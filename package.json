@@ -16,13 +16,12 @@
     "@clerk/nextjs": "^7.3.2",
     "drizzle-orm": "^0.45.2",
     "flags": "^4.0.6",
-    "next": "^15.5.0",
+    "next": "^16.2.6",
     "postgres": "^3.4.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.5",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -30,7 +29,7 @@
     "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
-    "eslint-config-next": "^15.5.0",
+    "eslint-config-next": "^16.2.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
