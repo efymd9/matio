@@ -20,6 +20,7 @@ export const shows = pgTable("shows", {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 export type Show = typeof shows.$inferSelect;

@@ -1,6 +1,27 @@
-import { clerkMiddleware } from "@clerk/nextjs/server";
+import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { eq } from "drizzle-orm";
+import { NextResponse } from "next/server";
+import { db } from "@/db";
+import { users } from "@/db/schema";
 
-export default clerkMiddleware();
+const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
+
+export default clerkMiddleware(async (auth, req) => {
+  if (!isAdminRoute(req)) return;
+
+  const { userId, redirectToSignIn } = await auth();
+  if (!userId) return redirectToSignIn({ returnBackUrl: req.url });
+
+  const [row] = await db
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!row || row.role !== "admin") {
+    return NextResponse.redirect(new URL("/", req.url));
+  }
+});
 
 export const config = {
   matcher: [

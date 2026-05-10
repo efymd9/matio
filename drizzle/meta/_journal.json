@@ -8,6 +8,13 @@
       "when": 1778266579862,
       "tag": "0000_cold_shinobi_shaw",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1778418290070,
+      "tag": "0001_dazzling_crystal",
+      "breakpoints": true
     }
   ]
 }

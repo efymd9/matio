@@ -1,0 +1,1 @@
+ALTER TABLE "shows" ADD COLUMN "deleted_at" timestamp with time zone;
