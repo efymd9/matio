@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -87,13 +87,21 @@ export default async function SeasonPage({
                     {!episode.muxAssetId && " — no video uploaded"}
                   </div>
                 </div>
-                <form
-                  action={deleteEpisode.bind(null, episode.id, season.id, show.id)}
-                >
-                  <Button variant="destructive" size="sm" type="submit">
-                    Delete
-                  </Button>
-                </form>
+                <div className="flex gap-2">
+                  <Link
+                    href={`/admin/shows/${show.id}/seasons/${season.id}/episodes/${episode.id}`}
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    Edit
+                  </Link>
+                  <form
+                    action={deleteEpisode.bind(null, episode.id, season.id, show.id)}
+                  >
+                    <Button variant="destructive" size="sm" type="submit">
+                      Delete
+                    </Button>
+                  </form>
+                </div>
               </li>
             ))}
           </ul>

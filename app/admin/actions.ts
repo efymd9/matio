@@ -11,6 +11,7 @@ import {
   type NewShow,
 } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin";
+import { getMux } from "@/lib/mux";
 
 function str(formData: FormData, key: string): string {
   const v = formData.get(key);
@@ -159,6 +160,35 @@ export async function createEpisode(
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
 }
 
+export async function updateEpisode(
+  id: string,
+  seasonId: string,
+  showId: string,
+  formData: FormData,
+) {
+  await requireAdmin();
+
+  const title = str(formData, "title");
+  if (!title) throw new Error("Title is required");
+
+  const number = num(formData, "number");
+  if (number === null || number < 1) {
+    throw new Error("Episode number must be a positive integer");
+  }
+
+  await db
+    .update(episodes)
+    .set({
+      title,
+      description: str(formData, "description") || null,
+      number,
+    })
+    .where(eq(episodes.id, id));
+
+  revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}/episodes/${id}`);
+  revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
+}
+
 export async function deleteEpisode(
   id: string,
   seasonId: string,
@@ -167,4 +197,43 @@ export async function deleteEpisode(
   await requireAdmin();
   await db.delete(episodes).where(eq(episodes.id, id));
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
+}
+
+// ---------- Mux ----------
+
+export async function createMuxUpload(
+  episodeId: string,
+): Promise<{ uploadUrl: string; uploadId: string }> {
+  await requireAdmin();
+
+  const [episode] = await db
+    .select({ id: episodes.id })
+    .from(episodes)
+    .where(eq(episodes.id, episodeId))
+    .limit(1);
+  if (!episode) throw new Error("Episode not found");
+
+  const upload = await getMux().video.uploads.create({
+    cors_origin: "*",
+    new_asset_settings: {
+      playback_policies: ["public"],
+      passthrough: episodeId,
+    },
+  });
+
+  // Mark the episode as processing — covers fresh uploads and re-uploads
+  // (e.g. after a previous upload errored).
+  await db
+    .update(episodes)
+    .set({
+      status: "processing",
+      muxAssetId: null,
+      muxPlaybackId: null,
+      durationSeconds: null,
+    })
+    .where(eq(episodes.id, episodeId));
+
+  if (!upload.url) throw new Error("Mux did not return an upload URL");
+
+  return { uploadUrl: upload.url, uploadId: upload.id };
 }
