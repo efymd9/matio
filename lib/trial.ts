@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { db } from "@/db";
 import { trialSessions, type TrialSession } from "@/db/schema";
 
-export const TRIAL_DURATION_SECONDS = 5 * 60;
+export const TRIAL_DURATION_SECONDS = 60;
 export const TRIAL_COOKIE = "trial_session";
 
 // Creates a trial_sessions row for (sessionToken, showId) if one doesn't

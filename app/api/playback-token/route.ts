@@ -6,12 +6,13 @@ import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { episodes, seasons, subscriptions, trialSessions } from "@/db/schema";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
-import { TRIAL_COOKIE } from "@/lib/trial";
+import { TRIAL_COOKIE, TRIAL_DURATION_SECONDS } from "@/lib/trial";
 
 export const runtime = "nodejs";
 
 const SUBSCRIBER_TTL = 60 * 60; // 1h
-const TRIAL_TTL_CAP = 5 * 60; // 5min
+// Cap trial JWT TTL at the trial duration so a token never outlives the row.
+const TRIAL_TTL_CAP = TRIAL_DURATION_SECONDS;
 
 export async function GET(req: NextRequest) {
   const episodeId = req.nextUrl.searchParams.get("episode_id");
