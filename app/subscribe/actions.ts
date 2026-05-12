@@ -1,11 +1,19 @@
 "use server";
 
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { subscriptions, users } from "@/db/schema";
 import { getStripe } from "@/lib/stripe";
+
+const HAS_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
+const STRIPE_HAS_SUBSCRIPTION_STATUSES = new Set([
+  "active",
+  "trialing",
+  "past_due",
+  "unpaid",
+]);
 
 export async function startCheckout(formData: FormData) {
   const plan = formData.get("plan");
@@ -15,6 +23,19 @@ export async function startCheckout(formData: FormData) {
 
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
+
+  // Layer 1: prevent duplicate subscriptions from our DB mirror.
+  const [existing] = await db
+    .select({ id: subscriptions.id })
+    .from(subscriptions)
+    .where(
+      and(
+        eq(subscriptions.userId, userId),
+        inArray(subscriptions.status, [...HAS_SUBSCRIPTION_STATUSES]),
+      ),
+    )
+    .limit(1);
+  if (existing) redirect("/account");
 
   const priceId =
     plan === "monthly"
@@ -51,6 +72,18 @@ export async function startCheckout(formData: FormData) {
       .update(users)
       .set({ stripeCustomerId: customerId })
       .where(eq(users.id, userId));
+  }
+
+  // Layer 2: source-of-truth check against Stripe. Catches the race where
+  // our DB mirror is behind because the previous customer.subscription.created
+  // webhook hasn't landed yet.
+  const stripeSubs = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 5,
+  });
+  if (stripeSubs.data.some((s) => STRIPE_HAS_SUBSCRIPTION_STATUSES.has(s.status))) {
+    redirect("/account");
   }
 
   const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
