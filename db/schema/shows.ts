@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from "drizzle-orm/pg-core";
 
 export const showStatus = pgEnum("show_status", ["draft", "published"]);
 
@@ -15,6 +22,8 @@ export const shows = pgTable("shows", {
     .notNull()
     .default(sql`ARRAY[]::text[]`),
   status: showStatus("status").notNull().default("draft"),
+  // Only one show is the "home hero" at a time; setFeaturedShow enforces.
+  featured: boolean("featured").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()

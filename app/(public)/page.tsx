@@ -31,9 +31,11 @@ export default async function HomePage() {
     );
   }
 
-  // Featured = first published with a hero image, else first published.
+  // Featured: admin pick wins, else first with a hero image, else first.
   const featured =
-    published.find((s) => !!s.heroImageUrl) ?? published[0];
+    published.find((s) => s.featured) ??
+    published.find((s) => !!s.heroImageUrl) ??
+    published[0];
 
   // Try to load a ready episode of the featured show for an auto-playing
   // preview. We use the public playback id directly — passing a signed

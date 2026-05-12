@@ -17,7 +17,9 @@ import { StatusSelect } from "@/components/admin/status-select";
 import {
   createSeason,
   deleteSeason,
+  setFeaturedShow,
   softDeleteShow,
+  unsetFeaturedShow,
   updateShow,
 } from "@/app/admin/actions";
 
@@ -118,6 +120,43 @@ export default async function EditShowPage({
               <Button type="submit">Save</Button>
             </div>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Home hero</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {show.featured ? (
+            <>
+              <p className="text-sm">
+                <span className="font-medium text-accent">Featured</span>{" "}
+                <span className="text-muted-foreground">
+                  on the home page hero. Only one show can be featured at a
+                  time.
+                </span>
+              </p>
+              <form action={unsetFeaturedShow.bind(null, show.id)}>
+                <Button variant="outline" type="submit">
+                  Remove from hero
+                </Button>
+              </form>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                {show.status === "published"
+                  ? "Promote this show to the home page hero. Any other featured show will be unfeatured."
+                  : "Publish the show first — only published shows appear on the home page."}
+              </p>
+              <form action={setFeaturedShow.bind(null, show.id)}>
+                <Button type="submit" disabled={show.status !== "published"}>
+                  Feature on home
+                </Button>
+              </form>
+            </>
+          )}
         </CardContent>
       </Card>
 

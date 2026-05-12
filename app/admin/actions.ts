@@ -95,6 +95,36 @@ export async function updateShow(id: string, formData: FormData) {
   revalidatePath(`/admin/shows/${id}`);
 }
 
+// Atomic "only one featured at a time": flips the target to true and
+// every other row to false in a single transaction.
+export async function setFeaturedShow(id: string) {
+  await requireAdmin();
+  await db.transaction(async (tx) => {
+    await tx
+      .update(shows)
+      .set({ featured: false })
+      .where(eq(shows.featured, true));
+    await tx
+      .update(shows)
+      .set({ featured: true })
+      .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
+  });
+  revalidatePath("/");
+  revalidatePath("/admin");
+  revalidatePath(`/admin/shows/${id}`);
+}
+
+export async function unsetFeaturedShow(id: string) {
+  await requireAdmin();
+  await db
+    .update(shows)
+    .set({ featured: false })
+    .where(eq(shows.id, id));
+  revalidatePath("/");
+  revalidatePath("/admin");
+  revalidatePath(`/admin/shows/${id}`);
+}
+
 export async function softDeleteShow(id: string) {
   await requireAdmin();
 
