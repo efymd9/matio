@@ -1,0 +1,1 @@
+ALTER TABLE "episodes" ADD COLUMN "mux_playback_policy" text;

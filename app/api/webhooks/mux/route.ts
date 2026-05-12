@@ -32,11 +32,13 @@ export async function POST(req: NextRequest) {
     if (!passthrough) {
       console.warn("video.asset.ready without passthrough", { assetId: id });
     } else {
+      const first = playback_ids?.[0];
       await db
         .update(episodes)
         .set({
           muxAssetId: id,
-          muxPlaybackId: playback_ids?.[0]?.id ?? null,
+          muxPlaybackId: first?.id ?? null,
+          muxPlaybackPolicy: first?.policy ?? null,
           durationSeconds:
             typeof duration === "number" ? Math.round(duration) : null,
           status: "ready",

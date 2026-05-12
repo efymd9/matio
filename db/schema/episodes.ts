@@ -28,6 +28,9 @@ export const episodes = pgTable(
     durationSeconds: integer("duration_seconds"),
     muxAssetId: text("mux_asset_id"),
     muxPlaybackId: text("mux_playback_id"),
+    // "public" | "signed" — set from playback_ids[0].policy in the webhook.
+    // Tells the hero/player whether they need a Mux JWT.
+    muxPlaybackPolicy: text("mux_playback_policy"),
     status: episodeStatus("status").notNull().default("processing"),
     releasedAt: timestamp("released_at", { withTimezone: true }),
   },

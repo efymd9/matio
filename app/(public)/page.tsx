@@ -3,8 +3,10 @@ import { db } from "@/db";
 import { episodes, seasons, shows, type Show } from "@/db/schema";
 import { GenreRow } from "@/components/site/genre-row";
 import { HeroBanner } from "@/components/site/hero-banner";
+import { signMuxPlaybackToken } from "@/lib/mux-token";
 
 const UNCATEGORIZED = "Uncategorized";
+const PREVIEW_TTL_SECONDS = 60 * 10;
 
 export default async function HomePage() {
   const published = await db
@@ -31,18 +33,16 @@ export default async function HomePage() {
     );
   }
 
-  // Featured: admin pick wins, else first with a hero image, else first.
   const featured =
     published.find((s) => s.featured) ??
     published.find((s) => !!s.heroImageUrl) ??
     published[0];
 
-  // Try to load a ready episode of the featured show for an auto-playing
-  // preview. We use the public playback id directly — passing a signed
-  // token to a public asset is a Mux error, so we let the hero attempt
-  // playback without auth and fall back to the still image on any
-  // failure (e.g. asset has signed-only policy).
+  // Auto-playing preview: needs the playback id, and a signed JWT if the
+  // asset's playback policy is "signed". Public assets reject a JWT, so we
+  // pass token only when explicitly required.
   let previewPlaybackId: string | null = null;
+  let previewToken: string | null = null;
 
   const featuredSeasons = await db
     .select({ id: seasons.id })
@@ -53,7 +53,10 @@ export default async function HomePage() {
 
   if (featuredSeasons.length > 0) {
     const [readyEp] = await db
-      .select({ muxPlaybackId: episodes.muxPlaybackId })
+      .select({
+        muxPlaybackId: episodes.muxPlaybackId,
+        muxPlaybackPolicy: episodes.muxPlaybackPolicy,
+      })
       .from(episodes)
       .where(
         and(
@@ -67,10 +70,21 @@ export default async function HomePage() {
       .orderBy(asc(episodes.number))
       .limit(1);
 
-    previewPlaybackId = readyEp?.muxPlaybackId ?? null;
+    if (readyEp?.muxPlaybackId) {
+      previewPlaybackId = readyEp.muxPlaybackId;
+      if (readyEp.muxPlaybackPolicy === "signed") {
+        try {
+          previewToken = signMuxPlaybackToken(
+            readyEp.muxPlaybackId,
+            PREVIEW_TTL_SECONDS,
+          );
+        } catch {
+          previewToken = null;
+        }
+      }
+    }
   }
 
-  // Group shows by genre (one show can appear in many rows).
   const byGenre = new Map<string, Show[]>();
   for (const show of published) {
     const genres = show.genre.length > 0 ? show.genre : [UNCATEGORIZED];
@@ -96,6 +110,7 @@ export default async function HomePage() {
         heroImageUrl={featured.heroImageUrl}
         posterImageUrl={featured.posterImageUrl}
         previewPlaybackId={previewPlaybackId}
+        previewToken={previewToken}
       />
 
       <div className="mx-auto max-w-screen-2xl space-y-14 pt-10 sm:pt-14">
