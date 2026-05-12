@@ -61,6 +61,11 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
     ? new Date(item.current_period_end * 1000)
     : new Date();
 
+  // The Customer Portal sets sub.cancel_at (a timestamp), not the legacy
+  // cancel_at_period_end boolean — treat either as "scheduled to cancel".
+  const cancelScheduled =
+    sub.cancel_at_period_end || sub.cancel_at != null;
+
   await db
     .insert(subscriptions)
     .values({
@@ -69,7 +74,7 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
       status: STATUS_MAP[sub.status],
       plan,
       currentPeriodEnd: periodEnd,
-      cancelAtPeriodEnd: sub.cancel_at_period_end,
+      cancelAtPeriodEnd: cancelScheduled,
     })
     .onConflictDoUpdate({
       target: subscriptions.stripeSubscriptionId,
@@ -77,7 +82,7 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
         status: STATUS_MAP[sub.status],
         plan,
         currentPeriodEnd: periodEnd,
-        cancelAtPeriodEnd: sub.cancel_at_period_end,
+        cancelAtPeriodEnd: cancelScheduled,
         updatedAt: new Date(),
       },
     });
