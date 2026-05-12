@@ -24,6 +24,7 @@ export function Player({
 }) {
   const ref = useRef<ComponentRef<typeof MuxPlayer>>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [paywall, setPaywall] = useState(false);
   const lastSavedRef = useRef<number>(0);
 
@@ -31,6 +32,7 @@ export function Player({
   useEffect(() => {
     let cancelled = false;
     setToken(null);
+    setExpiresAt(null);
     setPaywall(false);
     fetch(
       `/api/playback-token?episode_id=${encodeURIComponent(episodeId)}`,
@@ -42,8 +44,12 @@ export function Player({
           setPaywall(true);
           return;
         }
-        const data = (await r.json()) as { token: string };
+        const data = (await r.json()) as {
+          token: string;
+          expiresIn: number;
+        };
         setToken(data.token);
+        setExpiresAt(Date.now() + data.expiresIn * 1000);
       })
       .catch(() => {
         if (cancelled) return;
@@ -53,6 +59,39 @@ export function Player({
       cancelled = true;
     };
   }, [episodeId]);
+
+  // When the token expires, try refreshing — subscribers get a new 1h token
+  // and keep playing; trial users get 403, so we pause the player and show
+  // the paywall. This stops a buffered-ahead stream from running past the
+  // trial cut-off until the next page reload.
+  useEffect(() => {
+    if (!expiresAt) return;
+    const ms = expiresAt - Date.now();
+    if (ms <= 0) return;
+    const timer = setTimeout(async () => {
+      try {
+        const r = await fetch(
+          `/api/playback-token?episode_id=${encodeURIComponent(episodeId)}`,
+          { cache: "no-store" },
+        );
+        if (r.ok) {
+          const data = (await r.json()) as {
+            token: string;
+            expiresIn: number;
+          };
+          setToken(data.token);
+          setExpiresAt(Date.now() + data.expiresIn * 1000);
+          return;
+        }
+      } catch {
+        // fall through to paywall
+      }
+      const el = ref.current;
+      if (el) el.pause();
+      setPaywall(true);
+    }, ms);
+    return () => clearTimeout(timer);
+  }, [expiresAt, episodeId]);
 
   // Save position every 10s while playing.
   useEffect(() => {
