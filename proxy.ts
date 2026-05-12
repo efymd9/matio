@@ -5,21 +5,28 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
+const isAuthRoute = createRouteMatcher(["/account(.*)", "/subscribe(.*)"]);
 
 export default clerkMiddleware(async (auth, req) => {
-  if (!isAdminRoute(req)) return;
+  if (isAdminRoute(req)) {
+    const { userId, redirectToSignIn } = await auth();
+    if (!userId) return redirectToSignIn({ returnBackUrl: req.url });
 
-  const { userId, redirectToSignIn } = await auth();
-  if (!userId) return redirectToSignIn({ returnBackUrl: req.url });
+    const [row] = await db
+      .select({ role: users.role })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
 
-  const [row] = await db
-    .select({ role: users.role })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+    if (!row || row.role !== "admin") {
+      return NextResponse.redirect(new URL("/", req.url));
+    }
+    return;
+  }
 
-  if (!row || row.role !== "admin") {
-    return NextResponse.redirect(new URL("/", req.url));
+  if (isAuthRoute(req)) {
+    const { userId, redirectToSignIn } = await auth();
+    if (!userId) return redirectToSignIn({ returnBackUrl: req.url });
   }
 });
 
