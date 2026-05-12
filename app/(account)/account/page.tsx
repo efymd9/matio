@@ -43,8 +43,8 @@ export default async function AccountPage({
     .limit(1);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 px-4 py-10">
-      <h1 className="text-2xl font-semibold">Account</h1>
+    <div className="mx-auto max-w-3xl space-y-8 px-6 pb-16 pt-32 sm:pt-36">
+      <h1 className="font-display text-5xl italic leading-none">Account</h1>
 
       {welcome === "1" && (
         <Card>

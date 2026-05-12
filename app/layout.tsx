@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import {
   ClerkProvider,
   Show,
@@ -7,10 +7,11 @@ import {
   SignUpButton,
   UserButton,
 } from "@clerk/nextjs";
+import { SiteHeader } from "@/components/site/site-header";
 import "./globals.css";
 
 const geistSans = Geist({
-  variable: "--font-geist-sans",
+  variable: "--font-sans",
   subsets: ["latin"],
 });
 
@@ -19,9 +20,16 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const instrumentSerif = Instrument_Serif({
+  variable: "--font-display",
+  subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
+});
+
 export const metadata: Metadata = {
   title: "matio",
-  description: "matio streaming platform",
+  description: "Original stories, streamed.",
 };
 
 export default function RootLayout({
@@ -30,22 +38,49 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      appearance={{
+        variables: {
+          colorPrimary: "#e3963c",
+          colorBackground: "#161312",
+          colorInputBackground: "#1f1c1a",
+          colorInputText: "#f5f4ef",
+          colorText: "#f5f4ef",
+          colorTextSecondary: "#a8a39c",
+          borderRadius: "0.5rem",
+        },
+        elements: {
+          card: "bg-card border border-border",
+        },
+      }}
+    >
       <html
         lang="en"
-        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+        className={`dark ${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
       >
-        <body className="min-h-full flex flex-col">
-          <header className="flex justify-end items-center gap-4 p-4 h-16">
-            <Show when="signed-out">
-              <SignInButton />
-              <SignUpButton />
-            </Show>
-            <Show when="signed-in">
-              <UserButton />
-            </Show>
-          </header>
+        <body className="min-h-full bg-background font-sans text-foreground selection:bg-accent/40">
+          <SiteHeader
+            authSlot={
+              <>
+                <Show when="signed-out">
+                  <SignInButton mode="modal" />
+                  <SignUpButton mode="modal" />
+                </Show>
+                <Show when="signed-in">
+                  <UserButton
+                    appearance={{
+                      elements: {
+                        userButtonAvatarBox:
+                          "size-8 ring-1 ring-border hover:ring-accent/70 transition",
+                      },
+                    }}
+                  />
+                </Show>
+              </>
+            }
+          />
           {children}
+          <div className="film-grain" aria-hidden />
         </body>
       </html>
     </ClerkProvider>

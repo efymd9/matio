@@ -6,6 +6,7 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons, shows, subscriptions } from "@/db/schema";
 import { Player } from "@/components/watch/player";
+import { WatchShell } from "@/components/watch/watch-shell";
 import {
   TRIAL_COOKIE,
   getOrCreateTrialSession,
@@ -36,7 +37,6 @@ export default async function WatchPage({
     .limit(1);
   if (!show) notFound();
 
-  // Find the first ready episode of the first season.
   const showSeasons = await db
     .select({ id: seasons.id })
     .from(seasons)
@@ -66,7 +66,6 @@ export default async function WatchPage({
   }
   const episode = ready[0];
 
-  // Subscriber path bypasses the trial entirely.
   const { userId } = await auth();
   let isSubscriber = false;
   if (userId) {
@@ -102,10 +101,8 @@ export default async function WatchPage({
     );
   }
 
-  // Anonymous / non-subscriber: trial-session flow.
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   if (!sessionToken) {
-    // proxy.ts should have set this. Bail gracefully if not.
     redirect(`/subscribe?show=${show.slug}`);
   }
 
@@ -156,31 +153,6 @@ export default async function WatchPage({
   );
 }
 
-function WatchShell({
-  showTitle,
-  episodeTitle,
-  showSlug,
-  children,
-}: {
-  showTitle: string;
-  episodeTitle: string;
-  showSlug: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
-      <Link
-        href={`/shows/${showSlug}`}
-        className="text-sm text-muted-foreground hover:text-foreground"
-      >
-        ← {showTitle}
-      </Link>
-      <h1 className="text-xl font-semibold">{episodeTitle}</h1>
-      {children}
-    </div>
-  );
-}
-
 function ComingSoon({
   showTitle,
   showSlug,
@@ -189,15 +161,18 @@ function ComingSoon({
   showSlug: string;
 }) {
   return (
-    <div className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6">
+    <div className="fixed inset-0 z-50 flex flex-col bg-black px-6">
       <Link
         href={`/shows/${showSlug}`}
-        className="text-sm text-muted-foreground hover:text-foreground"
+        className="absolute left-6 top-5 inline-flex h-10 items-center gap-2 rounded-full bg-black/40 px-4 text-sm text-white backdrop-blur-md transition-colors hover:bg-black/70"
       >
         ← {showTitle}
       </Link>
-      <div className="flex aspect-video w-full items-center justify-center rounded-md border bg-muted text-muted-foreground">
-        Coming soon — no episodes ready yet.
+      <div className="flex flex-1 items-center justify-center">
+        <div className="space-y-2 text-center">
+          <p className="font-display text-4xl italic text-white">Coming soon</p>
+          <p className="text-sm text-white/60">No episodes ready yet.</p>
+        </div>
       </div>
     </div>
   );

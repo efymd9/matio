@@ -1,9 +1,12 @@
-import Link from "next/link";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { shows, type Show } from "@/db/schema";
+import { episodes, seasons, shows, type Show } from "@/db/schema";
+import { GenreRow } from "@/components/site/genre-row";
+import { HeroBanner } from "@/components/site/hero-banner";
+import { signMuxPlaybackToken } from "@/lib/mux-token";
 
 const UNCATEGORIZED = "Uncategorized";
+const PREVIEW_TTL_SECONDS = 60 * 10; // 10 min — enough to load + a few loops
 
 export default async function HomePage() {
   const published = await db
@@ -14,13 +17,68 @@ export default async function HomePage() {
 
   if (published.length === 0) {
     return (
-      <div className="mx-auto flex max-w-5xl flex-1 items-center justify-center px-4 py-16">
-        <p className="text-muted-foreground">No shows published yet.</p>
-      </div>
+      <main className="flex min-h-screen items-center justify-center bg-background px-6 pt-24 text-center">
+        <div className="space-y-4">
+          <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-accent">
+            Coming soon
+          </p>
+          <h1 className="font-display text-6xl italic leading-none">
+            Stories worth your time.
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            The catalog is being curated. Check back shortly.
+          </p>
+        </div>
+      </main>
     );
   }
 
-  // One show may appear in multiple genre rows.
+  // Featured = first published with a hero image, else first published.
+  const featured =
+    published.find((s) => !!s.heroImageUrl) ?? published[0];
+
+  // Try to load a ready episode of the featured show for an auto-playing preview.
+  let previewPlaybackId: string | null = null;
+  let previewToken: string | null = null;
+
+  const featuredSeasons = await db
+    .select({ id: seasons.id })
+    .from(seasons)
+    .where(eq(seasons.showId, featured.id))
+    .orderBy(asc(seasons.number))
+    .limit(1);
+
+  if (featuredSeasons.length > 0) {
+    const [readyEp] = await db
+      .select({ muxPlaybackId: episodes.muxPlaybackId })
+      .from(episodes)
+      .where(
+        and(
+          inArray(
+            episodes.seasonId,
+            featuredSeasons.map((s) => s.id),
+          ),
+          eq(episodes.status, "ready"),
+        ),
+      )
+      .orderBy(asc(episodes.number))
+      .limit(1);
+
+    if (readyEp?.muxPlaybackId) {
+      previewPlaybackId = readyEp.muxPlaybackId;
+      try {
+        previewToken = signMuxPlaybackToken(
+          readyEp.muxPlaybackId,
+          PREVIEW_TTL_SECONDS,
+        );
+      } catch {
+        // Missing signing keys — preview will fall back to image only.
+        previewToken = null;
+      }
+    }
+  }
+
+  // Group shows by genre (one show can appear in many rows).
   const byGenre = new Map<string, Show[]>();
   for (const show of published) {
     const genres = show.genre.length > 0 ? show.genre : [UNCATEGORIZED];
@@ -30,8 +88,6 @@ export default async function HomePage() {
       byGenre.set(g, list);
     }
   }
-
-  // Stable order: alphabetical, with Uncategorized last.
   const sortedGenres = [...byGenre.keys()].sort((a, b) => {
     if (a === UNCATEGORIZED) return 1;
     if (b === UNCATEGORIZED) return -1;
@@ -39,42 +95,28 @@ export default async function HomePage() {
   });
 
   return (
-    <div className="space-y-10 px-4 py-8 sm:px-8">
-      {sortedGenres.map((genre) => (
-        <section key={genre} className="space-y-3">
-          <h2 className="text-xl font-semibold capitalize">{genre}</h2>
-          <div className="-mx-4 overflow-x-auto px-4 sm:-mx-8 sm:px-8">
-            <ul className="flex gap-4 pb-2">
-              {byGenre.get(genre)!.map((show) => (
-                <li key={show.id} className="shrink-0">
-                  <Link
-                    href={`/shows/${show.slug}`}
-                    className="block w-44 sm:w-52"
-                  >
-                    <div className="aspect-[2/3] overflow-hidden rounded-md bg-muted">
-                      {show.posterImageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={show.posterImageUrl}
-                          alt={show.title}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center p-3 text-center text-sm text-muted-foreground">
-                          {show.title}
-                        </div>
-                      )}
-                    </div>
-                    <p className="mt-2 truncate text-sm font-medium">
-                      {show.title}
-                    </p>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-      ))}
-    </div>
+    <main className="bg-background pb-24">
+      <HeroBanner
+        title={featured.title}
+        description={featured.description}
+        genre={featured.genre}
+        slug={featured.slug}
+        heroImageUrl={featured.heroImageUrl}
+        posterImageUrl={featured.posterImageUrl}
+        previewPlaybackId={previewPlaybackId}
+        previewToken={previewToken}
+      />
+
+      <div className="mx-auto max-w-screen-2xl space-y-14 pt-10 sm:pt-14">
+        {sortedGenres.map((g, i) => (
+          <GenreRow
+            key={g}
+            genre={g}
+            shows={byGenre.get(g)!}
+            priority={i === 0}
+          />
+        ))}
+      </div>
+    </main>
   );
 }

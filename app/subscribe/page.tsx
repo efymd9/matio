@@ -20,10 +20,15 @@ export default async function SubscribePage({
   const { show, resume } = await searchParams;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8 px-4 py-12">
-      <div className="text-center">
-        <h1 className="text-3xl font-semibold">Choose a plan</h1>
-        <p className="mt-2 text-muted-foreground">Cancel anytime.</p>
+    <div className="mx-auto max-w-3xl space-y-10 px-6 pb-16 pt-32 sm:pt-40">
+      <div className="space-y-3 text-center">
+        <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-accent">
+          Membership
+        </p>
+        <h1 className="font-display text-5xl italic leading-none">
+          Choose a plan
+        </h1>
+        <p className="text-sm text-muted-foreground">Cancel anytime.</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
