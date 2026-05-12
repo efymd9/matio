@@ -42,15 +42,14 @@ export default function RootLayout({
       appearance={{
         variables: {
           colorPrimary: "#e3963c",
-          colorBackground: "#161312",
-          colorInputBackground: "#1f1c1a",
+          colorBackground: "#1f1d1b",
+          colorInputBackground: "#282522",
           colorInputText: "#f5f4ef",
           colorText: "#f5f4ef",
-          colorTextSecondary: "#a8a39c",
+          colorTextSecondary: "#bcb6ae",
+          colorTextOnPrimaryBackground: "#1f1d1b",
+          colorNeutral: "#bcb6ae",
           borderRadius: "0.5rem",
-        },
-        elements: {
-          card: "bg-card border border-border",
         },
       }}
     >
