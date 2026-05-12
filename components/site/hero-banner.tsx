@@ -13,7 +13,6 @@ export function HeroBanner({
   heroImageUrl,
   posterImageUrl,
   previewPlaybackId,
-  previewToken,
 }: {
   title: string;
   description: string | null;
@@ -22,9 +21,9 @@ export function HeroBanner({
   heroImageUrl: string | null;
   posterImageUrl: string | null;
   previewPlaybackId: string | null;
-  previewToken: string | null;
 }) {
   const [videoPlaying, setVideoPlaying] = useState(false);
+  const [videoFailed, setVideoFailed] = useState(false);
   const backdrop = heroImageUrl ?? posterImageUrl;
 
   return (
@@ -45,11 +44,13 @@ export function HeroBanner({
         <div className="absolute inset-0 bg-gradient-to-br from-muted via-card to-background" />
       )}
 
-      {/* Auto-playing muted preview, swaps in once it starts. */}
-      {previewPlaybackId && (
+      {/* Auto-playing muted preview, swaps in once it starts. We use the
+          playback id without a token — Mux rejects signed JWTs aimed at
+          public playback ids. If the asset has signed policy and won't
+          play here, we just stay on the backdrop image. */}
+      {previewPlaybackId && !videoFailed && (
         <MuxPlayer
           playbackId={previewPlaybackId}
-          tokens={previewToken ? { playback: previewToken } : undefined}
           autoPlay="muted"
           loop
           muted
@@ -67,6 +68,7 @@ export function HeroBanner({
             "--media-object-position": "center",
           }}
           onPlaying={() => setVideoPlaying(true)}
+          onError={() => setVideoFailed(true)}
         />
       )}
 

@@ -3,10 +3,8 @@ import { db } from "@/db";
 import { episodes, seasons, shows, type Show } from "@/db/schema";
 import { GenreRow } from "@/components/site/genre-row";
 import { HeroBanner } from "@/components/site/hero-banner";
-import { signMuxPlaybackToken } from "@/lib/mux-token";
 
 const UNCATEGORIZED = "Uncategorized";
-const PREVIEW_TTL_SECONDS = 60 * 10; // 10 min — enough to load + a few loops
 
 export default async function HomePage() {
   const published = await db
@@ -37,9 +35,12 @@ export default async function HomePage() {
   const featured =
     published.find((s) => !!s.heroImageUrl) ?? published[0];
 
-  // Try to load a ready episode of the featured show for an auto-playing preview.
+  // Try to load a ready episode of the featured show for an auto-playing
+  // preview. We use the public playback id directly — passing a signed
+  // token to a public asset is a Mux error, so we let the hero attempt
+  // playback without auth and fall back to the still image on any
+  // failure (e.g. asset has signed-only policy).
   let previewPlaybackId: string | null = null;
-  let previewToken: string | null = null;
 
   const featuredSeasons = await db
     .select({ id: seasons.id })
@@ -64,18 +65,7 @@ export default async function HomePage() {
       .orderBy(asc(episodes.number))
       .limit(1);
 
-    if (readyEp?.muxPlaybackId) {
-      previewPlaybackId = readyEp.muxPlaybackId;
-      try {
-        previewToken = signMuxPlaybackToken(
-          readyEp.muxPlaybackId,
-          PREVIEW_TTL_SECONDS,
-        );
-      } catch {
-        // Missing signing keys — preview will fall back to image only.
-        previewToken = null;
-      }
-    }
+    previewPlaybackId = readyEp?.muxPlaybackId ?? null;
   }
 
   // Group shows by genre (one show can appear in many rows).
@@ -104,7 +94,6 @@ export default async function HomePage() {
         heroImageUrl={featured.heroImageUrl}
         posterImageUrl={featured.posterImageUrl}
         previewPlaybackId={previewPlaybackId}
-        previewToken={previewToken}
       />
 
       <div className="mx-auto max-w-screen-2xl space-y-14 pt-10 sm:pt-14">
