@@ -4,13 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { subscriptions, users } from "@/db/schema";
-import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Icon } from "@/components/site/icon";
 import { openBillingPortal } from "./actions";
 
 export default async function AccountPage({
@@ -42,69 +36,161 @@ export default async function AccountPage({
     .orderBy(desc(subscriptions.updatedAt))
     .limit(1);
 
+  const initial = (user.email[0] ?? "M").toUpperCase();
+  const renewLabel = subscription
+    ? subscription.cancelAtPeriodEnd
+      ? "Cancels on"
+      : "Renews on"
+    : null;
+  const renewDate = subscription
+    ? new Date(subscription.currentPeriodEnd).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
+    : null;
+
   return (
-    <div className="mx-auto max-w-3xl space-y-8 px-6 pb-16 pt-32 sm:pt-36">
-      <h1 className="font-display text-5xl italic leading-none">Account</h1>
+    <div className="mx-auto max-w-2xl space-y-6 px-5 pb-20 pt-28 sm:px-6 sm:pt-32">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
+          Account
+        </h1>
+        <Icon name="settings" size={22} color="rgba(255,255,255,0.7)" />
+      </div>
 
       {welcome === "1" && (
-        <Card>
-          <CardContent className="py-4">
-            <p className="text-sm">
-              Welcome — your subscription is active.
-            </p>
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border border-[#7fd87a]/30 bg-[#7fd87a]/10 p-4 text-sm text-white">
+          <div className="flex items-center gap-2">
+            <Icon name="check" size={16} color="#7fd87a" />
+            <span className="font-semibold">Welcome.</span>
+            <span className="text-white/70">Your subscription is active.</span>
+          </div>
+        </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Profile</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-sm">
-            <dt className="text-muted-foreground">Email</dt>
-            <dd>{user.email}</dd>
-            <dt className="text-muted-foreground">Role</dt>
-            <dd>{user.role}</dd>
-          </dl>
-        </CardContent>
-      </Card>
+      {/* User card — gradient avatar block */}
+      <div className="flex items-center gap-4 rounded-2xl border border-white/[0.08] bg-gradient-to-br from-[#ff3d3d22] to-white/[0.04] p-4">
+        <div
+          className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl text-2xl font-extrabold text-white"
+          style={{
+            backgroundImage:
+              "linear-gradient(135deg, #ff3d3d 0%, #b821a3 100%)",
+          }}
+          aria-hidden
+        >
+          {initial}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-bold text-white">
+            {user.email}
+          </p>
+          <p className="text-xs capitalize text-white/55">
+            {user.role}
+            {subscription ? " · Premium" : ""}
+          </p>
+        </div>
+        <Icon name="chevron-right" size={18} color="rgba(255,255,255,0.4)" />
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Subscription</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      {/* Subscription card */}
+      <div className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-white/55">
+              Subscription
+            </p>
+            <p className="mt-1 text-base font-bold text-white">
+              {subscription
+                ? `${subscription.plan === "annual" ? "Annual" : "Monthly"} · Premium`
+                : "Not subscribed"}
+            </p>
+          </div>
           {subscription ? (
-            <>
-              <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-sm">
-                <dt className="text-muted-foreground">Plan</dt>
-                <dd className="capitalize">{subscription.plan}</dd>
-                <dt className="text-muted-foreground">Status</dt>
-                <dd className="capitalize">{subscription.status}</dd>
-                <dt className="text-muted-foreground">
-                  {subscription.cancelAtPeriodEnd ? "Cancels on" : "Renews"}
-                </dt>
-                <dd>
-                  {subscription.currentPeriodEnd.toISOString().slice(0, 10)}
-                </dd>
-              </dl>
-              <form action={openBillingPortal}>
-                <Button type="submit">Manage subscription</Button>
-              </form>
-            </>
+            <span
+              className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.04em] ${
+                subscription.status === "active"
+                  ? "bg-[#7fd87a]/15 text-[#7fd87a]"
+                  : subscription.status === "past_due"
+                    ? "bg-amber-500/15 text-amber-400"
+                    : "bg-white/10 text-white/70"
+              }`}
+            >
+              {subscription.status}
+            </span>
+          ) : null}
+        </div>
+        {subscription && renewDate ? (
+          <p className="mt-2 text-xs text-white/65">
+            {renewLabel}{" "}
+            <strong className="font-semibold text-white">{renewDate}</strong>
+          </p>
+        ) : null}
+        <div className="mt-4">
+          {subscription ? (
+            <form action={openBillingPortal}>
+              <button
+                type="submit"
+                className="inline-flex h-10 w-full items-center justify-center rounded-md border border-white/15 bg-transparent px-4 text-xs font-semibold text-white transition-colors hover:bg-white/10"
+              >
+                Manage subscription
+              </button>
+            </form>
           ) : (
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                You don&apos;t have an active subscription.
-              </p>
-              <Link href="/subscribe" className={buttonVariants()}>
-                Subscribe
-              </Link>
-            </div>
+            <Link
+              href="/subscribe"
+              className="inline-flex h-10 w-full items-center justify-center rounded-md bg-white text-sm font-bold text-black transition-colors hover:bg-white/90"
+            >
+              Subscribe
+            </Link>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
+
+      {/* Menu sections */}
+      {[
+        {
+          title: "Viewing",
+          items: ["My list", "Watch history", "Downloads", "Ratings"],
+        },
+        {
+          title: "Account",
+          items: ["Payment methods", "Notifications", "Privacy", "Language"],
+        },
+        {
+          title: "Help",
+          items: ["FAQ", "Contact support", "Terms of use"],
+        },
+      ].map((section) => (
+        <div key={section.title} className="space-y-2">
+          <p className="px-1 text-[11px] uppercase tracking-[0.08em] text-white/45">
+            {section.title}
+          </p>
+          <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.04]">
+            {section.items.map((item, i) => (
+              <div
+                key={item}
+                className={`flex items-center justify-between px-4 py-3.5 text-sm text-white transition-colors hover:bg-white/[0.04] ${
+                  i < section.items.length - 1
+                    ? "border-b border-white/[0.05]"
+                    : ""
+                }`}
+              >
+                <span>{item}</span>
+                <Icon
+                  name="chevron-right"
+                  size={16}
+                  color="rgba(255,255,255,0.35)"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <p className="text-center text-[10px] text-white/30">
+        matio · v1.0
+      </p>
     </div>
   );
 }

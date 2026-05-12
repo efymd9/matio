@@ -4,7 +4,15 @@ import MuxPlayer from "@mux/mux-player-react";
 import Link from "next/link";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { TONE_GRADIENT, toneFor } from "@/lib/design";
+import { Icon } from "./icon";
 
+// Cinema-style hero. Layered:
+//   1. backdrop image OR tone gradient
+//   2. autoplaying muted Mux preview (fades in on first frame)
+//   3. radial accent + vignette
+//   4. bottom-to-top scrim that fades into the page background
+//   5. content column with MATIO ORIGINAL kicker, title, meta, CTAs
 export function HeroBanner({
   title,
   description,
@@ -27,10 +35,11 @@ export function HeroBanner({
   const [videoPlaying, setVideoPlaying] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const backdrop = heroImageUrl ?? posterImageUrl;
+  const tone = toneFor(slug);
 
   return (
-    <section className="relative isolate min-h-[640px] w-full overflow-hidden bg-background pt-16 sm:h-[92vh]">
-      {/* Static backdrop — image OR gradient placeholder */}
+    <section className="relative isolate min-h-[640px] w-full overflow-hidden bg-background sm:h-[90vh]">
+      {/* Static backdrop: image or tone gradient placeholder */}
       {backdrop ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -43,13 +52,12 @@ export function HeroBanner({
           )}
         />
       ) : (
-        <div className="absolute inset-0 bg-gradient-to-br from-muted via-card to-background" />
+        <div
+          className="absolute inset-0"
+          style={{ backgroundImage: TONE_GRADIENT[tone] }}
+        />
       )}
 
-      {/* Auto-playing muted preview. Token is only set when the asset has
-          signed playback policy — Mux rejects a JWT aimed at a public
-          playback id. If anything goes wrong we hide the player and stay on
-          the static backdrop. */}
       {previewPlaybackId && !videoFailed && (
         <MuxPlayer
           playbackId={previewPlaybackId}
@@ -75,58 +83,61 @@ export function HeroBanner({
         />
       )}
 
-      {/* Atmospheric overlays */}
+      {/* Atmospheric overlays — radial accent + cinema scrims. */}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-50"
+        aria-hidden
+        style={{
+          backgroundImage:
+            "radial-gradient(circle at 65% 35%, rgba(255,61,61,0.18), transparent 55%), radial-gradient(circle at 25% 80%, rgba(255,255,255,0.10), transparent 50%)",
+        }}
+      />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/55 to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-3/4 bg-gradient-to-r from-background via-background/55 to-transparent" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-background/65 via-background/25 to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-3/5 bg-gradient-to-r from-background/85 via-background/40 to-transparent" />
 
       {/* Content */}
-      <div className="relative z-10 flex h-full min-h-[600px] flex-col justify-end px-6 pb-16 pt-24 sm:px-12 sm:pb-24 sm:pt-32 lg:pb-32">
-        <div className="max-w-2xl space-y-5">
-          {genre.length > 0 && (
-            <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-accent">
-              {genre.slice(0, 3).join("  ·  ")}
-            </p>
-          )}
-          <h1 className="font-display text-6xl italic leading-[0.92] tracking-tight text-foreground sm:text-7xl lg:text-[112px]">
+      <div className="relative z-10 flex h-full min-h-[600px] flex-col justify-end px-6 pb-16 pt-28 sm:px-12 sm:pb-24">
+        <div className="max-w-2xl space-y-4">
+          <div className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+            <Icon name="star" size={11} />
+            <span>Matio Original</span>
+          </div>
+          <h1 className="text-5xl font-extrabold leading-[0.95] tracking-[-0.02em] text-white sm:text-6xl lg:text-7xl">
             {title}
           </h1>
+          {genre.length > 0 && (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-white/70">
+              {genre.slice(0, 3).map((g, i) => (
+                <span key={g} className="flex items-center gap-2">
+                  {i > 0 && <span aria-hidden className="text-white/35">·</span>}
+                  <span className="capitalize">{g}</span>
+                </span>
+              ))}
+            </div>
+          )}
           {description && (
-            <p className="max-w-xl text-base leading-relaxed text-foreground/80 sm:text-lg">
+            <p className="max-w-xl text-sm leading-relaxed text-white/75 sm:text-base">
               {description}
             </p>
           )}
-          <div className="flex flex-wrap gap-3 pt-3">
+          <div className="flex flex-wrap gap-2.5 pt-3">
             <Link
               href={`/watch/${slug}`}
-              className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-7 text-sm font-medium text-background transition-all duration-300 hover:bg-accent hover:text-accent-foreground"
+              className="inline-flex h-11 items-center gap-2 rounded-md bg-white px-7 text-sm font-bold text-black transition-all duration-300 hover:bg-white/90"
             >
-              <PlayGlyph />
+              <Icon name="play" size={16} color="#0a0a0c" />
               Play
             </Link>
             <Link
               href={`/shows/${slug}`}
-              className="inline-flex h-12 items-center rounded-full border border-foreground/30 bg-background/20 px-7 text-sm font-medium text-foreground backdrop-blur-md transition-all duration-300 hover:border-foreground/50 hover:bg-background/40"
+              className="inline-flex h-11 items-center gap-2 rounded-md border border-white/15 bg-white/15 px-7 text-sm font-semibold text-white backdrop-blur-xl transition-colors hover:bg-white/25"
             >
-              More info
+              <Icon name="plus" size={16} />
+              My List
             </Link>
           </div>
         </div>
       </div>
     </section>
-  );
-}
-
-function PlayGlyph() {
-  return (
-    <svg
-      width="11"
-      height="13"
-      viewBox="0 0 11 13"
-      fill="currentColor"
-      aria-hidden
-    >
-      <path d="M0 0L11 6.5L0 13V0Z" />
-    </svg>
   );
 }

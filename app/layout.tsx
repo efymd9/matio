@@ -41,14 +41,14 @@ export default function RootLayout({
     <ClerkProvider
       appearance={{
         variables: {
-          colorPrimary: "#e3963c",
-          colorBackground: "#1f1d1b",
-          colorInputBackground: "#282522",
-          colorInputText: "#f5f4ef",
-          colorText: "#f5f4ef",
-          colorTextSecondary: "#bcb6ae",
-          colorTextOnPrimaryBackground: "#1f1d1b",
-          colorNeutral: "#bcb6ae",
+          colorPrimary: "#ff3d3d",
+          colorBackground: "#141418",
+          colorInputBackground: "#1d1d22",
+          colorInputText: "#ffffff",
+          colorText: "#ffffff",
+          colorTextSecondary: "#a8a8b3",
+          colorTextOnPrimaryBackground: "#ffffff",
+          colorNeutral: "#a8a8b3",
           borderRadius: "0.5rem",
         },
       }}
@@ -79,7 +79,6 @@ export default function RootLayout({
             }
           />
           {children}
-          <div className="film-grain" aria-hidden />
         </body>
       </html>
     </ClerkProvider>

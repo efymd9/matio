@@ -38,7 +38,7 @@ export default async function WatchPage({
   if (!show) notFound();
 
   const showSeasons = await db
-    .select({ id: seasons.id })
+    .select({ id: seasons.id, number: seasons.number })
     .from(seasons)
     .where(eq(seasons.showId, show.id))
     .orderBy(asc(seasons.number))
@@ -65,6 +65,7 @@ export default async function WatchPage({
     return <ComingSoon showTitle={show.title} showSlug={show.slug} />;
   }
   const episode = ready[0];
+  const episodeLabel = `S${showSeasons[0].number}·E${episode.number}`;
 
   const { userId } = await auth();
   let isSubscriber = false;
@@ -87,6 +88,7 @@ export default async function WatchPage({
       <WatchShell
         showTitle={show.title}
         episodeTitle={episode.title}
+        episodeLabel={episodeLabel}
         showSlug={show.slug}
       >
         <Player
@@ -95,6 +97,8 @@ export default async function WatchPage({
           title={episode.title}
           mode="subscriber"
           showSlug={show.slug}
+          showTitle={show.title}
+          episodeLabel={episodeLabel}
           resumeSeconds={resumeSeconds}
         />
       </WatchShell>
@@ -113,6 +117,7 @@ export default async function WatchPage({
       <WatchShell
         showTitle={show.title}
         episodeTitle={episode.title}
+        episodeLabel={episodeLabel}
         showSlug={show.slug}
       >
         <Player
@@ -121,6 +126,8 @@ export default async function WatchPage({
           title={episode.title}
           mode="subscriber"
           showSlug={show.slug}
+          showTitle={show.title}
+          episodeLabel={episodeLabel}
           resumeSeconds={resumeSeconds}
         />
       </WatchShell>
@@ -139,6 +146,7 @@ export default async function WatchPage({
     <WatchShell
       showTitle={show.title}
       episodeTitle={episode.title}
+      episodeLabel={episodeLabel}
       showSlug={show.slug}
     >
       <Player
@@ -147,6 +155,8 @@ export default async function WatchPage({
         title={episode.title}
         mode="trial"
         showSlug={show.slug}
+        showTitle={show.title}
+        episodeLabel={episodeLabel}
         resumeSeconds={resumeSeconds ?? (trial.lastPositionSeconds || null)}
       />
     </WatchShell>
@@ -164,13 +174,15 @@ function ComingSoon({
     <div className="fixed inset-0 z-50 flex flex-col bg-black px-6">
       <Link
         href={`/shows/${showSlug}`}
-        className="absolute left-6 top-5 inline-flex h-10 items-center gap-2 rounded-full bg-black/40 px-4 text-sm text-white backdrop-blur-md transition-colors hover:bg-black/70"
+        className="absolute left-6 top-5 inline-flex h-10 items-center gap-2 rounded-full bg-black/45 px-4 text-sm font-medium text-white backdrop-blur-md transition-colors hover:bg-black/70"
       >
         ← {showTitle}
       </Link>
       <div className="flex flex-1 items-center justify-center">
         <div className="space-y-2 text-center">
-          <p className="font-display text-4xl italic text-white">Coming soon</p>
+          <p className="text-3xl font-extrabold tracking-tight text-white">
+            Coming soon
+          </p>
           <p className="text-sm text-white/60">No episodes ready yet.</p>
         </div>
       </div>

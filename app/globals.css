@@ -84,40 +84,40 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-/* Matio cinematic dark palette: warm near-black, cream foreground,
-   single warm-amber accent. Used app-wide via the `dark` class on <html>. */
+/* Matio cinema dark — near-black bg #0a0a0c, cream foreground, cinema-red
+   accent #ff3d3d. Used app-wide via the `dark` class on <html>. */
 .dark {
-  --background: oklch(0.135 0.005 60);          /* warm near-black */
-  --foreground: oklch(0.965 0.005 90);          /* cream */
-  --card: oklch(0.16 0.006 65);                 /* one tone above bg */
-  --card-foreground: oklch(0.965 0.005 90);
-  --popover: oklch(0.155 0.006 65);
-  --popover-foreground: oklch(0.965 0.005 90);
-  --primary: oklch(0.965 0.005 90);             /* cream as button bg */
-  --primary-foreground: oklch(0.135 0.005 60);  /* bg as text on it */
-  --secondary: oklch(0.22 0.005 70);
-  --secondary-foreground: oklch(0.965 0.005 90);
-  --muted: oklch(0.21 0.005 70);
-  --muted-foreground: oklch(0.65 0.008 80);
-  --accent: oklch(0.78 0.13 65);                /* warm amber */
-  --accent-foreground: oklch(0.135 0.005 60);
-  --destructive: oklch(0.62 0.19 22);
-  --border: oklch(0.26 0.006 75);
-  --input: oklch(0.24 0.006 75);
-  --ring: oklch(0.78 0.13 65);
-  --chart-1: oklch(0.78 0.13 65);
-  --chart-2: oklch(0.65 0.008 80);
+  --background: oklch(0.115 0.005 270);         /* #0a0a0c — cool near-black */
+  --foreground: oklch(0.985 0 0);               /* pure white */
+  --card: oklch(0.155 0.005 270);               /* one tone above bg */
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.155 0.005 270);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);                  /* white as primary button bg */
+  --primary-foreground: oklch(0.115 0.005 270); /* bg as text on it */
+  --secondary: oklch(0.22 0.005 270);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.2 0.005 270);
+  --muted-foreground: oklch(0.65 0.005 270);
+  --accent: oklch(0.66 0.235 27);               /* #ff3d3d — cinema red */
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.66 0.235 27);
+  --border: oklch(0.26 0.005 270);
+  --input: oklch(0.22 0.005 270);
+  --ring: oklch(0.66 0.235 27);
+  --chart-1: oklch(0.66 0.235 27);
+  --chart-2: oklch(0.65 0.005 270);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.16 0.006 65);
-  --sidebar-foreground: oklch(0.965 0.005 90);
-  --sidebar-primary: oklch(0.78 0.13 65);
-  --sidebar-primary-foreground: oklch(0.135 0.005 60);
-  --sidebar-accent: oklch(0.22 0.005 70);
-  --sidebar-accent-foreground: oklch(0.965 0.005 90);
-  --sidebar-border: oklch(0.26 0.006 75);
-  --sidebar-ring: oklch(0.78 0.13 65);
+  --sidebar: oklch(0.155 0.005 270);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.66 0.235 27);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.22 0.005 270);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.26 0.005 270);
+  --sidebar-ring: oklch(0.66 0.235 27);
 }
 
 @layer base {
@@ -131,39 +131,48 @@
     @apply font-sans;
   }
   ::selection {
-    background: oklch(0.78 0.13 65 / 0.4);
-    color: oklch(0.965 0.005 90);
+    background: oklch(0.66 0.235 27 / 0.4);
+    color: oklch(0.985 0 0);
   }
 }
 
-/* Display utility (Instrument Serif) for hero typography. */
+/* Display utility — kept for occasional editorial moments (paywall hook etc.).
+   Default headings use Geist sans per the cinema-red design language. */
 .font-display {
   font-family: var(--font-display), serif;
   font-feature-settings: "ss01" on, "ss02" on;
 }
 
-/* Cinematic grain overlay — sits above page content, but below z-40 chrome
-   (site header) and z-50+ overlays (Clerk popovers/modals). overlay blend
-   mode darkens dark surfaces, so it MUST stay underneath any UI we don't
-   want crushed (we learned this the hard way with Clerk dropdowns). */
-.film-grain {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 30;
-  opacity: 0.05;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.5' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.6 0'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>");
-  background-size: 200px 200px;
-}
-
-/* Hide scrollbar utility, used on horizontal genre rows. */
+/* Hide scrollbar — used on horizontal genre rows + category chip strip. */
 .scrollbar-hidden {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .scrollbar-hidden::-webkit-scrollbar {
   display: none;
+}
+
+/* Tone gradients — six curated palettes that stand in for poster artwork
+   when a show doesn't have one yet. Driven by `shows.posterTone` ('a'..'f').
+   These mirror lib/design.ts so they're available as plain CSS classes too. */
+.tone-a { background-image: linear-gradient(160deg, #3a1f4d 0%, #0d0918 100%); }
+.tone-b { background-image: linear-gradient(160deg, #1f3a4d 0%, #08121a 100%); }
+.tone-c { background-image: linear-gradient(160deg, #4d3a1f 0%, #1a0e08 100%); }
+.tone-d { background-image: linear-gradient(160deg, #1f4d3a 0%, #08180e 100%); }
+.tone-e { background-image: linear-gradient(160deg, #4d1f3a 0%, #1a0814 100%); }
+.tone-f { background-image: linear-gradient(160deg, #2a2a2e 0%, #0d0d10 100%); }
+
+/* Poster atmospherics — soft radial highlights that sit over the tone
+   gradient. Layered as a pseudo-element so the poster content stays on top. */
+.poster-texture::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.25;
+  background-image:
+    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.18), transparent 50%),
+    radial-gradient(circle at 80% 80%, rgba(0, 0, 0, 0.5), transparent 60%);
 }
 
 /* Mux Player overrides for the hero preview — kill all chrome. */

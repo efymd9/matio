@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons, shows, type Episode } from "@/db/schema";
+import { Icon } from "@/components/site/icon";
+import { TONE_GRADIENT, toneFor } from "@/lib/design";
 
 export default async function ShowDetailPage({
   params,
@@ -49,11 +51,12 @@ export default async function ShowDetailPage({
 
   const totalEpisodes = allEpisodes.filter((e) => e.status === "ready").length;
   const backdrop = show.heroImageUrl ?? show.posterImageUrl;
+  const tone = toneFor(show.slug);
 
   return (
     <main className="bg-background">
       {/* Hero */}
-      <section className="relative isolate h-[70vh] min-h-[520px] w-full overflow-hidden">
+      <section className="relative isolate h-[65vh] min-h-[480px] w-full overflow-hidden">
         {backdrop ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -63,93 +66,141 @@ export default async function ShowDetailPage({
             className="absolute inset-0 h-full w-full object-cover"
           />
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-muted via-card to-background" />
+          <div
+            className="absolute inset-0"
+            style={{ backgroundImage: TONE_GRADIENT[tone] }}
+          />
         )}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/65 to-background/15" />
-        <div className="pointer-events-none absolute inset-y-0 left-0 w-2/3 bg-gradient-to-r from-background/85 via-background/40 to-transparent" />
+        <div
+          className="pointer-events-none absolute inset-0 opacity-45"
+          aria-hidden
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.22), transparent 55%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.5), transparent 60%)",
+          }}
+        />
+        {/* Bottom fade pulls the hero into the page bg */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-background via-background/70 to-transparent" />
+      </section>
 
-        <div className="relative z-10 flex h-full flex-col justify-end px-6 pb-14 pt-32 sm:px-12 sm:pb-20 sm:pt-36">
-          <div className="max-w-3xl space-y-5">
-            {show.genre.length > 0 && (
-              <p className="text-[10px] font-medium uppercase tracking-[0.4em] text-accent">
-                {show.genre.join("  ·  ")}
-              </p>
-            )}
-            <h1 className="font-display text-5xl italic leading-[0.95] tracking-tight sm:text-7xl lg:text-8xl">
-              {show.title}
-            </h1>
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              {totalEpisodes > 0 && (
-                <span>
-                  {totalEpisodes}{" "}
-                  {totalEpisodes === 1 ? "episode" : "episodes"}
-                </span>
-              )}
-              {showSeasons.length > 0 && (
-                <>
-                  <span aria-hidden>•</span>
-                  <span>
-                    {showSeasons.length}{" "}
-                    {showSeasons.length === 1 ? "season" : "seasons"}
-                  </span>
-                </>
-              )}
-            </div>
-            {show.description && (
-              <p className="max-w-2xl text-base leading-relaxed text-foreground/85 sm:text-lg">
-                {show.description}
-              </p>
-            )}
+      {/* Title block — overlaps the hero by pulling negative margin up. */}
+      <section className="relative z-10 -mt-48 px-6 pb-12 sm:px-12">
+        <div className="mx-auto max-w-5xl space-y-5">
+          <h1 className="text-5xl font-extrabold leading-[0.95] tracking-[-0.02em] text-white sm:text-6xl">
+            {show.title}
+          </h1>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-white/75">
+            <span className="font-semibold text-[#7fd87a]">● 96% match</span>
+            <span>{new Date(show.createdAt).getFullYear()}</span>
+            <span className="rounded-[3px] border border-white/30 px-1.5 py-px text-[10px] font-medium uppercase">
+              16+
+            </span>
             {totalEpisodes > 0 && (
-              <div className="pt-2">
-                <Link
-                  href={`/watch/${show.slug}`}
-                  className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-8 text-sm font-medium text-background transition-all duration-300 hover:bg-accent hover:text-accent-foreground"
-                >
-                  <PlayGlyph />
-                  Watch
-                </Link>
-              </div>
+              <span>
+                {totalEpisodes} {totalEpisodes === 1 ? "episode" : "episodes"}
+              </span>
             )}
+            <span className="rounded-[3px] border border-white/30 px-1.5 py-px text-[10px] font-medium uppercase">
+              HD
+            </span>
+          </div>
+
+          {totalEpisodes > 0 && (
+            <div className="flex flex-col gap-2 pt-1 sm:max-w-md">
+              <Link
+                href={`/watch/${show.slug}`}
+                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-white text-sm font-bold text-black transition-colors hover:bg-white/90"
+              >
+                <Icon name="play" size={18} color="#0a0a0c" />
+                Play
+              </Link>
+              <button
+                type="button"
+                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-white/15 text-sm font-semibold text-white transition-colors hover:bg-white/25"
+              >
+                <Icon name="download" size={16} />
+                Download episode 1
+              </button>
+            </div>
+          )}
+
+          {show.description && (
+            <p className="max-w-3xl text-sm leading-relaxed text-white/85 sm:text-base">
+              {show.description}
+            </p>
+          )}
+
+          {show.genre.length > 0 && (
+            <p className="text-[11px] text-white/55 leading-relaxed">
+              <span className="text-white/40">Genre: </span>
+              <span className="capitalize">{show.genre.join(" · ")}</span>
+            </p>
+          )}
+
+          {/* Action row — list / rate / share, mirrors title.jsx */}
+          <div className="flex gap-1 pt-2">
+            {[
+              { icon: "plus" as const, label: "My List" },
+              { icon: "star" as const, label: "Rate" },
+              { icon: "share" as const, label: "Share" },
+            ].map((a) => (
+              <button
+                key={a.label}
+                type="button"
+                className="inline-flex flex-1 sm:flex-initial flex-col items-center gap-1.5 px-5 py-2 text-[11px] font-medium text-white/85 transition-colors hover:text-white"
+              >
+                <Icon name={a.icon} size={20} />
+                {a.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tabs */}
+          <div className="flex gap-6 border-b border-white/10 pt-2 text-sm font-semibold">
+            <span className="border-b-2 border-[#ff3d3d] pb-3 text-white">
+              Episodes
+            </span>
+            <span className="pb-3 text-white/50">Related</span>
+            <span className="pb-3 text-white/50">About</span>
           </div>
         </div>
       </section>
 
       {/* Episodes */}
-      <section className="mx-auto max-w-5xl px-6 py-16 sm:px-12 sm:py-20">
+      <section className="mx-auto max-w-5xl px-6 pb-16 sm:px-12 sm:pb-20">
         {showSeasons.length === 0 ? (
-          <div className="text-center">
-            <p className="font-display text-3xl italic text-muted-foreground">
-              No episodes yet
-            </p>
+          <div className="py-12 text-center">
+            <p className="text-2xl font-bold text-white/50">No episodes yet</p>
           </div>
         ) : (
-          <div className="space-y-16">
+          <div className="space-y-12">
             {showSeasons.map((season) => {
               const eps = episodesBySeason.get(season.id) ?? [];
               return (
-                <div key={season.id} className="space-y-6">
-                  <div className="flex items-baseline gap-3 border-b border-border/60 pb-3">
-                    <h2 className="font-display text-3xl italic leading-none text-foreground/90">
-                      Season {season.number}
-                    </h2>
-                    {season.title && (
-                      <span className="text-sm text-muted-foreground">
-                        {season.title}
-                      </span>
-                    )}
+                <div key={season.id} className="space-y-4">
+                  <div className="flex items-center justify-between rounded-md bg-white/[0.06] px-4 py-3">
+                    <div className="flex items-baseline gap-3">
+                      <h2 className="text-sm font-bold text-white">
+                        Season {season.number}
+                      </h2>
+                      {season.title && (
+                        <span className="text-xs text-white/60">
+                          {season.title}
+                        </span>
+                      )}
+                    </div>
+                    <Icon name="chevron-right" size={16} color="rgba(255,255,255,0.6)" />
                   </div>
                   {eps.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No episodes yet.
-                    </p>
+                    <p className="text-sm text-white/55">No episodes yet.</p>
                   ) : (
-                    <ul className="divide-y divide-border/40">
+                    <ul className="space-y-2">
                       {eps.map((ep) => (
                         <EpisodeRow
                           key={ep.id}
                           ep={ep}
                           showSlug={show.slug}
+                          tone={tone}
                         />
                       ))}
                     </ul>
@@ -167,9 +218,11 @@ export default async function ShowDetailPage({
 function EpisodeRow({
   ep,
   showSlug,
+  tone,
 }: {
   ep: Episode;
   showSlug: string;
+  tone: ReturnType<typeof toneFor>;
 }) {
   const playable = !!ep.muxPlaybackId && ep.status === "ready";
   const minutes = ep.durationSeconds
@@ -177,63 +230,50 @@ function EpisodeRow({
     : null;
 
   return (
-    <li className="group relative">
+    <li>
       <Link
         href={playable ? `/watch/${showSlug}` : "#"}
         aria-disabled={!playable}
         tabIndex={playable ? 0 : -1}
-        className={`flex items-center gap-6 py-6 transition-colors ${
-          playable
-            ? "hover:bg-muted/30 focus-visible:bg-muted/30"
-            : "cursor-default"
-        } -mx-4 rounded-md px-4`}
+        className={`group flex items-start gap-4 rounded-lg p-3 transition-colors ${
+          playable ? "hover:bg-white/[0.04]" : "cursor-default opacity-70"
+        }`}
       >
+        {/* Thumbnail with play overlay */}
         <div
-          className={`font-display text-4xl italic leading-none transition-colors duration-300 ${
-            playable
-              ? "text-muted-foreground/40 group-hover:text-accent"
-              : "text-muted-foreground/30"
-          }`}
+          className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-md sm:w-40"
+          style={{ backgroundImage: TONE_GRADIENT[tone] }}
         >
-          {String(ep.number).padStart(2, "0")}
+          <div
+            className="absolute inset-0 opacity-30"
+            aria-hidden
+            style={{
+              backgroundImage:
+                "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.25), transparent 60%)",
+            }}
+          />
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60 backdrop-blur-md">
+              <Icon name="play" size={12} color="#ffffff" />
+            </div>
+          </div>
         </div>
-        <div className="flex-1 min-w-0 space-y-1.5">
-          <h3 className="text-base font-medium text-foreground sm:text-lg">
-            {ep.title}
-          </h3>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="text-sm font-semibold text-white sm:text-base">
+              {ep.number}. {ep.title}
+            </h3>
+            <span className="shrink-0 text-[11px] text-white/55">
+              {minutes ? `${minutes} min` : !playable ? "Soon" : ""}
+            </span>
+          </div>
           {ep.description && (
-            <p className="line-clamp-2 text-sm leading-relaxed text-muted-foreground">
+            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-white/60">
               {ep.description}
             </p>
           )}
-          <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.15em] text-muted-foreground/70">
-            {minutes && <span>{minutes} min</span>}
-            {!playable && (
-              <span className="text-accent/80">Coming soon</span>
-            )}
-          </div>
         </div>
-        {playable && (
-          <div className="hidden shrink-0 items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-foreground/70 transition-all duration-300 group-hover:gap-3 group-hover:text-foreground sm:flex">
-            Play
-            <span className="text-accent">→</span>
-          </div>
-        )}
       </Link>
     </li>
-  );
-}
-
-function PlayGlyph() {
-  return (
-    <svg
-      width="11"
-      height="13"
-      viewBox="0 0 11 13"
-      fill="currentColor"
-      aria-hidden
-    >
-      <path d="M0 0L11 6.5L0 13V0Z" />
-    </svg>
   );
 }

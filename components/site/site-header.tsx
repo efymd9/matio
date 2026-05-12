@@ -4,12 +4,15 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { MatioLogo } from "./matio-logo";
+import { Icon } from "./icon";
 
+// Sticky transparent → frosted-dark header. Hides on /watch (immersive
+// fullscreen player) and /admin (own nav).
 export function SiteHeader({ authSlot }: { authSlot: React.ReactNode }) {
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
 
-  // Hide on /watch, /admin (admin has its own nav), and never on /sign-in flows
   const hidden = pathname?.startsWith("/watch") || pathname?.startsWith("/admin");
 
   useEffect(() => {
@@ -27,36 +30,42 @@ export function SiteHeader({ authSlot }: { authSlot: React.ReactNode }) {
       className={cn(
         "fixed inset-x-0 top-0 z-40 transition-[background-color,backdrop-filter,border-color] duration-500 ease-out",
         scrolled
-          ? "border-b border-border/40 bg-background/75 backdrop-blur-xl backdrop-saturate-150"
-          : "border-b-0 bg-transparent",
+          ? "border-b border-white/[0.06] bg-background/85 backdrop-blur-xl backdrop-saturate-150"
+          : "border-b-0 bg-gradient-to-b from-background/70 via-background/25 to-transparent",
       )}
     >
       <div className="mx-auto flex max-w-screen-2xl items-center gap-8 px-6 py-4 sm:px-12">
         <Link
           href="/"
-          className="group flex items-baseline gap-1 transition-opacity hover:opacity-90"
+          className="group flex items-center transition-opacity hover:opacity-90"
           aria-label="matio home"
         >
-          <span className="font-display text-3xl italic leading-none tracking-tight text-foreground">
-            matio
-          </span>
-          <span className="size-1.5 translate-y-[-2px] rounded-full bg-accent transition-transform duration-500 group-hover:scale-150" />
+          <MatioLogo size={20} accent="#ff3d3d" color="#ffffff" />
         </Link>
-        <nav className="hidden gap-7 text-sm text-foreground/70 sm:flex">
+        <nav className="hidden gap-7 text-sm font-medium text-white/70 sm:flex">
           <Link
             href="/"
-            className="transition-colors hover:text-foreground"
+            className="transition-colors hover:text-white"
           >
             Browse
           </Link>
           <Link
             href="/subscribe"
-            className="transition-colors hover:text-foreground"
+            className="transition-colors hover:text-white"
           >
             Subscribe
           </Link>
         </nav>
-        <div className="ml-auto flex items-center gap-3">{authSlot}</div>
+        <div className="ml-auto flex items-center gap-4">
+          <button
+            type="button"
+            aria-label="Search"
+            className="hidden text-white/80 transition-colors hover:text-white sm:inline-flex"
+          >
+            <Icon name="search" size={20} />
+          </button>
+          {authSlot}
+        </div>
       </div>
     </header>
   );

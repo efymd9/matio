@@ -13,6 +13,8 @@ export function Player({
   title,
   mode,
   showSlug,
+  showTitle,
+  episodeLabel,
   resumeSeconds,
 }: {
   episodeId: string;
@@ -20,6 +22,8 @@ export function Player({
   title: string;
   mode: Mode;
   showSlug: string;
+  showTitle?: string;
+  episodeLabel?: string;
   resumeSeconds?: number | null;
 }) {
   const ref = useRef<ComponentRef<typeof MuxPlayer>>(null);
@@ -127,6 +131,8 @@ export function Player({
       <Paywall
         showSlug={showSlug}
         resumeSeconds={lastSavedRef.current || resumeSeconds || undefined}
+        showTitle={showTitle}
+        episodeLabel={episodeLabel}
       />
     );
   }
@@ -135,8 +141,10 @@ export function Player({
     return (
       <div className="flex aspect-video w-full items-center justify-center bg-black">
         <div className="flex items-center gap-3 text-white/60">
-          <span className="size-2 animate-pulse rounded-full bg-accent" />
-          <span className="text-sm uppercase tracking-[0.3em]">Loading</span>
+          <span className="size-2 animate-pulse rounded-full bg-[#ff3d3d]" />
+          <span className="text-xs font-medium uppercase tracking-[0.3em]">
+            Loading
+          </span>
         </div>
       </div>
     );
@@ -149,7 +157,7 @@ export function Player({
       tokens={{ playback: token }}
       streamType="on-demand"
       metadata={{ video_id: episodeId, video_title: title }}
-      accentColor="#e3963c"
+      accentColor="#ff3d3d"
       onError={() => setPaywall(true)}
       onEnded={() => {
         const el = ref.current;
