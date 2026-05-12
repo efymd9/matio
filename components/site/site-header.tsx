@@ -28,7 +28,7 @@ export function SiteHeader({ authSlot }: { authSlot: React.ReactNode }) {
         "fixed inset-x-0 top-0 z-40 transition-[background-color,backdrop-filter,border-color] duration-500 ease-out",
         scrolled
           ? "border-b border-border/40 bg-background/75 backdrop-blur-xl backdrop-saturate-150"
-          : "border-b border-transparent bg-gradient-to-b from-background/80 via-background/30 to-transparent",
+          : "border-b-0 bg-transparent",
       )}
     >
       <div className="mx-auto flex max-w-screen-2xl items-center gap-8 px-6 py-4 sm:px-12">

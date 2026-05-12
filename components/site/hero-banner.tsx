@@ -75,7 +75,7 @@ export function HeroBanner({
       {/* Atmospheric overlays */}
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/55 to-transparent" />
       <div className="pointer-events-none absolute inset-y-0 left-0 w-3/4 bg-gradient-to-r from-background via-background/55 to-transparent" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-background/40 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-background/65 via-background/25 to-transparent" />
 
       {/* Content */}
       <div className="relative z-10 flex h-full min-h-[600px] flex-col justify-end px-6 pb-16 pt-24 sm:px-12 sm:pb-24 sm:pt-32 lg:pb-32">
