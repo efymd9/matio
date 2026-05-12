@@ -55,12 +55,29 @@ export async function startCheckout(formData: FormData) {
 
   const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
+  // If the user came from a watch flow, carry show+resume through so we can
+  // drop them back into playback after Stripe Checkout.
+  const showSlug = formData.get("show");
+  const resume = formData.get("resume");
+  let successUrl = `${origin}/account?welcome=1`;
+  if (typeof showSlug === "string" && showSlug) {
+    const watchParams = new URLSearchParams();
+    if (typeof resume === "string" && resume) watchParams.set("resume", resume);
+    const qs = watchParams.toString();
+    successUrl = `${origin}/watch/${encodeURIComponent(showSlug)}${qs ? `?${qs}` : ""}`;
+  }
+  const cancelParams = new URLSearchParams();
+  if (typeof showSlug === "string" && showSlug) cancelParams.set("show", showSlug);
+  if (typeof resume === "string" && resume) cancelParams.set("resume", resume);
+  const cancelQs = cancelParams.toString();
+  const cancelUrl = `${origin}/subscribe${cancelQs ? `?${cancelQs}` : ""}`;
+
   const session = await stripe.checkout.sessions.create({
     mode: "subscription",
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${origin}/account?welcome=1`,
-    cancel_url: `${origin}/subscribe`,
+    success_url: successUrl,
+    cancel_url: cancelUrl,
     subscription_data: { metadata: { userId } },
   });
 

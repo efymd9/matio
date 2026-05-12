@@ -216,7 +216,10 @@ export async function createMuxUpload(
   const upload = await getMux().video.uploads.create({
     cors_origin: "*",
     new_asset_settings: {
-      playback_policies: ["public"],
+      // Signed playback IDs enforce the JWT issued by /api/playback-token.
+      // Existing public assets still play without one — they'd need to be
+      // re-uploaded (or have signed playback IDs added via the Mux API).
+      playback_policies: ["signed"],
       passthrough: episodeId,
     },
   });

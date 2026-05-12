@@ -15,6 +15,13 @@
       "when": 1778418290070,
       "tag": "0001_dazzling_crystal",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1778588402585,
+      "tag": "0002_parched_piledriver",
+      "breakpoints": true
     }
   ]
 }

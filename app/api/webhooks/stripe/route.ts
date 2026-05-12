@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { subscriptions, users } from "@/db/schema";
 import { getStripe } from "@/lib/stripe";
+import { markUserTrialsConverted } from "@/lib/trial";
 
 // Stripe needs the raw body to verify the signature; DB writes hit postgres-js.
 // Both want Node runtime.
@@ -66,12 +67,14 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
   const cancelScheduled =
     sub.cancel_at_period_end || sub.cancel_at != null;
 
+  const mappedStatus = STATUS_MAP[sub.status];
+
   await db
     .insert(subscriptions)
     .values({
       userId: user.id,
       stripeSubscriptionId: sub.id,
-      status: STATUS_MAP[sub.status],
+      status: mappedStatus,
       plan,
       currentPeriodEnd: periodEnd,
       cancelAtPeriodEnd: cancelScheduled,
@@ -79,13 +82,19 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
     .onConflictDoUpdate({
       target: subscriptions.stripeSubscriptionId,
       set: {
-        status: STATUS_MAP[sub.status],
+        status: mappedStatus,
         plan,
         currentPeriodEnd: periodEnd,
         cancelAtPeriodEnd: cancelScheduled,
         updatedAt: new Date(),
       },
     });
+
+  // Once the user has an active (or trialing) subscription, flip every trial
+  // session they own to converted = true so the playback path stops gating.
+  if (mappedStatus === "active" || mappedStatus === "trialing") {
+    await markUserTrialsConverted(user.id);
+  }
 }
 
 async function mirrorInvoiceSubscription(invoice: Stripe.Invoice) {

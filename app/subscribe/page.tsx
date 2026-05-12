@@ -5,9 +5,20 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { linkTrialSessionsToCurrentUser } from "@/lib/trial";
 import { startCheckout } from "./actions";
 
-export default function SubscribePage() {
+export default async function SubscribePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ show?: string; resume?: string }>;
+}) {
+  // User just signed up via Clerk and landed back here — claim any trial
+  // sessions on their cookie before they pay.
+  await linkTrialSessionsToCurrentUser();
+
+  const { show, resume } = await searchParams;
+
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4 py-12">
       <div className="text-center">
@@ -21,6 +32,8 @@ export default function SubscribePage() {
           title="Monthly"
           price="$9.99"
           interval="month"
+          show={show}
+          resume={resume}
         />
         <PlanCard
           plan="annual"
@@ -28,6 +41,8 @@ export default function SubscribePage() {
           price="$79.99"
           interval="year"
           note="Save ~33% vs monthly"
+          show={show}
+          resume={resume}
         />
       </div>
     </div>
@@ -40,12 +55,16 @@ function PlanCard({
   price,
   interval,
   note,
+  show,
+  resume,
 }: {
   plan: "monthly" | "annual";
   title: string;
   price: string;
   interval: string;
   note?: string;
+  show?: string;
+  resume?: string;
 }) {
   return (
     <Card>
@@ -60,6 +79,8 @@ function PlanCard({
         {note && <p className="text-sm text-green-600">{note}</p>}
         <form action={startCheckout}>
           <input type="hidden" name="plan" value={plan} />
+          {show && <input type="hidden" name="show" value={show} />}
+          {resume && <input type="hidden" name="resume" value={resume} />}
           <Button type="submit" className="w-full">
             Subscribe
           </Button>

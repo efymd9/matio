@@ -1,5 +1,6 @@
 import {
   boolean,
+  integer,
   pgTable,
   text,
   timestamp,
@@ -23,6 +24,7 @@ export const trialSessions = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
     converted: boolean("converted").notNull().default(false),
+    lastPositionSeconds: integer("last_position_seconds").notNull().default(0),
   },
   (t) => [
     unique("trial_sessions_session_token_show_id_unique").on(

@@ -1,0 +1,1 @@
+ALTER TABLE "trial_sessions" ADD COLUMN "last_position_seconds" integer DEFAULT 0 NOT NULL;

@@ -1,8 +1,11 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
+import { and, eq } from "drizzle-orm";
+import { cookies } from "next/headers";
 import { db } from "@/db";
-import { watchProgress } from "@/db/schema";
+import { episodes, seasons, trialSessions, watchProgress } from "@/db/schema";
+import { TRIAL_COOKIE } from "@/lib/trial";
 
 export async function saveWatchProgress(
   episodeId: string,
@@ -10,7 +13,7 @@ export async function saveWatchProgress(
   completed: boolean,
 ) {
   const { userId } = await auth();
-  if (!userId) return; // anonymous viewers: no-op for Phase 4
+  if (!userId) return;
 
   await db
     .insert(watchProgress)
@@ -23,4 +26,34 @@ export async function saveWatchProgress(
         updatedAt: new Date(),
       },
     });
+}
+
+// Trial-mode position save: keyed on (session_token, show_id), looked up via
+// the episode's season → show relationship. Anonymous-only — subscribers
+// route to saveWatchProgress instead.
+export async function saveTrialPosition(
+  episodeId: string,
+  positionSeconds: number,
+  _completed: boolean,
+) {
+  const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
+  if (!sessionToken) return;
+
+  const [row] = await db
+    .select({ showId: seasons.showId })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .where(eq(episodes.id, episodeId))
+    .limit(1);
+  if (!row) return;
+
+  await db
+    .update(trialSessions)
+    .set({ lastPositionSeconds: positionSeconds })
+    .where(
+      and(
+        eq(trialSessions.sessionToken, sessionToken),
+        eq(trialSessions.showId, row.showId),
+      ),
+    );
 }

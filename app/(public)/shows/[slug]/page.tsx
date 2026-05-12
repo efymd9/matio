@@ -133,7 +133,7 @@ export default async function ShowDetailPage({
                         </div>
                         {playable ? (
                           <Link
-                            href={`/watch/${ep.id}`}
+                            href={`/watch/${show.slug}`}
                             className={buttonVariants({ size: "sm" })}
                           >
                             Play
