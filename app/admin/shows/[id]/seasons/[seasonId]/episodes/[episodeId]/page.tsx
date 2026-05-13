@@ -37,8 +37,18 @@ export default async function EditEpisodePage({
     .limit(1);
   if (!season) notFound();
 
+  // Explicit columns — intro_* live in schema but aren't in prod yet.
   const [episode] = await db
-    .select()
+    .select({
+      id: episodes.id,
+      number: episodes.number,
+      title: episodes.title,
+      description: episodes.description,
+      durationSeconds: episodes.durationSeconds,
+      muxAssetId: episodes.muxAssetId,
+      muxPlaybackId: episodes.muxPlaybackId,
+      status: episodes.status,
+    })
     .from(episodes)
     .where(and(eq(episodes.id, episodeId), eq(episodes.seasonId, season.id)))
     .limit(1);

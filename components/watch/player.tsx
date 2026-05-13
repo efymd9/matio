@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import MuxVideo from "@mux/mux-video-react";
 import {
   MediaController,
@@ -13,55 +15,92 @@ import {
   MediaPlaybackRateButton,
   MediaFullscreenButton,
 } from "media-chrome/react";
-import Link from "next/link";
 import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
 import { Paywall } from "./paywall";
+import { EpisodesOverlay } from "./episodes-overlay";
+import { UpNextOverlay } from "./up-next-overlay";
+
+export type PlayerEpisode = {
+  id: string;
+  number: number;
+  seasonNumber: number;
+  title: string;
+  description: string | null;
+  durationSeconds: number | null;
+  playbackId: string;
+  introStartSeconds: number | null;
+  introEndSeconds: number | null;
+};
 
 type Mode = "subscriber" | "trial";
 
-// Custom chrome built on media-chrome primitives, sitting over a headless
-// <mux-video>. Mux's HLS/ABR/signed-JWT/Mux Data pipeline is untouched — we
-// only replace the visual layer.
-//
-// Chrome visibility is driven by media-chrome's own idle detection: when the
-// controller adds the `media-ui-inactive` attribute (during steady playback
-// with no input), Tailwind's `group-[[media-ui-inactive]]:` rules fade the
-// overlay layers to 0. Pausing or moving the pointer brings them back.
+// Custom chrome built on media-chrome primitives over a headless mux-video.
+// Owns the current-episode state so users can swap episodes (via the
+// Episodes overlay or "Up Next" countdown) without leaving the page —
+// the playback token is re-fetched per episode.
 export function Player({
-  episodeId,
-  playbackId,
-  title,
+  episodes,
+  initialEpisodeId,
   mode,
   showSlug,
   showTitle,
-  episodeLabel,
   resumeSeconds,
 }: {
-  episodeId: string;
-  playbackId: string;
-  title: string;
+  episodes: PlayerEpisode[];
+  initialEpisodeId: string;
   mode: Mode;
   showSlug: string;
   showTitle?: string;
-  episodeLabel?: string;
   resumeSeconds?: number | null;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
   const videoRef = useRef<HTMLVideoElement>(null);
+  const lastSavedRef = useRef<number>(0);
+
+  // Currently playing episode — initial from server, then driven by overlay
+  // selection / Up Next. resumeSecondsForCurrent only applies to the first
+  // episode shown (server-side computed from query param + watch_progress).
+  const [currentEpisodeId, setCurrentEpisodeId] = useState(initialEpisodeId);
   const [token, setToken] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [paywall, setPaywall] = useState(false);
-  const lastSavedRef = useRef<number>(0);
+  const [overlay, setOverlay] = useState<"none" | "episodes" | "upnext">(
+    "none",
+  );
+  const [showSkipIntro, setShowSkipIntro] = useState(false);
 
-  // Fetch playback token on mount / when episode changes.
+  const current = useMemo(
+    () =>
+      episodes.find((e) => e.id === currentEpisodeId) ?? episodes[0],
+    [episodes, currentEpisodeId],
+  );
+  const currentIdx = episodes.findIndex((e) => e.id === current.id);
+  const next: PlayerEpisode | null =
+    currentIdx >= 0 && currentIdx < episodes.length - 1
+      ? episodes[currentIdx + 1]
+      : null;
+  const episodeLabel = `S${current.seasonNumber}·E${current.number}`;
+
+  // Only honor server-provided resume on the initially loaded episode;
+  // subsequent swaps start from 0 (or from media-chrome's own auto-recovery).
+  const resumeForThisLoad =
+    current.id === initialEpisodeId ? resumeSeconds : null;
+
+  // Fetch playback token whenever the current episode changes.
   useEffect(() => {
     let cancelled = false;
     setToken(null);
     setExpiresAt(null);
     setPaywall(false);
+    setShowSkipIntro(false);
+    lastSavedRef.current = 0;
     fetch(
-      `/api/playback-token?episode_id=${encodeURIComponent(episodeId)}`,
+      `/api/playback-token?episode_id=${encodeURIComponent(current.id)}`,
       { cache: "no-store" },
     )
       .then(async (r) => {
@@ -84,11 +123,10 @@ export function Player({
     return () => {
       cancelled = true;
     };
-  }, [episodeId]);
+  }, [current.id]);
 
-  // When the token expires, refresh — subscribers get a new 1h token and
-  // keep playing; trial users get 403 → paywall. This stops a buffered-ahead
-  // stream from running past the trial cut-off until the next page reload.
+  // Token refresh on expiry. Subscribers get a fresh 1h token; trial users
+  // who've used their time get 403 and the player flips to paywall.
   useEffect(() => {
     if (!expiresAt) return;
     const ms = expiresAt - Date.now();
@@ -96,7 +134,7 @@ export function Player({
     const timer = setTimeout(async () => {
       try {
         const r = await fetch(
-          `/api/playback-token?episode_id=${encodeURIComponent(episodeId)}`,
+          `/api/playback-token?episode_id=${encodeURIComponent(current.id)}`,
           { cache: "no-store" },
         );
         if (r.ok) {
@@ -115,9 +153,9 @@ export function Player({
       setPaywall(true);
     }, ms);
     return () => clearTimeout(timer);
-  }, [expiresAt, episodeId]);
+  }, [expiresAt, current.id]);
 
-  // Save position every 10s while playing.
+  // Save progress every 10s while playing.
   useEffect(() => {
     const interval = setInterval(() => {
       const el = videoRef.current;
@@ -126,32 +164,74 @@ export function Player({
       if (t > 0 && t !== lastSavedRef.current) {
         lastSavedRef.current = t;
         const fn = mode === "trial" ? saveTrialPosition : saveWatchProgress;
-        void fn(episodeId, t, false).catch(() => {});
+        void fn(current.id, t, false).catch(() => {});
       }
     }, 10_000);
     return () => clearInterval(interval);
-  }, [episodeId, mode]);
+  }, [current.id, mode]);
 
-  // Seek to resume position once the player has metadata.
+  // Seek to resume position once the player has metadata for the initial
+  // episode. Swaps reset to 0 by design.
   useEffect(() => {
-    if (!token || !resumeSeconds || resumeSeconds <= 0) return;
+    if (!token || !resumeForThisLoad || resumeForThisLoad <= 0) return;
     const el = videoRef.current;
     if (!el) return;
     const handler = () => {
-      if ((el.currentTime ?? 0) < resumeSeconds) {
-        el.currentTime = resumeSeconds;
+      if ((el.currentTime ?? 0) < resumeForThisLoad) {
+        el.currentTime = resumeForThisLoad;
       }
     };
     el.addEventListener("loadedmetadata", handler, { once: true });
     return () => el.removeEventListener("loadedmetadata", handler);
-  }, [token, resumeSeconds]);
+  }, [token, resumeForThisLoad]);
+
+  // Skip-intro chip — visible while currentTime falls inside the episode's
+  // intro window. Only activates when both markers are present (admin-set;
+  // null on all episodes until the UI for it lands).
+  useEffect(() => {
+    const start = current.introStartSeconds;
+    const end = current.introEndSeconds;
+    if (start == null || end == null || end <= start) {
+      setShowSkipIntro(false);
+      return;
+    }
+    const el = videoRef.current;
+    if (!el) return;
+    const update = () => {
+      const t = el.currentTime ?? 0;
+      setShowSkipIntro(t >= start && t < end);
+    };
+    update();
+    el.addEventListener("timeupdate", update);
+    return () => el.removeEventListener("timeupdate", update);
+  }, [current.introStartSeconds, current.introEndSeconds, current.id, token]);
+
+  // Swap to a different episode — updates state + URL, closes any open
+  // overlay, and the effect chain handles fresh token + reset.
+  const swap = useCallback(
+    (episodeId: string) => {
+      if (episodeId === currentEpisodeId) {
+        setOverlay("none");
+        return;
+      }
+      setCurrentEpisodeId(episodeId);
+      setOverlay("none");
+      const sp = new URLSearchParams(searchParams?.toString() ?? "");
+      sp.set("ep", episodeId);
+      // Resume position only applies to the initial render — strip it now
+      // so a swap doesn't replay a stale offset.
+      sp.delete("resume");
+      router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
+    },
+    [currentEpisodeId, pathname, router, searchParams],
+  );
 
   if (paywall) {
     const lastPos = lastSavedRef.current;
     return (
       <Paywall
         showSlug={showSlug}
-        resumeSeconds={lastPos || resumeSeconds || undefined}
+        resumeSeconds={lastPos || undefined}
         showTitle={showTitle}
         episodeLabel={episodeLabel}
       />
@@ -173,9 +253,6 @@ export function Player({
 
   return (
     <MediaController
-      // CSS variables consumed by media-chrome's built-in primitives
-      // (range bar, time display, focus rings). Defined once at the
-      // controller level so every child inherits the cinema-red treatment.
       style={
         {
           display: "block",
@@ -206,23 +283,25 @@ export function Player({
       <MuxVideo
         ref={videoRef}
         slot="media"
-        playbackId={playbackId}
+        playbackId={current.playbackId}
         tokens={{ playback: token }}
         streamType="on-demand"
-        metadata={{ video_id: episodeId, video_title: title }}
+        metadata={{ video_id: current.id, video_title: current.title }}
         onError={() => setPaywall(true)}
         onEnded={() => {
           const el = videoRef.current;
-          if (!el) return;
-          const t = Math.floor(el.duration ?? 0);
-          const fn = mode === "trial" ? saveTrialPosition : saveWatchProgress;
-          void fn(episodeId, t, true).catch(() => {});
+          if (el) {
+            const t = Math.floor(el.duration ?? 0);
+            const fn =
+              mode === "trial" ? saveTrialPosition : saveWatchProgress;
+            void fn(current.id, t, true).catch(() => {});
+          }
+          if (next) setOverlay("upnext");
         }}
         className="h-full w-full"
       />
 
-      {/* Top scrim — back button, episode label, top-right control row.
-          Fades out together with the rest of the chrome on idle. */}
+      {/* Top scrim */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/85 via-black/40 to-transparent px-5 pb-14 pt-5 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8">
         <div className="pointer-events-auto flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
@@ -234,13 +313,11 @@ export function Player({
               <Icon name="back" size={18} />
             </Link>
             <div className="min-w-0">
-              {episodeLabel ? (
-                <p className="font-mono text-[11px] leading-none text-white/70">
-                  {episodeLabel}
-                </p>
-              ) : null}
+              <p className="font-mono text-[11px] leading-none text-white/70">
+                {episodeLabel}
+              </p>
               <h1 className="mt-0.5 truncate text-base font-bold leading-tight text-white sm:text-lg">
-                {showTitle ? `${showTitle} — ${title}` : title}
+                {showTitle ? `${showTitle} — ${current.title}` : current.title}
               </h1>
             </div>
           </div>
@@ -270,7 +347,7 @@ export function Player({
         </div>
       </div>
 
-      {/* Center cluster — rewind 10s / play-pause / forward 10s */}
+      {/* Center cluster */}
       <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0">
         <div className="pointer-events-auto flex items-center gap-10 text-white">
           <MediaSeekBackwardButton
@@ -309,12 +386,28 @@ export function Player({
         </div>
       </div>
 
-      {/* Mini Matio branding — bottom-left, sits above the bottom bar */}
+      {/* Skip-intro chip — only renders when in the intro window */}
+      {showSkipIntro && current.introEndSeconds != null ? (
+        <button
+          type="button"
+          onClick={() => {
+            const el = videoRef.current;
+            if (el && current.introEndSeconds != null) {
+              el.currentTime = current.introEndSeconds;
+            }
+          }}
+          className="absolute bottom-[110px] right-5 z-20 rounded-md border border-white/25 bg-white/15 px-3.5 py-2 text-xs font-semibold text-white backdrop-blur-xl transition-colors hover:bg-white/25 sm:right-8"
+        >
+          Skip intro
+        </button>
+      ) : null}
+
+      {/* Mini Matio branding */}
       <div className="pointer-events-none absolute bottom-[88px] left-5 z-10 opacity-50 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:left-8">
         <MatioLogo size={11} accent="#ff3d3d" color="#ffffff" />
       </div>
 
-      {/* Bottom bar — progress, time, secondary controls */}
+      {/* Bottom bar */}
       <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 to-transparent px-5 pb-5 pt-4 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8">
         <MediaTimeRange className="!block !h-3 !w-full !bg-transparent" />
         <div className="mt-1 flex justify-between font-mono text-[11px] tabular-nums text-white/85">
@@ -359,16 +452,20 @@ export function Player({
             />
             <button
               type="button"
+              onClick={() => setOverlay("episodes")}
               className="rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15"
             >
               Episodes
             </button>
-            <button
-              type="button"
-              className="rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15"
-            >
-              Up Next
-            </button>
+            {next ? (
+              <button
+                type="button"
+                onClick={() => swap(next.id)}
+                className="rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15"
+              >
+                Up Next
+              </button>
+            ) : null}
             <MediaFullscreenButton
               className="!ml-1 !bg-transparent !p-0 text-current transition-colors hover:text-white"
               aria-label="Toggle fullscreen"
@@ -383,6 +480,25 @@ export function Player({
           </div>
         </div>
       </div>
+
+      {/* Overlays */}
+      {overlay === "episodes" ? (
+        <EpisodesOverlay
+          episodes={episodes}
+          currentEpisodeId={current.id}
+          showSlug={showSlug}
+          onSelect={swap}
+          onClose={() => setOverlay("none")}
+        />
+      ) : null}
+      {overlay === "upnext" && next ? (
+        <UpNextOverlay
+          next={next}
+          showSlug={showSlug}
+          onPlayNow={() => swap(next.id)}
+          onCancel={() => setOverlay("none")}
+        />
+      ) : null}
     </MediaController>
   );
 }

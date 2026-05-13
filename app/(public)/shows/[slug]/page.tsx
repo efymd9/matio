@@ -2,7 +2,21 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { episodes, seasons, shows, type Episode } from "@/db/schema";
+import { episodes, seasons, shows } from "@/db/schema";
+
+// Local row shape for the episode list — narrower than `Episode` so we
+// don't have to select the intro columns from prod until migration 0005
+// has been applied.
+type EpisodeRowData = {
+  id: string;
+  seasonId: string;
+  number: number;
+  title: string;
+  description: string | null;
+  durationSeconds: number | null;
+  muxPlaybackId: string | null;
+  status: "processing" | "ready" | "errored";
+};
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 
@@ -33,16 +47,25 @@ export default async function ShowDetailPage({
     .orderBy(asc(seasons.number));
 
   const seasonIds = showSeasons.map((s) => s.id);
-  const allEpisodes =
+  const allEpisodes: EpisodeRowData[] =
     seasonIds.length === 0
       ? []
       : await db
-          .select()
+          .select({
+            id: episodes.id,
+            seasonId: episodes.seasonId,
+            number: episodes.number,
+            title: episodes.title,
+            description: episodes.description,
+            durationSeconds: episodes.durationSeconds,
+            muxPlaybackId: episodes.muxPlaybackId,
+            status: episodes.status,
+          })
           .from(episodes)
           .where(inArray(episodes.seasonId, seasonIds))
           .orderBy(asc(episodes.number));
 
-  const episodesBySeason = new Map<string, Episode[]>();
+  const episodesBySeason = new Map<string, EpisodeRowData[]>();
   for (const e of allEpisodes) {
     const list = episodesBySeason.get(e.seasonId) ?? [];
     list.push(e);
@@ -220,7 +243,7 @@ function EpisodeRow({
   showSlug,
   tone,
 }: {
-  ep: Episode;
+  ep: EpisodeRowData;
   showSlug: string;
   tone: ReturnType<typeof toneFor>;
 }) {

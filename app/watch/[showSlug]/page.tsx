@@ -4,8 +4,14 @@ import { notFound, redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { episodes, seasons, shows, subscriptions } from "@/db/schema";
-import { Player } from "@/components/watch/player";
+import {
+  episodes,
+  seasons,
+  shows,
+  subscriptions,
+  watchProgress,
+} from "@/db/schema";
+import { Player, type PlayerEpisode } from "@/components/watch/player";
 import { WatchShell } from "@/components/watch/watch-shell";
 import {
   TRIAL_COOKIE,
@@ -18,11 +24,10 @@ export default async function WatchPage({
   searchParams,
 }: {
   params: Promise<{ showSlug: string }>;
-  searchParams: Promise<{ resume?: string }>;
+  searchParams: Promise<{ resume?: string; ep?: string }>;
 }) {
   const { showSlug } = await params;
-  const { resume } = await searchParams;
-  const resumeSeconds = resume ? Number(resume) : null;
+  const { resume, ep: epParam } = await searchParams;
 
   const [show] = await db
     .select()
@@ -38,19 +43,34 @@ export default async function WatchPage({
   if (!show) notFound();
 
   const showSeasons = await db
-    .select({ id: seasons.id, number: seasons.number })
+    .select({ id: seasons.id, number: seasons.number, title: seasons.title })
     .from(seasons)
     .where(eq(seasons.showId, show.id))
-    .orderBy(asc(seasons.number))
-    .limit(1);
+    .orderBy(asc(seasons.number));
 
   if (showSeasons.length === 0) {
     return <ComingSoon showTitle={show.title} showSlug={show.slug} />;
   }
 
+  const seasonNumberById = new Map(showSeasons.map((s) => [s.id, s.number]));
   const seasonIds = showSeasons.map((s) => s.id);
-  const ready = await db
-    .select()
+
+  // Explicit column list: keeps queries compatible with the live prod
+  // schema even though `episodes.introStartSeconds`/`introEndSeconds` are
+  // declared in the Drizzle schema (their migration is staged but not yet
+  // applied). Once the migration runs, swap to `.select()` and start
+  // mapping intro markers below.
+  const allReady = await db
+    .select({
+      id: episodes.id,
+      seasonId: episodes.seasonId,
+      number: episodes.number,
+      title: episodes.title,
+      description: episodes.description,
+      durationSeconds: episodes.durationSeconds,
+      muxPlaybackId: episodes.muxPlaybackId,
+      status: episodes.status,
+    })
     .from(episodes)
     .where(
       and(
@@ -58,14 +78,47 @@ export default async function WatchPage({
         eq(episodes.status, "ready"),
       ),
     )
-    .orderBy(asc(episodes.number))
-    .limit(1);
+    .orderBy(asc(episodes.seasonId), asc(episodes.number));
 
-  if (ready.length === 0 || !ready[0].muxPlaybackId) {
+  if (allReady.length === 0) {
     return <ComingSoon showTitle={show.title} showSlug={show.slug} />;
   }
-  const episode = ready[0];
-  const episodeLabel = `S${showSeasons[0].number}·E${episode.number}`;
+
+  // Order list across seasons then episode number. Build playable shape
+  // up-front so the Player can switch between them without re-fetching the
+  // catalog from the client.
+  const ordered = [...allReady].sort((a, b) => {
+    const sa = seasonNumberById.get(a.seasonId) ?? 0;
+    const sb = seasonNumberById.get(b.seasonId) ?? 0;
+    return sa - sb || a.number - b.number;
+  });
+
+  const playable: PlayerEpisode[] = ordered
+    .filter((e) => !!e.muxPlaybackId)
+    .map((e) => ({
+      id: e.id,
+      number: e.number,
+      seasonNumber: seasonNumberById.get(e.seasonId) ?? 0,
+      title: e.title,
+      description: e.description,
+      durationSeconds: e.durationSeconds,
+      playbackId: e.muxPlaybackId!,
+      // Intro markers are stored in the schema but not selected until the
+      // 0005 migration has been applied — the chip code stays dormant
+      // (always null) on prod until then.
+      introStartSeconds: null,
+      introEndSeconds: null,
+    }));
+
+  if (playable.length === 0) {
+    return <ComingSoon showTitle={show.title} showSlug={show.slug} />;
+  }
+
+  // Resolve ?ep=<id>; fall back to first playable when the query param
+  // doesn't match (treat unknown ids as "start over").
+  const initial = epParam
+    ? (playable.find((e) => e.id === epParam) ?? playable[0])
+    : playable[0];
 
   const { userId } = await auth();
   let isSubscriber = false;
@@ -83,23 +136,37 @@ export default async function WatchPage({
     isSubscriber = !!sub;
   }
 
+  // For subscribers, look up per-episode watch progress so a refresh / new
+  // tab resumes where they left off without relying on URL ?resume=.
+  let resumeFromProgress: number | null = null;
+  if (userId && isSubscriber) {
+    const [wp] = await db
+      .select({ positionSeconds: watchProgress.positionSeconds })
+      .from(watchProgress)
+      .where(
+        and(
+          eq(watchProgress.userId, userId),
+          eq(watchProgress.episodeId, initial.id),
+        ),
+      )
+      .limit(1);
+    if (wp && wp.positionSeconds > 0) {
+      resumeFromProgress = wp.positionSeconds;
+    }
+  }
+
+  const queryResume = resume ? Number(resume) : null;
+
   if (isSubscriber) {
     return (
-      <WatchShell
-        showTitle={show.title}
-        episodeTitle={episode.title}
-        episodeLabel={episodeLabel}
-        showSlug={show.slug}
-      >
+      <WatchShell>
         <Player
-          episodeId={episode.id}
-          playbackId={episode.muxPlaybackId!}
-          title={episode.title}
           mode="subscriber"
           showSlug={show.slug}
           showTitle={show.title}
-          episodeLabel={episodeLabel}
-          resumeSeconds={resumeSeconds}
+          episodes={playable}
+          initialEpisodeId={initial.id}
+          resumeSeconds={queryResume ?? resumeFromProgress}
         />
       </WatchShell>
     );
@@ -114,50 +181,36 @@ export default async function WatchPage({
 
   if (trial.converted) {
     return (
-      <WatchShell
-        showTitle={show.title}
-        episodeTitle={episode.title}
-        episodeLabel={episodeLabel}
-        showSlug={show.slug}
-      >
+      <WatchShell>
         <Player
-          episodeId={episode.id}
-          playbackId={episode.muxPlaybackId!}
-          title={episode.title}
           mode="subscriber"
           showSlug={show.slug}
           showTitle={show.title}
-          episodeLabel={episodeLabel}
-          resumeSeconds={resumeSeconds}
+          episodes={playable}
+          initialEpisodeId={initial.id}
+          resumeSeconds={queryResume ?? resumeFromProgress}
         />
       </WatchShell>
     );
   }
 
   if (!isTrialActive(trial)) {
-    const params = new URLSearchParams({ show: show.slug });
+    const sp = new URLSearchParams({ show: show.slug });
     if (trial.lastPositionSeconds > 0) {
-      params.set("resume", String(trial.lastPositionSeconds));
+      sp.set("resume", String(trial.lastPositionSeconds));
     }
-    redirect(`/subscribe?${params.toString()}`);
+    redirect(`/subscribe?${sp.toString()}`);
   }
 
   return (
-    <WatchShell
-      showTitle={show.title}
-      episodeTitle={episode.title}
-      episodeLabel={episodeLabel}
-      showSlug={show.slug}
-    >
+    <WatchShell>
       <Player
-        episodeId={episode.id}
-        playbackId={episode.muxPlaybackId!}
-        title={episode.title}
         mode="trial"
         showSlug={show.slug}
         showTitle={show.title}
-        episodeLabel={episodeLabel}
-        resumeSeconds={resumeSeconds ?? (trial.lastPositionSeconds || null)}
+        episodes={playable}
+        initialEpisodeId={initial.id}
+        resumeSeconds={queryResume ?? (trial.lastPositionSeconds || null)}
       />
     </WatchShell>
   );

@@ -36,8 +36,16 @@ export default async function SeasonPage({
     .limit(1);
   if (!season) notFound();
 
+  // Explicit columns — intro_* live in schema but aren't in prod yet.
   const seasonEpisodes = await db
-    .select()
+    .select({
+      id: episodes.id,
+      number: episodes.number,
+      title: episodes.title,
+      description: episodes.description,
+      status: episodes.status,
+      muxAssetId: episodes.muxAssetId,
+    })
     .from(episodes)
     .where(eq(episodes.seasonId, season.id))
     .orderBy(asc(episodes.number));

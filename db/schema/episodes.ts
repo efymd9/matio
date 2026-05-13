@@ -26,6 +26,12 @@ export const episodes = pgTable(
     title: text("title").notNull(),
     description: text("description"),
     durationSeconds: integer("duration_seconds"),
+    // Intro window in seconds — when both are set, the player surfaces a
+    // "Skip intro" chip while currentTime ∈ [intro_start, intro_end].
+    // Nullable so existing episodes simply don't show the chip until
+    // someone fills them in (admin UI is a follow-up).
+    introStartSeconds: integer("intro_start_seconds"),
+    introEndSeconds: integer("intro_end_seconds"),
     muxAssetId: text("mux_asset_id"),
     muxPlaybackId: text("mux_playback_id"),
     // "public" | "signed" — set from playback_ids[0].policy in the webhook.
