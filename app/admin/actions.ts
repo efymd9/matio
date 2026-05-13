@@ -206,12 +206,34 @@ export async function updateEpisode(
     throw new Error("Episode number must be a positive integer");
   }
 
+  // Intro markers — both optional. When set, they drive the player's
+  // "Skip intro" chip. Validate the pair: either both are blank/null
+  // (chip hidden) or end > start (chip seeks from start to end).
+  const introStart = num(formData, "introStartSeconds");
+  const introEnd = num(formData, "introEndSeconds");
+  if (introStart !== null && (introStart < 0 || !Number.isInteger(introStart))) {
+    throw new Error("Intro start must be a non-negative integer (seconds)");
+  }
+  if (introEnd !== null && (introEnd < 0 || !Number.isInteger(introEnd))) {
+    throw new Error("Intro end must be a non-negative integer (seconds)");
+  }
+  if (introStart !== null && introEnd !== null && introEnd <= introStart) {
+    throw new Error("Intro end must be after intro start");
+  }
+  // Partial set: blank one side → null both (skip chip needs both markers).
+  const introStartFinal =
+    introStart !== null && introEnd !== null ? introStart : null;
+  const introEndFinal =
+    introStart !== null && introEnd !== null ? introEnd : null;
+
   await db
     .update(episodes)
     .set({
       title,
       description: str(formData, "description") || null,
       number,
+      introStartSeconds: introStartFinal,
+      introEndSeconds: introEndFinal,
     })
     .where(eq(episodes.id, id));
 

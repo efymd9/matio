@@ -37,7 +37,6 @@ export default async function EditEpisodePage({
     .limit(1);
   if (!season) notFound();
 
-  // Explicit columns — intro_* live in schema but aren't in prod yet.
   const [episode] = await db
     .select({
       id: episodes.id,
@@ -48,6 +47,8 @@ export default async function EditEpisodePage({
       muxAssetId: episodes.muxAssetId,
       muxPlaybackId: episodes.muxPlaybackId,
       status: episodes.status,
+      introStartSeconds: episodes.introStartSeconds,
+      introEndSeconds: episodes.introEndSeconds,
     })
     .from(episodes)
     .where(and(eq(episodes.id, episodeId), eq(episodes.seasonId, season.id)))
@@ -147,6 +148,56 @@ export default async function EditEpisodePage({
                 defaultValue={episode.description ?? ""}
                 rows={4}
               />
+            </div>
+            <div className="space-y-2 border-t border-white/[0.06] pt-4">
+              <div className="flex items-baseline justify-between">
+                <Label className="text-sm font-semibold text-white">
+                  Skip intro
+                </Label>
+                <span className="text-[11px] text-white/45">
+                  Leave both blank to hide the chip
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label
+                    htmlFor="introStartSeconds"
+                    className="text-xs text-white/65"
+                  >
+                    Start (seconds)
+                  </Label>
+                  <Input
+                    id="introStartSeconds"
+                    name="introStartSeconds"
+                    type="number"
+                    min={0}
+                    step={1}
+                    placeholder="e.g. 5"
+                    defaultValue={episode.introStartSeconds ?? ""}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label
+                    htmlFor="introEndSeconds"
+                    className="text-xs text-white/65"
+                  >
+                    End (seconds)
+                  </Label>
+                  <Input
+                    id="introEndSeconds"
+                    name="introEndSeconds"
+                    type="number"
+                    min={1}
+                    step={1}
+                    placeholder="e.g. 60"
+                    defaultValue={episode.introEndSeconds ?? ""}
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] leading-relaxed text-white/50">
+                The player shows a &quot;Skip intro&quot; pill while playback
+                is in this window and seeks to End on click.
+              </p>
             </div>
             <div className="flex justify-end">
               <Button type="submit">Save</Button>

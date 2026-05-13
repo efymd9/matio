@@ -55,11 +55,6 @@ export default async function WatchPage({
   const seasonNumberById = new Map(showSeasons.map((s) => [s.id, s.number]));
   const seasonIds = showSeasons.map((s) => s.id);
 
-  // Explicit column list: keeps queries compatible with the live prod
-  // schema even though `episodes.introStartSeconds`/`introEndSeconds` are
-  // declared in the Drizzle schema (their migration is staged but not yet
-  // applied). Once the migration runs, swap to `.select()` and start
-  // mapping intro markers below.
   const allReady = await db
     .select({
       id: episodes.id,
@@ -70,6 +65,8 @@ export default async function WatchPage({
       durationSeconds: episodes.durationSeconds,
       muxPlaybackId: episodes.muxPlaybackId,
       status: episodes.status,
+      introStartSeconds: episodes.introStartSeconds,
+      introEndSeconds: episodes.introEndSeconds,
     })
     .from(episodes)
     .where(
@@ -103,11 +100,8 @@ export default async function WatchPage({
       description: e.description,
       durationSeconds: e.durationSeconds,
       playbackId: e.muxPlaybackId!,
-      // Intro markers are stored in the schema but not selected until the
-      // 0005 migration has been applied — the chip code stays dormant
-      // (always null) on prod until then.
-      introStartSeconds: null,
-      introEndSeconds: null,
+      introStartSeconds: e.introStartSeconds,
+      introEndSeconds: e.introEndSeconds,
     }));
 
   if (playable.length === 0) {
