@@ -1,23 +1,27 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { Icon } from "@/components/site/icon";
 
 const IDLE_MS = 3000;
 
+// Thin fullscreen layout wrapper for the player. All chrome (back, episode
+// label, controls, branding) is now rendered by the Player itself so the
+// idle-fade is driven by media-chrome's own state, not a sibling timer.
+// This component only owns:
+//   1. the black fullscreen canvas
+//   2. letterboxing the player to 16:9
+//   3. cursor auto-hide on idle for a more cinematic feel
 export function WatchShell({
-  showTitle,
-  episodeTitle,
-  episodeLabel,
-  showSlug,
   children,
 }: {
-  showTitle: string;
-  episodeTitle: string;
+  // Kept in the type signature so the watch route can keep passing the same
+  // props without changes. They flow through to Player which renders the top
+  // chrome inline now.
+  showTitle?: string;
+  episodeTitle?: string;
   episodeLabel?: string;
-  showSlug: string;
+  showSlug?: string;
   children: React.ReactNode;
 }) {
   const [visible, setVisible] = useState(true);
@@ -46,66 +50,11 @@ export function WatchShell({
   return (
     <div
       className={cn(
-        "fixed inset-0 z-50 flex flex-col bg-black",
+        "fixed inset-0 z-50 flex items-center justify-center bg-black",
         visible ? "cursor-auto" : "cursor-none",
       )}
     >
-      <header
-        className={cn(
-          "pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/85 via-black/40 to-transparent px-5 pb-16 pt-5 transition-opacity duration-500 sm:px-10",
-          visible ? "opacity-100" : "opacity-0",
-        )}
-      >
-        <div className="pointer-events-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <Link
-              href={`/shows/${showSlug}`}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition-colors hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
-              aria-label="Back to show"
-            >
-              <Icon name="back" size={18} />
-            </Link>
-            <div className="min-w-0">
-              {episodeLabel ? (
-                <p className="font-mono text-[11px] leading-none text-white/70">
-                  {episodeLabel}
-                </p>
-              ) : null}
-              <h1 className="mt-0.5 truncate text-base font-bold leading-tight text-white sm:text-lg">
-                {showTitle} — {episodeTitle}
-              </h1>
-            </div>
-          </div>
-          <div className="hidden items-center gap-5 text-white/85 sm:flex">
-            <button
-              type="button"
-              aria-label="Cast"
-              className="transition-colors hover:text-white"
-            >
-              <Icon name="cast" size={20} />
-            </button>
-            <button
-              type="button"
-              aria-label="Subtitles"
-              className="transition-colors hover:text-white"
-            >
-              <Icon name="subtitle" size={20} />
-            </button>
-            <button
-              type="button"
-              aria-label="Settings"
-              className="transition-colors hover:text-white"
-            >
-              <Icon name="settings" size={20} />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Player stage — letterboxes to viewport while preserving 16:9. */}
-      <div className="flex flex-1 items-center justify-center">
-        <div className="w-full max-w-[calc(100vh*16/9)]">{children}</div>
-      </div>
+      <div className="w-full max-w-[calc(100vh*16/9)]">{children}</div>
     </div>
   );
 }
