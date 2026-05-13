@@ -404,18 +404,6 @@ export function Player({
                 </span>
               </MediaCaptionsButton>
             ) : null}
-            {/* Settings — opens a quality picker. The menu auto-populates
-                from the HLS renditions Mux exposes (Auto + each variant
-                like 1080p / 720p / 480p). Auto-hides when there's only
-                one rendition. */}
-            <MediaRenditionMenuButton
-              className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
-              aria-label="Video quality"
-            >
-              <span slot="icon" className="contents">
-                <Icon name="settings" size={20} />
-              </span>
-            </MediaRenditionMenuButton>
           </div>
         </div>
       </div>
@@ -547,8 +535,20 @@ export function Player({
                 Up Next
               </button>
             ) : null}
-            <MediaFullscreenButton
+            {/* Quality picker — placed in the bottom bar so its menu has
+                room to anchor upward (anchoring from the top bar got it
+                clipped against the player edge). Auto-populates from the
+                stream's renditions; auto-hides when there's only one. */}
+            <MediaRenditionMenuButton
               className="!ml-1 !bg-transparent !p-0 text-current transition-colors hover:text-white"
+              aria-label="Video quality"
+            >
+              <span slot="icon" className="contents">
+                <Icon name="settings" size={18} />
+              </span>
+            </MediaRenditionMenuButton>
+            <MediaFullscreenButton
+              className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
               aria-label="Toggle fullscreen"
             >
               <span slot="enter" className="contents">
@@ -562,14 +562,16 @@ export function Player({
         </div>
       </div>
 
-      {/* Rendition (quality) menu — anchored to the button that toggled
-          it. Hidden until invoked. Auto-populated from the active stream's
-          renditions; selecting one tells mux-video to lock to that level
-          (or back to Auto). */}
+      {/* Rendition (quality) menu — pinned to the bottom-right of the
+          player, sitting above the bottom bar. We bypass media-chrome's
+          auto-anchor positioning (which was clipping the menu against
+          the player edge) by positioning it explicitly. The button still
+          toggles it via media-chrome's internal invoker wiring. */}
       <MediaRenditionMenu
         hidden
         anchor="auto"
-        className="!font-sans"
+        className="!absolute !right-5 !bottom-[92px] z-30 !font-sans sm:!right-8"
+        style={{ minWidth: "180px" }}
       />
 
       {/* Unlock pill — only thing interactive when chrome is locked. */}
