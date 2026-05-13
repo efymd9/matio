@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 import { Icon } from "@/components/site/icon";
 import type { PlayerEpisode } from "./player";
 
-// Slide-in episode picker that sits over the player. Episodes are grouped
-// by season; clicking one swaps the playing episode without leaving the
-// page. Closes on backdrop click, the explicit X button, or Esc.
+// Episode picker over the player. Rendered via portal to document.body so
+// it lives OUTSIDE the <media-controller> tree — media-chrome's controller
+// treats clicks inside its subtree as media gestures (play/pause toggle),
+// which was preventing the close + select buttons from firing reliably.
 export function EpisodesOverlay({
   episodes,
   currentEpisodeId,
@@ -21,6 +23,11 @@ export function EpisodesOverlay({
   onSelect: (episodeId: string) => void;
   onClose: () => void;
 }) {
+  // Portals need a browser-mounted target; gate the render on a client-side
+  // mount flag so SSR doesn't try to portal into a non-existent body.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -29,7 +36,8 @@ export function EpisodesOverlay({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Group episodes by season number, preserving order.
+  if (!mounted) return null;
+
   const seasonMap = new Map<number, PlayerEpisode[]>();
   for (const ep of episodes) {
     const list = seasonMap.get(ep.seasonNumber) ?? [];
@@ -39,13 +47,13 @@ export function EpisodesOverlay({
   const seasonNumbers = [...seasonMap.keys()].sort((a, b) => a - b);
   const tone = toneFor(showSlug);
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Episodes"
       onClick={onClose}
-      className="absolute inset-0 z-30 flex flex-col bg-black/85 backdrop-blur-2xl"
+      className="fixed inset-0 z-[100] flex flex-col bg-black/85 backdrop-blur-2xl"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -62,7 +70,10 @@ export function EpisodesOverlay({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
             aria-label="Close"
             className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
           >
@@ -87,7 +98,10 @@ export function EpisodesOverlay({
                       <li key={ep.id}>
                         <button
                           type="button"
-                          onClick={() => onSelect(ep.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelect(ep.id);
+                          }}
                           className={`group flex w-full items-start gap-4 rounded-lg p-2.5 text-left transition-colors ${
                             isCurrent
                               ? "bg-white/[0.08] ring-1 ring-[#ff3d3d]/60"
@@ -153,6 +167,7 @@ export function EpisodesOverlay({
           })}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

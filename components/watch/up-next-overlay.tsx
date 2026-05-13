@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 import type { PlayerEpisode } from "./player";
 
 const COUNTDOWN_SECONDS = 7;
 
-// Shown when an episode ends and a next one exists. A 7-second countdown
-// auto-advances to the next episode unless the user cancels. "Watch now"
-// skips the countdown.
+// Up-next card. Portaled out of the MediaController tree so its buttons
+// aren't intercepted by media-chrome's click-to-toggle-play behavior.
 export function UpNextOverlay({
   next,
   showSlug,
@@ -21,6 +21,9 @@ export function UpNextOverlay({
   onPlayNow: () => void;
   onCancel: () => void;
 }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const [remaining, setRemaining] = useState(COUNTDOWN_SECONDS);
   const tone = toneFor(showSlug);
 
@@ -33,12 +36,14 @@ export function UpNextOverlay({
     return () => clearTimeout(t);
   }, [remaining, onPlayNow]);
 
+  if (!mounted) return null;
+
   const pct =
     ((COUNTDOWN_SECONDS - remaining) / COUNTDOWN_SECONDS) * 100;
 
-  return (
-    <div className="absolute inset-0 z-30 flex items-end justify-end bg-gradient-to-t from-black via-black/80 to-black/40 p-5 sm:p-8">
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f0f12]/95 p-4 backdrop-blur-2xl">
+  return createPortal(
+    <div className="pointer-events-none fixed inset-0 z-[100] flex items-end justify-end p-5 sm:p-8">
+      <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f0f12]/95 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
           Up next
         </p>
@@ -76,7 +81,6 @@ export function UpNextOverlay({
           </div>
         </div>
 
-        {/* Countdown progress bar */}
         <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10">
           <div
             className="h-full bg-[#ff3d3d] transition-[width] duration-1000 ease-linear"
@@ -87,7 +91,10 @@ export function UpNextOverlay({
         <div className="mt-3 flex gap-2">
           <button
             type="button"
-            onClick={onPlayNow}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPlayNow();
+            }}
             className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-white text-sm font-bold text-black transition-colors hover:bg-white/90"
           >
             <Icon name="play" size={14} color="#0a0a0c" />
@@ -95,7 +102,10 @@ export function UpNextOverlay({
           </button>
           <button
             type="button"
-            onClick={onCancel}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancel();
+            }}
             className="inline-flex h-10 items-center justify-center rounded-md border border-white/15 px-4 text-sm font-semibold text-white transition-colors hover:bg-white/10"
           >
             Cancel
@@ -105,6 +115,7 @@ export function UpNextOverlay({
           Playing in {remaining}s
         </p>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

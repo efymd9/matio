@@ -5,15 +5,17 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import MuxVideo from "@mux/mux-video-react";
 import {
+  MediaAirplayButton,
+  MediaCaptionsButton,
   MediaController,
+  MediaFullscreenButton,
+  MediaMuteButton,
   MediaPlayButton,
+  MediaPlaybackRateButton,
   MediaSeekBackwardButton,
   MediaSeekForwardButton,
-  MediaTimeRange,
   MediaTimeDisplay,
-  MediaMuteButton,
-  MediaPlaybackRateButton,
-  MediaFullscreenButton,
+  MediaTimeRange,
 } from "media-chrome/react";
 import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
@@ -73,6 +75,10 @@ export function Player({
     "none",
   );
   const [showSkipIntro, setShowSkipIntro] = useState(false);
+  // Lock state hides all chrome + makes it non-interactive so accidental
+  // taps on a phone don't pause / seek / open overlays. A single tap on
+  // the unlock pill restores the chrome.
+  const [locked, setLocked] = useState(false);
 
   const current = useMemo(
     () =>
@@ -302,7 +308,9 @@ export function Player({
       />
 
       {/* Top scrim */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/85 via-black/40 to-transparent px-5 pb-14 pt-5 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8">
+      <div
+        className={`pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/85 via-black/40 to-transparent px-5 pb-14 pt-5 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8 ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
+      >
         <div className="pointer-events-auto flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3">
             <Link
@@ -322,33 +330,35 @@ export function Player({
             </div>
           </div>
           <div className="hidden items-center gap-5 text-white/85 sm:flex">
-            <button
-              type="button"
+            {/* AirPlay button auto-hides when no AirPlay targets are
+                available (Safari with a discoverable device only). */}
+            <MediaAirplayButton
+              className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
               aria-label="Cast"
-              className="transition-colors hover:text-white"
             >
-              <Icon name="cast" size={20} />
-            </button>
-            <button
-              type="button"
-              aria-label="Subtitles"
-              className="transition-colors hover:text-white"
+              <span slot="icon" className="contents">
+                <Icon name="cast" size={20} />
+              </span>
+            </MediaAirplayButton>
+            {/* Captions button auto-hides when the stream has no text
+                tracks (most uploaded Mux assets won't, until captions are
+                generated or attached). */}
+            <MediaCaptionsButton
+              className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
+              aria-label="Toggle captions"
             >
-              <Icon name="subtitle" size={20} />
-            </button>
-            <button
-              type="button"
-              aria-label="Settings"
-              className="transition-colors hover:text-white"
-            >
-              <Icon name="settings" size={20} />
-            </button>
+              <span slot="icon" className="contents">
+                <Icon name="subtitle" size={20} />
+              </span>
+            </MediaCaptionsButton>
           </div>
         </div>
       </div>
 
       {/* Center cluster */}
-      <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0">
+      <div
+        className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
+      >
         <div className="pointer-events-auto flex items-center gap-10 text-white">
           <MediaSeekBackwardButton
             seekOffset={10}
@@ -386,8 +396,9 @@ export function Player({
         </div>
       </div>
 
-      {/* Skip-intro chip — only renders when in the intro window */}
-      {showSkipIntro && current.introEndSeconds != null ? (
+      {/* Skip-intro chip — only renders when in the intro window and the
+          chrome isn't locked. */}
+      {showSkipIntro && !locked && current.introEndSeconds != null ? (
         <button
           type="button"
           onClick={() => {
@@ -403,12 +414,16 @@ export function Player({
       ) : null}
 
       {/* Mini Matio branding */}
-      <div className="pointer-events-none absolute bottom-[88px] left-5 z-10 opacity-50 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:left-8">
+      <div
+        className={`pointer-events-none absolute bottom-[88px] left-5 z-10 opacity-50 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:left-8 ${locked ? "!opacity-0" : ""}`}
+      >
         <MatioLogo size={11} accent="#ff3d3d" color="#ffffff" />
       </div>
 
       {/* Bottom bar */}
-      <div className="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 to-transparent px-5 pb-5 pt-4 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8">
+      <div
+        className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 to-transparent px-5 pb-5 pt-4 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8 ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
+      >
         <MediaTimeRange className="!block !h-3 !w-full !bg-transparent" />
         <div className="mt-1 flex justify-between font-mono text-[11px] tabular-nums text-white/85">
           <MediaTimeDisplay className="!bg-transparent !p-0 !text-white/85" />
@@ -439,6 +454,7 @@ export function Player({
             <button
               type="button"
               aria-label="Lock controls"
+              onClick={() => setLocked(true)}
               className="text-current transition-colors hover:text-white"
             >
               <Icon name="lock" size={18} />
@@ -480,6 +496,19 @@ export function Player({
           </div>
         </div>
       </div>
+
+      {/* Unlock pill — only thing interactive when chrome is locked. */}
+      {locked ? (
+        <button
+          type="button"
+          onClick={() => setLocked(false)}
+          className="absolute left-1/2 top-1/2 z-20 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-white/20 bg-black/60 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur-xl transition-colors hover:bg-black/75"
+          aria-label="Unlock controls"
+        >
+          <Icon name="lock" size={16} />
+          Tap to unlock
+        </button>
+      ) : null}
 
       {/* Overlays */}
       {overlay === "episodes" ? (
