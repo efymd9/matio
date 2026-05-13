@@ -17,6 +17,10 @@ import {
   MediaTimeDisplay,
   MediaTimeRange,
 } from "media-chrome/react";
+import {
+  MediaRenditionMenu,
+  MediaRenditionMenuButton,
+} from "media-chrome/react/menu";
 import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
@@ -318,6 +322,16 @@ export function Player({
           "--media-tooltip-display": "none",
           "--media-font-family":
             "var(--font-sans), -apple-system, BlinkMacSystemFont, sans-serif",
+          // Settings / rendition menu — cinema-red themed.
+          "--media-menu-background": "rgba(15, 15, 18, 0.95)",
+          "--media-menu-border": "1px solid rgba(255, 255, 255, 0.1)",
+          "--media-menu-border-radius": "10px",
+          "--media-menu-padding": "6px",
+          "--media-menu-item-border-radius": "6px",
+          "--media-menu-item-checked-bg": "rgba(255, 61, 61, 0.15)",
+          "--media-menu-item-checked-color": "#ff3d3d",
+          "--media-menu-item-hover-background": "rgba(255, 255, 255, 0.08)",
+          "--media-menu-icon-color": "#ffffff",
         } as React.CSSProperties
       }
       className="group/player relative isolate"
@@ -390,6 +404,18 @@ export function Player({
                 </span>
               </MediaCaptionsButton>
             ) : null}
+            {/* Settings — opens a quality picker. The menu auto-populates
+                from the HLS renditions Mux exposes (Auto + each variant
+                like 1080p / 720p / 480p). Auto-hides when there's only
+                one rendition. */}
+            <MediaRenditionMenuButton
+              className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
+              aria-label="Video quality"
+            >
+              <span slot="icon" className="contents">
+                <Icon name="settings" size={20} />
+              </span>
+            </MediaRenditionMenuButton>
           </div>
         </div>
       </div>
@@ -535,6 +561,16 @@ export function Player({
           </div>
         </div>
       </div>
+
+      {/* Rendition (quality) menu — anchored to the button that toggled
+          it. Hidden until invoked. Auto-populated from the active stream's
+          renditions; selecting one tells mux-video to lock to that level
+          (or back to Auto). */}
+      <MediaRenditionMenu
+        hidden
+        anchor="auto"
+        className="!font-sans"
+      />
 
       {/* Unlock pill — only thing interactive when chrome is locked. */}
       {locked ? (
