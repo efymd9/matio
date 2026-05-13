@@ -79,6 +79,11 @@ export function Player({
   // taps on a phone don't pause / seek / open overlays. A single tap on
   // the unlock pill restores the chrome.
   const [locked, setLocked] = useState(false);
+  // Whether the underlying media element exposes at least one real
+  // caption/subtitle track. media-chrome's built-in auto-hide on
+  // <MediaCaptionsButton> doesn't catch every case (Mux sometimes surfaces
+  // empty/CEA-608 placeholders), so we gate the button on our own check.
+  const [hasCaptions, setHasCaptions] = useState(false);
 
   const current = useMemo(
     () =>
@@ -190,6 +195,37 @@ export function Player({
     el.addEventListener("loadedmetadata", handler, { once: true });
     return () => el.removeEventListener("loadedmetadata", handler);
   }, [token, resumeForThisLoad]);
+
+  // Detect real caption/subtitle tracks on the underlying media element so
+  // we can decide whether to even render the CC button. The textTracks list
+  // is populated asynchronously by HLS as it parses the manifest, so we
+  // both poll the list once and subscribe to `addtrack`. Reset on episode
+  // change because each episode has its own manifest.
+  useEffect(() => {
+    setHasCaptions(false);
+    const el = videoRef.current;
+    if (!el) return;
+    const check = () => {
+      const tracks = Array.from(el.textTracks);
+      // CEA-608 inline tracks show up as kind="captions" with no label and
+      // are often noisy/empty on Mux. We accept either kind but require a
+      // language hint so empty placeholders don't activate the button.
+      const real = tracks.some(
+        (t) =>
+          (t.kind === "captions" || t.kind === "subtitles") &&
+          !!t.language,
+      );
+      setHasCaptions(real);
+    };
+    check();
+    const onAdd = () => check();
+    el.textTracks.addEventListener?.("addtrack", onAdd);
+    el.textTracks.addEventListener?.("removetrack", onAdd);
+    return () => {
+      el.textTracks.removeEventListener?.("addtrack", onAdd);
+      el.textTracks.removeEventListener?.("removetrack", onAdd);
+    };
+  }, [token, current.id]);
 
   // Skip-intro chip — visible while currentTime falls inside the episode's
   // intro window. Only activates when both markers are present (admin-set;
@@ -340,17 +376,20 @@ export function Player({
                 <Icon name="cast" size={20} />
               </span>
             </MediaAirplayButton>
-            {/* Captions button auto-hides when the stream has no text
-                tracks (most uploaded Mux assets won't, until captions are
-                generated or attached). */}
-            <MediaCaptionsButton
-              className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
-              aria-label="Toggle captions"
-            >
-              <span slot="icon" className="contents">
-                <Icon name="subtitle" size={20} />
-              </span>
-            </MediaCaptionsButton>
+            {/* Captions button — gated on a real text track being present
+                on the underlying media element. media-chrome's own
+                auto-hide misfires when Mux exposes empty/CEA-608
+                placeholder tracks, so we control visibility ourselves. */}
+            {hasCaptions ? (
+              <MediaCaptionsButton
+                className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
+                aria-label="Toggle captions"
+              >
+                <span slot="icon" className="contents">
+                  <Icon name="subtitle" size={20} />
+                </span>
+              </MediaCaptionsButton>
+            ) : null}
           </div>
         </div>
       </div>
