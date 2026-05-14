@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { Player, type PlayerEpisode } from "@/components/watch/player";
 import { WatchShell } from "@/components/watch/watch-shell";
+import { muxThumbnailUrl } from "@/lib/mux-token";
 import {
   TRIAL_COOKIE,
   getOrCreateTrialSession,
@@ -64,6 +65,7 @@ export default async function WatchPage({
       description: episodes.description,
       durationSeconds: episodes.durationSeconds,
       muxPlaybackId: episodes.muxPlaybackId,
+      muxPlaybackPolicy: episodes.muxPlaybackPolicy,
       status: episodes.status,
       introStartSeconds: episodes.introStartSeconds,
       introEndSeconds: episodes.introEndSeconds,
@@ -92,17 +94,30 @@ export default async function WatchPage({
 
   const playable: PlayerEpisode[] = ordered
     .filter((e) => !!e.muxPlaybackId)
-    .map((e) => ({
-      id: e.id,
-      number: e.number,
-      seasonNumber: seasonNumberById.get(e.seasonId) ?? 0,
-      title: e.title,
-      description: e.description,
-      durationSeconds: e.durationSeconds,
-      playbackId: e.muxPlaybackId!,
-      introStartSeconds: e.introStartSeconds,
-      introEndSeconds: e.introEndSeconds,
-    }));
+    .map((e) => {
+      let thumbnailUrl: string | null = null;
+      try {
+        thumbnailUrl = muxThumbnailUrl(e.muxPlaybackId!, e.muxPlaybackPolicy, {
+          width: 320,
+          height: 180,
+        });
+      } catch {
+        // Missing signing env or other failure — fall back to tone gradient.
+        thumbnailUrl = null;
+      }
+      return {
+        id: e.id,
+        number: e.number,
+        seasonNumber: seasonNumberById.get(e.seasonId) ?? 0,
+        title: e.title,
+        description: e.description,
+        durationSeconds: e.durationSeconds,
+        playbackId: e.muxPlaybackId!,
+        introStartSeconds: e.introStartSeconds,
+        introEndSeconds: e.introEndSeconds,
+        thumbnailUrl,
+      };
+    });
 
   if (playable.length === 0) {
     return <ComingSoon showTitle={show.title} showSlug={show.slug} />;

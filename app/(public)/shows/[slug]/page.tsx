@@ -3,10 +3,8 @@ import { notFound } from "next/navigation";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
+import { muxThumbnailUrl } from "@/lib/mux-token";
 
-// Local row shape for the episode list — narrower than `Episode` so we
-// don't have to select the intro columns from prod until migration 0005
-// has been applied.
 type EpisodeRowData = {
   id: string;
   seasonId: string;
@@ -15,7 +13,9 @@ type EpisodeRowData = {
   description: string | null;
   durationSeconds: number | null;
   muxPlaybackId: string | null;
+  muxPlaybackPolicy: string | null;
   status: "processing" | "ready" | "errored";
+  thumbnailUrl: string | null;
 };
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
@@ -47,7 +47,7 @@ export default async function ShowDetailPage({
     .orderBy(asc(seasons.number));
 
   const seasonIds = showSeasons.map((s) => s.id);
-  const allEpisodes: EpisodeRowData[] =
+  const rawEpisodes =
     seasonIds.length === 0
       ? []
       : await db
@@ -59,11 +59,27 @@ export default async function ShowDetailPage({
             description: episodes.description,
             durationSeconds: episodes.durationSeconds,
             muxPlaybackId: episodes.muxPlaybackId,
+            muxPlaybackPolicy: episodes.muxPlaybackPolicy,
             status: episodes.status,
           })
           .from(episodes)
           .where(inArray(episodes.seasonId, seasonIds))
           .orderBy(asc(episodes.number));
+
+  const allEpisodes: EpisodeRowData[] = rawEpisodes.map((e) => {
+    let thumbnailUrl: string | null = null;
+    if (e.muxPlaybackId && e.status === "ready") {
+      try {
+        thumbnailUrl = muxThumbnailUrl(e.muxPlaybackId, e.muxPlaybackPolicy, {
+          width: 320,
+          height: 180,
+        });
+      } catch {
+        thumbnailUrl = null;
+      }
+    }
+    return { ...e, thumbnailUrl };
+  });
 
   const episodesBySeason = new Map<string, EpisodeRowData[]>();
   for (const e of allEpisodes) {
@@ -262,19 +278,35 @@ function EpisodeRow({
           playable ? "hover:bg-white/[0.04]" : "cursor-default opacity-70"
         }`}
       >
-        {/* Thumbnail with play overlay */}
+        {/* Thumbnail — real signed Mux still if the asset is ready,
+            tone-gradient placeholder otherwise. */}
         <div
           className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-md sm:w-40"
-          style={{ backgroundImage: TONE_GRADIENT[tone] }}
+          style={
+            ep.thumbnailUrl
+              ? undefined
+              : { backgroundImage: TONE_GRADIENT[tone] }
+          }
         >
-          <div
-            className="absolute inset-0 opacity-30"
-            aria-hidden
-            style={{
-              backgroundImage:
-                "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.25), transparent 60%)",
-            }}
-          />
+          {ep.thumbnailUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={ep.thumbnailUrl}
+              alt=""
+              aria-hidden
+              loading="lazy"
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          ) : (
+            <div
+              className="absolute inset-0 opacity-30"
+              aria-hidden
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.25), transparent 60%)",
+              }}
+            />
+          )}
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60 backdrop-blur-md">
               <Icon name="play" size={12} color="#ffffff" />

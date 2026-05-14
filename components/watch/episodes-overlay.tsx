@@ -110,16 +110,31 @@ export function EpisodesOverlay({
                         >
                           <div
                             className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-md sm:w-40"
-                            style={{ backgroundImage: TONE_GRADIENT[tone] }}
+                            style={
+                              ep.thumbnailUrl
+                                ? undefined
+                                : { backgroundImage: TONE_GRADIENT[tone] }
+                            }
                           >
-                            <div
-                              className="absolute inset-0 opacity-30"
-                              aria-hidden
-                              style={{
-                                backgroundImage:
-                                  "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.25), transparent 60%)",
-                              }}
-                            />
+                            {ep.thumbnailUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={ep.thumbnailUrl}
+                                alt=""
+                                aria-hidden
+                                loading="lazy"
+                                className="absolute inset-0 h-full w-full object-cover"
+                              />
+                            ) : (
+                              <div
+                                className="absolute inset-0 opacity-30"
+                                aria-hidden
+                                style={{
+                                  backgroundImage:
+                                    "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.25), transparent 60%)",
+                                }}
+                              />
+                            )}
                             <div className="absolute inset-0 flex items-center justify-center">
                               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60 backdrop-blur-md">
                                 <Icon

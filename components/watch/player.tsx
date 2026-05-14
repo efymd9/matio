@@ -38,6 +38,10 @@ export type PlayerEpisode = {
   playbackId: string;
   introStartSeconds: number | null;
   introEndSeconds: number | null;
+  // Server-signed Mux thumbnail URL. Null on assets that haven't been
+  // provisioned yet or when minting fails — overlays fall back to a
+  // tone-gradient placeholder.
+  thumbnailUrl: string | null;
 };
 
 type Mode = "subscriber" | "trial";
