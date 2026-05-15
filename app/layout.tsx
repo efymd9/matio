@@ -7,6 +7,7 @@ import {
   SignUpButton,
   UserButton,
 } from "@clerk/nextjs";
+import { dark } from "@clerk/themes";
 import { SiteHeader } from "@/components/site/site-header";
 import "./globals.css";
 
@@ -40,23 +41,13 @@ export default function RootLayout({
   return (
     <ClerkProvider
       appearance={{
+        // Official Clerk-designed dark baseTheme. Handles the navbar /
+        // panel split, hover states, and opacity ramps so every surface
+        // stays readable. We just layer the cinema-red accent on top
+        // via colorPrimary.
+        baseTheme: dark,
         variables: {
           colorPrimary: "#ff3d3d",
-          // Modal surface, bright enough that Clerk's internal "secondary
-          // surface" (the modal's sidebar) doesn't crush into the page bg.
-          colorBackground: "#26262d",
-          colorInputBackground: "#33333b",
-          colorInputText: "#ffffff",
-          // Hand Clerk *white* for every text/neutral channel. Clerk
-          // applies its own opacity ramps for inactive / secondary
-          // elements — by starting at pure white, those derived colors
-          // always land in the readable range (white at 70% is still
-          // bright). Previously we passed a faded gray here and Clerk
-          // multiplied it down past legibility for sidebar items.
-          colorText: "#ffffff",
-          colorTextSecondary: "#ffffff",
-          colorTextOnPrimaryBackground: "#ffffff",
-          colorNeutral: "#ffffff",
           borderRadius: "0.5rem",
         },
       }}
