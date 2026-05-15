@@ -42,14 +42,36 @@ export default function RootLayout({
       appearance={{
         variables: {
           colorPrimary: "#ff3d3d",
-          colorBackground: "#141418",
-          colorInputBackground: "#1d1d22",
+          // Card / modal surface — bumped a few stops above pure black so
+          // Clerk's internal "secondary surface" (the sidebar) doesn't
+          // crush down into the page background.
+          colorBackground: "#1c1c22",
+          colorInputBackground: "#2a2a30",
           colorInputText: "#ffffff",
           colorText: "#ffffff",
-          colorTextSecondary: "#a8a8b3",
+          // Secondary text (subtitles, "Manage your account info", inactive
+          // sidebar items) — was #a8a8b3 which Clerk multiplied by its own
+          // opacity into illegibility. Brighten it.
+          colorTextSecondary: "#d4d4d8",
           colorTextOnPrimaryBackground: "#ffffff",
-          colorNeutral: "#a8a8b3",
+          colorNeutral: "#e4e4e7",
           borderRadius: "0.5rem",
+        },
+        elements: {
+          // Sidebar of the Account / UserProfile modal. Match the main
+          // panel background so the two halves don't visually split into
+          // bright / dark, and bring the inactive button text up.
+          navbar:
+            "bg-[#1c1c22] border-r border-white/[0.06]",
+          navbarButton:
+            "text-white/75 hover:text-white hover:bg-white/[0.04]",
+          navbarButton__active:
+            "text-white bg-white/[0.06]",
+          headerTitle: "text-white",
+          headerSubtitle: "text-white/75",
+          // Dividers between profile rows
+          profileSectionPrimaryButton:
+            "text-white/85 hover:text-white",
         },
       }}
     >
