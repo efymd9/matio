@@ -364,6 +364,12 @@ export function Player({
         playbackId={current.playbackId}
         tokens={{ playback: token }}
         streamType="on-demand"
+        // Without playsInline iOS Safari auto-promotes the video into its
+        // system player on tap, drawing native chrome over ours. Setting
+        // it keeps playback in the page so our custom controls own the
+        // surface; the fullscreen button still hands off to the system
+        // player on demand.
+        playsInline
         metadata={{ video_id: current.id, video_title: current.title }}
         onLoadedMetadata={(e) => {
           // HTMLVideoElement exposes intrinsic dimensions once the

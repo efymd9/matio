@@ -191,3 +191,24 @@ mux-player.hero-preview::part(center),
 mux-player.hero-preview::part(bottom) {
   display: none !important;
 }
+
+/* iOS Safari paints its own inline media controls (a "tap to play" disc,
+   sometimes a system progress bar) on top of any custom chrome. The
+   pseudo-elements below belong to WebKit's media controls shadow tree —
+   hiding them leaves only our media-chrome layer in inline playback.
+   Native fullscreen / picture-in-picture run in a separate system layer
+   that ignores these rules, so the iOS player still appears when the
+   user explicitly fullscreens. */
+mux-video::-webkit-media-controls,
+mux-video::-webkit-media-controls-panel,
+mux-video::-webkit-media-controls-play-button,
+mux-video::-webkit-media-controls-start-playback-button,
+mux-video::-webkit-media-controls-overlay-play-button,
+video::-webkit-media-controls,
+video::-webkit-media-controls-panel,
+video::-webkit-media-controls-play-button,
+video::-webkit-media-controls-start-playback-button,
+video::-webkit-media-controls-overlay-play-button {
+  display: none !important;
+  -webkit-appearance: none !important;
+}
