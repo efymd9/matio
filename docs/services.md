@@ -69,9 +69,14 @@ stripe login
 
 ## Mux (video)
 
-**Used for**: direct uploads, transcoding, signed playback. Three webhook types we care about: `video.asset.ready`, `video.asset.errored`.
+**Used for**: direct uploads, transcoding, signed playback, signed thumbnail stills. Webhook types we care about: `video.asset.ready`, `video.asset.errored`.
 
-**SDK**: `@mux/mux-node@14` (server), `@mux/upchunk@3` (browser uploader), `@mux/mux-player-react@3.13` (player).
+**SDK**:
+- `@mux/mux-node@14` (server)
+- `@mux/upchunk@3` (browser uploader)
+- `@mux/mux-video-react@0.31` (headless video element used for the main player chrome)
+- `media-chrome@4.19` (player chrome primitives — `MediaController`, `MediaPlayButton`, `MediaTimeRange`, etc.; menu primitives live at `media-chrome/react/menu`)
+- `@mux/mux-player-react@3.13` (retained only for the auto-playing hero preview on `/`)
 
 **Env vars**:
 | Name | Where to get it |
@@ -152,6 +157,6 @@ Existing deployments keep their snapshot of env vars — only the **next** deplo
 |---|---|
 | Clerk | `proxy.ts`, `app/layout.tsx`, `app/api/webhooks/clerk/route.ts`, `lib/admin.ts` |
 | Stripe | `lib/stripe.ts`, `app/subscribe/`, `app/(account)/account/`, `app/api/webhooks/stripe/route.ts`, `scripts/stripe-setup.ts` |
-| Mux | `lib/mux.ts`, `lib/mux-token.ts`, `app/admin/actions.ts:createMuxUpload`, `app/api/webhooks/mux/route.ts`, `app/api/playback-token/route.ts`, `components/admin/upload-widget.tsx`, `components/watch/player.tsx` |
+| Mux | `lib/mux.ts`, `lib/mux-token.ts` (playback + thumbnail JWT signers), `app/admin/actions.ts:createMuxUpload`, `app/api/webhooks/mux/route.ts`, `app/api/playback-token/route.ts`, `components/admin/upload-widget.tsx`, `components/watch/player.tsx`, `components/watch/episodes-overlay.tsx`, `components/watch/up-next-overlay.tsx`, `components/site/hero-banner.tsx` (mux-player hero preview) |
 | Neon | `db/index.ts`, `db/schema/*.ts`, `drizzle.config.ts`, `drizzle/` |
 | Vercel | platform-only; see [operations.md](./operations.md#deploy) |

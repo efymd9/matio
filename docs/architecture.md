@@ -32,7 +32,7 @@ Schemas live in `db/schema/`, one file per logical domain (CLAUDE.md convention)
 | `subscriptions` | Stripe-mirrored subscription state | `user_id`, `stripe_subscription_id`, `status`, `plan`, `current_period_end`, `cancel_at_period_end` |
 | `shows` | The catalog | `slug` (unique), `genre[]`, `status` (`draft`\|`published`), `deleted_at` (soft-delete) |
 | `seasons` | Season per show | `(show_id, number)` unique |
-| `episodes` | Episode with Mux linkage | `mux_asset_id`, `mux_playback_id`, `status` (`processing`\|`ready`\|`errored`), `(season_id, number)` unique |
+| `episodes` | Episode with Mux linkage | `mux_asset_id`, `mux_playback_id`, `mux_playback_policy` (`public`\|`signed`), `status` (`processing`\|`ready`\|`errored`), `intro_start_seconds` + `intro_end_seconds` (nullable; drive the "Skip intro" chip), `(season_id, number)` unique |
 | `trial_sessions` | Anonymous-first 60s trial | `(session_token, show_id)` unique, `expires_at`, `user_id` (nullable, set on signup), `converted`, `last_position_seconds` |
 | `watch_progress` | Per-user, per-episode resume position | `(user_id, episode_id)` unique |
 
@@ -82,18 +82,92 @@ mux.video.uploads.create({ playback_policies: ["signed"], passthrough: episode.i
 Mux processes (transcodes etc.)
         │
         ▼ (video.asset.ready webhook → app/api/webhooks/mux/route.ts)
-episodes.mux_asset_id / mux_playback_id / duration_seconds / status="ready"
+episodes.mux_asset_id / mux_playback_id / mux_playback_policy /
+duration_seconds / status="ready"
         │
         ▼ (user visits /watch/<slug>)
 Player fetches /api/playback-token → RS256 JWT (lib/mux-token.ts)
         │
         ▼
-<MuxPlayer playbackId={...} tokens={{ playback: jwt }} />
+<MediaController>
+  <MuxVideo slot="media" playbackId tokens={{ playback }} />
+  <!-- custom chrome (media-chrome React primitives) -->
+</MediaController>
 ```
 
 `passthrough` carries the episode id through Mux → webhook → our DB without needing an extra column. Webhook uses `mux.webhooks.unwrap(body, headers, secret)` for signature verification.
 
-**Caveat**: existing assets uploaded before the policy switch have **public** playback IDs and play without a token. Re-upload to gate them.
+**Caveat**: existing assets uploaded before the policy switch have **public** playback IDs and play without a token. Re-upload to gate them — or run `pnpm backfill:mux-policy` if the script applies.
+
+## Player architecture
+
+The watch surface uses **headless `<mux-video>` + media-chrome** for full visual control. `@mux/mux-player-react` is retained only for the auto-playing hero preview on `/`.
+
+**File layout:**
+- `components/watch/watch-shell.tsx` — fullscreen black canvas, cursor auto-hide on idle. No max-width; player sizes itself.
+- `components/watch/player.tsx` — `<MediaController>` + `<MuxVideo>` + Tailwind-styled chrome. Owns: token fetch / refresh / paywall, episode swap state, aspect-ratio detection, caption-track detection, lock toggle, overlay state.
+- `components/watch/episodes-overlay.tsx` — season-grouped episode picker. Portal'd to `document.body` (see [gotchas → media-chrome overlays](./gotchas.md#media-chrome)).
+- `components/watch/up-next-overlay.tsx` — bottom-right slide-in card with 7-second auto-advance.
+- `components/watch/paywall.tsx` — soft-sidekick bottom sheet shown on trial expiry / token 403.
+
+**Chrome layout (all positioned relative to `MediaController`):**
+- Top scrim — back button, `S<n>·E<n>` mono kicker, show — title, AirPlay, captions, quality menu trigger
+- Center — `MediaSeekBackwardButton` (10s) / `MediaPlayButton` (72px frosted disc) / `MediaSeekForwardButton` (10s)
+- Bottom — `MediaTimeRange` (red bar, halo thumb), `MediaTimeDisplay` × 2, mute, lock, playback rate, Episodes, Up Next, gear (quality), fullscreen
+- Skip-intro chip (bottom-right) — visible only when `currentTime ∈ [intro_start, intro_end]`
+- Quality menu — `<MediaRenditionMenu anchor="auto">`, pinned at `right-5 bottom-[92px]` so it can't be clipped by the player edge
+
+**Chrome auto-hide:** driven by media-chrome's `media-ui-inactive` attribute on `<media-controller>`. Tailwind selectors target it: `group-[[media-ui-inactive]]/player:opacity-0`.
+
+**Aspect ratio:** read off the underlying `<video>` element on `loadedmetadata`. Defaults to 16:9 until metadata arrives (~200ms flash on first frame). Applied to `MediaController` as `aspectRatio` plus `maxWidth: min(100vw, calc(100vh * <ratio>))` so portrait assets fill phone portrait viewports instead of being letterboxed into a 16:9 rectangle. Reset on episode swap.
+
+**Episode swap (`?ep=<id>` URL sync):**
+
+1. User clicks Episodes → overlay shows season-grouped list with real Mux thumbnails.
+2. Selecting an episode → `setCurrentEpisodeId` + close overlay + `router.replace(`?ep=<id>`, { scroll: false })`. `?resume=` is stripped on swap so stale offsets don't replay.
+3. The token-fetch effect (keyed on `current.id`) re-runs and pulls a fresh playback JWT for the new episode.
+4. Subscriber: cross-session resume from `watch_progress` only applies to the initial episode (server-rendered); subsequent swaps start from 0 by design.
+5. Trial: `trial_sessions` is keyed at the show level, so any episode in the show plays during the active trial window.
+
+**Up Next:** the `<MuxVideo onEnded>` handler saves completion to progress and, if a next episode exists in the `episodes` list, sets `overlay="upnext"`. The card shows the next episode poster + label + 7-second countdown progress bar; **Watch now** swaps immediately, **Cancel** dismisses.
+
+**Skip intro:** Player watches `timeupdate` and toggles a `showSkipIntro` state when `currentTime ∈ [intro_start, intro_end]`. Click → `video.currentTime = intro_end`. Markers are set in the admin episode-edit form (admin/shows/[id]/seasons/[seasonId]/episodes/[episodeId]) — both blank ⇒ chip hidden.
+
+**Quality picker:** `<MediaRenditionMenuButton>` + `<MediaRenditionMenu>` from `media-chrome/react/menu`. The menu auto-populates from the active stream's HLS renditions (Auto + each variant) and dispatches `mediaratechangerequest` to lock to a level. Themed via `--media-menu-*` CSS variables on `MediaController`.
+
+**Lock toggle:** sets a `locked` boolean; all chrome layers get `!opacity-0 !pointer-events-none` and a single "🔒 Tap to unlock" pill renders center. Tap unlocks.
+
+**Token expiry:** subscriber gets a fresh 1h token via re-fetch; trial gets 403 → `videoRef.current.pause()` + `paywall=true`. This is what stops buffered-ahead chunks from running past the trial cutoff.
+
+## Mux thumbnail signing
+
+`lib/mux-token.ts` exposes both signers:
+
+```ts
+signMuxPlaybackToken(playbackId, ttl)   // aud='v' (video)
+signMuxThumbnailToken(playbackId, ttl)  // aud='t' (image)
+```
+
+Plus a `muxThumbnailUrl(playbackId, policy, opts)` helper that builds `https://image.mux.com/<id>/thumbnail.jpg?width=…&height=…&fit_mode=smartcrop[&token=<jwt>]`. Token is included only when the asset's `mux_playback_policy === "signed"`. TTL is 1h — long enough for typical sessions, short enough to avoid leaking long-lived URLs.
+
+Consumed by: episodes overlay, up-next card, public show-detail episode rows. All pre-computed server-side in the route handlers / page components.
+
+## Admin analytics
+
+`app/admin/analytics/page.tsx` is a server component that fires eight parallel Drizzle queries via `Promise.all`:
+
+- Users: total + 30-day count
+- Active subscriptions by plan (for MRR + active count)
+- Cancellations in the last 30 days (for churn approximation)
+- Trials started in the last 30 days + how many converted
+- Top 10 shows by `SUM(watch_progress.position_seconds)` joined episodes → seasons → shows
+- Daily signup buckets (`TO_CHAR(... AT TIME ZONE 'UTC', 'YYYY-MM-DD')`)
+
+Rendered as metric cards + a 30-bar histogram + a normalized horizontal bar list. No Recharts dep — Tailwind/CSS only.
+
+Approximations called out in code comments:
+- Churn = cancellations / (cancellations + still-active). True churn needs a snapshot of "active at start of window," which we don't maintain.
+- Watch time = sum of last-known position; doesn't account for repeat watching.
 
 ## Subscription pipeline
 
@@ -141,8 +215,8 @@ Public catalog (`/`, `/shows/[slug]`) isn't gated — it surfaces only `status='
 
 - `app/(public)/` — `/`, `/shows/[slug]` — root layout, no auth
 - `app/(account)/account/` — `/account` — root layout, auth required (proxy)
-- `app/admin/` — admin panel (not in a group, has its own `layout.tsx`)
-- `app/watch/[showSlug]/` — public + cookie-managed
+- `app/admin/` — admin panel (own `layout.tsx`). Pages: `/`, `shows/new`, `shows/[id]`, `shows/[id]/seasons/[seasonId]`, `shows/[id]/seasons/[seasonId]/episodes/[episodeId]`, `analytics`
+- `app/watch/[showSlug]/` — public + cookie-managed. Accepts `?ep=<id>` to start on a specific episode, `?resume=<seconds>` for cross-session resume.
 - `app/subscribe/` — checkout form
 - `app/api/webhooks/{clerk,mux,stripe}/` — external webhooks (`runtime = "nodejs"`, raw body verification)
 - `app/api/playback-token/` — token issuer

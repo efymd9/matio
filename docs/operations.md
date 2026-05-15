@@ -164,11 +164,30 @@ vercel env pull .env.vercel.production
 
 1. **Incognito window** → `/`. Click the show poster → `/shows/<slug>` → Play → `/watch/<slug>`.
 2. `proxy.ts` sets a `trial_session` cookie (HTTP-only). New row in `trial_sessions` keyed on `(cookie, show.id)` with `expires_at = now + 60s`.
-3. Video plays. After 60s the player **pauses** and the paywall overlay shows. Buffered-ahead chunks don't keep playing because the player calls `el.pause()` at expiry.
-4. Click "Subscribe" → redirected through Clerk sign-up → back to `/subscribe?show=<slug>&resume=<seconds>` → trial linked to the new user (via `linkTrialSessionsToCurrentUser` on the page).
+3. Video plays in the custom mux-video + media-chrome player (cinema-red bottom bar, mono `S1·E1` kicker). After 60s the player **pauses** and the soft-sidekick paywall sheet slides up. Buffered-ahead chunks don't keep playing because the player calls `videoRef.current.pause()` at token expiry.
+4. Click "Continue · Subscribe" → redirected through Clerk sign-up → back to `/subscribe?show=<slug>&resume=<seconds>` → trial linked to the new user (via `linkTrialSessionsToCurrentUser` on the page).
 5. Pick a plan, use test card `4242 4242 4242 4242`, any CVC, any future date.
 6. Stripe webhook → `subscriptions` row created with `status='active'` → `markUserTrialsConverted` flips `trial_sessions.converted=true` for the user's rows.
 7. Redirected to `/watch/<slug>?resume=<seconds>` — player gets a 1h subscriber token, seeks to resume position.
+
+### Episode swap (URL sync)
+
+1. While watching, open the bottom-bar **Episodes** button → season-grouped overlay with Mux thumbnails.
+2. Click any other episode → it swaps in place, `?ep=<id>` is added to the URL (no scroll, no page reload), the token is re-fetched for the new episode.
+3. Bouncing the URL (refresh / share) lands the user on that exact episode.
+
+### Skip-intro markers
+
+1. `/admin` → pick a show → season → episode.
+2. Under "Skip intro" enter integer seconds for Start and End (or leave both blank to hide the chip). End must be greater than Start.
+3. Save. Open `/watch/<show-slug>?ep=<episode-id>` and seek to a moment inside the window — the red "Skip intro" pill appears bottom-right. Click → playhead jumps to End.
+
+### Analytics dashboard smoke
+
+1. Sign in as an admin → `/admin/analytics`.
+2. Eight metric cards render with valid numbers (no `NaN`, no division-by-zero).
+3. Daily-signups histogram shows 30 bars (oldest left → today right). Days with zero render as faint stubs.
+4. Top shows list shows up to 10 rows with the highest watched-minutes show normalized to a full red bar. Empty data renders "No watch progress recorded yet."
 
 ### Cancel + resume via Customer Portal
 

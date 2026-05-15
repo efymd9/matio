@@ -155,7 +155,11 @@ A playback ID with `policy: "public"` plays without a JWT. The Mux Player just i
 
 ### Mux client-side buffer behavior
 
-Mux Player buffers chunks ahead of the playhead. Token authorization happens **per-segment-request**, so chunks already in the buffer continue to play even after the token expires. This is why `components/watch/player.tsx` runs a `setTimeout(expiresAt - now)` and calls `el.pause()` — without that, trial videos run several minutes past the 60s cutoff.
+mux-video buffers HLS chunks ahead of the playhead. Token authorization happens **per-segment-request**, so chunks already in the buffer continue to play even after the token expires. This is why `components/watch/player.tsx` runs a `setTimeout(expiresAt - now)` and calls `videoRef.current.pause()` — without that, trial videos run several minutes past the 60s cutoff.
+
+### We use mux-video (headless) for the main player
+
+The main watch surface uses `@mux/mux-video-react` + `media-chrome` (custom React-styled chrome). `@mux/mux-player-react` is retained only for the auto-playing hero preview on `/`. Don't reach for `MuxPlayer` when extending the watch player — its theme system fights anything more involved than color tweaks. Add primitives from `media-chrome/react` or `media-chrome/react/menu` instead.
 
 ### Signed playback JWT shape (`lib/mux-token.ts`)
 
@@ -172,6 +176,67 @@ jwt.sign(
 ```
 
 Private key stored base64-encoded to dodge multi-line-PEM-in-env nightmares.
+
+## media-chrome
+
+The watch player is built on `media-chrome` primitives. A few quirks worth knowing in advance:
+
+### Menu components live at `media-chrome/react/menu`
+
+The top-level `media-chrome/react` doesn't export the menu set. Reaching for `MediaRenditionMenu` / `MediaRenditionMenuButton` / `MediaSettingsMenu` from `media-chrome/react` will throw a TypeScript error.
+
+```ts
+import { MediaController, MediaPlayButton } from "media-chrome/react";
+import { MediaRenditionMenu, MediaRenditionMenuButton } from "media-chrome/react/menu";
+```
+
+### React bindings camelCase certain HTML attributes
+
+The HTML attribute is `seekoffset`, but the React binding takes `seekOffset`. TypeScript catches this — if you see `Property 'seekoffset' does not exist`, rename to `seekOffset`.
+
+### Overlays inside `<MediaController>` get treated as gestures
+
+`<media-controller>` captures clicks inside its subtree as media gestures (toggle play/pause). Buttons inside overlays — especially ones positioned absolutely — can fire React's `onClick` but also be intercepted, so e.g. a close button silently fails to close.
+
+Fix: portal overlays out via `createPortal(<dialog />, document.body)`. `EpisodesOverlay` and `UpNextOverlay` both do this. Defense-in-depth: `stopPropagation` on every overlay button's click.
+
+### Chrome visibility uses `[media-ui-inactive]` attribute
+
+media-chrome adds/removes `media-ui-inactive` on the controller as the user idles. Target with Tailwind: `group-[[media-ui-inactive]]/player:opacity-0` on each chrome layer.
+
+### Menus pinned manually beat anchor-positioning
+
+`<MediaRenditionMenu anchor="auto">` would position relative to its trigger button via CSS anchor positioning. On the main player this got clipped against the controller's `aspect-ratio` box. We override with absolute positioning (`!absolute !right-5 !bottom-[92px] z-30`) so the menu always pops over the bottom bar. The button → menu invoker wiring still works.
+
+### Aspect ratio is detected client-side, not server-side
+
+The Player reads `videoWidth / videoHeight` off the `<video>` on `loadedmetadata` and applies it as the controller's `aspectRatio`. Defaults to 16:9 until the manifest is parsed — there's a brief (~200ms) layout flash on first paint where a portrait video renders as 16:9 before correcting to 9:16. Reset on episode swap so a 16:9 → 9:16 transition doesn't briefly render at the wrong ratio. Server-side detection (storing Mux's reported `aspect_ratio` in the DB) would remove the flash; deferred until it matters.
+
+## iOS Safari
+
+The custom player needs two iOS-specific concessions:
+
+### `playsInline` is required on `<MuxVideo>`
+
+Without it, iOS Safari auto-promotes inline video into the system player on first tap, drawing native chrome over ours. Set `playsInline` on `<MuxVideo>` (or any `<video>`) to keep playback in the page surface so our media-chrome layer owns the UI. Fullscreen still hands off to iOS's system player on demand — which is the desired behavior.
+
+### `::-webkit-media-controls-panel` is on the touch hit-test path — don't hide it
+
+WebKit has a media-controls shadow tree with pseudo-elements. Hiding `::-webkit-media-controls` or `::-webkit-media-controls-panel` on iOS Safari turns out to break scrubbing — our `<MediaTimeRange>` visually responds to drags, but the underlying `<video>` never actually seeks. The panel is on iOS's touch-routing path for the media element even when the page renders custom controls over it.
+
+Only safe pseudo-elements to hide for an inline cinema-style overlay:
+
+```css
+mux-video::-webkit-media-controls-start-playback-button,
+mux-video::-webkit-media-controls-overlay-play-button,
+video::-webkit-media-controls-start-playback-button,
+video::-webkit-media-controls-overlay-play-button {
+  display: none !important;
+  -webkit-appearance: none;
+}
+```
+
+That kills the big "tap to play" disc that overlays inline iOS video. Leave the rest of the WebKit pseudo set alone.
 
 ## shadcn (current generation)
 
