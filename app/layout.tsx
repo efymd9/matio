@@ -33,6 +33,28 @@ export const metadata: Metadata = {
   description: "Original stories, streamed.",
 };
 
+// Minimal credit-card glyph — kept local so we don't drag in lucide just
+// for one icon in the user dropdown.
+function CreditCardIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <line x1="2" y1="10" x2="22" y2="10" />
+      <line x1="6" y1="15" x2="10" y2="15" />
+    </svg>
+  );
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -72,7 +94,15 @@ export default function RootLayout({
                           "size-8 ring-1 ring-border hover:ring-accent/70 transition",
                       },
                     }}
-                  />
+                  >
+                    <UserButton.MenuItems>
+                      <UserButton.Link
+                        href="/account"
+                        label="Manage subscription"
+                        labelIcon={<CreditCardIcon />}
+                      />
+                    </UserButton.MenuItems>
+                  </UserButton>
                 </Show>
               </>
             }
