@@ -54,7 +54,11 @@ export function WatchShell({
         visible ? "cursor-auto" : "cursor-none",
       )}
     >
-      <div className="w-full max-w-[calc(100vh*16/9)]">{children}</div>
+      {/* No max-width here anymore — the player sizes itself to its
+          asset's aspect ratio (read off the video's intrinsic
+          dimensions). Vertical assets fill a phone's portrait
+          viewport; horizontal assets still letterbox to fit. */}
+      {children}
     </div>
   );
 }

@@ -92,6 +92,12 @@ export function Player({
   // <MediaCaptionsButton> doesn't catch every case (Mux sometimes surfaces
   // empty/CEA-608 placeholders), so we gate the button on our own check.
   const [hasCaptions, setHasCaptions] = useState(false);
+  // Live aspect ratio of the currently playing asset, read off the
+  // video element once metadata is available. Default 16:9 so the
+  // first paint isn't a zero-height container; gets corrected to e.g.
+  // 9/16 for portrait shorts within ~200ms of the manifest arriving.
+  // Re-read on every episode swap (each manifest may differ).
+  const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
 
   const current = useMemo(
     () =>
@@ -204,6 +210,13 @@ export function Player({
     return () => el.removeEventListener("loadedmetadata", handler);
   }, [token, resumeForThisLoad]);
 
+  // Reset aspect-ratio to the default when episode changes so the next
+  // asset's `loadedmetadata` event gets a clean slate; without this a
+  // 16:9 → 9:16 swap would briefly render at the wrong ratio.
+  useEffect(() => {
+    setAspectRatio(16 / 9);
+  }, [current.id]);
+
   // Detect real caption/subtitle tracks on the underlying media element so
   // we can decide whether to even render the CC button. The textTracks list
   // is populated asynchronously by HLS as it parses the manifest, so we
@@ -307,7 +320,12 @@ export function Player({
         {
           display: "block",
           width: "100%",
-          aspectRatio: "16 / 9",
+          aspectRatio,
+          // Letterbox to fit the viewport whichever way the video is shaped:
+          // vertical assets cap at `100vh * ratio` (narrow on landscape,
+          // ~viewport-wide on portrait); horizontal assets cap by width.
+          maxWidth: `min(100vw, calc(100vh * ${aspectRatio}))`,
+          margin: "0 auto",
           backgroundColor: "#000",
           "--media-primary-color": "#ffffff",
           "--media-secondary-color": "transparent",
@@ -347,6 +365,15 @@ export function Player({
         tokens={{ playback: token }}
         streamType="on-demand"
         metadata={{ video_id: current.id, video_title: current.title }}
+        onLoadedMetadata={(e) => {
+          // HTMLVideoElement exposes intrinsic dimensions once the
+          // manifest is parsed. Use those to size the player container
+          // so portrait/landscape both render naturally.
+          const v = e.currentTarget;
+          if (v.videoWidth > 0 && v.videoHeight > 0) {
+            setAspectRatio(v.videoWidth / v.videoHeight);
+          }
+        }}
         onError={() => setPaywall(true)}
         onEnded={() => {
           const el = videoRef.current;
