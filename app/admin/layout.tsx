@@ -29,6 +29,12 @@ export default async function AdminLayout({
             Shows
           </Link>
           <Link
+            href="/admin/analytics"
+            className="text-sm font-medium text-white/65 transition-colors hover:text-white"
+          >
+            Analytics
+          </Link>
+          <Link
             href="/"
             className="ml-auto text-sm text-white/55 transition-colors hover:text-white"
           >
