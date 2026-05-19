@@ -29,9 +29,8 @@ export async function POST(req: NextRequest) {
 
   if (event.type === "video.asset.ready") {
     const { id, passthrough, playback_ids, duration } = event.data;
-    if (!passthrough) {
-      console.warn("video.asset.ready without passthrough", { assetId: id });
-    } else {
+    const target = await resolveEpisodeFromPassthrough(passthrough, id, event.type);
+    if (target) {
       const first = playback_ids?.[0];
       await db
         .update(episodes)
@@ -43,19 +42,63 @@ export async function POST(req: NextRequest) {
             typeof duration === "number" ? Math.round(duration) : null,
           status: "ready",
         })
-        .where(eq(episodes.id, passthrough));
+        .where(eq(episodes.id, target.id));
     }
   } else if (event.type === "video.asset.errored") {
     const { id, passthrough } = event.data;
-    if (!passthrough) {
-      console.warn("video.asset.errored without passthrough", { assetId: id });
-    } else {
+    const target = await resolveEpisodeFromPassthrough(passthrough, id, event.type);
+    if (target) {
       await db
         .update(episodes)
         .set({ status: "errored", muxAssetId: id })
-        .where(eq(episodes.id, passthrough));
+        .where(eq(episodes.id, target.id));
     }
   }
 
   return new Response("OK", { status: 200 });
+}
+
+// Mux's `passthrough` field is operator-editable (anyone with Mux dashboard
+// access can change it on an asset after upload), and a compromised webhook
+// signing secret turns any signed body into a valid event. Don't blindly
+// trust passthrough as an episode id: verify the row exists, and reject
+// events that try to re-point an episode at a different Mux asset than the
+// one already attached. Falls back to 200 + warn log so we don't trigger a
+// Mux retry storm on a malformed/forged event.
+async function resolveEpisodeFromPassthrough(
+  passthrough: string | undefined,
+  assetId: string,
+  eventType: string,
+): Promise<{ id: string } | null> {
+  if (!passthrough || !/^[0-9a-f-]{36}$/i.test(passthrough)) {
+    console.warn(`${eventType} with invalid passthrough`, {
+      assetId,
+      passthrough,
+    });
+    return null;
+  }
+  const [row] = await db
+    .select({ id: episodes.id, muxAssetId: episodes.muxAssetId })
+    .from(episodes)
+    .where(eq(episodes.id, passthrough))
+    .limit(1);
+  if (!row) {
+    console.warn(`${eventType} passthrough matches no episode`, {
+      assetId,
+      passthrough,
+    });
+    return null;
+  }
+  if (row.muxAssetId && row.muxAssetId !== assetId) {
+    // Episode already attached to a different asset — refuse to overwrite.
+    // This blocks the "edit passthrough in Mux dashboard to redirect events
+    // at someone else's episode" attack.
+    console.warn(`${eventType} would re-point episode to a different asset`, {
+      assetId,
+      passthrough,
+      existingMuxAssetId: row.muxAssetId,
+    });
+    return null;
+  }
+  return { id: row.id };
 }

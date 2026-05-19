@@ -2,7 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   episodes,
@@ -128,6 +128,11 @@ export default async function WatchPage({
   const { userId } = await auth();
   let isSubscriber = false;
   if (userId) {
+    // Belt-and-braces on the subscription gate: status='active' AND
+    // current_period_end > now(). Otherwise a dropped
+    // customer.subscription.deleted webhook lets the user keep playback
+    // past their term. Order by updatedAt to pick the freshest row when
+    // multiple exist (resubscribe history).
     const [sub] = await db
       .select({ id: subscriptions.id })
       .from(subscriptions)
@@ -135,8 +140,10 @@ export default async function WatchPage({
         and(
           eq(subscriptions.userId, userId),
           eq(subscriptions.status, "active"),
+          gt(subscriptions.currentPeriodEnd, new Date()),
         ),
       )
+      .orderBy(desc(subscriptions.updatedAt))
       .limit(1);
     isSubscriber = !!sub;
   }

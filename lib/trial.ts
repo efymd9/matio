@@ -4,7 +4,7 @@ import { auth } from "@clerk/nextjs/server";
 import { and, count, eq, gt, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
-import { trialSessions, type TrialSession } from "@/db/schema";
+import { trialSessions, users, type TrialSession } from "@/db/schema";
 
 export const TRIAL_DURATION_SECONDS = 60;
 export const TRIAL_COOKIE = "trial_session";
@@ -119,12 +119,27 @@ export function getClientIp(req: { headers: Headers }): string | null {
 
 // Called from pages that the user lands on after Clerk sign-up. Attaches any
 // unlinked trial_sessions rows that share the user's cookie to their user id.
+//
+// Race guard: trial_sessions.user_id has an FK to users.id. If this runs
+// before the Clerk user.created webhook has mirrored the user into our
+// table (common on fast signups), the UPDATE would throw an FK violation
+// and crash the page. Confirm the users row exists first; if it doesn't
+// yet, skip — the Stripe webhook's markUserTrialsConverted is keyed on
+// userId too, so callers that need the link should call
+// getOrSyncCurrentUser() before this helper to guarantee the mirror.
 export async function linkTrialSessionsToCurrentUser(): Promise<void> {
   const { userId } = await auth();
   if (!userId) return;
 
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   if (!sessionToken) return;
+
+  const [mirror] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!mirror) return;
 
   await db
     .update(trialSessions)

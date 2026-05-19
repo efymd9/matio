@@ -1,5 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
@@ -64,7 +64,12 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Subscriber path: any active subscription → 1h token.
+  // Subscriber path: status='active' AND current_period_end is still in the
+  // future. The period-end check is belt-and-braces: if a
+  // customer.subscription.deleted webhook drops, the row stays "active" in
+  // our DB and free playback continues past the user's term without it.
+  // Multiple subscriptions per user are possible (cancel + resubscribe), so
+  // order by updatedAt desc and look at the freshest.
   const { userId } = await auth();
   if (userId) {
     const [sub] = await db
@@ -74,8 +79,10 @@ export async function GET(req: NextRequest) {
         and(
           eq(subscriptions.userId, userId),
           eq(subscriptions.status, "active"),
+          gt(subscriptions.currentPeriodEnd, new Date()),
         ),
       )
+      .orderBy(desc(subscriptions.updatedAt))
       .limit(1);
     if (sub) {
       const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);

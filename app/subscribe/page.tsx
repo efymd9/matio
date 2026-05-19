@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { auth } from "@clerk/nextjs/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { subscriptions, type Subscription } from "@/db/schema";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { Icon } from "@/components/site/icon";
+import { getOrSyncCurrentUser } from "@/lib/admin";
 import { linkTrialSessionsToCurrentUser } from "@/lib/trial";
 import { startCheckout } from "./actions";
 
@@ -16,12 +16,17 @@ export default async function SubscribePage({
 }: {
   searchParams: Promise<{ show?: string; resume?: string }>;
 }) {
-  await linkTrialSessionsToCurrentUser();
-
-  const { userId } = await auth();
-  // Proxy gates /subscribe to require auth, so userId should always be set
+  // Sync the user mirror before anything that touches FKs against users.id.
+  // On a fresh signup the Clerk user.created webhook can lag behind the
+  // user landing here, leaving trial_sessions.user_id with nothing to point
+  // at — linkTrialSessionsToCurrentUser would FK-crash without this step.
+  const user = await getOrSyncCurrentUser();
+  // Proxy gates /subscribe to require auth, so user should always be set
   // here — defensive bounce in case Clerk session goes missing mid-request.
-  if (!userId) redirect("/");
+  if (!user) redirect("/");
+  const userId = user.id;
+
+  await linkTrialSessionsToCurrentUser();
 
   const [existing] = await db
     .select()
