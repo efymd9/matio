@@ -23,9 +23,39 @@ const instrumentSerif = Instrument_Serif({
   style: ["normal", "italic"],
 });
 
+// metadataBase resolves any relative OG/Twitter image URLs against the
+// production origin. Override via NEXT_PUBLIC_APP_URL for preview branches
+// so link unfurls in Slack/Twitter from staging URLs still point at the
+// right host.
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://matio-ten.vercel.app";
+
 export const metadata: Metadata = {
-  title: "matio",
-  description: "Original stories, streamed.",
+  metadataBase: new URL(APP_URL),
+  title: {
+    default: "matio — original stories, streamed",
+    template: "%s · matio",
+  },
+  description:
+    "A subscription streaming home for original short-form stories. Watch the first 60 seconds free.",
+  applicationName: "matio",
+  openGraph: {
+    type: "website",
+    siteName: "matio",
+    url: "/",
+    title: "matio — original stories, streamed",
+    description:
+      "A subscription streaming home for original short-form stories. Watch the first 60 seconds free.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "matio",
+    description:
+      "Original stories, streamed. Watch the first 60 seconds free.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({

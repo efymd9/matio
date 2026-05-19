@@ -1,9 +1,51 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { muxThumbnailUrl } from "@/lib/mux-token";
+
+// Per-show metadata: makes Slack / Twitter / iMessage unfurls show the
+// actual show title and (where set) its hero artwork instead of the
+// generic site default. Hero image takes precedence over poster — it's
+// 16:9 which matches the OG card aspect; poster is a fallback.
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const [show] = await db
+    .select()
+    .from(shows)
+    .where(
+      and(
+        eq(shows.slug, slug),
+        eq(shows.status, "published"),
+        isNull(shows.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!show) return { title: "Not found" };
+  const image = show.heroImageUrl ?? show.posterImageUrl ?? null;
+  return {
+    title: show.title,
+    description: show.description ?? undefined,
+    openGraph: {
+      type: "video.tv_show",
+      title: show.title,
+      description: show.description ?? undefined,
+      images: image ? [{ url: image }] : undefined,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: show.title,
+      description: show.description ?? undefined,
+      images: image ? [image] : undefined,
+    },
+  };
+}
 
 type EpisodeRowData = {
   id: string;

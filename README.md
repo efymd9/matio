@@ -1,36 +1,107 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# matio
 
-## Getting Started
+A subscription streaming home for original short-form stories. 60-second
+anonymous trial per (browser session, show), then sign-up + Stripe
+Checkout in one flow.
 
-First, run the development server:
+Production: **https://matio-ten.vercel.app**
+
+## Stack
+
+- Next.js 16 App Router · TypeScript · React 19
+- Postgres on Neon · Drizzle ORM (`postgres-js` driver, pooled endpoint)
+- Clerk 7 (auth, keyless in dev)
+- Stripe 22 (Checkout + Customer Portal + webhooks)
+- Mux 14 (direct upload + RS256-signed playback)
+- Tailwind v4 · shadcn (built on Base UI)
+- Vercel hosting
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+cp .env.example .env.local            # fill in real values
+pnpm db:migrate                       # apply schema to your Neon branch
+pnpm stripe:setup                     # create Stripe products + prices
+pnpm seed:fake-shows                  # optional: 35 placeholder shows for layout testing
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`AGENTS.md` lists every env var and where to obtain it; `.env.example`
+mirrors the canonical names.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Docs
 
-## Learn More
+Read these before changing integrations:
 
-To learn more about Next.js, take a look at the following resources:
+- [docs/architecture.md](./docs/architecture.md) — system diagram, data
+  model, trial pipeline, playback pipeline, route protection, *why*
+  each decision was made
+- [docs/services.md](./docs/services.md) — per-service setup (Clerk,
+  Stripe, Mux, Neon, Vercel) and env-var sources
+- [docs/operations.md](./docs/operations.md) — pnpm scripts, migrations,
+  deploy commands, end-to-end test recipes
+- [docs/gotchas.md](./docs/gotchas.md) — version-specific traps for
+  Next 16, Clerk 7, Stripe SDK 22 (API 2024+), Mux 14, Tailwind v4 +
+  shadcn-on-Base-UI, Drizzle 0.45
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+[`CLAUDE.md`](./CLAUDE.md) summarises the rules and conventions agents
+follow when working in this repo.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Useful scripts
 
-## Deploy on Vercel
+| Command | Purpose |
+|---|---|
+| `pnpm dev` | Next dev server with Turbopack |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm lint` | ESLint |
+| `pnpm db:generate` | Diff schema → write a new Drizzle migration |
+| `pnpm db:migrate` | Apply pending migrations to `DATABASE_URL` |
+| `pnpm db:studio` | Drizzle Studio (browser DB GUI) |
+| `pnpm stripe:setup` | Idempotently create Stripe products + prices |
+| `pnpm seed:fake-shows` | Insert 35 demo shows (slug prefix `demo-`) |
+| `pnpm seed:fake-shows -- --reset` | Delete every `demo-*` show |
+| `pnpm promote-to-admin <email>` | Grant `users.role='admin'` |
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Deploying
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+GitHub auto-deploy is **not** wired (the Vercel project lives under a
+different account than the GitHub repo owner). Ship via the CLI:
+
+```bash
+vercel --prod --yes
+```
+
+Migrations run separately against `DATABASE_URL` from `.env.local`:
+
+```bash
+pnpm db:migrate
+```
+
+Always migrate **before** deploying when a release adds new columns/tables.
+
+## What's in the repo
+
+```
+app/
+  (public)/              Catalog: / and /shows/[slug]
+  admin/                 Admin panel: shows, episodes, analytics
+  api/
+    billing-portal/      Direct redirect to Stripe Customer Portal
+    playback-token/      Mux RS256 JWT issuer (trial + subscriber)
+    webhooks/            Clerk / Mux / Stripe webhooks
+  subscribe/             Checkout form
+  watch/[showSlug]/      Player + trial paywall
+components/
+  ui/                    shadcn primitives (Base UI under the hood)
+  admin/                 Admin-specific (upload widget, status select)
+  site/                  Marketing surfaces (header, footer, posters)
+  watch/                 Player, paywall, overlays
+db/                      Drizzle client + schemas
+drizzle/                 Migrations (`pnpm db:migrate`)
+lib/                     Server-only helpers (auth, trial, Mux, Stripe)
+proxy.ts                 Next 16 middleware (auth gating + role cache)
+scripts/                 One-off CLI tasks
+```
