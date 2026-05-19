@@ -1,5 +1,6 @@
 import {
   boolean,
+  index,
   integer,
   pgTable,
   text,
@@ -25,11 +26,25 @@ export const trialSessions = pgTable(
     userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
     converted: boolean("converted").notNull().default(false),
     lastPositionSeconds: integer("last_position_seconds").notNull().default(0),
+    // SHA-256 hex of (client IP || MUX_SIGNING_KEY_PRIVATE_KEY). Used to
+    // rate-limit trial-row creation per (IP, show) per hour — stops a user
+    // from clearing cookies / opening incognito to mint endless 60s previews.
+    // Nullable so existing rows (created before this column) don't need a
+    // backfill; the rate-limit query just sees fewer rows for that bucket.
+    ipHash: text("ip_hash"),
   },
   (t) => [
     unique("trial_sessions_session_token_show_id_unique").on(
       t.sessionToken,
       t.showId,
+    ),
+    // Supports the rate-limit count: WHERE ip_hash=? AND show_id=? AND
+    // started_at > now() - 1h. Leading ip_hash makes the lookup selective
+    // since most users won't have many rows for a given show.
+    index("trial_sessions_ip_hash_show_id_started_at_idx").on(
+      t.ipHash,
+      t.showId,
+      t.startedAt,
     ),
   ],
 );

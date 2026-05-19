@@ -24,6 +24,11 @@ export const shows = pgTable("shows", {
   status: showStatus("status").notNull().default("draft"),
   // Only one show is the "home hero" at a time; setFeaturedShow enforces.
   featured: boolean("featured").notNull().default(false),
+  // Homepage section flags. Independent — a show can be in both, either, or
+  // neither. Toggled per-show in the admin edit form. Shows in neither
+  // section don't appear on / but are still reachable via /shows/[slug].
+  justReleased: boolean("just_released").notNull().default(false),
+  popularNow: boolean("popular_now").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()

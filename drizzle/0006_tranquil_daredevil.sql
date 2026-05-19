@@ -1,0 +1,2 @@
+ALTER TABLE "trial_sessions" ADD COLUMN "ip_hash" text;--> statement-breakpoint
+CREATE INDEX "trial_sessions_ip_hash_show_id_started_at_idx" ON "trial_sessions" USING btree ("ip_hash","show_id","started_at");
