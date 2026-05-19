@@ -96,14 +96,25 @@ export async function startCheckout(formData: FormData) {
   const cancelQs = cancelParams.toString();
   const cancelUrl = `${origin}/subscribe${cancelQs ? `?${cancelQs}` : ""}`;
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    subscription_data: { metadata: { userId } },
-  });
+  // Idempotency key dedupes parallel-tab clicks: two simultaneous
+  // submissions for the same (user, plan) inside the same hour bucket
+  // return the same Checkout session from Stripe, so the user can only
+  // ever complete one subscription per intent. Layer 1 + Layer 2 above
+  // catch most cases but neither is atomic with sessions.create.
+  const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
+  const idempotencyKey = `checkout:${userId}:${plan}:${hourBucket}`;
+
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "subscription",
+      customer: customerId,
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      subscription_data: { metadata: { userId } },
+    },
+    { idempotencyKey },
+  );
 
   if (!session.url) throw new Error("Stripe did not return a session URL");
   redirect(session.url);

@@ -159,6 +159,20 @@ const ref = invoice.parent?.subscription_details?.subscription;
 const subId = typeof ref === "string" ? ref : ref?.id;
 ```
 
+### Idempotency key on Checkout creation
+
+`stripe.checkout.sessions.create()` accepts a second-arg `{ idempotencyKey }`. Reusing the same key returns the same Session — important when a user might double-click Subscribe or open Checkout in two tabs:
+
+```ts
+const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
+await stripe.checkout.sessions.create(
+  { mode: "subscription", customer, line_items, success_url, cancel_url, ... },
+  { idempotencyKey: `checkout:${userId}:${plan}:${hourBucket}` },
+);
+```
+
+Without it, two parallel submissions both pass the DB and Stripe-list dedupe checks in `startCheckout` (neither is atomic with `sessions.create`) and we end up with two completed subscriptions for the same user.
+
 ### Cancel: `cancel_at_period_end` vs `cancel_at`
 
 The Customer Portal sets `subscription.cancel_at` (a unix timestamp) when you cancel "at period end" — NOT the legacy `subscription.cancel_at_period_end: true` boolean. If you only mirror the boolean, cancellations silently disappear.
@@ -190,13 +204,15 @@ const evt = await mux.webhooks.unwrap(body, req.headers, signingSecret);
 Direct uploads:
 ```ts
 mux.video.uploads.create({
-  cors_origin: "*",
+  cors_origin: process.env.NEXT_PUBLIC_APP_URL ?? "*", // scope CORS to our origin
   new_asset_settings: {
     playback_policies: ["signed"],     // plural array, not playback_policy: "..."
     passthrough: episode.id,
   },
 });
 ```
+
+`cors_origin: "*"` works but lets the (admin-only, single-use) upload URL be hit from any page. Scope to the app origin in prod; fall back to `*` only when `NEXT_PUBLIC_APP_URL` isn't set (i.e., bare local dev).
 
 `passthrough` goes inside `new_asset_settings` — not at the top level. Mux echoes it back in every webhook event for the resulting asset.
 

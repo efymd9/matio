@@ -265,8 +265,13 @@ export async function createMuxUpload(
     .limit(1);
   if (!episode) throw new Error("Episode not found");
 
+  // Scope the upload URL's CORS to our origin so a leaked URL can't be used
+  // from someone else's page. Falls back to `*` only in local dev where
+  // NEXT_PUBLIC_APP_URL might not be set.
+  const corsOrigin = process.env.NEXT_PUBLIC_APP_URL ?? "*";
+
   const upload = await getMux().video.uploads.create({
-    cors_origin: "*",
+    cors_origin: corsOrigin,
     new_asset_settings: {
       // Signed playback IDs enforce the JWT issued by /api/playback-token.
       // Existing public assets still play without one — they'd need to be
