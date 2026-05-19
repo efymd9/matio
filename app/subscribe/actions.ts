@@ -1,10 +1,10 @@
 "use server";
 
-import { auth, currentUser } from "@clerk/nextjs/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { subscriptions, users } from "@/db/schema";
+import { getOrSyncCurrentUser } from "@/lib/admin";
 import { getStripe } from "@/lib/stripe";
 
 const HAS_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
@@ -21,8 +21,13 @@ export async function startCheckout(formData: FormData) {
     throw new Error("Invalid plan");
   }
 
-  const { userId } = await auth();
-  if (!userId) redirect("/sign-in");
+  // getOrSyncCurrentUser handles the race where Clerk's user.created webhook
+  // hasn't landed before a brand-new signup hits Subscribe. If we still come
+  // back empty here something is wrong with auth — bounce to home, proxy
+  // will redirect to sign-in on the next request.
+  const user = await getOrSyncCurrentUser();
+  if (!user) redirect("/");
+  const userId = user.id;
 
   // Layer 1: prevent duplicate subscriptions from our DB mirror.
   const [existing] = await db
@@ -47,24 +52,10 @@ export async function startCheckout(formData: FormData) {
 
   const stripe = getStripe();
 
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!user) {
-    throw new Error(
-      "Local user row missing — Clerk webhook hasn't mirrored this user yet",
-    );
-  }
-
   let customerId = user.stripeCustomerId;
   if (!customerId) {
-    const clerkUser = await currentUser();
-    const email =
-      clerkUser?.primaryEmailAddress?.emailAddress ?? user.email;
     const customer = await stripe.customers.create({
-      email,
+      email: user.email,
       metadata: { userId },
     });
     customerId = customer.id;

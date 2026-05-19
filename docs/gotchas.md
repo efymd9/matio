@@ -130,6 +130,14 @@ Param is `returnBackUrl`, not `returnUrl`. Clerk preserves the original URL and 
 
 If `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is empty in dev, Clerk auto-creates a "keyless" instance and writes its keys to `.clerk/.tmp/keyless.json`. Convenient for local dev but **fails in production** with `Missing publishableKey`.
 
+### user.created webhook race
+
+Clerk fires `user.created` asynchronously after signup completes. There's a window — typically tens to hundreds of milliseconds — where Clerk thinks the user is signed in but our `users` mirror hasn't been written yet. Anything that does a `users` lookup keyed on the Clerk userId can crash in that window.
+
+The classic example: a fresh signup goes straight from Clerk's hosted signup → `/subscribe` → clicks Subscribe → `startCheckout` looks up the `users` row and throws "Local user row missing" before the webhook has landed.
+
+Fix: anywhere a missing mirror would block the flow, use `getOrSyncCurrentUser()` from `lib/admin.ts` instead of a raw query. It reads the row, and if it's missing, upserts from Clerk's `currentUser()` (idempotent with the webhook via `onConflictDoNothing`).
+
 ## Stripe API 2024+ moves
 
 These three field moves caused real bugs during build:

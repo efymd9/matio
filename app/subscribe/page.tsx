@@ -19,7 +19,9 @@ export default async function SubscribePage({
   await linkTrialSessionsToCurrentUser();
 
   const { userId } = await auth();
-  if (!userId) redirect("/sign-in");
+  // Proxy gates /subscribe to require auth, so userId should always be set
+  // here — defensive bounce in case Clerk session goes missing mid-request.
+  if (!userId) redirect("/");
 
   const [existing] = await db
     .select()

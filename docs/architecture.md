@@ -43,7 +43,10 @@ FK cascade defaults: deleting a `show` removes its `seasons` → `episodes` → 
 - Clerk owns identity + sessions.
 - `users` table mirrors Clerk via `user.created` webhook (`app/api/webhooks/clerk/route.ts`) — handler is idempotent (`onConflictDoNothing` on `users.id`).
 - `users.role` is the **only** source of truth for admin — never Clerk metadata alone.
-- `proxy.ts` is the first line of defense; pages/actions use `lib/admin.ts` helpers (`getCurrentUser` / `getCurrentAdmin` / `requireAdmin`) as belt-and-braces.
+- `proxy.ts` is the first line of defense; pages/actions use `lib/admin.ts` helpers as belt-and-braces:
+  - `getCurrentUser()` — pure read, returns the local row or `null`. Use for pages that can tolerate a missing mirror (e.g. analytics-only callsites).
+  - `getOrSyncCurrentUser()` — read-or-upsert from `currentUser()` if the local row is missing. Use anywhere a missing mirror would block the user from making progress (e.g. `/subscribe` server action, `/account` page). Closes the race where a brand-new signup hits these surfaces before the `user.created` webhook lands.
+  - `getCurrentAdmin()` / `requireAdmin()` — role-gated variants for admin pages and actions.
 - `users.email` is required because the promote-to-admin script and Stripe customer lookups both rely on it.
 
 ## Trial system (the most subtle piece)

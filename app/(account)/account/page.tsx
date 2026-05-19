@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { auth } from "@clerk/nextjs/server";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { subscriptions, users } from "@/db/schema";
+import { subscriptions } from "@/db/schema";
 import { Icon } from "@/components/site/icon";
+import { getOrSyncCurrentUser } from "@/lib/admin";
 import { openBillingPortal } from "./actions";
 
 export default async function AccountPage({
@@ -12,24 +12,19 @@ export default async function AccountPage({
 }: {
   searchParams: Promise<{ welcome?: string }>;
 }) {
-  const { userId } = await auth();
-  if (!userId) redirect("/sign-in");
+  // Sync from Clerk if the user.created webhook hasn't landed yet — a brand
+  // new signup hitting /account post-Checkout shouldn't see "user missing".
+  const user = await getOrSyncCurrentUser();
+  if (!user) redirect("/");
 
   const { welcome } = await searchParams;
-
-  const [user] = await db
-    .select()
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!user) redirect("/sign-in");
 
   const [subscription] = await db
     .select()
     .from(subscriptions)
     .where(
       and(
-        eq(subscriptions.userId, userId),
+        eq(subscriptions.userId, user.id),
         inArray(subscriptions.status, ["active", "trialing", "past_due"]),
       ),
     )
