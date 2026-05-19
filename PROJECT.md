@@ -9,20 +9,18 @@ This document is your single source of truth. Save it in your repo as `PROJECT.m
 ## 1. What we're building
 
 **Public side**
-- Landing page with hero + ad banners promoting specific shows
-- Sign-up / sign-in (email + password)
-- Browse catalog (shows → seasons → episodes), Netflix-style rows
-- Show detail page with episode list, "Subscribe" CTA, and a "Watch 5 min free" CTA when there's an active banner promo
+- Landing page with hero + show carousels (any show link starts the 5-min trial)
+- Browse catalog (shows → seasons → episodes), Netflix-style rows — public, no login required
+- Show detail page with episode list and "Watch first 5 min free" CTA
 - Video player with adaptive streaming + signed playback tokens
-- Subscription checkout (monthly / annual) + customer portal for managing billing
-- Account page (profile, subscription status, watch history)
+- 5-minute anonymous trial → paywall → sign-up + Stripe Checkout in one flow → resume watching
+- Account page (profile, subscription status, watch history) — for subscribed users
 
 **Admin side** (multi-user, role-gated)
 - Login (same auth, role = `admin`)
 - Upload videos (direct-to-Mux), attach to shows/seasons/episodes
 - Manage shows: create, edit metadata, set artwork, publish/unpublish
-- Manage ad banners: create promo banners that unlock trials for specific shows
-- Analytics: signups, MRR, churn, top shows by minutes watched
+- Analytics: signups, MRR, churn, top shows by minutes watched, trial-to-paid conversion
 - User management: list users, view subscription status, comp/cancel
 
 **Out of scope for v1** (deliberately deferred)
@@ -110,24 +108,16 @@ episodes
   - status: 'processing' | 'ready' | 'errored'
   - released_at
 
-ad_banners
+trial_sessions
   - id
-  - show_id → shows.id (the show this banner promotes)
-  - title, subtitle
-  - image_url
-  - cta_text (default: "Watch 5 min free")
-  - active: boolean
-  - starts_at, ends_at
-  - position: int (for ordering on home page)
-
-trial_redemptions
-  - id
-  - user_id → users.id
+  - session_id (random UUID, stored in HTTP-only cookie)
   - show_id → shows.id
-  - banner_id → ad_banners.id
+  - user_id → users.id (nullable; populated when they convert)
   - started_at
-  - expires_at  (started_at + 5 min)
-  - UNIQUE(user_id, show_id)   -- one trial per show per user
+  - expires_at         (started_at + 5 min)
+  - last_position_seconds  (where the player was when paused/closed)
+  - converted: boolean (true once user signs up + pays)
+  - UNIQUE(session_id, show_id)  -- one trial per show per browser session
 
 watch_progress
   - id
@@ -146,30 +136,40 @@ The `UNIQUE(user_id, show_id)` on `trial_redemptions` is the anti-abuse mechanis
 
 This is the trickiest piece, so worth a deep dive.
 
-**Flow:**
-1. User lands on home page. Sees an ad banner: "Watch *The Studio's New Drama* — 5 min free."
-2. Clicks the banner.
-3. If not signed in → redirect to sign-up, then return to step 4.
-4. Server checks `trial_redemptions` for `(user_id, show_id)`. If exists, redirect to subscribe page. Otherwise, create row with `expires_at = now + 5min`.
-5. Redirect to player for the first episode of that show.
-6. Player calls `/api/playback-token?episode_id=...`.
-7. Server logic for token issuance:
-   - Is user subscribed (`subscriptions.status = 'active'`)? → issue normal token (1 hour TTL, can re-issue freely).
-   - Else, is there an unexpired `trial_redemption` for this show? → issue token with TTL = `min(expires_at - now, 6 minutes)`.
-   - Else → 403, redirect to subscribe page.
-8. Token is a Mux signed JWT. Mux refuses playback when it expires, no matter what the client does.
-9. Client also has a 5-minute timer that pauses playback and shows a paywall, for nice UX (don't let them watch until token expiry mid-scene).
+**Design:** anonymous trial. No signup required to start watching. Anyone clicking a show link gets the first 5 minutes of episode 1, then a paywall that doubles as the signup + payment flow.
 
-**Why this is robust:**
-- Auth-gated → can't re-trial by clearing cookies.
-- DB-tracked redemptions → can't re-trial the same show.
-- Mux signed tokens → can't bypass via DevTools (server controls expiry).
-- One token request per session → can't extend by hammering the endpoint.
+**Flow:**
+1. User clicks any link to `/watch/[show-slug]` (from social, email, the home page, anywhere).
+2. Server checks for a `trial_session` cookie scoped to this show:
+   - **No cookie or session not yet started:** create a `trial_sessions` row with a fresh `session_id` (UUID), `started_at = now`, `expires_at = now + 5min`, set the cookie (HTTP-only, 30 days).
+   - **Active session (not expired):** resume — remaining seconds = `expires_at - now`.
+   - **Expired and not converted:** redirect to `/subscribe?show=<slug>`.
+   - **Converted (user paid):** issue a normal subscriber token, no time limit.
+3. Server issues a Mux signed JWT with TTL = remaining trial seconds (capped at 5 min on first issue).
+4. Player loads at `last_position_seconds` (so closing and reopening resumes correctly).
+5. Player saves position every 10s to `trial_sessions.last_position_seconds`.
+6. At ~4:50, client-side overlay starts a "paywall preview" (subtle dim, CTA fades in).
+7. At 5:00, Mux refuses further playback because the JWT has expired. Player goes into paywall mode.
+8. Paywall: "Continue watching — £9.99/mo or £79.99/yr."
+9. Click → Clerk sign-up (email + password). On `user.created` webhook, link `trial_sessions.session_id` → new `users.id`.
+10. After sign-up, automatic redirect to Stripe Checkout.
+11. After Stripe `checkout.session.completed` webhook + `customer.subscription.created` (subscription `active`), set `trial_sessions.converted = true`.
+12. Stripe redirects back to `/watch/[show-slug]?resume=<last_position>`. Now-authenticated, now-subscribed user gets a fresh full-length token. Player resumes at the trial's stopping point.
+
+**Why this works:**
+- Mux signed JWT TTL is the hard server-side cutoff. Client-side timers are just for UX polish.
+- Trial state is keyed on a cookie-bound session ID, so refresh / new tab / closed tab all resume the same trial.
+- The cookie + DB row survive the signup → checkout redirect chain, so we can resume at the right timestamp post-payment.
+
+**Anti-abuse trade-off — read this:**
+Because there's no auth gate before the trial, a user can clear cookies and start fresh. Their best-case "abuse" is watching 5 min of show X once per cookie-clear. This is acceptable for v1 — it's effectively a longer trailer. If it becomes a real problem post-launch, add FingerprintJS (~$200/mo) as a second signal alongside the cookie. Don't add captchas or pre-trial signup; both crater conversion.
 
 **Edge cases to handle:**
-- User starts trial, closes tab at 2 min, comes back: resume from where they left off, with remaining 3 min. (Use `started_at` to compute remaining.)
-- Trial expires mid-episode: paywall takes over the player UI.
-- Subscription expires while watching: token is still valid for current TTL; on next refresh, paywall.
+- User starts trial, closes tab at 2 min, comes back: cookie is still there, resume at 2:00 with 3 min left.
+- User opens trial in incognito after watching once: gets a fresh trial. Acceptable.
+- User signs up but abandons checkout: `trial_sessions.user_id` is set but `converted = false`. Next visit, treat them as authenticated-but-unsubscribed; if their trial is expired, send to `/subscribe`.
+- Subscription expires while watching: existing token may still be valid for up to 1 hour. On next token refresh, server returns 403 → paywall.
+- Multiple browser tabs of the same show: same session, same expiry, both get cut off together. Fine.
 
 ---
 
@@ -207,7 +207,7 @@ Then deploy to Vercel: link the GitHub repo, paste env vars from `.env.local`, d
 **Goal:** All DB tables exist. You can mark yourself as admin.
 
 **Claude Code prompt:**
-> Using the data model in `PROJECT.md` section 3, create Drizzle schema files for: users, subscriptions, shows, seasons, episodes, ad_banners, trial_redemptions, watch_progress. Add a Clerk webhook handler at `/api/webhooks/clerk` that mirrors users to our `users` table on `user.created`. Add a one-off script `scripts/promote-to-admin.ts` that takes an email and sets `role = 'admin'`. Generate and run the migration.
+> Using the data model in `PROJECT.md` section 3, create Drizzle schema files for: users, subscriptions, shows, seasons, episodes, trial_sessions, watch_progress. Add a Clerk webhook handler at `/api/webhooks/clerk` that mirrors users to our `users` table on `user.created`. Add a one-off script `scripts/promote-to-admin.ts` that takes an email and sets `role = 'admin'`. Generate and run the migration.
 
 **Verify:**
 - Tables exist in Neon dashboard.
@@ -272,19 +272,34 @@ Then deploy to Vercel: link the GitHub repo, paste env vars from `.env.local`, d
 
 ---
 
-### Phase 6 — Signed tokens + paywall + trial system (≈ 4 hours)
+### Phase 6 — Signed tokens + anonymous trial + paywall flow (≈ 4–5 hours)
 
 **This is the big one. Read section 4 of this doc again before starting.**
 
 **Claude Code prompt:**
-> Build the playback token system. Add `/api/playback-token` that takes an `episode_id` and returns a Mux signed JWT, applying the logic in PROJECT.md section 4 (subscribed → 1h token; active trial → token capped at trial expiry; otherwise 403). Update the player to fetch a token on mount and refresh it before expiry. Add a paywall overlay component that shows when token issuance fails. Build the trial flow: ad banner click → POST `/api/start-trial?show_id=...` → creates `trial_redemptions` row (or 409 if exists) → redirects to first episode of show. Build a basic admin page to create ad banners.
+> Build the playback token system and anonymous trial flow as described in PROJECT.md section 4.
+>
+> 1. Make `/watch/[show-slug]` a public route (no auth required). On request, read or set a `trial_session` HTTP-only cookie. Look up or create a `trial_sessions` row keyed on `(session_id, show_id)`. If the row's `converted = true`, treat as subscriber. If expired and not converted, redirect to `/subscribe?show=<slug>`. Otherwise, render the player with the first episode of the show.
+>
+> 2. Add `/api/playback-token` that takes `episode_id`. Logic:
+>    - If authenticated user has `subscriptions.status = 'active'`: issue Mux signed JWT, 1h TTL.
+>    - Else if request has a valid `trial_session` cookie tied to the show containing this episode and the session is not expired: issue JWT with TTL = `expires_at - now` (max 5 min).
+>    - Else: 403.
+>
+> 3. Update player to fetch token on mount, save `last_position_seconds` to the trial session every 10s, and show a paywall overlay component on token-fetch 403 or on the Mux player's `error` event.
+>
+> 4. Build `/subscribe` page. After the user clicks "Subscribe," redirect them through Clerk sign-up (preserve `?show=<slug>` and `?resume=<seconds>` query params via Clerk's `redirectUrl`), then through Stripe Checkout, then back to `/watch/[show-slug]?resume=<seconds>`.
+>
+> 5. Add a Clerk webhook handler for `user.created` that finds any `trial_sessions` rows with this user's email-derived session and links them via `user_id`. (Or pass the `session_id` through Clerk's `unsafeMetadata` during signup and link in the webhook.)
+>
+> 6. In the Stripe webhook handler (already built in Phase 5), on `checkout.session.completed` followed by an active subscription, set `trial_sessions.converted = true` for any session belonging to this user.
 
 **Verify:**
-- Subscribed user: video plays normally.
-- Logged-in non-subscriber clicks banner: 5-min trial starts, video plays for 5 min then paywall.
-- Same user clicks the same banner again: redirected to subscribe page.
-- Logged-in non-subscriber tries to watch without clicking a banner: paywall.
-- Logged-out user clicks banner: redirected to sign-up, then trial starts.
+- Open `/watch/some-show` in a fresh incognito window: video plays for 5 min, then paywall appears.
+- Refresh: still paywalled. Cookie remembers.
+- Click "Subscribe," sign up, complete Stripe Checkout with test card: redirected to player, video resumes at ~5:00 with no time limit.
+- Open the same show in a different incognito window: fresh 5 min trial. (Expected — this is the documented v1 trade-off.)
+- Open a different show as the now-subscribed user: plays normally.
 
 ---
 
@@ -365,8 +380,8 @@ Netflix-inspired UX. 5-min trial unlocked via ad banners.
 - middleware.ts              # Auth and admin gating
 
 ## Key business rules
-- Trial: one per (user, show). Lasts 5 minutes from first click.
-- Trials only start via ad banner clicks, not arbitrary URLs.
+- Trial: anonymous, cookie-based. 5 minutes per (browser session, show). Triggered by visiting any /watch/[show-slug] URL — no auth required.
+- Trial state survives signup + Stripe checkout via the trial_session cookie; on conversion, mark `trial_sessions.converted = true` and link `user_id`.
 - Subscriptions: monthly or annual, no other tiers.
 - Admin role is set via DB column `users.role`, never via Clerk metadata alone.
 

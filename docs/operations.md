@@ -50,7 +50,7 @@ Pick the right group:
 - Public catalog → `app/(public)/foo/page.tsx`
 - Account/billing (signed-in) → `app/(account)/foo/page.tsx`
 - Admin-only → `app/admin/foo/page.tsx`
-- Anonymous + cookie-managed → `app/foo/page.tsx` (and add matcher in `proxy.ts` if cookie logic is needed)
+- Anonymous + cookie-managed → `app/foo/page.tsx`. Cookies must be set from a Route Handler or Server Action — proxy.ts no longer mints anything for `/watch/*`. See `app/api/playback-token/route.ts` for the trial-cookie pattern.
 
 If the route needs auth, also update `proxy.ts`:
 ```ts
@@ -162,13 +162,15 @@ vercel env pull .env.vercel.production
 
 ### Trial flow (incognito, anon visitor)
 
-1. **Incognito window** → `/`. Click the show poster → `/shows/<slug>` → Play → `/watch/<slug>`.
-2. `proxy.ts` sets a `trial_session` cookie (HTTP-only). New row in `trial_sessions` keyed on `(cookie, show.id)` with `expires_at = now + 60s`.
+1. **Incognito window** → `/`. Click the show poster → `/shows/<slug>` → Play → `/watch/<slug>`. The page renders the Player in trial mode but **no cookie is set and no `trial_sessions` row exists yet** — the 60s clock hasn't started.
+2. Player mounts → fetches `/api/playback-token?episode_id=<id>`. The route handler verifies show is published+ready, runs `mintTrialSession({ sessionToken, showId, ipHash })` which creates the row with `expires_at = now + 60s` and `ip_hash = HMAC(MUX_SIGNING_KEY_PRIVATE_KEY, x-forwarded-for)`, then sets the `trial_session` cookie (HTTP-only, secure-in-prod, sameSite=lax, 1y) on the response and returns the 60s JWT.
 3. Video plays in the custom mux-video + media-chrome player (cinema-red bottom bar, mono `S1·E1` kicker). After 60s the player **pauses** and the soft-sidekick paywall sheet slides up. Buffered-ahead chunks don't keep playing because the player calls `videoRef.current.pause()` at token expiry.
 4. Click "Continue · Subscribe" → redirected through Clerk sign-up → back to `/subscribe?show=<slug>&resume=<seconds>` → trial linked to the new user (via `linkTrialSessionsToCurrentUser` on the page).
 5. Pick a plan, use test card `4242 4242 4242 4242`, any CVC, any future date.
 6. Stripe webhook → `subscriptions` row created with `status='active'` → `markUserTrialsConverted` flips `trial_sessions.converted=true` for the user's rows.
 7. Redirected to `/watch/<slug>?resume=<seconds>` — player gets a 1h subscriber token, seeks to resume position.
+
+**Verifying the IP rate-limit**: clear cookies + reload + play 3× in under an hour on the same show. The 4th attempt's `/api/playback-token` call returns `429` → player paywalls immediately without spending a fresh 60s. Different shows have independent buckets; a household sharing an IP can still trial multiple shows.
 
 ### Episode swap (URL sync)
 

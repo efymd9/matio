@@ -89,6 +89,8 @@ stripe login
 
 **Why base64?** Multi-line PEM in env vars is fragile across hosting platforms (some strip/escape newlines). `base64 -i key.pem | tr -d '\n'` collapses it to a single string.
 
+**Dual use**: `MUX_SIGNING_KEY_PRIVATE_KEY` is also used as the HMAC salt in `lib/trial.ts:hashClientIp` for the trial-creation IP rate-limit bucket. No raw client IPs are stored — only the SHA-256 HMAC. If you rotate the Mux signing key, existing `trial_sessions.ip_hash` values become inert (the bucket key changes), which is fine: legitimate users get fresh trial budgets and the prior abuse window is closed.
+
 **Webhook setup**: Dashboard → Settings → Webhooks → URL = `https://matio-ten.vercel.app/api/webhooks/mux`. Mux delivers all event types — handler ignores the ones it doesn't care about.
 
 **Local webhook**: Mux doesn't have a `stripe listen`-equivalent. Use an `ngrok` tunnel (`ngrok http 3000`) and point a separate Mux webhook at the ngrok URL. Webhook secret will be different from prod.

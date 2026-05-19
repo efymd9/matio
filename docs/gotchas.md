@@ -32,7 +32,7 @@ export default async function Page({
 - Server Components **cannot set** cookies.
 - To set on first request: do it in `proxy.ts` (`response.cookies.set(...)` on `NextResponse.next()`), in a Route Handler, or in a Server Action (these all return responses that the runtime applies cookies on).
 
-This is why `trial_session` is issued by proxy.ts, not by the watch page.
+This is why `trial_session` is issued by `/api/playback-token` (a Route Handler), not by the watch server component. It used to be set in `proxy.ts` on every `/watch/*` hit, but doing it there mints cookies for slugs that may not resolve to a real published show and starts the 60s clock before the user ever presses play — so we moved the mint into the token route, which already verifies show + episode state.
 
 ### tsconfig `jsx` flips on first build
 

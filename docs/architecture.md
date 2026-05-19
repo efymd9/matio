@@ -11,8 +11,8 @@ Browser ──► proxy.ts (clerkMiddleware) ──► (gate check) ──► Pa
                 │                = "admin" (DB lookup)          │   – reads cookies()
                 ├── /account/*  : Clerk userId                  │   – calls db / Clerk
                 │   /subscribe/*                                │   – returns JSX
-                └── /watch/*    : ensure trial_session cookie   │
-                                  (proxy sets if missing)       └── Server Action
+                └── everything else: passes through             │
+                                                                └── Server Action
                                                                     – "use server"
                                                                     – requireAdmin() etc.
                                                                     – mutates DB
@@ -20,7 +20,7 @@ Browser ──► proxy.ts (clerkMiddleware) ──► (gate check) ──► Pa
                                                                     – redirect
 ```
 
-Server components can **read** cookies but cannot set them — that's why proxy.ts owns trial-cookie issuance. See [gotchas](./gotchas.md#nextjs-cookie-rules).
+Server components can **read** cookies but cannot set them — that's why the `trial_session` cookie is issued by the `/api/playback-token` route handler (which is also the gate that verifies the show is real + published + ready before persisting any state). See [gotchas](./gotchas.md#nextjs-cookie-rules).
 
 ## Data model
 
@@ -33,7 +33,7 @@ Schemas live in `db/schema/`, one file per logical domain (CLAUDE.md convention)
 | `shows` | The catalog | `slug` (unique), `genre[]`, `status` (`draft`\|`published`), `deleted_at` (soft-delete) |
 | `seasons` | Season per show | `(show_id, number)` unique |
 | `episodes` | Episode with Mux linkage | `mux_asset_id`, `mux_playback_id`, `mux_playback_policy` (`public`\|`signed`), `status` (`processing`\|`ready`\|`errored`), `intro_start_seconds` + `intro_end_seconds` (nullable; drive the "Skip intro" chip), `(season_id, number)` unique |
-| `trial_sessions` | Anonymous-first 60s trial | `(session_token, show_id)` unique, `expires_at`, `user_id` (nullable, set on signup), `converted`, `last_position_seconds` |
+| `trial_sessions` | Anonymous-first 60s trial | `(session_token, show_id)` unique, `expires_at`, `user_id` (nullable, set on signup), `converted`, `last_position_seconds`, `ip_hash` (nullable HMAC-SHA256 of client IP; drives per-(IP, show) trial rate-limit) |
 | `watch_progress` | Per-user, per-episode resume position | `(user_id, episode_id)` unique |
 
 FK cascade defaults: deleting a `show` removes its `seasons` → `episodes` → `trial_sessions` (via FK CASCADE). `users.id` cascades into `subscriptions` and `watch_progress`; nulls out `trial_sessions.user_id`.
@@ -53,25 +53,36 @@ FK cascade defaults: deleting a `show` removes its `seasons` → `episodes` → 
 
 End-to-end:
 
-1. **First `/watch/<slug>` hit**: `proxy.ts` matcher detects `/watch(.*)`. If no `trial_session` cookie, it generates `crypto.randomUUID()` and sets `trial_session` (HTTP-only, secure-in-prod, sameSite=lax, 1y).
-2. **Server component (`app/watch/[showSlug]/page.tsx`)**:
-   - If signed-in with active subscription → render Player in `subscriber` mode.
-   - Otherwise: `getOrCreateTrialSession(sessionToken, show.id)` — `onConflictDoNothing` then SELECT. Returns row.
-     - `now > expires_at` → redirect to `/subscribe?show=<slug>&resume=<last_position_seconds>`. `resume` is only included when the row hasn't yet `converted` — for a former subscriber, the trial offset is stale.
-     - Else → render in `trial` mode.
+1. **Visiting `/watch/<slug>`** (`app/watch/[showSlug]/page.tsx`):
+   - The show must be `status='published' AND deleted_at IS NULL`, else `notFound()`.
+   - Signed-in + active subscription → render Player in `subscriber` mode.
+   - Else: read the `trial_session` cookie (may be absent). `findTrialSession(cookie, show.id)` is a **read-only** lookup that returns the row if one exists for this (cookie, show).
+     - Row found and `now > expires_at` → redirect to `/subscribe?show=<slug>&resume=<last_position_seconds>`. `resume` is only included when the row hasn't yet `converted` — for a former subscriber, the trial offset is stale.
+     - Row found and active, OR no row yet → render Player in `trial` mode. The trial 60-second clock has **not** started — it begins when the player actually requests a token.
    - **Not** a shortcut: `trial.converted = true` does **not** grant subscriber-mode rendering. Access for converted-and-still-paying users is granted via the active-subscription lookup above; converted-but-canceled users get the same trial-expired flow as any anonymous visitor.
-3. **Player mounts** (`components/watch/player.tsx`):
+2. **Player mounts** (`components/watch/player.tsx`):
    - Outer `Player` picks the initial episode; the inner `EpisodePlayback` (keyed on `current.id`) does the actual playback work.
    - Inner fetches `/api/playback-token?episode_id=<id>` on mount, captures `token` + `expiresIn`, sets `expiresAt = Date.now() + expiresIn*1000`.
    - Renders `<MediaController>` + `<MuxVideo slot="media" playbackId tokens={{ playback }} />` (headless mux-video + media-chrome — not `@mux/mux-player-react`).
    - `setTimeout(expiresAt - now)` fires at expiry → re-fetches token. Subscriber gets new 1h token. Trial gets 403 → `videoRef.current.pause()` + Paywall overlay. This is what stops a buffered-ahead Mux stream from running past the cutoff.
    - Every 10s while playing, writes `last_position_seconds` (trial → `trial_sessions`) or `watch_progress` (subscriber).
-4. **Token endpoint** (`app/api/playback-token/route.ts`): joins episode → season → show to find the show. If user has `subscriptions.status='active'` → 1h JWT. Else if trial row exists, returns JWT with `ttl = min(remaining, TRIAL_DURATION_SECONDS)`. Else 403.
+3. **Token endpoint** (`app/api/playback-token/route.ts`) — this is the actual gate. The handler:
+   - Joins episode → season → show and filters on `episodes.status='ready' AND shows.status='published' AND shows.deleted_at IS NULL`. A leaked draft episode id returns 404 here, regardless of any cookie.
+   - Signed-in user with `subscriptions.status='active'` → 1h subscriber JWT.
+   - Otherwise enters the trial path:
+     - Reads the `trial_session` cookie (may be absent — that's normal for a first-time visitor since proxy.ts no longer mints it).
+     - If a trial row exists for (cookie, show) and `remaining > 0` → JWT with `ttl = min(remaining, TRIAL_DURATION_SECONDS)`.
+     - If a trial row exists and is expired → 403 (no re-trial on the same cookie/show).
+     - If no row yet → `mintTrialSession({ sessionToken, showId, ipHash })`: enforces a per-(`ip_hash`, `show_id`) cap of `TRIAL_RATELIMIT_PER_HOUR = 3` trial creations / hour, inserts the row, sets the `trial_session` cookie if it was missing, and returns the JWT. Cap exceeded → 429.
+4. **IP rate-limit details**:
+   - `hashClientIp(ip)` returns `HMAC-SHA256(MUX_SIGNING_KEY_PRIVATE_KEY, ip)` so the bucket is stable across requests but unrecoverable without the Mux signing key (no raw IPs in the DB).
+   - Client IP comes from the leftmost `x-forwarded-for` entry (Vercel's convention); `x-real-ip` is a fallback. If neither is present, `ipHash` is `null` and the rate-limit is skipped (fail-open) — preferable to locking out users behind unusual proxy chains.
+   - The cap is **per-(IP, show)** — a household watching a different show on the same IP isn't disrupted.
 5. **Conversion linking**:
    - **Page-level** (primary): `/subscribe` server component runs `linkTrialSessionsToCurrentUser()` on render — claims any trial rows with the user's cookie that have `user_id IS NULL`. Catches the common case (user comes from trial → Subscribe → signup → back to /subscribe).
    - **Stripe webhook**: when `customer.subscription.*` lands with active/trialing status, `markUserTrialsConverted(user.id)` flips `converted=true` on all the user's trial rows. This is an **analytics-only** marker (powers the trial→paid metric on the admin dashboard). It does not affect playback — gating is purely based on `subscriptions.status='active'` and the trial expiry timestamp.
 
-Constants in `lib/trial.ts`: `TRIAL_DURATION_SECONDS = 60`. `/api/playback-token` imports this as `TRIAL_TTL_CAP` so the JWT can never outlive the row.
+Constants in `lib/trial.ts`: `TRIAL_DURATION_SECONDS = 60`, `TRIAL_RATELIMIT_PER_HOUR = 3`. `/api/playback-token` imports the duration as `TRIAL_TTL_CAP` so the JWT can never outlive the row.
 
 ## Playback pipeline
 
@@ -209,12 +220,11 @@ mirrorSubscription:
 ```ts
 isAdminRoute   = createRouteMatcher(["/admin(.*)"]);
 isAuthRoute    = createRouteMatcher(["/account(.*)", "/subscribe(.*)"]);
-isWatchRoute   = createRouteMatcher(["/watch(.*)"]);
 ```
 
 - `/admin/*`: Clerk userId required, then DB lookup `users.role='admin'`. Non-admin → redirect `/`.
 - `/account/*`, `/subscribe/*`: Clerk userId required. Anonymous → `redirectToSignIn({ returnBackUrl })`.
-- `/watch/*`: public. Sets `trial_session` cookie if missing.
+- `/watch/*`: public. Trial cookie is **not** set here — `/api/playback-token` mints it on first play, after verifying the show is published+ready.
 - Everything else: passes through.
 
 Public catalog (`/`, `/shows/[slug]`) isn't gated — it surfaces only `status='published' AND deleted_at IS NULL` rows.
@@ -242,4 +252,4 @@ Webhook handlers always declare `export const runtime = "nodejs";` — the SDK s
 - **Drizzle over Prisma**: type-safe SQL, no engine binary, fast cold start.
 - **shadcn over component library**: full source in `components/ui/` — modifiable, no upgrade churn. New shadcn uses Base UI (not Radix); `Button` lacks `asChild`. For "link styled as button" use `buttonVariants()`.
 - **Mux signed playback (new uploads)**: `playback_policies: ["signed"]` + JWT enforces server-side gating. Public IDs are still played by mux-player (token ignored) — old assets remain accessible unless re-uploaded.
-- **Trial cookie + table**: `cookie` survives across signed-out → signed-up → subscribed without losing the user's place. `trial_sessions.user_id` is nullable until signup; webhook flips `converted` once they pay.
+- **Trial cookie + table**: `cookie` survives across signed-out → signed-up → subscribed without losing the user's place. `trial_sessions.user_id` is nullable until signup; webhook flips `converted` once they pay. Cookie minting + row creation both happen in `/api/playback-token` (not proxy.ts) — that way the show is verified published+ready before any state is persisted, and the 60s clock starts on the user's first play rather than on page load. An HMAC-of-IP bucket caps trial creations at 3/(IP, show)/hour to stop the cookie-clear loop.

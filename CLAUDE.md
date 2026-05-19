@@ -77,8 +77,9 @@ scripts/
 
 ## Key business rules
 
-- **Trial**: anonymous, cookie-based. 60 seconds per (browser session, show). Triggered by visiting any `/watch/[show-slug]` URL — no auth required. Constant: `TRIAL_DURATION_SECONDS` in `lib/trial.ts`.
+- **Trial**: anonymous, cookie-based. 60 seconds per (browser session, show). Triggered when the player on `/watch/[show-slug]` requests its first token — `/api/playback-token` mints the `trial_session` cookie and `trial_sessions` row at that point, after verifying the show is published+ready. The 60s clock starts on click-play, not on page load. Constant: `TRIAL_DURATION_SECONDS` in `lib/trial.ts`.
 - Trial state survives signup + Stripe checkout via the `trial_session` cookie. `linkTrialSessionsToCurrentUser` (runs on `/subscribe` render) links unlinked rows by cookie; Stripe webhook flips `trial_sessions.converted=true` on active subscription.
+- Trial creation is rate-limited at 3 per (`ip_hash`, `show_id`) per hour (`TRIAL_RATELIMIT_PER_HOUR`). `ip_hash` is `HMAC-SHA256(MUX_SIGNING_KEY_PRIVATE_KEY, client_ip)` — no raw IPs in the DB. Cap exceeded → `/api/playback-token` returns 429.
 - **Subscriptions**: monthly ($9.99) or annual ($79.99), no other tiers. Stored in `subscriptions` table; mirrored from Stripe via webhook (one source of truth).
 - **Admin role**: set via DB column `users.role`, never via Clerk metadata alone. `proxy.ts` does the lookup on every `/admin/*` request; `requireAdmin()` does it again inside actions.
 - Playback always goes through `/api/playback-token` → signed Mux JWT. Subscriber TTL: 1 hour (auto-refreshed). Trial TTL: `min(remaining, TRIAL_DURATION_SECONDS)`.
