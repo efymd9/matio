@@ -5,9 +5,16 @@ import { GenreRow } from "@/components/site/genre-row";
 import { HeroBanner } from "@/components/site/hero-banner";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
+import { TRIAL_DURATION_SECONDS } from "@/lib/trial";
 
 const UNCATEGORIZED = "Uncategorized";
-const PREVIEW_TTL_SECONDS = 60 * 10;
+// The hero auto-plays a muted preview of the featured show's first episode.
+// The signed JWT we mint here ends up in the HTML, so anyone can extract it
+// and stream the asset directly. Cap the TTL to the trial duration so the
+// preview window never exposes more than what /watch already gives an
+// anonymous visitor for free. (Defense-in-depth: also configure referrer
+// restrictions on the Mux signing key — see docs/services.md.)
+const PREVIEW_TTL_SECONDS = TRIAL_DURATION_SECONDS;
 
 export default async function HomePage() {
   const published = await db

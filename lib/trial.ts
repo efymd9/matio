@@ -66,8 +66,10 @@ export async function linkTrialSessionsToCurrentUser(): Promise<void> {
 }
 
 // Called from the Stripe webhook when a user's subscription becomes active.
-// Flips converted = true on every trial_sessions row this user owns so we
-// stop trying to gate them.
+// Flips converted = true on every trial_sessions row this user owns. This is
+// an analytics-only marker now (it powers the trial-to-paid metric on the
+// admin analytics dashboard). Playback gating no longer reads converted —
+// see app/api/playback-token/route.ts for the rationale.
 export async function markUserTrialsConverted(userId: string): Promise<void> {
   await db
     .update(trialSessions)
@@ -80,14 +82,16 @@ export async function markUserTrialsConverted(userId: string): Promise<void> {
     );
 }
 
+// Whether the trial window is still open. We deliberately don't special-case
+// trial.converted — granting playback to any cookie that once converted is a
+// bypass for users who paid then canceled. Conversion is enforced via active
+// subscription lookups, not via this flag.
 export function isTrialActive(trial: TrialSession): boolean {
-  if (trial.converted) return true;
   return trial.expiresAt.getTime() > Date.now();
 }
 
 // Remaining seconds clamped to [0, TRIAL_DURATION_SECONDS]
 export function trialRemainingSeconds(trial: TrialSession): number {
-  if (trial.converted) return TRIAL_DURATION_SECONDS;
   const remaining = Math.floor((trial.expiresAt.getTime() - Date.now()) / 1000);
   return Math.max(0, remaining);
 }

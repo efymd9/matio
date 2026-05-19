@@ -63,7 +63,12 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Trial path: valid trial_session cookie for this show.
+  // Trial path: unexpired trial_session cookie for this show. Note we
+  // intentionally do NOT special-case trial.converted here — granting a
+  // subscriber-length token to any cookie that once converted is a real
+  // bypass for users who paid then canceled. They re-enter through the
+  // signed-in active-subscription branch above; if that fails they have
+  // no playback access. Converted is now an analytics-only marker.
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   if (sessionToken) {
     const [trial] = await db
@@ -78,15 +83,6 @@ export async function GET(req: NextRequest) {
       .limit(1);
 
     if (trial) {
-      // Converted = subscriber (the Stripe webhook flipped this).
-      if (trial.converted) {
-        const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
-        return NextResponse.json({
-          token,
-          expiresIn: SUBSCRIBER_TTL,
-          mode: "subscriber",
-        });
-      }
       const remaining = Math.floor(
         (trial.expiresAt.getTime() - Date.now()) / 1000,
       );

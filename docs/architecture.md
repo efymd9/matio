@@ -54,9 +54,9 @@ End-to-end:
 2. **Server component (`app/watch/[showSlug]/page.tsx`)**:
    - If signed-in with active subscription → render Player in `subscriber` mode.
    - Otherwise: `getOrCreateTrialSession(sessionToken, show.id)` — `onConflictDoNothing` then SELECT. Returns row.
-     - `converted = true` → render in subscriber mode anyway.
-     - `now > expires_at` → redirect to `/subscribe?show=<slug>&resume=<last_position_seconds>`.
+     - `now > expires_at` → redirect to `/subscribe?show=<slug>&resume=<last_position_seconds>`. `resume` is only included when the row hasn't yet `converted` — for a former subscriber, the trial offset is stale.
      - Else → render in `trial` mode.
+   - **Not** a shortcut: `trial.converted = true` does **not** grant subscriber-mode rendering. Access for converted-and-still-paying users is granted via the active-subscription lookup above; converted-but-canceled users get the same trial-expired flow as any anonymous visitor.
 3. **Player mounts** (`components/watch/player.tsx`):
    - Outer `Player` picks the initial episode; the inner `EpisodePlayback` (keyed on `current.id`) does the actual playback work.
    - Inner fetches `/api/playback-token?episode_id=<id>` on mount, captures `token` + `expiresIn`, sets `expiresAt = Date.now() + expiresIn*1000`.
@@ -66,7 +66,7 @@ End-to-end:
 4. **Token endpoint** (`app/api/playback-token/route.ts`): joins episode → season → show to find the show. If user has `subscriptions.status='active'` → 1h JWT. Else if trial row exists, returns JWT with `ttl = min(remaining, TRIAL_DURATION_SECONDS)`. Else 403.
 5. **Conversion linking**:
    - **Page-level** (primary): `/subscribe` server component runs `linkTrialSessionsToCurrentUser()` on render — claims any trial rows with the user's cookie that have `user_id IS NULL`. Catches the common case (user comes from trial → Subscribe → signup → back to /subscribe).
-   - **Stripe webhook**: when `customer.subscription.*` lands with active/trialing status, `markUserTrialsConverted(user.id)` flips `converted=true` on all the user's trial rows so playback stops gating.
+   - **Stripe webhook**: when `customer.subscription.*` lands with active/trialing status, `markUserTrialsConverted(user.id)` flips `converted=true` on all the user's trial rows. This is an **analytics-only** marker (powers the trial→paid metric on the admin dashboard). It does not affect playback — gating is purely based on `subscriptions.status='active'` and the trial expiry timestamp.
 
 Constants in `lib/trial.ts`: `TRIAL_DURATION_SECONDS = 60`. `/api/playback-token` imports this as `TRIAL_TTL_CAP` so the JWT can never outlive the row.
 

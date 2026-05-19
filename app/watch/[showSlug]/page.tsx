@@ -188,24 +188,17 @@ export default async function WatchPage({
 
   const trial = await getOrCreateTrialSession(sessionToken, show.id);
 
-  if (trial.converted) {
-    return (
-      <WatchShell>
-        <Player
-          mode="subscriber"
-          showSlug={show.slug}
-          showTitle={show.title}
-          episodes={playable}
-          initialEpisodeId={initial.id}
-          resumeSeconds={queryResume ?? resumeFromProgress}
-        />
-      </WatchShell>
-    );
-  }
-
+  // We intentionally don't short-circuit on trial.converted here — a former
+  // subscriber (paid then canceled) with a still-set cookie would otherwise
+  // get subscriber-mode access for life. Active subscribers were already
+  // caught by the isSubscriber check above; everyone else falls through to
+  // the trial-expiry / new-trial flow.
   if (!isTrialActive(trial)) {
     const sp = new URLSearchParams({ show: show.slug });
-    if (trial.lastPositionSeconds > 0) {
+    // lastPositionSeconds is only meaningful for the user's first trial of
+    // this show; for a converted trial it's a stale offset from before they
+    // were a subscriber.
+    if (!trial.converted && trial.lastPositionSeconds > 0) {
       sp.set("resume", String(trial.lastPositionSeconds));
     }
     redirect(`/subscribe?${sp.toString()}`);
