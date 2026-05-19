@@ -139,7 +139,7 @@ function AlreadySubscribed({ sub }: { sub: Subscription }) {
         </p>
         <div className="mt-7 flex flex-wrap justify-center gap-2.5">
           <Link
-            href="/account"
+            href="/api/billing-portal"
             className="inline-flex h-11 items-center rounded-md bg-white px-7 text-sm font-bold text-black transition-colors hover:bg-white/90"
           >
             Manage subscription

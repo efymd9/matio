@@ -40,7 +40,7 @@ export async function startCheckout(formData: FormData) {
       ),
     )
     .limit(1);
-  if (existing) redirect("/account");
+  if (existing) redirect("/");
 
   const priceId =
     plan === "monthly"
@@ -74,7 +74,7 @@ export async function startCheckout(formData: FormData) {
     limit: 5,
   });
   if (stripeSubs.data.some((s) => STRIPE_HAS_SUBSCRIPTION_STATUSES.has(s.status))) {
-    redirect("/account");
+    redirect("/");
   }
 
   const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
@@ -83,7 +83,10 @@ export async function startCheckout(formData: FormData) {
   // drop them back into playback after Stripe Checkout.
   const showSlug = formData.get("show");
   const resume = formData.get("resume");
-  let successUrl = `${origin}/account?welcome=1`;
+  // No /account page anymore — Stripe Checkout success lands back on the
+  // catalog. If the user came from a watch flow, the override below sends
+  // them straight back into playback.
+  let successUrl = `${origin}/?welcome=1`;
   if (typeof showSlug === "string" && showSlug) {
     const watchParams = new URLSearchParams();
     if (typeof resume === "string" && resume) watchParams.set("resume", resume);

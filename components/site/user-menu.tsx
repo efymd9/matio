@@ -26,7 +26,7 @@ export function UserMenu() {
         >
           <UserButton.MenuItems>
             <UserButton.Link
-              href="/account"
+              href="/api/billing-portal"
               label="Manage subscription"
               labelIcon={<CreditCardIcon />}
             />
