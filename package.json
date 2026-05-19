@@ -14,7 +14,8 @@
     "db:studio": "drizzle-kit studio",
     "promote-to-admin": "tsx scripts/promote-to-admin.ts",
     "stripe:setup": "tsx scripts/stripe-setup.ts",
-    "backfill:mux-policy": "tsx scripts/backfill-mux-policy.ts"
+    "backfill:mux-policy": "tsx scripts/backfill-mux-policy.ts",
+    "seed:fake-shows": "tsx scripts/seed-fake-shows.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

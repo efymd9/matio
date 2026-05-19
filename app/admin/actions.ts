@@ -34,6 +34,13 @@ function parseGenre(formData: FormData): string[] {
     .filter(Boolean);
 }
 
+// HTML checkboxes send the field with the literal string "on" when checked
+// and omit the field entirely when unchecked. Both `has()` and `get() === "on"`
+// work; `has()` is more permissive of custom values.
+function checkbox(formData: FormData, key: string): boolean {
+  return formData.has(key);
+}
+
 // ---------- shows ----------
 
 export async function createShow(formData: FormData) {
@@ -57,10 +64,13 @@ export async function createShow(formData: FormData) {
     heroImageUrl: str(formData, "heroImageUrl") || null,
     genre: parseGenre(formData),
     status,
+    justReleased: checkbox(formData, "justReleased"),
+    popularNow: checkbox(formData, "popularNow"),
   };
 
   const [created] = await db.insert(shows).values(values).returning({ id: shows.id });
 
+  revalidatePath("/");
   revalidatePath("/admin");
   redirect(`/admin/shows/${created.id}`);
 }
@@ -88,9 +98,12 @@ export async function updateShow(id: string, formData: FormData) {
       heroImageUrl: str(formData, "heroImageUrl") || null,
       genre: parseGenre(formData),
       status,
+      justReleased: checkbox(formData, "justReleased"),
+      popularNow: checkbox(formData, "popularNow"),
     })
     .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
 
+  revalidatePath("/");
   revalidatePath("/admin");
   revalidatePath(`/admin/shows/${id}`);
 }

@@ -1,13 +1,11 @@
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { episodes, seasons, shows, type Show } from "@/db/schema";
+import { episodes, seasons, shows } from "@/db/schema";
 import { GenreRow } from "@/components/site/genre-row";
 import { HeroBanner } from "@/components/site/hero-banner";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { TRIAL_DURATION_SECONDS } from "@/lib/trial";
-
-const UNCATEGORIZED = "Uncategorized";
 // The hero auto-plays a muted preview of the featured show's first episode.
 // The signed JWT we mint here ends up in the HTML, so anyone can extract it
 // and stream the asset directly. Cap the TTL to the trial duration so the
@@ -16,12 +14,24 @@ const UNCATEGORIZED = "Uncategorized";
 // restrictions on the Mux signing key — see docs/services.md.)
 const PREVIEW_TTL_SECONDS = TRIAL_DURATION_SECONDS;
 
+// Force dynamic rendering. The hero embeds a 60s Mux JWT in the HTML — if
+// the page were prerendered at build time (Next 16's default for pure DB
+// reads) or CDN-cached for more than ~60s, the JWT would be dead on arrival
+// for almost every visitor. Each request must mint a fresh token.
+export const dynamic = "force-dynamic";
+
 export default async function HomePage() {
+  // One published-shows query, partitioned in JS into the two homepage
+  // sections. A show can be in both, either, or neither — neither hides it
+  // from / but it stays reachable at /shows/[slug].
   const published = await db
     .select()
     .from(shows)
     .where(and(eq(shows.status, "published"), isNull(shows.deletedAt)))
-    .orderBy(asc(shows.title));
+    .orderBy(desc(shows.createdAt));
+
+  const justReleased = published.filter((s) => s.justReleased);
+  const popularNow = published.filter((s) => s.popularNow);
 
   if (published.length === 0) {
     return (
@@ -93,22 +103,15 @@ export default async function HomePage() {
     }
   }
 
-  const byGenre = new Map<string, Show[]>();
-  for (const show of published) {
-    const genres = show.genre.length > 0 ? show.genre : [UNCATEGORIZED];
-    for (const g of genres) {
-      const list = byGenre.get(g) ?? [];
-      list.push(show);
-      byGenre.set(g, list);
-    }
-  }
-  const sortedGenres = [...byGenre.keys()].sort((a, b) => {
-    if (a === UNCATEGORIZED) return 1;
-    if (b === UNCATEGORIZED) return -1;
-    return a.localeCompare(b);
-  });
-
-  const categoryChips = sortedGenres.slice(0, 5);
+  const sections: Array<{
+    key: string;
+    label: string;
+    shows: typeof published;
+    size: "default" | "big";
+  }> = [
+    { key: "just-released", label: "Just released", shows: justReleased, size: "default" as const },
+    { key: "popular-now", label: "Popular now", shows: popularNow, size: "big" as const },
+  ].filter((s) => s.shows.length > 0);
 
   return (
     <main className="bg-background pb-24">
@@ -123,40 +126,22 @@ export default async function HomePage() {
         previewToken={previewToken}
       />
 
-      {/* Category chips strip — sits at the top of the rows section, mirrors
-          the floating chips on the iOS hero in the design. */}
-      {categoryChips.length > 0 && (
-        <div className="scrollbar-hidden overflow-x-auto border-b border-white/[0.05]">
-          <div className="mx-auto flex max-w-screen-2xl gap-2 px-6 py-4 sm:px-12">
-            {categoryChips.map((g) => (
-              <a
-                key={g}
-                href={`#row-${slugify(g)}`}
-                className="shrink-0 rounded-full border border-white/10 bg-white/[0.06] px-3.5 py-1.5 text-xs font-medium text-white/85 backdrop-blur-xl transition-colors hover:bg-white/15 capitalize"
-              >
-                {g}
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
-
       <div className="mx-auto max-w-screen-2xl space-y-10 pt-8 sm:pt-10">
-        {sortedGenres.map((g, i) => (
-          <div key={g} id={`row-${slugify(g)}`} className="scroll-mt-24">
+        {sections.map((section, i) => (
+          <div
+            key={section.key}
+            id={`row-${section.key}`}
+            className="scroll-mt-24"
+          >
             <GenreRow
-              genre={g}
-              shows={byGenre.get(g)!}
+              genre={section.label}
+              shows={section.shows}
               priority={i === 0}
-              size={i === 1 ? "big" : "default"}
+              size={section.size}
             />
           </div>
         ))}
       </div>
     </main>
   );
-}
-
-function slugify(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }

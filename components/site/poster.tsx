@@ -53,8 +53,16 @@ export function Poster({
           src={imageUrl}
           alt={title}
           loading={priority ? "eager" : "lazy"}
+          // aspect-[2/3] on the img itself, not just the parent. Without it,
+          // landscape source images (e.g. Mux thumbnails set as
+          // posterImageUrl: thumbnail.png?width=214&height=121) collapse to
+          // their intrinsic ratio because `height: 100%` doesn't always
+          // resolve against an aspect-ratio-derived parent height (Safari
+          // < 16.4 most notably). Pinning the img's own aspect makes the box
+          // 2:3 regardless of the source dimensions, then object-cover crops
+          // to fill.
           className={cn(
-            "absolute inset-0 h-full w-full object-cover",
+            "absolute inset-0 aspect-[2/3] h-full w-full object-cover",
             imgClassName,
           )}
         />

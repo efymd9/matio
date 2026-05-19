@@ -49,6 +49,32 @@ export default function NewShowPage() {
           <Input id="genre" name="genre" placeholder="action, drama, sci-fi" />
         </div>
 
+        <fieldset className="space-y-3 rounded-md border border-border/60 p-4">
+          <legend className="px-1 text-sm font-medium">
+            Homepage sections
+          </legend>
+          <p className="text-xs text-muted-foreground">
+            Choose which rows this show appears in on /. A show can be in
+            both, either, or neither.
+          </p>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="justReleased"
+              className="size-4 accent-accent"
+            />
+            Just released
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              name="popularNow"
+              className="size-4 accent-accent"
+            />
+            Popular now
+          </label>
+        </fieldset>
+
         <div className="flex justify-end gap-2 pt-2">
           <Link href="/admin" className={buttonVariants({ variant: "outline" })}>
             Cancel
