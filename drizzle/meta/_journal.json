@@ -57,6 +57,13 @@
       "when": 1779212869249,
       "tag": "0007_lying_lila_cheney",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779225307835,
+      "tag": "0008_magical_talisman",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "subscriptions_active_user_id_unique" ON "subscriptions" USING btree ("user_id") WHERE status IN ('active','trialing','past_due');

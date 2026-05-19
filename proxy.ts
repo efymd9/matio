@@ -13,18 +13,37 @@ const isAuthRoute = createRouteMatcher(["/subscribe(.*)"]);
 // minting now happens in /api/playback-token, where the show is verified
 // published+ready and the trial row is created at the moment of play.
 
+// Cache for the per-user role lookup. Without it, every /admin/* request —
+// including RSC prefetches and the matcher-caught fan-out — translates 1:1
+// into a Neon roundtrip; a single signed-in user can saturate the pooled
+// connection by spamming admin URLs. TTL kept short so role changes
+// (promote/demote) propagate quickly. The cache lives in module scope and
+// is process-local; Vercel Fluid Compute reuses instances across requests,
+// so the amortisation actually happens.
+const ROLE_CACHE_TTL_MS = 5_000;
+const roleCache = new Map<string, { role: string | null; expiresAt: number }>();
+
+async function getUserRoleCached(userId: string): Promise<string | null> {
+  const now = Date.now();
+  const hit = roleCache.get(userId);
+  if (hit && hit.expiresAt > now) return hit.role;
+  const [row] = await db
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  const role = row?.role ?? null;
+  roleCache.set(userId, { role, expiresAt: now + ROLE_CACHE_TTL_MS });
+  return role;
+}
+
 export default clerkMiddleware(async (auth, req) => {
   if (isAdminRoute(req)) {
     const { userId, redirectToSignIn } = await auth();
     if (!userId) return redirectToSignIn({ returnBackUrl: req.url });
 
-    const [row] = await db
-      .select({ role: users.role })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-
-    if (!row || row.role !== "admin") {
+    const role = await getUserRoleCached(userId);
+    if (role !== "admin") {
       return NextResponse.redirect(new URL("/", req.url));
     }
     return;
