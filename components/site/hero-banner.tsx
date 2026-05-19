@@ -132,8 +132,8 @@ export function HeroBanner({
               href={`/shows/${slug}`}
               className="inline-flex h-11 items-center gap-2 rounded-md border border-white/15 bg-white/15 px-7 text-sm font-semibold text-white backdrop-blur-xl transition-colors hover:bg-white/25"
             >
-              <Icon name="plus" size={16} />
-              My List
+              <Icon name="info" size={16} />
+              More info
             </Link>
           </div>
         </div>
