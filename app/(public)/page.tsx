@@ -109,8 +109,8 @@ export default async function HomePage() {
     shows: typeof published;
     size: "default" | "big";
   }> = [
-    { key: "just-released", label: "Just released", shows: justReleased, size: "default" as const },
-    { key: "popular-now", label: "Popular now", shows: popularNow, size: "default" as const },
+    { key: "just-released", label: "Just released", shows: justReleased, size: "big" as const },
+    { key: "popular-now", label: "Popular now", shows: popularNow, size: "big" as const },
   ].filter((s) => s.shows.length > 0);
 
   return (
