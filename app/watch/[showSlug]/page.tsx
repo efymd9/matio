@@ -14,11 +14,7 @@ import {
 import { Player, type PlayerEpisode } from "@/components/watch/player";
 import { WatchShell } from "@/components/watch/watch-shell";
 import { muxThumbnailUrl } from "@/lib/mux-token";
-import {
-  TRIAL_COOKIE,
-  getOrCreateTrialSession,
-  isTrialActive,
-} from "@/lib/trial";
+import { TRIAL_COOKIE, findTrialSession, isTrialActive } from "@/lib/trial";
 
 export default async function WatchPage({
   params,
@@ -181,19 +177,23 @@ export default async function WatchPage({
     );
   }
 
-  const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
-  if (!sessionToken) {
-    redirect(`/subscribe?show=${show.slug}`);
-  }
-
-  const trial = await getOrCreateTrialSession(sessionToken, show.id);
-
-  // We intentionally don't short-circuit on trial.converted here — a former
+  // Trial branch. The trial row is created lazily inside
+  // /api/playback-token when the player actually requests a token — that
+  // way the 60-second clock starts on play, not on page load, and we never
+  // record a row for an unpublished show. Here we only *read* the row to
+  // decide whether to render the player or bounce an expired-trial user
+  // straight to /subscribe.
+  //
+  // We intentionally don't short-circuit on trial.converted — a former
   // subscriber (paid then canceled) with a still-set cookie would otherwise
   // get subscriber-mode access for life. Active subscribers were already
-  // caught by the isSubscriber check above; everyone else falls through to
-  // the trial-expiry / new-trial flow.
-  if (!isTrialActive(trial)) {
+  // caught by the isSubscriber check above.
+  const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value ?? null;
+  const trial = sessionToken
+    ? await findTrialSession(sessionToken, show.id)
+    : null;
+
+  if (trial && !isTrialActive(trial)) {
     const sp = new URLSearchParams({ show: show.slug });
     // lastPositionSeconds is only meaningful for the user's first trial of
     // this show; for a converted trial it's a stale offset from before they
@@ -212,7 +212,7 @@ export default async function WatchPage({
         showTitle={show.title}
         episodes={playable}
         initialEpisodeId={initial.id}
-        resumeSeconds={queryResume ?? (trial.lastPositionSeconds || null)}
+        resumeSeconds={queryResume ?? (trial?.lastPositionSeconds || null)}
       />
     </WatchShell>
   );

@@ -1,6 +1,7 @@
 import "server-only";
+import crypto from "node:crypto";
 import { auth } from "@clerk/nextjs/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, count, eq, gt, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
 import { trialSessions, type TrialSession } from "@/db/schema";
@@ -8,25 +9,27 @@ import { trialSessions, type TrialSession } from "@/db/schema";
 export const TRIAL_DURATION_SECONDS = 60;
 export const TRIAL_COOKIE = "trial_session";
 
-// Creates a trial_sessions row for (sessionToken, showId) if one doesn't
-// already exist, then returns the row. Idempotent — concurrent visits to the
-// same show with the same cookie won't duplicate.
-export async function getOrCreateTrialSession(
+// Cap on trial-row creations per (client-IP, show) per hour. Stops the
+// "clear cookies → fresh 60s" loop without disrupting households on a
+// shared IP watching different shows.
+export const TRIAL_RATELIMIT_PER_HOUR = 3;
+const RATELIMIT_WINDOW_MS = 60 * 60 * 1000;
+
+// Lightweight error so the route handler can map to a 429 cleanly.
+export class TrialRateLimitError extends Error {
+  constructor() {
+    super("Trial rate limit exceeded");
+    this.name = "TrialRateLimitError";
+  }
+}
+
+// Read-only lookup. Returns null if the (cookie, show) pair has no row yet —
+// which is the steady-state for a first-time visitor or for a returning
+// user visiting a new show on the same cookie.
+export async function findTrialSession(
   sessionToken: string,
   showId: string,
-): Promise<TrialSession> {
-  const expiresAt = new Date(Date.now() + TRIAL_DURATION_SECONDS * 1000);
-
-  const inserted = await db
-    .insert(trialSessions)
-    .values({ sessionToken, showId, expiresAt })
-    .onConflictDoNothing({
-      target: [trialSessions.sessionToken, trialSessions.showId],
-    })
-    .returning();
-
-  if (inserted.length > 0) return inserted[0];
-
+): Promise<TrialSession | null> {
   const [existing] = await db
     .select()
     .from(trialSessions)
@@ -37,12 +40,81 @@ export async function getOrCreateTrialSession(
       ),
     )
     .limit(1);
+  return existing ?? null;
+}
 
+// Mint a fresh trial_sessions row for (sessionToken, showId). The (token,
+// show) unique constraint makes this idempotent under multi-tab races. If
+// ipHash is provided, enforces TRIAL_RATELIMIT_PER_HOUR / (ip, show) /
+// hour and throws TrialRateLimitError when exceeded.
+export async function mintTrialSession({
+  sessionToken,
+  showId,
+  ipHash,
+}: {
+  sessionToken: string;
+  showId: string;
+  ipHash: string | null;
+}): Promise<TrialSession> {
+  if (ipHash) {
+    const since = new Date(Date.now() - RATELIMIT_WINDOW_MS);
+    const [{ value }] = await db
+      .select({ value: count() })
+      .from(trialSessions)
+      .where(
+        and(
+          eq(trialSessions.ipHash, ipHash),
+          eq(trialSessions.showId, showId),
+          gt(trialSessions.startedAt, since),
+        ),
+      );
+    if (value >= TRIAL_RATELIMIT_PER_HOUR) {
+      throw new TrialRateLimitError();
+    }
+  }
+
+  const expiresAt = new Date(Date.now() + TRIAL_DURATION_SECONDS * 1000);
+  const inserted = await db
+    .insert(trialSessions)
+    .values({ sessionToken, showId, expiresAt, ipHash })
+    .onConflictDoNothing({
+      target: [trialSessions.sessionToken, trialSessions.showId],
+    })
+    .returning();
+  if (inserted.length > 0) return inserted[0];
+
+  // Conflict path: another concurrent request already created the row for
+  // this (sessionToken, showId). Read it back.
+  const existing = await findTrialSession(sessionToken, showId);
   if (!existing) {
-    // Should be unreachable: insert was a no-op so a row must exist.
     throw new Error("trial_sessions row vanished between upsert and select");
   }
   return existing;
+}
+
+// Derives the stable hash bucket for rate-limiting. Uses the Mux signing
+// private key as the HMAC salt — it's already required server-side, never
+// shipped to the client, and rotates with the signing key. Returns null if
+// the salt is missing or the IP is empty (rate-limit then skipped, which
+// fail-opens — preferable to locking out legitimate users behind a quirky
+// proxy chain).
+export function hashClientIp(ip: string | null | undefined): string | null {
+  if (!ip) return null;
+  const salt = process.env.MUX_SIGNING_KEY_PRIVATE_KEY;
+  if (!salt) return null;
+  return crypto.createHmac("sha256", salt).update(ip).digest("hex");
+}
+
+// Pulls the client IP from a NextRequest. Vercel sets `x-forwarded-for` to
+// `client, proxy1, proxy2` — the leftmost entry is what we want.
+export function getClientIp(req: { headers: Headers }): string | null {
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
+  }
+  const real = req.headers.get("x-real-ip");
+  return real?.trim() || null;
 }
 
 // Called from pages that the user lands on after Clerk sign-up. Attaches any
