@@ -2,7 +2,6 @@ import "server-only";
 import Stripe from "stripe";
 
 declare global {
-  // eslint-disable-next-line no-var
   var __stripeClient: Stripe | undefined;
 }
 

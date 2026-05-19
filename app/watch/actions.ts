@@ -30,11 +30,11 @@ export async function saveWatchProgress(
 
 // Trial-mode position save: keyed on (session_token, show_id), looked up via
 // the episode's season → show relationship. Anonymous-only — subscribers
-// route to saveWatchProgress instead.
+// route to saveWatchProgress instead. Trial sessions don't track completion
+// (single-show trial; no Up Next), so the caller's third arg is dropped.
 export async function saveTrialPosition(
   episodeId: string,
   positionSeconds: number,
-  _completed: boolean,
 ) {
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   if (!sessionToken) return;

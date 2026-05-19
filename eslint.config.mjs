@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Loose design references — not part of the app bundle, not linted.
+    "example_design/**",
   ]),
 ]);
 

@@ -105,9 +105,11 @@ The watch surface uses **headless `<mux-video>` + media-chrome** for full visual
 
 **File layout:**
 - `components/watch/watch-shell.tsx` — fullscreen black canvas, cursor auto-hide on idle. No max-width; player sizes itself.
-- `components/watch/player.tsx` — `<MediaController>` + `<MuxVideo>` + Tailwind-styled chrome. Owns: token fetch / refresh / paywall, episode swap state, aspect-ratio detection, caption-track detection, lock toggle, overlay state.
-- `components/watch/episodes-overlay.tsx` — season-grouped episode picker. Portal'd to `document.body` (see [gotchas → media-chrome overlays](./gotchas.md#media-chrome)).
-- `components/watch/up-next-overlay.tsx` — bottom-right slide-in card with 7-second auto-advance.
+- `components/watch/player.tsx` — split into two components in one file:
+  - **`Player` (outer)** — owns state that should survive episode swaps: `currentEpisodeId`, overlay visibility, lock toggle, and the `swap` callback that updates the URL.
+  - **`EpisodePlayback` (inner, `key={current.id}`)** — owns per-episode state: token, expiresAt, paywall, aspect ratio, captions detection, skip-intro chip, last-saved position. The `key` prop is what makes this work: every episode swap unmounts and remounts the inner, so all per-episode state resets to its initial value naturally. This pattern is required by React 19's `react-hooks/set-state-in-effect` rule — see [gotchas → React 19 hooks rules](./gotchas.md#react-19-hooks-rules).
+- `components/watch/episodes-overlay.tsx` — season-grouped episode picker. Portal'd to `document.body` (see [gotchas → media-chrome overlays](./gotchas.md#media-chrome)). Uses `useSyncExternalStore` for an SSR-safe "are we on the client" check (not `useState + useEffect(setMounted)` — see gotchas).
+- `components/watch/up-next-overlay.tsx` — bottom-right slide-in card with 7-second auto-advance. Same `useSyncExternalStore` SSR pattern.
 - `components/watch/paywall.tsx` — soft-sidekick bottom sheet shown on trial expiry / token 403.
 
 **Chrome layout (all positioned relative to `MediaController`):**
@@ -124,10 +126,13 @@ The watch surface uses **headless `<mux-video>` + media-chrome** for full visual
 **Episode swap (`?ep=<id>` URL sync):**
 
 1. User clicks Episodes → overlay shows season-grouped list with real Mux thumbnails.
-2. Selecting an episode → `setCurrentEpisodeId` + close overlay + `router.replace(`?ep=<id>`, { scroll: false })`. `?resume=` is stripped on swap so stale offsets don't replay.
-3. The token-fetch effect (keyed on `current.id`) re-runs and pulls a fresh playback JWT for the new episode.
-4. Subscriber: cross-session resume from `watch_progress` only applies to the initial episode (server-rendered); subsequent swaps start from 0 by design.
-5. Trial: `trial_sessions` is keyed at the show level, so any episode in the show plays during the active trial window.
+2. Selecting an episode → outer `Player` calls `setCurrentEpisodeId(id)` + closes overlay + `router.replace(?ep=<id>, { scroll: false })`. `?resume=` is stripped on swap so stale offsets don't replay.
+3. The outer's `current.id` flips → the inner `EpisodePlayback` (keyed on `current.id`) unmounts and remounts. Token state, paywall flag, aspect ratio, caption detection, skip-intro chip, and last-saved position all start fresh — no manual resets in effect bodies.
+4. The new inner's token-fetch effect fires on mount → pulls a JWT for the new episode. During the fetch the inner renders the "Loading" splash (`token === null`).
+5. Subscriber: cross-session resume from `watch_progress` only applies to the initial episode (server-rendered); subsequent swaps start from 0 by design.
+6. Trial: `trial_sessions` is keyed at the show level, so any episode in the show plays during the active trial window.
+
+The downside of the keyed-remount pattern is a brief Loading splash on every swap (the `<MediaController>` + `<MuxVideo>` are torn down and rebuilt rather than reusing the same element with a new `playbackId`). The trade-off is that React 19's hook-rule lint passes cleanly and the per-episode state model stays simple — no `useEffect(() => setX(initial), [current.id])` reset patterns.
 
 **Up Next:** the `<MuxVideo onEnded>` handler saves completion to progress and, if a next episode exists in the `episodes` list, sets `overlay="upnext"`. The card shows the next episode poster + label + 7-second countdown progress bar; **Watch now** swaps immediately, **Cancel** dismisses.
 

@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+
+// SSR-safe "are we on the client" flag without setState-in-effect.
+// Server snapshot returns false; client snapshot returns true. No subscription
+// — the value never changes after hydration.
+const subscribe = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 import { Icon } from "@/components/site/icon";
 import type { PlayerEpisode } from "./player";
@@ -23,10 +30,13 @@ export function EpisodesOverlay({
   onSelect: (episodeId: string) => void;
   onClose: () => void;
 }) {
-  // Portals need a browser-mounted target; gate the render on a client-side
-  // mount flag so SSR doesn't try to portal into a non-existent body.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  // Portals need a browser-mounted target; useSyncExternalStore returns false
+  // during SSR and true once we're hydrated, so we render null on the server.
+  const mounted = useSyncExternalStore(
+    subscribe,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

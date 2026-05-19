@@ -45,11 +45,14 @@ export type PlayerEpisode = {
 };
 
 type Mode = "subscriber" | "trial";
+type OverlayKind = "none" | "episodes" | "upnext";
 
-// Custom chrome built on media-chrome primitives over a headless mux-video.
-// Owns the current-episode state so users can swap episodes (via the
-// Episodes overlay or "Up Next" countdown) without leaving the page —
-// the playback token is re-fetched per episode.
+// Outer shell owns episode selection, overlay visibility, and the locked
+// flag — none of which should reset on episode swap. The inner
+// EpisodePlayback is keyed on current.id, so swapping episodes unmounts
+// and remounts it, which is what naturally resets per-episode state
+// (token, paywall, aspect ratio, captions, skip-intro, last-saved
+// position) without needing setState calls at the top of effects.
 export function Player({
   episodes,
   initialEpisodeId,
@@ -69,39 +72,12 @@ export function Player({
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const lastSavedRef = useRef<number>(0);
-
-  // Currently playing episode — initial from server, then driven by overlay
-  // selection / Up Next. resumeSecondsForCurrent only applies to the first
-  // episode shown (server-side computed from query param + watch_progress).
   const [currentEpisodeId, setCurrentEpisodeId] = useState(initialEpisodeId);
-  const [token, setToken] = useState<string | null>(null);
-  const [expiresAt, setExpiresAt] = useState<number | null>(null);
-  const [paywall, setPaywall] = useState(false);
-  const [overlay, setOverlay] = useState<"none" | "episodes" | "upnext">(
-    "none",
-  );
-  const [showSkipIntro, setShowSkipIntro] = useState(false);
-  // Lock state hides all chrome + makes it non-interactive so accidental
-  // taps on a phone don't pause / seek / open overlays. A single tap on
-  // the unlock pill restores the chrome.
+  const [overlay, setOverlay] = useState<OverlayKind>("none");
   const [locked, setLocked] = useState(false);
-  // Whether the underlying media element exposes at least one real
-  // caption/subtitle track. media-chrome's built-in auto-hide on
-  // <MediaCaptionsButton> doesn't catch every case (Mux sometimes surfaces
-  // empty/CEA-608 placeholders), so we gate the button on our own check.
-  const [hasCaptions, setHasCaptions] = useState(false);
-  // Live aspect ratio of the currently playing asset, read off the
-  // video element once metadata is available. Default 16:9 so the
-  // first paint isn't a zero-height container; gets corrected to e.g.
-  // 9/16 for portrait shorts within ~200ms of the manifest arriving.
-  // Re-read on every episode swap (each manifest may differ).
-  const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
 
   const current = useMemo(
-    () =>
-      episodes.find((e) => e.id === currentEpisodeId) ?? episodes[0],
+    () => episodes.find((e) => e.id === currentEpisodeId) ?? episodes[0],
     [episodes, currentEpisodeId],
   );
   const currentIdx = episodes.findIndex((e) => e.id === current.id);
@@ -109,21 +85,106 @@ export function Player({
     currentIdx >= 0 && currentIdx < episodes.length - 1
       ? episodes[currentIdx + 1]
       : null;
-  const episodeLabel = `S${current.seasonNumber}·E${current.number}`;
 
   // Only honor server-provided resume on the initially loaded episode;
-  // subsequent swaps start from 0 (or from media-chrome's own auto-recovery).
+  // subsequent swaps start from 0 by design.
   const resumeForThisLoad =
-    current.id === initialEpisodeId ? resumeSeconds : null;
+    current.id === initialEpisodeId ? (resumeSeconds ?? null) : null;
 
-  // Fetch playback token whenever the current episode changes.
+  // Swap to a different episode — updates the URL, closes any open
+  // overlay, and triggers the inner remount via the key change.
+  const swap = useCallback(
+    (episodeId: string) => {
+      if (episodeId === currentEpisodeId) {
+        setOverlay("none");
+        return;
+      }
+      setCurrentEpisodeId(episodeId);
+      setOverlay("none");
+      const sp = new URLSearchParams(searchParams?.toString() ?? "");
+      sp.set("ep", episodeId);
+      // Resume only applies to the initial render — strip it so a swap
+      // doesn't replay a stale offset.
+      sp.delete("resume");
+      router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
+    },
+    [currentEpisodeId, pathname, router, searchParams],
+  );
+
+  return (
+    <EpisodePlayback
+      key={current.id}
+      current={current}
+      next={next}
+      episodes={episodes}
+      mode={mode}
+      showSlug={showSlug}
+      showTitle={showTitle}
+      resumeSeconds={resumeForThisLoad}
+      locked={locked}
+      onLockChange={setLocked}
+      overlay={overlay}
+      onOverlayChange={setOverlay}
+      onSwap={swap}
+    />
+  );
+}
+
+function EpisodePlayback({
+  current,
+  next,
+  episodes,
+  mode,
+  showSlug,
+  showTitle,
+  resumeSeconds,
+  locked,
+  onLockChange,
+  overlay,
+  onOverlayChange,
+  onSwap,
+}: {
+  current: PlayerEpisode;
+  next: PlayerEpisode | null;
+  episodes: PlayerEpisode[];
+  mode: Mode;
+  showSlug: string;
+  showTitle?: string;
+  resumeSeconds: number | null;
+  locked: boolean;
+  onLockChange: (locked: boolean) => void;
+  overlay: OverlayKind;
+  onOverlayChange: (overlay: OverlayKind) => void;
+  onSwap: (episodeId: string) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  // Mirrored ref + state: ref handles the fast tick comparison inside the
+  // 10s interval (avoids re-creating the interval on every save), state
+  // is what the paywall branch reads (refs can't be accessed in render).
+  const lastSavedRef = useRef(0);
+  const [lastSaved, setLastSaved] = useState(0);
+  const [token, setToken] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
+  const [paywall, setPaywall] = useState(false);
+  const [showSkipIntro, setShowSkipIntro] = useState(false);
+  // Whether the underlying media element exposes at least one real
+  // caption/subtitle track. media-chrome's built-in auto-hide on
+  // <MediaCaptionsButton> doesn't catch every case (Mux sometimes surfaces
+  // empty/CEA-608 placeholders), so we gate the button on our own check.
+  const [hasCaptions, setHasCaptions] = useState(false);
+  // Live aspect ratio of the playing asset, read off the video element
+  // once metadata is available. Default 16:9 so the first paint isn't a
+  // zero-height container; corrects to e.g. 9/16 for portrait shorts
+  // within ~200ms of the manifest arriving.
+  const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
+
+  const episodeLabel = `S${current.seasonNumber}·E${current.number}`;
+
+  // Fetch playback token. Inner is keyed on current.id, so this runs
+  // exactly once per episode-mount; per-episode state starts at its
+  // initial value (no setState resets at the top of the effect body).
   useEffect(() => {
     let cancelled = false;
-    setToken(null);
-    setExpiresAt(null);
-    setPaywall(false);
-    setShowSkipIntro(false);
-    lastSavedRef.current = 0;
     fetch(
       `/api/playback-token?episode_id=${encodeURIComponent(current.id)}`,
       { cache: "no-store" },
@@ -142,8 +203,7 @@ export function Player({
         setExpiresAt(Date.now() + data.expiresIn * 1000);
       })
       .catch(() => {
-        if (cancelled) return;
-        setPaywall(true);
+        if (!cancelled) setPaywall(true);
       });
     return () => {
       cancelled = true;
@@ -188,42 +248,37 @@ export function Player({
       const t = Math.floor(el.currentTime ?? 0);
       if (t > 0 && t !== lastSavedRef.current) {
         lastSavedRef.current = t;
-        const fn = mode === "trial" ? saveTrialPosition : saveWatchProgress;
-        void fn(current.id, t, false).catch(() => {});
+        setLastSaved(t);
+        if (mode === "trial") {
+          void saveTrialPosition(current.id, t).catch(() => {});
+        } else {
+          void saveWatchProgress(current.id, t, false).catch(() => {});
+        }
       }
     }, 10_000);
     return () => clearInterval(interval);
   }, [current.id, mode]);
 
-  // Seek to resume position once the player has metadata for the initial
-  // episode. Swaps reset to 0 by design.
+  // Seek to resume position once the player has metadata for the episode.
   useEffect(() => {
-    if (!token || !resumeForThisLoad || resumeForThisLoad <= 0) return;
+    if (!token || !resumeSeconds || resumeSeconds <= 0) return;
     const el = videoRef.current;
     if (!el) return;
     const handler = () => {
-      if ((el.currentTime ?? 0) < resumeForThisLoad) {
-        el.currentTime = resumeForThisLoad;
+      if ((el.currentTime ?? 0) < resumeSeconds) {
+        el.currentTime = resumeSeconds;
       }
     };
     el.addEventListener("loadedmetadata", handler, { once: true });
     return () => el.removeEventListener("loadedmetadata", handler);
-  }, [token, resumeForThisLoad]);
-
-  // Reset aspect-ratio to the default when episode changes so the next
-  // asset's `loadedmetadata` event gets a clean slate; without this a
-  // 16:9 → 9:16 swap would briefly render at the wrong ratio.
-  useEffect(() => {
-    setAspectRatio(16 / 9);
-  }, [current.id]);
+  }, [token, resumeSeconds]);
 
   // Detect real caption/subtitle tracks on the underlying media element so
-  // we can decide whether to even render the CC button. The textTracks list
-  // is populated asynchronously by HLS as it parses the manifest, so we
-  // both poll the list once and subscribe to `addtrack`. Reset on episode
-  // change because each episode has its own manifest.
+  // we can decide whether to render the CC button. The textTracks list is
+  // populated asynchronously by HLS as the manifest parses, so we both
+  // poll once and subscribe to add/remove events. The check() runs at the
+  // top of the effect and sets the correct value, so no reset is needed.
   useEffect(() => {
-    setHasCaptions(false);
     const el = videoRef.current;
     if (!el) return;
     const check = () => {
@@ -233,8 +288,7 @@ export function Player({
       // language hint so empty placeholders don't activate the button.
       const real = tracks.some(
         (t) =>
-          (t.kind === "captions" || t.kind === "subtitles") &&
-          !!t.language,
+          (t.kind === "captions" || t.kind === "subtitles") && !!t.language,
       );
       setHasCaptions(real);
     };
@@ -246,18 +300,16 @@ export function Player({
       el.textTracks.removeEventListener?.("addtrack", onAdd);
       el.textTracks.removeEventListener?.("removetrack", onAdd);
     };
-  }, [token, current.id]);
+  }, [token]);
 
   // Skip-intro chip — visible while currentTime falls inside the episode's
-  // intro window. Only activates when both markers are present (admin-set;
-  // null on all episodes until the UI for it lands).
+  // intro window. Only activates when both markers are present (admin-set
+  // in the episode edit form). When markers are missing the effect bails
+  // immediately; showSkipIntro starts false on this mount so no reset.
   useEffect(() => {
     const start = current.introStartSeconds;
     const end = current.introEndSeconds;
-    if (start == null || end == null || end <= start) {
-      setShowSkipIntro(false);
-      return;
-    }
+    if (start == null || end == null || end <= start) return;
     const el = videoRef.current;
     if (!el) return;
     const update = () => {
@@ -267,34 +319,13 @@ export function Player({
     update();
     el.addEventListener("timeupdate", update);
     return () => el.removeEventListener("timeupdate", update);
-  }, [current.introStartSeconds, current.introEndSeconds, current.id, token]);
-
-  // Swap to a different episode — updates state + URL, closes any open
-  // overlay, and the effect chain handles fresh token + reset.
-  const swap = useCallback(
-    (episodeId: string) => {
-      if (episodeId === currentEpisodeId) {
-        setOverlay("none");
-        return;
-      }
-      setCurrentEpisodeId(episodeId);
-      setOverlay("none");
-      const sp = new URLSearchParams(searchParams?.toString() ?? "");
-      sp.set("ep", episodeId);
-      // Resume position only applies to the initial render — strip it now
-      // so a swap doesn't replay a stale offset.
-      sp.delete("resume");
-      router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
-    },
-    [currentEpisodeId, pathname, router, searchParams],
-  );
+  }, [current.introStartSeconds, current.introEndSeconds, token]);
 
   if (paywall) {
-    const lastPos = lastSavedRef.current;
     return (
       <Paywall
         showSlug={showSlug}
-        resumeSeconds={lastPos || undefined}
+        resumeSeconds={lastSaved || undefined}
         showTitle={showTitle}
         episodeLabel={episodeLabel}
       />
@@ -385,11 +416,13 @@ export function Player({
           const el = videoRef.current;
           if (el) {
             const t = Math.floor(el.duration ?? 0);
-            const fn =
-              mode === "trial" ? saveTrialPosition : saveWatchProgress;
-            void fn(current.id, t, true).catch(() => {});
+            if (mode === "trial") {
+              void saveTrialPosition(current.id, t).catch(() => {});
+            } else {
+              void saveWatchProgress(current.id, t, true).catch(() => {});
+            }
           }
-          if (next) setOverlay("upnext");
+          if (next) onOverlayChange("upnext");
         }}
         className="h-full w-full"
       />
@@ -544,7 +577,7 @@ export function Player({
             <button
               type="button"
               aria-label="Lock controls"
-              onClick={() => setLocked(true)}
+              onClick={() => onLockChange(true)}
               className="text-current transition-colors hover:text-white"
             >
               <Icon name="lock" size={18} />
@@ -558,7 +591,7 @@ export function Player({
             />
             <button
               type="button"
-              onClick={() => setOverlay("episodes")}
+              onClick={() => onOverlayChange("episodes")}
               className="rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15"
             >
               Episodes
@@ -566,7 +599,7 @@ export function Player({
             {next ? (
               <button
                 type="button"
-                onClick={() => swap(next.id)}
+                onClick={() => onSwap(next.id)}
                 className="rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15"
               >
                 Up Next
@@ -615,7 +648,7 @@ export function Player({
       {locked ? (
         <button
           type="button"
-          onClick={() => setLocked(false)}
+          onClick={() => onLockChange(false)}
           className="absolute left-1/2 top-1/2 z-20 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-white/20 bg-black/60 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur-xl transition-colors hover:bg-black/75"
           aria-label="Unlock controls"
         >
@@ -630,16 +663,16 @@ export function Player({
           episodes={episodes}
           currentEpisodeId={current.id}
           showSlug={showSlug}
-          onSelect={swap}
-          onClose={() => setOverlay("none")}
+          onSelect={onSwap}
+          onClose={() => onOverlayChange("none")}
         />
       ) : null}
       {overlay === "upnext" && next ? (
         <UpNextOverlay
           next={next}
           showSlug={showSlug}
-          onPlayNow={() => swap(next.id)}
-          onCancel={() => setOverlay("none")}
+          onPlayNow={() => onSwap(next.id)}
+          onCancel={() => onOverlayChange("none")}
         />
       ) : null}
     </MediaController>

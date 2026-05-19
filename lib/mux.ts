@@ -2,7 +2,6 @@ import "server-only";
 import Mux from "@mux/mux-node";
 
 declare global {
-  // eslint-disable-next-line no-var
   var __muxClient: Mux | undefined;
 }
 

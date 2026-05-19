@@ -42,6 +42,64 @@ Next 16 mandates `jsx: react-jsx` and silently rewrites tsconfig on first build.
 
 `app/(public)/page.tsx` and `app/page.tsx` both resolve to `/`. The `(group)` is purely organizational — sharing a layout or signaling intent. Having both = build error.
 
+## React 19 hooks rules
+
+`eslint-config-next@16` ships `eslint-plugin-react-hooks@5+`, which adds two rules that flag patterns that were idiomatic in React 18 and earlier. Both fail the Vercel build by default (Next runs ESLint during `next build`).
+
+### `react-hooks/set-state-in-effect` — no synchronous setState in an effect body
+
+This fails:
+```ts
+useEffect(() => {
+  setX(initial);   // ← flagged: cascading render
+  doAsync().then((v) => setX(v));
+}, [dep]);
+```
+
+The reset is treated as "synchronous setState in an effect body" — React 19 wants the body of an effect to either sync with an external system or call setState only from a callback (event handler, fetch resolver, etc.). The classic "reset state when a prop changes" use case has to be expressed a different way.
+
+Three fixes, in order of preference:
+
+1. **Key-based remount on a child component.** Lift the resettable state into a child and pass a `key` that changes when you want the reset. Mount/unmount handles the reset, no setState-in-effect needed. This is what `components/watch/player.tsx` does — outer `Player` owns selection state, inner `EpisodePlayback` is `key={current.id}` and owns per-episode state.
+
+2. **Move setState into a callback.** If the value is fetched, set it only inside the `.then()`/`onSuccess` — the rule fires on synchronous-in-body, not on callbacks.
+
+3. **Derive state from props during render.** If the "state" is actually a function of props, drop it from state entirely and compute during render or via `useMemo`.
+
+### Refs during render
+
+```ts
+if (paywall) {
+  const lastPos = lastSavedRef.current;   // ← flagged
+  return <Paywall resumeSeconds={lastPos} />;
+}
+```
+
+Reading (or writing) `ref.current` during render breaks React 19's component-update invariant. Fix: keep the ref for fast access inside callbacks (intervals, event handlers, effects), but mirror the value to state for anything render needs. `EpisodePlayback` does both — `lastSavedRef` is used inside the 10s save interval (allowed), `lastSaved` state is what the paywall branch reads.
+
+### `useSyncExternalStore` for SSR-safe "client only" flags
+
+The setMounted pattern is flagged by `set-state-in-effect`:
+```ts
+const [mounted, setMounted] = useState(false);
+useEffect(() => setMounted(true), []);   // ← flagged
+```
+
+Replace with `useSyncExternalStore`, which has a separate server snapshot:
+```ts
+const subscribe = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
+
+const mounted = useSyncExternalStore(
+  subscribe,
+  getClientSnapshot,
+  getServerSnapshot,
+);
+```
+
+Both `EpisodesOverlay` and `UpNextOverlay` use this for their portal-target check (`document.body` doesn't exist during SSR).
+
 ## Clerk 7 changes
 
 ### `<Show>` replaced `<SignedIn>` / `<SignedOut>`

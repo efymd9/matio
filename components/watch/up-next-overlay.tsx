@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+
+// SSR-safe "are we on the client" flag without setState-in-effect.
+const subscribe = () => () => {};
+const getClientSnapshot = () => true;
+const getServerSnapshot = () => false;
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 import type { PlayerEpisode } from "./player";
@@ -21,8 +26,11 @@ export function UpNextOverlay({
   onPlayNow: () => void;
   onCancel: () => void;
 }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(
+    subscribe,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
 
   const [remaining, setRemaining] = useState(COUNTDOWN_SECONDS);
   const tone = toneFor(showSlug);
