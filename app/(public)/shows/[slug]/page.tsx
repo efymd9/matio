@@ -176,24 +176,6 @@ export default async function ShowDetailPage({
             </p>
           )}
 
-          {/* Action row — list / rate / share, mirrors title.jsx */}
-          <div className="flex gap-1 pt-2">
-            {[
-              { icon: "plus" as const, label: "My List" },
-              { icon: "star" as const, label: "Rate" },
-              { icon: "share" as const, label: "Share" },
-            ].map((a) => (
-              <button
-                key={a.label}
-                type="button"
-                className="inline-flex flex-1 sm:flex-initial flex-col items-center gap-1.5 px-5 py-2 text-[11px] font-medium text-white/85 transition-colors hover:text-white"
-              >
-                <Icon name={a.icon} size={20} />
-                {a.label}
-              </button>
-            ))}
-          </div>
-
           {/* Tabs */}
           <div className="flex gap-6 border-b border-white/10 pt-2 text-sm font-semibold">
             <span className="border-b-2 border-[#ff3d3d] pb-3 text-white">
