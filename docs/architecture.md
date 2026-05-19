@@ -58,10 +58,10 @@ End-to-end:
      - `now > expires_at` → redirect to `/subscribe?show=<slug>&resume=<last_position_seconds>`.
      - Else → render in `trial` mode.
 3. **Player mounts** (`components/watch/player.tsx`):
-   - Fetches `/api/playback-token?episode_id=<id>`, captures `token` + `expiresIn`.
-   - Sets `expiresAt = Date.now() + expiresIn*1000`.
-   - Renders `MuxPlayer` with `tokens={{ playback }}`.
-   - `setTimeout(expiresAt - now)` fires at expiry → re-fetches token. Subscriber gets new 1h token. Trial gets 403 → `el.pause()` + Paywall overlay. This is what stops a buffered-ahead Mux stream from running past the cutoff.
+   - Outer `Player` picks the initial episode; the inner `EpisodePlayback` (keyed on `current.id`) does the actual playback work.
+   - Inner fetches `/api/playback-token?episode_id=<id>` on mount, captures `token` + `expiresIn`, sets `expiresAt = Date.now() + expiresIn*1000`.
+   - Renders `<MediaController>` + `<MuxVideo slot="media" playbackId tokens={{ playback }} />` (headless mux-video + media-chrome — not `@mux/mux-player-react`).
+   - `setTimeout(expiresAt - now)` fires at expiry → re-fetches token. Subscriber gets new 1h token. Trial gets 403 → `videoRef.current.pause()` + Paywall overlay. This is what stops a buffered-ahead Mux stream from running past the cutoff.
    - Every 10s while playing, writes `last_position_seconds` (trial → `trial_sessions`) or `watch_progress` (subscriber).
 4. **Token endpoint** (`app/api/playback-token/route.ts`): joins episode → season → show to find the show. If user has `subscriptions.status='active'` → 1h JWT. Else if trial row exists, returns JWT with `ttl = min(remaining, TRIAL_DURATION_SECONDS)`. Else 403.
 5. **Conversion linking**:
