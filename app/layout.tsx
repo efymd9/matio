@@ -4,6 +4,8 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { SiteHeader } from "@/components/site/site-header";
 import { UserMenu } from "@/components/site/user-menu";
+import { LocaleProvider } from "@/lib/i18n/client";
+import { getDict } from "@/lib/i18n/server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -29,40 +31,41 @@ const instrumentSerif = Instrument_Serif({
 // right host.
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://matio-ten.vercel.app";
 
-export const metadata: Metadata = {
-  metadataBase: new URL(APP_URL),
-  title: {
-    default: "matio — original stories, streamed",
-    template: "%s · matio",
-  },
-  description:
-    "A subscription streaming home for original short-form stories. Watch the first 60 seconds free.",
-  applicationName: "matio",
-  openGraph: {
-    type: "website",
-    siteName: "matio",
-    url: "/",
-    title: "matio — original stories, streamed",
-    description:
-      "A subscription streaming home for original short-form stories. Watch the first 60 seconds free.",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "matio",
-    description:
-      "Original stories, streamed. Watch the first 60 seconds free.",
-  },
-  robots: {
-    index: true,
-    follow: true,
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getDict();
+  return {
+    metadataBase: new URL(APP_URL),
+    title: {
+      default: t.metadata.siteTitle,
+      template: t.metadata.siteTitleTemplate,
+    },
+    description: t.metadata.siteDescription,
+    applicationName: "matio",
+    openGraph: {
+      type: "website",
+      siteName: "matio",
+      url: "/",
+      title: t.metadata.siteTitle,
+      description: t.metadata.siteDescription,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: t.metadata.twitterTitle,
+      description: t.metadata.twitterDescription,
+    },
+    robots: {
+      index: true,
+      follow: true,
+    },
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const { locale, t } = await getDict();
   return (
     <ClerkProvider
       appearance={{
@@ -78,12 +81,14 @@ export default function RootLayout({
       }}
     >
       <html
-        lang="en"
+        lang={t.htmlLang}
         className={`dark ${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
       >
         <body className="min-h-full bg-background font-sans text-foreground selection:bg-accent/40">
-          <SiteHeader authSlot={<UserMenu />} />
-          {children}
+          <LocaleProvider locale={locale}>
+            <SiteHeader authSlot={<UserMenu />} />
+            {children}
+          </LocaleProvider>
         </body>
       </html>
     </ClerkProvider>

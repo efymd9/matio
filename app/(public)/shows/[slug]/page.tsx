@@ -5,6 +5,8 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { muxThumbnailUrl } from "@/lib/mux-token";
+import { getDict } from "@/lib/i18n/server";
+import type { Dict } from "@/lib/i18n/dictionaries";
 
 // Per-show metadata: makes Slack / Twitter / iMessage unfurls show the
 // actual show title and (where set) its hero artwork instead of the
@@ -27,7 +29,8 @@ export async function generateMetadata({
       ),
     )
     .limit(1);
-  if (!show) return { title: "Not found" };
+  const { t } = await getDict();
+  if (!show) return { title: t.showDetail.notFound };
   const image = show.heroImageUrl ?? show.posterImageUrl ?? null;
   return {
     title: show.title,
@@ -68,6 +71,7 @@ export default async function ShowDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
+  const { t } = await getDict();
 
   const [show] = await db
     .select()
@@ -171,18 +175,16 @@ export default async function ShowDetailPage({
             {show.title}
           </h1>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-white/75">
-            <span className="font-semibold text-[#7fd87a]">● 96% match</span>
+            <span className="font-semibold text-[#7fd87a]">{t.showDetail.matchValue}</span>
             <span>{new Date(show.createdAt).getFullYear()}</span>
             <span className="rounded-[3px] border border-white/30 px-1.5 py-px text-[10px] font-medium uppercase">
-              16+
+              {t.showDetail.ageRating}
             </span>
             {totalEpisodes > 0 && (
-              <span>
-                {totalEpisodes} {totalEpisodes === 1 ? "episode" : "episodes"}
-              </span>
+              <span>{t.showDetail.episodeCount(totalEpisodes)}</span>
             )}
             <span className="rounded-[3px] border border-white/30 px-1.5 py-px text-[10px] font-medium uppercase">
-              HD
+              {t.showDetail.quality}
             </span>
           </div>
 
@@ -193,14 +195,14 @@ export default async function ShowDetailPage({
                 className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-white text-sm font-bold text-black transition-colors hover:bg-white/90"
               >
                 <Icon name="play" size={18} color="#0a0a0c" />
-                Play
+                {t.showDetail.play}
               </Link>
               <button
                 type="button"
                 className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-white/15 text-sm font-semibold text-white transition-colors hover:bg-white/25"
               >
                 <Icon name="download" size={16} />
-                Download episode 1
+                {t.showDetail.downloadEp1}
               </button>
             </div>
           )}
@@ -213,7 +215,7 @@ export default async function ShowDetailPage({
 
           {show.genre.length > 0 && (
             <p className="text-[11px] text-white/55 leading-relaxed">
-              <span className="text-white/40">Genre: </span>
+              <span className="text-white/40">{t.showDetail.genreLabel}</span>
               <span className="capitalize">{show.genre.join(" · ")}</span>
             </p>
           )}
@@ -221,10 +223,10 @@ export default async function ShowDetailPage({
           {/* Tabs */}
           <div className="flex gap-6 border-b border-white/10 pt-2 text-sm font-semibold">
             <span className="border-b-2 border-[#ff3d3d] pb-3 text-white">
-              Episodes
+              {t.showDetail.tabEpisodes}
             </span>
-            <span className="pb-3 text-white/50">Related</span>
-            <span className="pb-3 text-white/50">About</span>
+            <span className="pb-3 text-white/50">{t.showDetail.tabRelated}</span>
+            <span className="pb-3 text-white/50">{t.showDetail.tabAbout}</span>
           </div>
         </div>
       </section>
@@ -233,7 +235,9 @@ export default async function ShowDetailPage({
       <section className="mx-auto max-w-5xl px-6 pb-16 sm:px-12 sm:pb-20">
         {showSeasons.length === 0 ? (
           <div className="py-12 text-center">
-            <p className="text-2xl font-bold text-white/50">No episodes yet</p>
+            <p className="text-2xl font-bold text-white/50">
+              {t.showDetail.noEpisodesYetHeader}
+            </p>
           </div>
         ) : (
           <div className="space-y-12">
@@ -244,7 +248,7 @@ export default async function ShowDetailPage({
                   <div className="flex items-center justify-between rounded-md bg-white/[0.06] px-4 py-3">
                     <div className="flex items-baseline gap-3">
                       <h2 className="text-sm font-bold text-white">
-                        Season {season.number}
+                        {t.showDetail.season(season.number)}
                       </h2>
                       {season.title && (
                         <span className="text-xs text-white/60">
@@ -255,7 +259,7 @@ export default async function ShowDetailPage({
                     <Icon name="chevron-right" size={16} color="rgba(255,255,255,0.6)" />
                   </div>
                   {eps.length === 0 ? (
-                    <p className="text-sm text-white/55">No episodes yet.</p>
+                    <p className="text-sm text-white/55">{t.showDetail.noEpisodesYetLine}</p>
                   ) : (
                     <ul className="space-y-2">
                       {eps.map((ep) => (
@@ -264,6 +268,7 @@ export default async function ShowDetailPage({
                           ep={ep}
                           showSlug={show.slug}
                           tone={tone}
+                          t={t}
                         />
                       ))}
                     </ul>
@@ -282,10 +287,12 @@ function EpisodeRow({
   ep,
   showSlug,
   tone,
+  t,
 }: {
   ep: EpisodeRowData;
   showSlug: string;
   tone: ReturnType<typeof toneFor>;
+  t: Dict;
 }) {
   const playable = !!ep.muxPlaybackId && ep.status === "ready";
   const minutes = ep.durationSeconds
@@ -343,7 +350,11 @@ function EpisodeRow({
               {ep.number}. {ep.title}
             </h3>
             <span className="shrink-0 text-[11px] text-white/55">
-              {minutes ? `${minutes} min` : !playable ? "Soon" : ""}
+              {minutes
+                ? t.showDetail.minutes(minutes)
+                : !playable
+                  ? t.showDetail.soon
+                  : ""}
             </span>
           </div>
           {ep.description && (

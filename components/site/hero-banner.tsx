@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
+import { useT } from "@/lib/i18n/client";
 import { Icon } from "./icon";
 
 // Cinema-style hero. Layered:
@@ -36,6 +37,7 @@ export function HeroBanner({
   const [videoFailed, setVideoFailed] = useState(false);
   const backdrop = heroImageUrl ?? posterImageUrl;
   const tone = toneFor(slug);
+  const t = useT();
 
   return (
     <section className="relative isolate min-h-[640px] w-full overflow-hidden bg-background sm:h-[90vh]">
@@ -100,7 +102,7 @@ export function HeroBanner({
         <div className="max-w-2xl space-y-4">
           <div className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
             <Icon name="star" size={11} />
-            <span>Matio Original</span>
+            <span>{t.hero.matioOriginal}</span>
           </div>
           <h1 className="text-5xl font-extrabold leading-[0.95] tracking-[-0.02em] text-white sm:text-6xl lg:text-7xl">
             {title}
@@ -126,14 +128,14 @@ export function HeroBanner({
               className="inline-flex h-11 items-center gap-2 rounded-md bg-white px-7 text-sm font-bold text-black transition-all duration-300 hover:bg-white/90"
             >
               <Icon name="play" size={16} color="#0a0a0c" />
-              Play
+              {t.hero.play}
             </Link>
             <Link
               href={`/shows/${slug}`}
               className="inline-flex h-11 items-center gap-2 rounded-md border border-white/15 bg-white/15 px-7 text-sm font-semibold text-white backdrop-blur-xl transition-colors hover:bg-white/25"
             >
               <Icon name="info" size={16} />
-              More info
+              {t.hero.moreInfo}
             </Link>
           </div>
         </div>

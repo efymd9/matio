@@ -1,6 +1,7 @@
 "use client";
 
 import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
+import { useT } from "@/lib/i18n/client";
 
 // Wraps Clerk's UserButton with our custom "Manage subscription" item.
 // Has to live in a client component (not threaded through layout.tsx's
@@ -9,6 +10,7 @@ import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
 // that filtering doesn't survive crossing a server→client boundary as a
 // prop, so the custom items silently disappeared from the dropdown.
 export function UserMenu() {
+  const t = useT();
   return (
     <>
       <Show when="signed-out">
@@ -27,7 +29,7 @@ export function UserMenu() {
           <UserButton.MenuItems>
             <UserButton.Link
               href="/api/billing-portal"
-              label="Manage subscription"
+              label={t.userMenu.manageSubscription}
               labelIcon={<CreditCardIcon />}
             />
           </UserButton.MenuItems>

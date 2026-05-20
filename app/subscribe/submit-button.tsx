@@ -2,6 +2,7 @@
 
 import { useFormStatus } from "react-dom";
 import { Icon } from "@/components/site/icon";
+import { useT } from "@/lib/i18n/client";
 
 // Lives in its own client component so the parent /subscribe page stays a
 // pure server component. useFormStatus reads the wrapping form's pending
@@ -14,6 +15,7 @@ import { Icon } from "@/components/site/icon";
 // the button the tactile feel the design lacks otherwise.
 export function SubmitButton() {
   const { pending } = useFormStatus();
+  const t = useT();
   return (
     <button
       type="submit"
@@ -25,12 +27,12 @@ export function SubmitButton() {
       {pending ? (
         <>
           <Spinner />
-          <span>Redirecting to checkout…</span>
+          <span>{t.subscribe.redirectingToCheckout}</span>
         </>
       ) : (
         <>
           <Icon name="play" size={14} color="#ffffff" />
-          <span>Continue · Subscribe</span>
+          <span>{t.subscribe.continueSubscribe}</span>
         </>
       )}
     </button>

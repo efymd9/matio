@@ -1,11 +1,16 @@
 import { ImageResponse } from "next/og";
+import { es } from "@/lib/i18n/dictionaries";
 
 // Default OG image rendered at request time via next/og. 1200×630 is the
 // canonical OG card size used by Twitter, Slack, iMessage, and LinkedIn.
 // Per-show pages override this with their own OG via generateMetadata.
+//
+// Social-media crawlers don't carry our locale cookie, so the OG renders
+// in the site's default locale (Spanish). Per-show OGs still surface the
+// show's own title/description verbatim from the database.
 
 export const runtime = "edge";
-export const alt = "matio — original stories, streamed";
+export const alt = es.metadata.siteTitle;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -59,7 +64,7 @@ export default async function OpenGraphImage() {
               color: "#ff3d3d",
             }}
           >
-            Streaming originals
+            {es.og.kicker}
           </span>
           <span
             style={{
@@ -70,12 +75,12 @@ export default async function OpenGraphImage() {
               maxWidth: 980,
             }}
           >
-            Original stories,
+            {es.og.title[0]}
             <br />
-            streamed.
+            {es.og.title[1]}
           </span>
           <span style={{ fontSize: 26, color: "rgba(255,255,255,0.65)", marginTop: 12 }}>
-            Watch the first 60 seconds free.
+            {es.og.tagline}
           </span>
         </div>
       </div>

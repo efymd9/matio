@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT } from "@/lib/design";
+import { useT } from "@/lib/i18n/client";
 import { cn } from "@/lib/utils";
 
 // Soft-sidekick paywall (Variant B from the design): the player frame stays
@@ -35,6 +36,7 @@ export function Paywall({
   const [plan, setPlan] = useState<Plan>("annual");
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
+  const t = useT();
 
   const continueToSubscribe = () => {
     const params = new URLSearchParams({ show: showSlug, plan });
@@ -64,7 +66,7 @@ export function Paywall({
 
       {/* "Preview ended" red chip floats above the sheet */}
       <div className="absolute left-1/2 top-[28%] -translate-x-1/2 rounded-full bg-[#ff3d3d]/95 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-white backdrop-blur-md">
-        Preview complete
+        {t.paywall.previewComplete}
       </div>
 
       {/* Bottom sheet */}
@@ -73,15 +75,15 @@ export function Paywall({
           <div className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/20" aria-hidden />
 
           <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#ff3d3d]">
-            Continue watching
+            {t.paywall.continueWatching}
           </p>
           <h2 className="mt-1 text-xl font-extrabold leading-tight tracking-tight text-white sm:text-2xl">
-            {showTitle ?? "Your story"}
+            {showTitle ?? t.paywall.yourStory}
             {episodeLabel ? (
               <span className="ml-2 text-white/55">· {episodeLabel}</span>
             ) : null}
             <span className="block text-sm font-semibold text-white/55 sm:text-base">
-              Pick up where you left off.
+              {t.paywall.pickUpWhereLeftOff}
             </span>
           </h2>
 
@@ -92,7 +94,7 @@ export function Paywall({
           <div
             className="mt-4 grid grid-cols-2 gap-2.5"
             role="radiogroup"
-            aria-label="Choose a subscription plan"
+            aria-label={t.paywall.choosePlanAria}
           >
             <PlanOption
               kind="monthly"
@@ -117,17 +119,17 @@ export function Paywall({
             {isPending ? (
               <>
                 <Spinner />
-                <span>Continuing to checkout…</span>
+                <span>{t.paywall.continuingToCheckout}</span>
               </>
             ) : (
               <>
                 <Icon name="play" size={14} color="#ffffff" />
-                <span>Continue · Subscribe</span>
+                <span>{t.paywall.continueSubscribe}</span>
               </>
             )}
           </button>
           <p className="mt-2 text-center text-[10px] text-white/45">
-            Cancel anytime from your account.
+            {t.paywall.cancelAnytimeFromAccount}
           </p>
         </div>
       </div>
@@ -147,6 +149,7 @@ function PlanOption({
   discountBadge?: string;
 }) {
   const isAnnual = kind === "annual";
+  const t = useT();
   return (
     <button
       type="button"
@@ -176,7 +179,7 @@ function PlanOption({
           selected ? "text-white" : "text-white/60",
         )}
       >
-        {isAnnual ? "Annual" : "Monthly"}
+        {isAnnual ? t.paywall.annual : t.paywall.monthly}
       </p>
       <p className="mt-1 text-base font-bold text-white">
         {isAnnual ? "$79.99" : "$9.99"}
@@ -187,7 +190,7 @@ function PlanOption({
           selected ? "text-white/75" : "text-white/50",
         )}
       >
-        {isAnnual ? "≈ $6.67/mo" : "cancel anytime"}
+        {isAnnual ? t.paywall.perMonthApprox : t.paywall.cancelAnytime}
       </p>
 
       {/* Small radio dot top-left — empty ring by default, filled when

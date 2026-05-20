@@ -1,7 +1,8 @@
 import type { Show } from "@/db/schema";
+import { getDict } from "@/lib/i18n/server";
 import { ShowCard } from "./show-card";
 
-export function GenreRow({
+export async function GenreRow({
   genre,
   shows,
   priority = false,
@@ -12,6 +13,7 @@ export function GenreRow({
   priority?: boolean;
   size?: "default" | "big";
 }) {
+  const { t } = await getDict();
   return (
     <section className="space-y-2.5">
       <div className="flex items-baseline justify-between px-6 sm:px-12">
@@ -19,7 +21,7 @@ export function GenreRow({
           {genre}
         </h2>
         <span className="text-[11px] font-medium text-white/45 transition-colors hover:text-white/80">
-          See all →
+          {t.genreRow.seeAll}
         </span>
       </div>
       <div className="scrollbar-hidden overflow-x-auto">

@@ -4,8 +4,27 @@
 // crashes inside the root layout itself (Clerk provider, font loader,
 // etc.). Must declare <html>/<body> because the root layout is what
 // failed, so no other layout is wrapping us.
+//
+// The LocaleProvider lives inside the failed root layout, so we can't
+// useT() here. Instead we read the locale cookie directly off
+// document.cookie via useSyncExternalStore (SSR-safe; returns the
+// default locale on the server) and pluck the right dict from there.
 
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+import { dictFor, DEFAULT_LOCALE, type Locale } from "@/lib/i18n/dictionaries";
+
+const LOCALE_COOKIE = "locale";
+
+function readLocaleFromCookie(): Locale {
+  if (typeof document === "undefined") return DEFAULT_LOCALE;
+  const match = document.cookie.match(
+    new RegExp(`(?:^|; )${LOCALE_COOKIE}=([^;]+)`),
+  );
+  const value = match?.[1];
+  return value === "en" || value === "es" ? value : DEFAULT_LOCALE;
+}
+
+const subscribe = () => () => {};
 
 export default function GlobalError({
   error,
@@ -14,12 +33,19 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const locale = useSyncExternalStore(
+    subscribe,
+    readLocaleFromCookie,
+    () => DEFAULT_LOCALE,
+  );
+  const t = dictFor(locale);
+
   useEffect(() => {
     console.error(error);
   }, [error]);
 
   return (
-    <html lang="en">
+    <html lang={t.htmlLang}>
       <body
         style={{
           margin: 0,
@@ -56,13 +82,13 @@ export default function GlobalError({
               marginBottom: 18,
             }}
           >
-            Something glitched
+            {t.globalError.kicker}
           </p>
           <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0, lineHeight: 1 }}>
-            We&apos;ll catch the next take.
+            {t.globalError.title}
           </h1>
           <p style={{ marginTop: 16, color: "rgba(255,255,255,0.55)", fontSize: 14 }}>
-            The root layout failed to render. Refresh, or try again in a moment.
+            {t.globalError.body}
           </p>
           {error.digest && (
             <p
@@ -75,7 +101,7 @@ export default function GlobalError({
                 color: "rgba(255,255,255,0.35)",
               }}
             >
-              ref · {error.digest}
+              {t.globalError.refLabel} · {error.digest}
             </p>
           )}
           <button
@@ -94,7 +120,7 @@ export default function GlobalError({
               cursor: "pointer",
             }}
           >
-            Try again
+            {t.globalError.tryAgain}
           </button>
         </div>
       </body>

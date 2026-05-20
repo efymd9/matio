@@ -4,14 +4,17 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n/client";
 import { MatioLogo } from "./matio-logo";
 import { Icon } from "./icon";
+import { LanguageSwitcher } from "./language-switcher";
 
 // Sticky transparent → frosted-dark header. Hides on /watch (immersive
 // fullscreen player) and /admin (own nav).
 export function SiteHeader({ authSlot }: { authSlot: React.ReactNode }) {
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
+  const t = useT();
 
   const hidden = pathname?.startsWith("/watch") || pathname?.startsWith("/admin");
 
@@ -38,7 +41,7 @@ export function SiteHeader({ authSlot }: { authSlot: React.ReactNode }) {
         <Link
           href="/"
           className="group flex items-center transition-opacity hover:opacity-90"
-          aria-label="matio home"
+          aria-label={t.header.home}
         >
           <MatioLogo size={20} accent="#ff3d3d" color="#ffffff" />
         </Link>
@@ -47,23 +50,24 @@ export function SiteHeader({ authSlot }: { authSlot: React.ReactNode }) {
             href="/"
             className="transition-colors hover:text-white"
           >
-            Browse
+            {t.header.browse}
           </Link>
           <Link
             href="/subscribe"
             className="transition-colors hover:text-white"
           >
-            Subscribe
+            {t.header.subscribe}
           </Link>
         </nav>
-        <div className="ml-auto flex items-center gap-4">
+        <div className="ml-auto flex items-center gap-3 sm:gap-4">
           <button
             type="button"
-            aria-label="Search"
+            aria-label={t.header.search}
             className="hidden text-white/80 transition-colors hover:text-white sm:inline-flex"
           >
             <Icon name="search" size={20} />
           </button>
+          <LanguageSwitcher />
           {authSlot}
         </div>
       </div>

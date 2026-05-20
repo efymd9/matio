@@ -11,6 +11,7 @@ const getClientSnapshot = () => true;
 const getServerSnapshot = () => false;
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 import { Icon } from "@/components/site/icon";
+import { useT } from "@/lib/i18n/client";
 import type { PlayerEpisode } from "./player";
 
 // Episode picker over the player. Rendered via portal to document.body so
@@ -37,6 +38,7 @@ export function EpisodesOverlay({
     getClientSnapshot,
     getServerSnapshot,
   );
+  const t = useT();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -61,7 +63,7 @@ export function EpisodesOverlay({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Episodes"
+      aria-label={t.episodesOverlay.title}
       onClick={onClose}
       className="fixed inset-0 z-[100] flex flex-col bg-black/85 backdrop-blur-2xl"
     >
@@ -72,10 +74,10 @@ export function EpisodesOverlay({
         <header className="flex items-center justify-between pb-4 pt-5">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
-              Episodes
+              {t.episodesOverlay.title}
             </p>
             <h2 className="mt-1 text-xl font-extrabold tracking-tight text-white sm:text-2xl">
-              {episodes.length} episode{episodes.length === 1 ? "" : "s"}
+              {t.episodesOverlay.count(episodes.length)}
             </h2>
           </div>
           <button
@@ -84,7 +86,7 @@ export function EpisodesOverlay({
               e.stopPropagation();
               onClose();
             }}
-            aria-label="Close"
+            aria-label={t.episodesOverlay.closeAria}
             className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
           >
             <Icon name="close" size={18} />
@@ -96,7 +98,7 @@ export function EpisodesOverlay({
             return (
               <section key={sn} className="mb-6">
                 <h3 className="mb-3 text-sm font-bold text-white/85">
-                  Season {sn}
+                  {t.episodesOverlay.season(sn)}
                 </h3>
                 <ul className="space-y-2">
                   {eps.map((ep) => {
@@ -168,7 +170,7 @@ export function EpisodesOverlay({
                                 {ep.number}. {ep.title}
                               </h4>
                               <span className="shrink-0 font-mono text-[11px] text-white/55">
-                                {minutes ? `${minutes} min` : ""}
+                                {minutes ? t.episodesOverlay.minutes(minutes) : ""}
                               </span>
                             </div>
                             {ep.description ? (
@@ -178,7 +180,7 @@ export function EpisodesOverlay({
                             ) : null}
                             {isCurrent ? (
                               <p className="mt-1.5 text-[10px] font-bold uppercase tracking-[0.06em] text-[#ff3d3d]">
-                                Now playing
+                                {t.episodesOverlay.nowPlaying}
                               </p>
                             ) : null}
                           </div>

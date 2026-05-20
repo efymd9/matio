@@ -5,6 +5,7 @@ import { GenreRow } from "@/components/site/genre-row";
 import { HeroBanner } from "@/components/site/hero-banner";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
+import { getDict } from "@/lib/i18n/server";
 import { TRIAL_DURATION_SECONDS } from "@/lib/trial";
 // The hero auto-plays a muted preview of the featured show's first episode.
 // The signed JWT we mint here ends up in the HTML, so anyone can extract it
@@ -21,6 +22,7 @@ const PREVIEW_TTL_SECONDS = TRIAL_DURATION_SECONDS;
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  const { t } = await getDict();
   // One published-shows query, partitioned in JS into the two homepage
   // sections. A show can be in both, either, or neither — neither hides it
   // from / but it stays reachable at /shows/[slug].
@@ -41,13 +43,13 @@ export default async function HomePage() {
             <MatioLogo size={32} accent="#ff3d3d" />
           </div>
           <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-[#ff3d3d]">
-            Coming soon
+            {t.home.comingSoonKicker}
           </p>
           <h1 className="text-4xl font-extrabold leading-[0.95] tracking-tight text-white">
-            Stories worth your time.
+            {t.home.storiesHeadline}
           </h1>
           <p className="text-sm text-white/60">
-            The catalog is being curated. Check back shortly.
+            {t.home.catalogBeingCurated}
           </p>
         </div>
       </main>
@@ -109,8 +111,8 @@ export default async function HomePage() {
     shows: typeof published;
     size: "default" | "big";
   }> = [
-    { key: "just-released", label: "Just released", shows: justReleased, size: "big" as const },
-    { key: "popular-now", label: "Popular now", shows: popularNow, size: "big" as const },
+    { key: "just-released", label: t.home.justReleased, shows: justReleased, size: "big" as const },
+    { key: "popular-now", label: t.home.popularNow, shows: popularNow, size: "big" as const },
   ].filter((s) => s.shows.length > 0);
 
   return (

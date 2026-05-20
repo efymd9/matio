@@ -6,6 +6,8 @@ import { subscriptions, type Subscription } from "@/db/schema";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { Icon } from "@/components/site/icon";
 import { getOrSyncCurrentUser } from "@/lib/admin";
+import { getDict } from "@/lib/i18n/server";
+import type { Dict } from "@/lib/i18n/dictionaries";
 import { linkTrialSessionsToCurrentUser } from "@/lib/trial";
 import { startCheckout } from "./actions";
 import { SubmitButton } from "./submit-button";
@@ -29,6 +31,8 @@ export default async function SubscribePage({
 
   await linkTrialSessionsToCurrentUser();
 
+  const { t } = await getDict();
+
   const [existing] = await db
     .select()
     .from(subscriptions)
@@ -42,7 +46,7 @@ export default async function SubscribePage({
     .limit(1);
 
   if (existing) {
-    return <AlreadySubscribed sub={existing} />;
+    return <AlreadySubscribed sub={existing} t={t} />;
   }
 
   const { show, resume, plan: planParam } = await searchParams;
@@ -70,15 +74,15 @@ export default async function SubscribePage({
             <MatioLogo size={20} accent="#ff3d3d" />
           </div>
           <p className="text-[11px] font-bold uppercase tracking-[0.4em] text-[#ff3d3d]">
-            Membership
+            {t.subscribe.membershipKicker}
           </p>
           <h1 className="text-4xl font-extrabold leading-[0.95] tracking-tight text-white sm:text-5xl">
-            Pick a plan.
+            {t.subscribe.pickAPlan}
             <br />
-            <span className="text-white/55">Watch everything.</span>
+            <span className="text-white/55">{t.subscribe.watchEverything}</span>
           </h1>
           <p className="text-sm text-white/55">
-            Cancel anytime. All originals included.
+            {t.subscribe.cancelAnytimeAll}
           </p>
         </div>
 
@@ -88,24 +92,28 @@ export default async function SubscribePage({
 
           <fieldset
             className="grid gap-3 sm:grid-cols-2"
-            aria-label="Choose a subscription plan"
+            aria-label={t.subscribe.choosePlanAria}
           >
             <PlanCard
               plan="monthly"
-              title="Monthly"
-              price="$9.99"
-              interval="month"
-              sub="Billed monthly · cancel anytime"
+              title={t.subscribe.monthly}
+              price={t.subscribe.monthlyPrice}
+              interval={t.subscribe.monthlyInterval}
+              sub={t.subscribe.monthlySub}
               defaultChecked={initialPlan === "monthly"}
+              selectedLabel={t.subscribe.selected}
+              chooseLabel={t.subscribe.chooseThisPlan}
             />
             <PlanCard
               plan="annual"
-              title="Annual"
-              price="$79.99"
-              interval="year"
-              sub="≈ $6.67/mo · 33% off"
-              badge="Best value"
+              title={t.subscribe.annual}
+              price={t.subscribe.annualPrice}
+              interval={t.subscribe.annualInterval}
+              sub={t.subscribe.annualSub}
+              badge={t.subscribe.bestValueBadge}
               defaultChecked={initialPlan === "annual"}
+              selectedLabel={t.subscribe.selected}
+              chooseLabel={t.subscribe.chooseThisPlan}
             />
           </fieldset>
 
@@ -116,15 +124,15 @@ export default async function SubscribePage({
         <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-[11px] text-white/45">
           <span className="flex items-center gap-1.5">
             <Icon name="lock" size={12} />
-            Secure checkout via Stripe
+            {t.subscribe.secureCheckout}
           </span>
           <span className="flex items-center gap-1.5">
             <Icon name="check" size={12} color="#7fd87a" />
-            Cancel in one click
+            {t.subscribe.cancelInOneClick}
           </span>
           <span className="flex items-center gap-1.5">
             <Icon name="check" size={12} color="#7fd87a" />
-            4K when available
+            {t.subscribe.fourKWhenAvailable}
           </span>
         </div>
       </div>
@@ -132,7 +140,7 @@ export default async function SubscribePage({
   );
 }
 
-function AlreadySubscribed({ sub }: { sub: Subscription }) {
+function AlreadySubscribed({ sub, t }: { sub: Subscription; t: Dict }) {
   return (
     <div className="relative min-h-screen overflow-hidden bg-background pb-16 pt-28 sm:pt-32">
       <div
@@ -145,28 +153,26 @@ function AlreadySubscribed({ sub }: { sub: Subscription }) {
       />
       <div className="relative mx-auto max-w-2xl px-6 text-center sm:px-8">
         <p className="text-[11px] font-bold uppercase tracking-[0.4em] text-[#ff3d3d]">
-          Already a member
+          {t.subscribe.alreadyMemberKicker}
         </p>
         <h1 className="mt-3 text-4xl font-extrabold leading-[0.95] tracking-tight text-white sm:text-5xl">
-          You&apos;re subscribed.
+          {t.subscribe.youreSubscribed}
         </h1>
         <p className="mx-auto mt-4 max-w-md text-sm text-white/65">
-          Your <span className="capitalize text-white">{sub.plan}</span> plan is{" "}
-          <span className="capitalize text-white">{sub.status}</span>. Change or
-          cancel any time in your account.
+          {t.subscribe.yourPlanIs(sub.plan, sub.status)}
         </p>
         <div className="mt-7 flex flex-wrap justify-center gap-2.5">
           <Link
             href="/api/billing-portal"
             className="inline-flex h-11 items-center rounded-md bg-white px-7 text-sm font-bold text-black transition-colors hover:bg-white/90"
           >
-            Manage subscription
+            {t.subscribe.manageSubscription}
           </Link>
           <Link
             href="/"
             className="inline-flex h-11 items-center rounded-md border border-white/15 bg-white/[0.06] px-7 text-sm font-semibold text-white transition-colors hover:bg-white/[0.12]"
           >
-            Back to browse
+            {t.subscribe.backToBrowse}
           </Link>
         </div>
       </div>
@@ -190,6 +196,8 @@ function PlanCard({
   sub,
   badge,
   defaultChecked = false,
+  selectedLabel,
+  chooseLabel,
 }: {
   plan: "monthly" | "annual";
   title: string;
@@ -198,6 +206,8 @@ function PlanCard({
   sub?: string;
   badge?: string;
   defaultChecked?: boolean;
+  selectedLabel: string;
+  chooseLabel: string;
 }) {
   return (
     <label className="group/plan relative block cursor-pointer">
@@ -235,10 +245,10 @@ function PlanCard({
             <span className="size-2 scale-0 rounded-full bg-[#ff3d3d] transition-transform duration-150 group-has-[:checked]/plan:scale-100" />
           </span>
           <span className="hidden group-has-[:checked]/plan:inline">
-            Selected
+            {selectedLabel}
           </span>
           <span className="group-has-[:checked]/plan:hidden">
-            Choose this plan
+            {chooseLabel}
           </span>
         </div>
       </div>

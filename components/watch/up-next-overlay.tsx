@@ -9,6 +9,7 @@ const getClientSnapshot = () => true;
 const getServerSnapshot = () => false;
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
+import { useT } from "@/lib/i18n/client";
 import type { PlayerEpisode } from "./player";
 
 const COUNTDOWN_SECONDS = 7;
@@ -34,6 +35,7 @@ export function UpNextOverlay({
 
   const [remaining, setRemaining] = useState(COUNTDOWN_SECONDS);
   const tone = toneFor(showSlug);
+  const t = useT();
 
   useEffect(() => {
     if (remaining <= 0) {
@@ -53,7 +55,7 @@ export function UpNextOverlay({
     <div className="pointer-events-none fixed inset-0 z-[100] flex items-end justify-end p-5 sm:p-8">
       <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f0f12]/95 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
-          Up next
+          {t.upNextOverlay.label}
         </p>
         <div className="mt-3 flex gap-3">
           <div
@@ -121,7 +123,7 @@ export function UpNextOverlay({
             className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-white text-sm font-bold text-black transition-colors hover:bg-white/90"
           >
             <Icon name="play" size={14} color="#0a0a0c" />
-            Watch now
+            {t.upNextOverlay.watchNow}
           </button>
           <button
             type="button"
@@ -131,11 +133,11 @@ export function UpNextOverlay({
             }}
             className="inline-flex h-10 items-center justify-center rounded-md border border-white/15 px-4 text-sm font-semibold text-white transition-colors hover:bg-white/10"
           >
-            Cancel
+            {t.upNextOverlay.cancel}
           </button>
         </div>
         <p className="mt-2 text-center text-[10px] text-white/45">
-          Playing in {remaining}s
+          {t.upNextOverlay.playingIn(remaining)}
         </p>
       </div>
     </div>,

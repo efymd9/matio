@@ -14,6 +14,7 @@ import {
 import { Player, type PlayerEpisode } from "@/components/watch/player";
 import { WatchShell } from "@/components/watch/watch-shell";
 import { muxThumbnailUrl } from "@/lib/mux-token";
+import { getDict } from "@/lib/i18n/server";
 import { TRIAL_COOKIE, findTrialSession, isTrialActive } from "@/lib/trial";
 
 export default async function WatchPage({
@@ -225,13 +226,14 @@ export default async function WatchPage({
   );
 }
 
-function ComingSoon({
+async function ComingSoon({
   showTitle,
   showSlug,
 }: {
   showTitle: string;
   showSlug: string;
 }) {
+  const { t } = await getDict();
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black px-6">
       <Link
@@ -243,9 +245,9 @@ function ComingSoon({
       <div className="flex flex-1 items-center justify-center">
         <div className="space-y-2 text-center">
           <p className="text-3xl font-extrabold tracking-tight text-white">
-            Coming soon
+            {t.watch.comingSoonTitle}
           </p>
-          <p className="text-sm text-white/60">No episodes ready yet.</p>
+          <p className="text-sm text-white/60">{t.watch.noEpisodesReady}</p>
         </div>
       </div>
     </div>

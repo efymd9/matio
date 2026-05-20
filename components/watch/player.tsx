@@ -23,6 +23,7 @@ import {
 } from "media-chrome/react/menu";
 import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
+import { useT } from "@/lib/i18n/client";
 import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
 import { Paywall } from "./paywall";
 import { EpisodesOverlay } from "./episodes-overlay";
@@ -158,6 +159,7 @@ function EpisodePlayback({
   onSwap: (episodeId: string) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const t = useT();
   // Mirrored ref + state: ref handles the fast tick comparison inside the
   // 10s interval (avoids re-creating the interval on every save), state
   // is what the paywall branch reads (refs can't be accessed in render).
@@ -338,7 +340,7 @@ function EpisodePlayback({
         <div className="flex items-center gap-3 text-white/60">
           <span className="size-2 animate-pulse rounded-full bg-[#ff3d3d]" />
           <span className="text-xs font-medium uppercase tracking-[0.3em]">
-            Loading
+            {t.watch.loading}
           </span>
         </div>
       </div>
@@ -436,7 +438,7 @@ function EpisodePlayback({
             <Link
               href={`/shows/${showSlug}`}
               className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition-colors hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
-              aria-label="Back to show"
+              aria-label={t.player.backToShowAria}
             >
               <Icon name="back" size={18} />
             </Link>
@@ -454,7 +456,7 @@ function EpisodePlayback({
                 available (Safari with a discoverable device only). */}
             <MediaAirplayButton
               className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
-              aria-label="Cast"
+              aria-label={t.player.castAria}
             >
               <span slot="icon" className="contents">
                 <Icon name="cast" size={20} />
@@ -467,7 +469,7 @@ function EpisodePlayback({
             {hasCaptions ? (
               <MediaCaptionsButton
                 className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
-                aria-label="Toggle captions"
+                aria-label={t.player.captionsAria}
               >
                 <span slot="icon" className="contents">
                   <Icon name="subtitle" size={20} />
@@ -486,7 +488,7 @@ function EpisodePlayback({
           <MediaSeekBackwardButton
             seekOffset={10}
             className="!flex flex-col items-center gap-1 !bg-transparent !p-0 text-white/85 transition-colors hover:text-white"
-            aria-label="Back 10 seconds"
+            aria-label={t.player.back10Aria}
           >
             <span slot="icon" className="contents">
               <Icon name="rewind" size={26} />
@@ -495,7 +497,7 @@ function EpisodePlayback({
           </MediaSeekBackwardButton>
           <MediaPlayButton
             className="!flex h-[72px] w-[72px] items-center justify-center rounded-full border border-white/20 !bg-white/15 text-white backdrop-blur-xl transition-transform hover:scale-105"
-            aria-label="Play/Pause"
+            aria-label={t.player.playPauseAria}
           >
             <span slot="play" className="contents">
               <span className="-mr-1 inline-flex">
@@ -509,7 +511,7 @@ function EpisodePlayback({
           <MediaSeekForwardButton
             seekOffset={10}
             className="!flex flex-col items-center gap-1 !bg-transparent !p-0 text-white/85 transition-colors hover:text-white"
-            aria-label="Forward 10 seconds"
+            aria-label={t.player.forward10Aria}
           >
             <span slot="icon" className="contents">
               <Icon name="forward" size={26} />
@@ -532,7 +534,7 @@ function EpisodePlayback({
           }}
           className="absolute bottom-[110px] right-5 z-20 rounded-md border border-white/25 bg-white/15 px-3.5 py-2 text-xs font-semibold text-white backdrop-blur-xl transition-colors hover:bg-white/25 sm:right-8"
         >
-          Skip intro
+          {t.player.skipIntro}
         </button>
       ) : null}
 
@@ -559,7 +561,7 @@ function EpisodePlayback({
           <div className="flex items-center gap-5">
             <MediaMuteButton
               className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
-              aria-label="Mute / unmute"
+              aria-label={t.player.muteAria}
             >
               <span slot="high" className="contents">
                 <Icon name="volume" size={20} />
@@ -576,7 +578,7 @@ function EpisodePlayback({
             </MediaMuteButton>
             <button
               type="button"
-              aria-label="Lock controls"
+              aria-label={t.player.lockAria}
               onClick={() => onLockChange(true)}
               className="text-current transition-colors hover:text-white"
             >
@@ -587,14 +589,14 @@ function EpisodePlayback({
             <MediaPlaybackRateButton
               rates={[0.5, 1, 1.25, 1.5, 2]}
               className="!rounded !bg-white/10 !px-2 !py-1 font-mono !text-[11px] !text-white transition-colors hover:!bg-white/15"
-              aria-label="Playback speed"
+              aria-label={t.player.rateAria}
             />
             <button
               type="button"
               onClick={() => onOverlayChange("episodes")}
               className="rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15"
             >
-              Episodes
+              {t.player.episodesBtn}
             </button>
             {next ? (
               <button
@@ -602,7 +604,7 @@ function EpisodePlayback({
                 onClick={() => onSwap(next.id)}
                 className="rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15"
               >
-                Up Next
+                {t.player.upNextBtn}
               </button>
             ) : null}
             {/* Quality picker — placed in the bottom bar so its menu has
@@ -611,7 +613,7 @@ function EpisodePlayback({
                 stream's renditions; auto-hides when there's only one. */}
             <MediaRenditionMenuButton
               className="!ml-1 !bg-transparent !p-0 text-current transition-colors hover:text-white"
-              aria-label="Video quality"
+              aria-label={t.player.qualityAria}
             >
               <span slot="icon" className="contents">
                 <Icon name="settings" size={18} />
@@ -619,7 +621,7 @@ function EpisodePlayback({
             </MediaRenditionMenuButton>
             <MediaFullscreenButton
               className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
-              aria-label="Toggle fullscreen"
+              aria-label={t.player.fullscreenAria}
             >
               <span slot="enter" className="contents">
                 <Icon name="fullscreen" size={20} />
@@ -650,10 +652,10 @@ function EpisodePlayback({
           type="button"
           onClick={() => onLockChange(false)}
           className="absolute left-1/2 top-1/2 z-20 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-white/20 bg-black/60 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur-xl transition-colors hover:bg-black/75"
-          aria-label="Unlock controls"
+          aria-label={t.player.unlockAria}
         >
           <Icon name="lock" size={16} />
-          Tap to unlock
+          {t.player.tapToUnlock}
         </button>
       ) : null}
 
