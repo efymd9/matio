@@ -160,6 +160,32 @@ vercel env pull .env.vercel.production
 5. Wait ~30s. Refresh — `mux_asset_id` and `mux_playback_id` populate via webhook. Status flips to `ready`.
 6. Edit the show → status=`published`. The show appears on `/`.
 
+### Show artwork — image specs
+
+The admin form has two image URL fields. Both are optional (a show with neither just gets the deterministic tone-gradient placeholder), but a published show is much more compelling with real art.
+
+**Poster** (`posterImageUrl`)
+- **Aspect:** 2:3 portrait — the same shape as a printed movie poster.
+- **Recommended:** **600 × 900** (covers 2× retina at the largest card size, `150 × 225` desktop). Minimum 400 × 600.
+- **Where it renders:** every catalog row (`components/site/show-card.tsx`, sized via `aspect-[2/3]` + `object-cover`).
+- **Where it's a fallback:** OG / Twitter unfurl image on `/shows/<slug>` when no hero is set.
+- **Notes:** The card overlays a subtle bottom-to-top gradient on hover with the title — keep the bottom ~10% of the artwork unbusy, or the title becomes hard to read.
+
+**Hero** (`heroImageUrl`)
+- **Aspect:** 16:9 wide.
+- **Recommended:** **2560 × 1440** (covers 4K-ish viewports without upscaling). Minimum 1920 × 1080. Don't go below 1600 wide — the hero stretches to viewport width and a 1280 image will blur on a desktop monitor.
+- **Where it renders:**
+  - Home page hero (`components/site/hero-banner.tsx`, `min-h-[640px] sm:h-[90vh]`, `object-cover`) — the featured show only.
+  - Show detail backdrop (`app/(public)/shows/[slug]/page.tsx`, `h-[65vh] min-h-[480px]`, `object-cover`).
+  - OG / Twitter unfurl on `/shows/<slug>` (cropped to 1.91:1).
+- **Composition:** the page overlays the title + Play / More info CTAs in the **left third**; pages also apply a left-side scrim (`bg-gradient-to-r from-background/85`) and a bottom scrim. Compose the subject **slightly right of centre**, with safe darkness on the left. A face dead-centre tends to disappear behind the text on small screens.
+- **Fallback:** if `heroImageUrl` is null the page falls through to `posterImageUrl`. A portrait poster stretched to 16:9 looks bad — set hero artwork on any show that gets featured.
+
+**File format / size**
+- JPG, PNG, WebP, or AVIF. WebP/AVIF give the smallest files at the same visual quality.
+- Target weight: posters under ~150 KB, heroes under ~400 KB. There's no automatic optimisation in the path right now — `next/image` migration is post-launch backlog (see audit), so the bytes ship as-is.
+- Hosting: any HTTPS URL works. For dev, you can paste an Unsplash hotlink to test layout. For production, host on Vercel Blob / S3 / a CDN you control.
+
 ### Trial flow (incognito, anon visitor)
 
 1. **Incognito window** → `/`. Click the show poster → `/shows/<slug>` → Play → `/watch/<slug>`. The page renders the Player in trial mode but **no cookie is set and no `trial_sessions` row exists yet** — the 60s clock hasn't started.

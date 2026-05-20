@@ -94,6 +94,10 @@ export default async function EditShowPage({
                 name="posterImageUrl"
                 defaultValue={show.posterImageUrl ?? ""}
               />
+              <p className="text-[11px] text-muted-foreground">
+                Portrait 2:3 (e.g. 600×900). Used on catalog rows and as
+                the OG fallback when no hero is set.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="heroImageUrl">Hero image URL</Label>
@@ -102,6 +106,12 @@ export default async function EditShowPage({
                 name="heroImageUrl"
                 defaultValue={show.heroImageUrl ?? ""}
               />
+              <p className="text-[11px] text-muted-foreground">
+                Wide 16:9 (e.g. 2560×1440). Used on the show detail page,
+                the home hero, and OG / Twitter unfurls. Compose subject
+                slightly right-of-centre — the left third is overlaid
+                with title + CTAs.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="genre">Genre</Label>
