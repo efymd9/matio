@@ -8,6 +8,7 @@ import { Icon } from "@/components/site/icon";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import { linkTrialSessionsToCurrentUser } from "@/lib/trial";
 import { startCheckout } from "./actions";
+import { SubmitButton } from "./submit-button";
 
 const HAS_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
 
@@ -76,31 +77,37 @@ export default async function SubscribePage({
           </p>
         </div>
 
-        <div className="mt-10 grid gap-3 sm:grid-cols-2">
-          <PlanCard
-            plan="monthly"
-            title="Monthly"
-            price="$9.99"
-            interval="month"
-            sub="Billed monthly · cancel anytime"
-            show={show}
-            resume={resume}
-          />
-          <PlanCard
-            plan="annual"
-            title="Annual"
-            price="$79.99"
-            interval="year"
-            sub="≈ $6.67/mo · 33% off"
-            highlight
-            badge="Best value"
-            show={show}
-            resume={resume}
-          />
-        </div>
+        <form action={startCheckout} className="mt-10 space-y-6">
+          {show && <input type="hidden" name="show" value={show} />}
+          {resume && <input type="hidden" name="resume" value={resume} />}
+
+          <fieldset
+            className="grid gap-3 sm:grid-cols-2"
+            aria-label="Choose a subscription plan"
+          >
+            <PlanCard
+              plan="monthly"
+              title="Monthly"
+              price="$9.99"
+              interval="month"
+              sub="Billed monthly · cancel anytime"
+            />
+            <PlanCard
+              plan="annual"
+              title="Annual"
+              price="$79.99"
+              interval="year"
+              sub="≈ $6.67/mo · 33% off"
+              badge="Best value"
+              defaultChecked
+            />
+          </fieldset>
+
+          <SubmitButton />
+        </form>
 
         {/* Trust row */}
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-[11px] text-white/45">
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-[11px] text-white/45">
           <span className="flex items-center gap-1.5">
             <Icon name="lock" size={12} />
             Secure checkout via Stripe
@@ -161,6 +168,14 @@ function AlreadySubscribed({ sub }: { sub: Subscription }) {
   );
 }
 
+// Radio-card plan picker. The whole card is a <label> wrapping a
+// visually-hidden <input type="radio">. We tag the label as
+// `group/plan` and use Tailwind's `group-has-[:checked]/plan:` variant
+// to drive every visual change (outer border + gradient, the dot inside
+// the selected indicator, the indicator's label colour) from the
+// input's checked state — zero client JS. The browser handles keyboard
+// nav (Tab to focus, Arrow keys between same-name radios) for free, and
+// `group-has-[:focus-visible]/plan:` puts a focus ring on the card.
 function PlanCard({
   plan,
   title,
@@ -168,9 +183,7 @@ function PlanCard({
   interval,
   sub,
   badge,
-  highlight = false,
-  show,
-  resume,
+  defaultChecked = false,
 }: {
   plan: "monthly" | "annual";
   title: string;
@@ -178,49 +191,51 @@ function PlanCard({
   interval: string;
   sub?: string;
   badge?: string;
-  highlight?: boolean;
-  show?: string;
-  resume?: string;
+  defaultChecked?: boolean;
 }) {
   return (
-    <div
-      className={`relative overflow-hidden rounded-2xl p-5 sm:p-6 ${
-        highlight
-          ? "border-[1.5px] border-[#ff3d3d] bg-gradient-to-br from-[#ff3d3d22] to-white/[0.04]"
-          : "border border-white/10 bg-white/[0.04]"
-      }`}
-    >
-      {highlight && badge ? (
-        <span className="absolute right-4 top-4 rounded-full bg-[#ff3d3d] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.06em] text-white">
-          {badge}
-        </span>
-      ) : null}
-      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/55">
-        {title}
-      </p>
-      <div className="mt-4 flex items-baseline gap-1.5">
-        <span className="text-3xl font-extrabold tracking-tight text-white">
-          {price}
-        </span>
-        <span className="text-sm text-white/55"> / {interval}</span>
+    <label className="group/plan relative block cursor-pointer">
+      <input
+        type="radio"
+        name="plan"
+        value={plan}
+        defaultChecked={defaultChecked}
+        className="sr-only"
+      />
+      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-5 transition-all duration-200 hover:border-white/25 hover:bg-white/[0.07] group-has-[:checked]/plan:border-[1.5px] group-has-[:checked]/plan:border-[#ff3d3d] group-has-[:checked]/plan:bg-gradient-to-br group-has-[:checked]/plan:from-[#ff3d3d22] group-has-[:checked]/plan:to-white/[0.04] group-has-[:checked]/plan:shadow-[0_12px_40px_-20px_rgba(255,61,61,0.55)] group-has-[:focus-visible]/plan:ring-2 group-has-[:focus-visible]/plan:ring-[#ff3d3d]/70 group-has-[:focus-visible]/plan:ring-offset-2 group-has-[:focus-visible]/plan:ring-offset-background sm:p-6">
+        {badge ? (
+          <span className="absolute right-4 top-4 rounded-full bg-[#ff3d3d] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.06em] text-white">
+            {badge}
+          </span>
+        ) : null}
+        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/55">
+          {title}
+        </p>
+        <div className="mt-4 flex items-baseline gap-1.5">
+          <span className="text-3xl font-extrabold tracking-tight text-white">
+            {price}
+          </span>
+          <span className="text-sm text-white/55"> / {interval}</span>
+        </div>
+        {sub && <p className="mt-1 text-xs text-white/55">{sub}</p>}
+
+        {/* Selected indicator — empty ring by default; cinema-red label +
+            filled dot when the radio is checked. */}
+        <div className="mt-5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white/40 transition-colors group-has-[:checked]/plan:text-[#ff3d3d]">
+          <span
+            aria-hidden
+            className="relative inline-flex size-4 items-center justify-center rounded-full border border-white/25 transition-colors group-has-[:checked]/plan:border-[#ff3d3d]"
+          >
+            <span className="size-2 scale-0 rounded-full bg-[#ff3d3d] transition-transform duration-150 group-has-[:checked]/plan:scale-100" />
+          </span>
+          <span className="hidden group-has-[:checked]/plan:inline">
+            Selected
+          </span>
+          <span className="group-has-[:checked]/plan:hidden">
+            Choose this plan
+          </span>
+        </div>
       </div>
-      {sub && <p className="mt-1 text-xs text-white/55">{sub}</p>}
-      <form action={startCheckout} className="mt-5">
-        <input type="hidden" name="plan" value={plan} />
-        {show && <input type="hidden" name="show" value={show} />}
-        {resume && <input type="hidden" name="resume" value={resume} />}
-        <button
-          type="submit"
-          className={`inline-flex h-11 w-full items-center justify-center gap-2 rounded-md text-sm font-bold transition-colors ${
-            highlight
-              ? "bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] text-white hover:brightness-110"
-              : "bg-white text-black hover:bg-white/90"
-          }`}
-        >
-          <Icon name="play" size={14} color={highlight ? "#ffffff" : "#0a0a0c"} />
-          Subscribe
-        </button>
-      </form>
-    </div>
+    </label>
   );
 }
