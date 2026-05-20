@@ -44,15 +44,15 @@ Always check these before changing integrations or guessing API shapes:
 ```
 app/
   (public)/                # Public catalog: /, /shows/[slug]
-  (account)/account/       # /account — signed-in only (proxy-gated)
   admin/                   # /admin — admin role required (proxy-gated, DB check)
   api/
+    billing-portal/        # /api/billing-portal — 302 to Stripe Customer Portal
     playback-token/        # /api/playback-token — Mux JWT issuer
     webhooks/
       clerk/               # user.created → mirrors to users
       mux/                 # video.asset.{ready,errored}
       stripe/              # customer.subscription.*, invoice.{paid,payment_failed}
-  subscribe/               # /subscribe — pricing cards + Checkout redirect
+  subscribe/               # /subscribe — radio-card pricing + Checkout redirect
   watch/[showSlug]/        # /watch/<slug> — public, trial-aware
 components/
   ui/                      # shadcn primitives (Base UI under the hood)
@@ -80,8 +80,10 @@ scripts/
 - **Trial**: anonymous, cookie-based. 60 seconds per (browser session, show). Triggered when the player on `/watch/[show-slug]` requests its first token — `/api/playback-token` mints the `trial_session` cookie and `trial_sessions` row at that point, after verifying the show is published+ready. The 60s clock starts on click-play, not on page load. Constant: `TRIAL_DURATION_SECONDS` in `lib/trial.ts`.
 - Trial state survives signup + Stripe checkout via the `trial_session` cookie. `linkTrialSessionsToCurrentUser` (runs on `/subscribe` render) links unlinked rows by cookie; Stripe webhook flips `trial_sessions.converted=true` on active subscription.
 - Trial creation is rate-limited at 3 per (`ip_hash`, `show_id`) per hour (`TRIAL_RATELIMIT_PER_HOUR`). `ip_hash` is `HMAC-SHA256(MUX_SIGNING_KEY_PRIVATE_KEY, client_ip)` — no raw IPs in the DB. Cap exceeded → `/api/playback-token` returns 429.
-- **Subscriptions**: monthly ($9.99) or annual ($79.99), no other tiers. Stored in `subscriptions` table; mirrored from Stripe via webhook (one source of truth).
-- **Admin role**: set via DB column `users.role`, never via Clerk metadata alone. `proxy.ts` does the lookup on every `/admin/*` request; `requireAdmin()` does it again inside actions.
+- **Subscriptions**: monthly ($9.99) or annual ($79.99), no other tiers. Stored in `subscriptions` table; mirrored from Stripe via webhook (one source of truth). A partial unique index on `(user_id) WHERE status IN ('active','trialing','past_due')` guarantees at most one access-granting row per user; historic rows (status='canceled') stay. Every subscription gate also checks `current_period_end > now()` so a dropped `customer.subscription.deleted` webhook can't extend playback past the user's term.
+- **Subscribe surface**: `/subscribe` shows two radio-card plans (Monthly / Annual, Annual default). The in-player paywall (`components/watch/paywall.tsx`) also lets the user pick the plan there and forwards `?plan=…` to `/subscribe` so the selection carries through Clerk sign-in.
+- **Billing portal**: `/api/billing-portal` is the single entry point — it does auth + customer lookup + Stripe billingPortal session + 302 in one server hop. The Clerk user menu's "Manage subscription" item links straight to it; no `/account` page exists.
+- **Admin role**: set via DB column `users.role`, never via Clerk metadata alone. `proxy.ts` does the lookup on every `/admin/*` request via a module-scoped 5-second cache; `requireAdmin()` does it again inside actions (cache-free) for belt-and-braces.
 - Playback always goes through `/api/playback-token` → signed Mux JWT. Subscriber TTL: 1 hour (auto-refreshed). Trial TTL: `min(remaining, TRIAL_DURATION_SECONDS)`.
 
 ## What NOT to do

@@ -8,9 +8,9 @@ How the pieces fit together. Sibling docs: [services](./services.md), [operation
 Browser ──► proxy.ts (clerkMiddleware) ──► (gate check) ──► Page / Route Handler
                 │                                              │
                 ├── /admin/*    : Clerk userId + users.role     ├── Server Component
-                │                = "admin" (DB lookup)          │   – reads cookies()
-                ├── /account/*  : Clerk userId                  │   – calls db / Clerk
-                │   /subscribe/*                                │   – returns JSX
+                │                = "admin" (DB lookup, 5s       │   – reads cookies()
+                │                module-cached)                 │   – calls db / Clerk
+                ├── /subscribe/*: Clerk userId                  │   – returns JSX
                 └── everything else: passes through             │
                                                                 └── Server Action
                                                                     – "use server"
@@ -45,7 +45,7 @@ FK cascade defaults: deleting a `show` removes its `seasons` → `episodes` → 
 - `users.role` is the **only** source of truth for admin — never Clerk metadata alone.
 - `proxy.ts` is the first line of defense; pages/actions use `lib/admin.ts` helpers as belt-and-braces:
   - `getCurrentUser()` — pure read, returns the local row or `null`. Use for pages that can tolerate a missing mirror (e.g. analytics-only callsites).
-  - `getOrSyncCurrentUser()` — read-or-upsert from `currentUser()` if the local row is missing. Use anywhere a missing mirror would block the user from making progress (e.g. `/subscribe` server action, `/account` page). Closes the race where a brand-new signup hits these surfaces before the `user.created` webhook lands.
+  - `getOrSyncCurrentUser()` — read-or-upsert from `currentUser()` if the local row is missing. Use anywhere a missing mirror would block the user from making progress (e.g. `/subscribe` page render before `linkTrialSessionsToCurrentUser`, `startCheckout` server action, `/api/billing-portal` route). Closes the race where a brand-new signup hits these surfaces before the `user.created` webhook lands.
   - `getCurrentAdmin()` / `requireAdmin()` — role-gated variants for admin pages and actions.
 - `users.email` is required because the promote-to-admin script and Stripe customer lookups both rely on it.
 
@@ -124,7 +124,7 @@ The watch surface uses **headless `<mux-video>` + media-chrome** for full visual
   - **`EpisodePlayback` (inner, `key={current.id}`)** — owns per-episode state: token, expiresAt, paywall, aspect ratio, captions detection, skip-intro chip, last-saved position. The `key` prop is what makes this work: every episode swap unmounts and remounts the inner, so all per-episode state resets to its initial value naturally. This pattern is required by React 19's `react-hooks/set-state-in-effect` rule — see [gotchas → React 19 hooks rules](./gotchas.md#react-19-hooks-rules).
 - `components/watch/episodes-overlay.tsx` — season-grouped episode picker. Portal'd to `document.body` (see [gotchas → media-chrome overlays](./gotchas.md#media-chrome)). Uses `useSyncExternalStore` for an SSR-safe "are we on the client" check (not `useState + useEffect(setMounted)` — see gotchas).
 - `components/watch/up-next-overlay.tsx` — bottom-right slide-in card with 7-second auto-advance. Same `useSyncExternalStore` SSR pattern.
-- `components/watch/paywall.tsx` — soft-sidekick bottom sheet shown on trial expiry / token 403.
+- `components/watch/paywall.tsx` — soft-sidekick bottom sheet shown on trial expiry / token 403. Client component (rendered from inside the client `Player`). Two interactive plan tiles (Monthly / Annual, Annual default) drive a `plan` state that highlights the selected card (cinema-red border, gradient bg, dropped glow, corner radio dot, swapped "Selected" label). The "Continue · Subscribe" button uses `useTransition` + `router.push` so it shows press feedback (`active:scale-[0.98]`) and a spinner during the navigation. The chosen plan rides along as `?plan=` on the `/subscribe` URL; `/subscribe` reads it and pre-selects the matching radio card so the user doesn't have to pick twice.
 
 **Chrome layout (all positioned relative to `MediaController`):**
 - Top scrim — back button, `S<n>·E<n>` mono kicker, show — title, AirPlay, captions, quality menu trigger
@@ -191,14 +191,20 @@ Approximations called out in code comments:
 ## Subscription pipeline
 
 ```
-/subscribe (signed-in, gated by proxy.ts)
-   │
-   ▼ <form action={startCheckout}>
+In-player paywall (components/watch/paywall.tsx)
+   │  client component, radio-card selection (monthly | annual)
+   ▼  useTransition + router.push("/subscribe?show=<slug>&plan=<picked>&resume=<n>")
+/subscribe (signed-in, gated by proxy.ts; reads ?plan= to pre-select)
+   │  single <form action={startCheckout}> with hidden show/resume + radio name="plan"
+   │  client SubmitButton (useFormStatus) shows spinner while pending
+   ▼
 startCheckout (app/subscribe/actions.ts)
    │
-   ├── linkTrialSessionsToCurrentUser ran on /subscribe page render before this
+   ├── getOrSyncCurrentUser ran on /subscribe page render before this,
+   │     then linkTrialSessionsToCurrentUser
    ├── findOrCreate Stripe customer (stores stripe_customer_id on users)
-   ├── checkout.sessions.create with success_url = /watch/<slug>?resume=<n> (if from trial)
+   ├── checkout.sessions.create with success_url = /watch/<slug>?resume=<n>
+   │     (or /?welcome=1 when there's no show context — /account is gone)
    └── redirect(session.url)
    │
    ▼ Stripe Checkout (hosted)
@@ -207,23 +213,29 @@ startCheckout (app/subscribe/actions.ts)
 mirrorSubscription:
    - lookup user by stripe_customer_id
    - upsert subscriptions row keyed on stripe_subscription_id
+     (partial unique index on (user_id) WHERE status IN active/trialing/
+     past_due — only one access-granting row per user at a time)
    - markUserTrialsConverted (active/trialing only)
    │
    ▼ redirect to success_url
-/watch/<slug>?resume=<n>  or  /account?welcome=1
+/watch/<slug>?resume=<n>  or  /?welcome=1
 ```
+
+**Subscription gate (read path).** Every place we check "is this user a subscriber?" — `/api/playback-token`, `app/watch/[showSlug]/page.tsx`, `saveWatchProgress` — applies the same filter: `status='active' AND current_period_end > now()`, ordered by `updated_at DESC LIMIT 1`. Defense-in-depth: even if a `customer.subscription.deleted` webhook is dropped and the row stays "active" in our DB, the period-end check expires playback at the user's actual term.
+
+**Billing portal.** `/api/billing-portal` is the only entry — a GET handler that does auth + customer lookup + `stripe.billingPortal.sessions.create` + 302 in one server hop. The Clerk user-menu's "Manage subscription" item, the `/subscribe` "you're already subscribed" CTA, and any future "manage billing" affordance all link straight to it. There is no `/account` page.
 
 `subscriptions.cancel_at_period_end` is OR'd from both `sub.cancel_at_period_end` and `sub.cancel_at != null` because the Customer Portal sets the timestamp form, not the boolean. See [gotchas](./gotchas.md#stripe-portal-cancel).
 
 ## Route protection (proxy.ts)
 
 ```ts
-isAdminRoute   = createRouteMatcher(["/admin(.*)"]);
-isAuthRoute    = createRouteMatcher(["/account(.*)", "/subscribe(.*)"]);
+isAdminRoute = createRouteMatcher(["/admin(.*)"]);
+isAuthRoute  = createRouteMatcher(["/subscribe(.*)"]);
 ```
 
-- `/admin/*`: Clerk userId required, then DB lookup `users.role='admin'`. Non-admin → redirect `/`.
-- `/account/*`, `/subscribe/*`: Clerk userId required. Anonymous → `redirectToSignIn({ returnBackUrl })`.
+- `/admin/*`: Clerk userId required, then DB lookup `users.role='admin'`. Non-admin → redirect `/`. The role read is wrapped in a module-scope 5-second cache (`roleCache: Map<userId, {role, expiresAt}>`) so RSC prefetch fan-out + matcher-caught traffic don't translate 1:1 into Neon queries — without it a single signed-in user could saturate the pooled connection by spamming admin URLs.
+- `/subscribe/*`: Clerk userId required. Anonymous → `redirectToSignIn({ returnBackUrl })`.
 - `/watch/*`: public. Trial cookie is **not** set here — `/api/playback-token` mints it on first play, after verifying the show is published+ready.
 - Everything else: passes through.
 
@@ -232,10 +244,10 @@ Public catalog (`/`, `/shows/[slug]`) isn't gated — it surfaces only `status='
 ## Route groups
 
 - `app/(public)/` — `/`, `/shows/[slug]` — root layout, no auth
-- `app/(account)/account/` — `/account` — root layout, auth required (proxy)
 - `app/admin/` — admin panel (own `layout.tsx`). Pages: `/`, `shows/new`, `shows/[id]`, `shows/[id]/seasons/[seasonId]`, `shows/[id]/seasons/[seasonId]/episodes/[episodeId]`, `analytics`
 - `app/watch/[showSlug]/` — public + cookie-managed. Accepts `?ep=<id>` to start on a specific episode, `?resume=<seconds>` for cross-session resume.
-- `app/subscribe/` — checkout form
+- `app/subscribe/` — radio-card plan picker + animated submit (`submit-button.tsx` is the lone client component; the page itself stays a server component)
+- `app/api/billing-portal/` — GET-only redirect to Stripe Customer Portal
 - `app/api/webhooks/{clerk,mux,stripe}/` — external webhooks (`runtime = "nodejs"`, raw body verification)
 - `app/api/playback-token/` — token issuer
 

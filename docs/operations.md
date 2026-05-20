@@ -48,13 +48,14 @@ The migrate command uses `drizzle.config.ts` which `dotenv`-loads `.env.local`. 
 Pick the right group:
 
 - Public catalog → `app/(public)/foo/page.tsx`
-- Account/billing (signed-in) → `app/(account)/foo/page.tsx`
+- Signed-in only → `app/foo/page.tsx` + add `/foo(.*)` to `isAuthRoute` in proxy.ts (the `(account)` route group was removed; there's no signed-in shell to inherit from)
 - Admin-only → `app/admin/foo/page.tsx`
 - Anonymous + cookie-managed → `app/foo/page.tsx`. Cookies must be set from a Route Handler or Server Action — proxy.ts no longer mints anything for `/watch/*`. See `app/api/playback-token/route.ts` for the trial-cookie pattern.
+- External redirect endpoint (e.g. billing portal) → `app/api/foo/route.ts` with a `GET` that does auth + work + `NextResponse.redirect(...)`. See `app/api/billing-portal/route.ts`.
 
 If the route needs auth, also update `proxy.ts`:
 ```ts
-const isAuthRoute = createRouteMatcher(["/account(.*)", "/subscribe(.*)", "/foo(.*)"]);
+const isAuthRoute = createRouteMatcher(["/subscribe(.*)", "/foo(.*)"]);
 ```
 
 Defensive check inside the page even if proxy gates — server actions can be invoked from outside the matcher.
@@ -191,10 +192,11 @@ The admin form has two image URL fields. Both are optional (a show with neither 
 1. **Incognito window** → `/`. Click the show poster → `/shows/<slug>` → Play → `/watch/<slug>`. The page renders the Player in trial mode but **no cookie is set and no `trial_sessions` row exists yet** — the 60s clock hasn't started.
 2. Player mounts → fetches `/api/playback-token?episode_id=<id>`. The route handler verifies show is published+ready, runs `mintTrialSession({ sessionToken, showId, ipHash })` which creates the row with `expires_at = now + 60s` and `ip_hash = HMAC(MUX_SIGNING_KEY_PRIVATE_KEY, x-forwarded-for)`, then sets the `trial_session` cookie (HTTP-only, secure-in-prod, sameSite=lax, 1y) on the response and returns the 60s JWT.
 3. Video plays in the custom mux-video + media-chrome player (cinema-red bottom bar, mono `S1·E1` kicker). After 60s the player **pauses** and the soft-sidekick paywall sheet slides up. Buffered-ahead chunks don't keep playing because the player calls `videoRef.current.pause()` at token expiry.
-4. Click "Continue · Subscribe" → redirected through Clerk sign-up → back to `/subscribe?show=<slug>&resume=<seconds>` → trial linked to the new user (via `linkTrialSessionsToCurrentUser` on the page).
-5. Pick a plan, use test card `4242 4242 4242 4242`, any CVC, any future date.
-6. Stripe webhook → `subscriptions` row created with `status='active'` → `markUserTrialsConverted` flips `trial_sessions.converted=true` for the user's rows.
-7. Redirected to `/watch/<slug>?resume=<seconds>` — player gets a 1h subscriber token, seeks to resume position.
+4. **Paywall** — the bottom sheet shows two plan tiles (Monthly / Annual, Annual highlighted by default). Click Monthly to flip the highlight. Click "Continue · Subscribe" → the button shows press feedback (`active:scale`) and a spinner while `useTransition` navigates to `/subscribe?show=<slug>&plan=<picked>&resume=<seconds>`.
+5. Proxy gates `/subscribe` → bounces through Clerk sign-up modal → back to `/subscribe?show=…&plan=…&resume=…`. The page calls `getOrSyncCurrentUser()` (ensures the mirror row exists before `linkTrialSessionsToCurrentUser` runs — otherwise the FK on `trial_sessions.user_id` would crash on fresh signups), then `linkTrialSessionsToCurrentUser()` claims any unlinked trial rows on the cookie. The radio-card picker boots with the chosen plan already selected.
+6. Click "Continue · Subscribe" on `/subscribe` → animated `SubmitButton` (uses `useFormStatus`) shows a spinner while `startCheckout` runs → redirected to Stripe Checkout. Use test card `4242 4242 4242 4242`, any CVC, any future date.
+7. Stripe webhook → `subscriptions` row created with `status='active'` → `markUserTrialsConverted` flips `trial_sessions.converted=true` for the user's rows.
+8. Redirected to `/watch/<slug>?resume=<seconds>` — player gets a 1h subscriber token, seeks to resume position.
 
 **Verifying the IP rate-limit**: clear cookies + reload + play 3× in under an hour on the same show. The 4th attempt's `/api/playback-token` call returns `429` → player paywalls immediately without spending a fresh 60s. Different shows have independent buckets; a household sharing an IP can still trial multiple shows.
 
@@ -219,10 +221,12 @@ The admin form has two image URL fields. Both are optional (a show with neither 
 
 ### Cancel + resume via Customer Portal
 
-1. `/account` → "Manage subscription" → Stripe Customer Portal.
+1. Open the Clerk user menu (top-right avatar) → **Manage subscription**. The menu item links at `/api/billing-portal` — a GET route that does auth + Stripe customer lookup + `billingPortal.sessions.create` + 302 in one server hop, so the browser lands directly on Stripe's hosted Customer Portal.
 2. "Cancel subscription" → reason → confirm. Portal sets `subscription.cancel_at` (a timestamp, not the boolean). Our webhook mirrors both fields into `cancel_at_period_end=true`.
-3. Back on `/account`, panel shows "Cancels on YYYY-MM-DD".
-4. "Renew subscription" (resume) → portal clears `cancel_at` → webhook flips `cancel_at_period_end=false`.
+3. Come back to the app — every subscription-gated query is read-time, so the next playback request reflects the change immediately.
+4. "Renew subscription" (resume) inside the portal → portal clears `cancel_at` → webhook flips `cancel_at_period_end=false`.
+
+**No /account page**: it was removed pre-launch (placeholder rows, "Payment methods" / "Notifications" etc. were unwired). All billing surfaces route through `/api/billing-portal`. To bring `/account` back, restore `app/(account)/` from git history and re-add the matcher in `proxy.ts`.
 
 ### Inspect production logs
 
