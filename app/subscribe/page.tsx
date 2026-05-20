@@ -15,7 +15,7 @@ const HAS_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
 export default async function SubscribePage({
   searchParams,
 }: {
-  searchParams: Promise<{ show?: string; resume?: string }>;
+  searchParams: Promise<{ show?: string; resume?: string; plan?: string }>;
 }) {
   // Sync the user mirror before anything that touches FKs against users.id.
   // On a fresh signup the Clerk user.created webhook can lag behind the
@@ -45,7 +45,12 @@ export default async function SubscribePage({
     return <AlreadySubscribed sub={existing} />;
   }
 
-  const { show, resume } = await searchParams;
+  const { show, resume, plan: planParam } = await searchParams;
+  // Honour ?plan= from the watch paywall so the user's selection
+  // carries across the sign-in step. Anything other than "monthly"
+  // falls back to "annual" (the recommended default).
+  const initialPlan: "monthly" | "annual" =
+    planParam === "monthly" ? "monthly" : "annual";
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background pb-16 pt-28 sm:pt-32">
@@ -91,6 +96,7 @@ export default async function SubscribePage({
               price="$9.99"
               interval="month"
               sub="Billed monthly · cancel anytime"
+              defaultChecked={initialPlan === "monthly"}
             />
             <PlanCard
               plan="annual"
@@ -99,7 +105,7 @@ export default async function SubscribePage({
               interval="year"
               sub="≈ $6.67/mo · 33% off"
               badge="Best value"
-              defaultChecked
+              defaultChecked={initialPlan === "annual"}
             />
           </fieldset>
 
