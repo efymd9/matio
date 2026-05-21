@@ -11,7 +11,7 @@ import { shows } from "@/db/schema";
 // admin publishes new content; with ~tens of shows the cost is trivial.
 
 const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? "https://matio-ten.vercel.app";
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://matio.tv";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const published = await db

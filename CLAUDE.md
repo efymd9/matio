@@ -101,7 +101,7 @@ scripts/
 ## Production context
 
 - Vercel project: `mad-matttts-projects/matio` (id `prj_bT5c7cdVTRzAIPX7uLGYjQLBF5EI`)
-- Prod URL: `https://matio-ten.vercel.app`
+- Prod URL: `https://matio.tv` (legacy Vercel alias still resolves: `https://matio-ten.vercel.app`)
 - Neon project: `little-base-06482402` (org `Matvei`, aws-eu-central-1, Postgres 18, pooled endpoint)
 - Stripe is in **test mode** (`sk_test_…`) — switch to `sk_live_…` when going live
 - GitHub auto-deploy is NOT wired (Vercel account ≠ GitHub repo owner). Push via `vercel --prod --yes` from CLI.

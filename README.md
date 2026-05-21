@@ -4,7 +4,7 @@ A subscription streaming home for original short-form stories. 60-second
 anonymous trial per (browser session, show), then sign-up + Stripe
 Checkout in one flow.
 
-Production: **https://matio-ten.vercel.app**
+Production: **https://matio.tv**
 
 ## Stack
 

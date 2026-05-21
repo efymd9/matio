@@ -2,7 +2,7 @@
 
 Setup steps + service-specific quirks for Clerk, Stripe, Mux, Neon, Vercel. Cross-references: [architecture](./architecture.md), [operations](./operations.md), [gotchas](./gotchas.md).
 
-Production prod URL: **https://matio-ten.vercel.app**. Stripe webhook URL on prod = `https://matio-ten.vercel.app/api/webhooks/stripe`, etc.
+Production prod URL: **https://matio.tv**. Stripe webhook URL on prod = `https://matio.tv/api/webhooks/stripe`, etc.
 
 ## Clerk (authentication)
 
@@ -21,7 +21,7 @@ Production prod URL: **https://matio-ten.vercel.app**. Stripe webhook URL on pro
 
 **Webhook setup**:
 1. Dashboard → Webhooks → Add endpoint
-2. URL: `https://matio-ten.vercel.app/api/webhooks/clerk`
+2. URL: `https://matio.tv/api/webhooks/clerk`
 3. Subscribe to `user.created`
 4. Copy the endpoint's signing secret into `CLERK_WEBHOOK_SIGNING_SECRET`
 
@@ -40,14 +40,14 @@ Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@cle
 | `STRIPE_WEBHOOK_SECRET` | Dashboard → Developers → Webhooks → endpoint signing secret (`whsec_…`). **Different per environment.** Local `stripe listen` prints a different one than the dashboard endpoint. |
 | `STRIPE_PRICE_MONTHLY` | Printed by `pnpm stripe:setup` |
 | `STRIPE_PRICE_ANNUAL` | Printed by `pnpm stripe:setup` |
-| `NEXT_PUBLIC_APP_URL` | Origin used in Checkout `success_url` / `cancel_url`. `http://localhost:3000` locally; `https://matio-ten.vercel.app` in prod. |
+| `NEXT_PUBLIC_APP_URL` | Origin used in Checkout `success_url` / `cancel_url`. `http://localhost:3000` locally; `https://matio.tv` in prod. |
 
 **One-time setup**:
 1. Drop a `sk_test_…` into `.env.local`.
 2. `pnpm stripe:setup` (scripts/stripe-setup.ts) — idempotently creates "Matio Monthly" ($9.99/mo) and "Matio Annual" ($79.99/yr) products+prices, tagged with `metadata.plan`. Prints the price IDs.
 3. **Customer Portal** — Dashboard → Settings → Billing → Customer portal. Enable "Cancel subscriptions" (mode: at period end). This is what makes the "Manage subscription" button work.
 4. **Local webhook**: `stripe listen --forward-to localhost:3000/api/webhooks/stripe` → it prints a `whsec_…` → paste into `.env.local` `STRIPE_WEBHOOK_SECRET`.
-5. **Prod webhook**: Dashboard → Developers → Webhooks → Add endpoint → `https://matio-ten.vercel.app/api/webhooks/stripe` → subscribe to:
+5. **Prod webhook**: Dashboard → Developers → Webhooks → Add endpoint → `https://matio.tv/api/webhooks/stripe` → subscribe to:
    - `customer.subscription.created`
    - `customer.subscription.updated`
    - `customer.subscription.deleted`
@@ -91,7 +91,7 @@ stripe login
 
 **Dual use**: `MUX_SIGNING_KEY_PRIVATE_KEY` is also used as the HMAC salt in `lib/trial.ts:hashClientIp` for the trial-creation IP rate-limit bucket. No raw client IPs are stored — only the SHA-256 HMAC. If you rotate the Mux signing key, existing `trial_sessions.ip_hash` values become inert (the bucket key changes), which is fine: legitimate users get fresh trial budgets and the prior abuse window is closed.
 
-**Webhook setup**: Dashboard → Settings → Webhooks → URL = `https://matio-ten.vercel.app/api/webhooks/mux`. Mux delivers all event types — handler ignores the ones it doesn't care about.
+**Webhook setup**: Dashboard → Settings → Webhooks → URL = `https://matio.tv/api/webhooks/mux`. Mux delivers all event types — handler ignores the ones it doesn't care about.
 
 **Local webhook**: Mux doesn't have a `stripe listen`-equivalent. Use an `ngrok` tunnel (`ngrok http 3000`) and point a separate Mux webhook at the ngrok URL. Webhook secret will be different from prod.
 
@@ -99,7 +99,7 @@ stripe login
 
 **Test mode**: Mux distinguishes between environments at the dashboard level (top-left switcher). Each environment has its own tokens, signing keys, webhooks.
 
-**Production hardening — referrer restrictions on the signing key**: Mux lets you bind a signing key to specific referrer domains via the dashboard (Settings → Signing Keys → Edit → Domain restrictions). Add `matio-ten.vercel.app` (and the custom domain when wired) so a leaked playback JWT — for example one extracted from the auto-playing hero preview on `/` — can't be used from any other origin. The hero preview's TTL is already capped at `TRIAL_DURATION_SECONDS` (see `app/(public)/page.tsx`), but referrer-binding is what stops an attacker from streaming the same asset from their own page during the 60-second window.
+**Production hardening — referrer restrictions on the signing key**: Mux lets you bind a signing key to specific referrer domains via the dashboard (Settings → Signing Keys → Edit → Domain restrictions). Add `matio.tv` (the production custom domain) so a leaked playback JWT — for example one extracted from the auto-playing hero preview on `/` — can't be used from any other origin. The hero preview's TTL is already capped at `TRIAL_DURATION_SECONDS` (see `app/(public)/page.tsx`), but referrer-binding is what stops an attacker from streaming the same asset from their own page during the 60-second window.
 
 ## Neon (Postgres)
 
@@ -130,7 +130,7 @@ postgres(connectionString, { prepare: false });
 
 **Account**: `mad-matttts-projects/matio` (project id `prj_bT5c7cdVTRzAIPX7uLGYjQLBF5EI`, team id `team_UHZkCJeZjplSYAOzioSexjBo`).
 
-**Production aliases**: `https://matio-ten.vercel.app` (stable alias) + immutable URL per deployment.
+**Production aliases**: `https://matio.tv` (stable alias) + immutable URL per deployment.
 
 **CLI setup** (one-time):
 ```bash

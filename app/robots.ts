@@ -11,7 +11,7 @@ import type { MetadataRoute } from "next";
 // Sitemap pointer matches app/sitemap.ts.
 
 const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? "https://matio-ten.vercel.app";
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://matio.tv";
 
 export default function robots(): MetadataRoute.Robots {
   return {

@@ -29,7 +29,7 @@ const instrumentSerif = Instrument_Serif({
 // production origin. Override via NEXT_PUBLIC_APP_URL for preview branches
 // so link unfurls in Slack/Twitter from staging URLs still point at the
 // right host.
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://matio-ten.vercel.app";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://matio.tv";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getDict();

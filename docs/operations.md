@@ -120,7 +120,7 @@ Always idempotent (retries happen) — use `onConflictDoNothing` / `onConflictDo
 vercel --prod --yes
 ```
 
-Outputs a JSON object with the immutable deployment URL. Production alias (`matio-ten.vercel.app`) updates automatically.
+Outputs a JSON object with the immutable deployment URL. Production aliases (`matio.tv` + legacy `matio-ten.vercel.app`) update automatically.
 
 **Env vars**: changes to env vars in Vercel only take effect on the **next** deployment. Push then redeploy.
 
