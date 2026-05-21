@@ -44,9 +44,11 @@ export async function findTrialSession(
 }
 
 // Mint a fresh trial_sessions row for (sessionToken, showId). The (token,
-// show) unique constraint makes this idempotent under multi-tab races. If
-// ipHash is provided, enforces TRIAL_RATELIMIT_PER_HOUR / (ip, show) /
-// hour and throws TrialRateLimitError when exceeded.
+// show) unique constraint makes this idempotent under multi-tab races.
+// Always enforces TRIAL_RATELIMIT_PER_HOUR / (ip, show) / hour and throws
+// TrialRateLimitError when exceeded — there is no skip-on-missing-IP
+// branch, because that path was a bypass: clients that scrubbed the
+// upstream proxy header would get unlimited trial mints.
 export async function mintTrialSession({
   sessionToken,
   showId,
@@ -54,23 +56,21 @@ export async function mintTrialSession({
 }: {
   sessionToken: string;
   showId: string;
-  ipHash: string | null;
+  ipHash: string;
 }): Promise<TrialSession> {
-  if (ipHash) {
-    const since = new Date(Date.now() - RATELIMIT_WINDOW_MS);
-    const [{ value }] = await db
-      .select({ value: count() })
-      .from(trialSessions)
-      .where(
-        and(
-          eq(trialSessions.ipHash, ipHash),
-          eq(trialSessions.showId, showId),
-          gt(trialSessions.startedAt, since),
-        ),
-      );
-    if (value >= TRIAL_RATELIMIT_PER_HOUR) {
-      throw new TrialRateLimitError();
-    }
+  const since = new Date(Date.now() - RATELIMIT_WINDOW_MS);
+  const [{ value }] = await db
+    .select({ value: count() })
+    .from(trialSessions)
+    .where(
+      and(
+        eq(trialSessions.ipHash, ipHash),
+        eq(trialSessions.showId, showId),
+        gt(trialSessions.startedAt, since),
+      ),
+    );
+  if (value >= TRIAL_RATELIMIT_PER_HOUR) {
+    throw new TrialRateLimitError();
   }
 
   const expiresAt = new Date(Date.now() + TRIAL_DURATION_SECONDS * 1000);
@@ -94,27 +94,33 @@ export async function mintTrialSession({
 
 // Derives the stable hash bucket for rate-limiting. Uses the Mux signing
 // private key as the HMAC salt — it's already required server-side, never
-// shipped to the client, and rotates with the signing key. Returns null if
-// the salt is missing or the IP is empty (rate-limit then skipped, which
-// fail-opens — preferable to locking out legitimate users behind a quirky
-// proxy chain).
-export function hashClientIp(ip: string | null | undefined): string | null {
-  if (!ip) return null;
-  const salt = process.env.MUX_SIGNING_KEY_PRIVATE_KEY;
-  if (!salt) return null;
+// shipped to the client, and rotates with the signing key. Always returns
+// a string: a missing salt is a server-config error that would already
+// have broken JWT signing upstream, so we fall back to a constant only
+// to keep the type non-nullable; in any healthy deployment the env var
+// is present.
+const TRIAL_HASH_FALLBACK_SALT = "matio-trial-fallback-salt";
+
+export function hashClientIp(ip: string): string {
+  const salt = process.env.MUX_SIGNING_KEY_PRIVATE_KEY ?? TRIAL_HASH_FALLBACK_SALT;
   return crypto.createHmac("sha256", salt).update(ip).digest("hex");
 }
 
-// Pulls the client IP from a NextRequest. Vercel sets `x-forwarded-for` to
-// `client, proxy1, proxy2` — the leftmost entry is what we want.
-export function getClientIp(req: { headers: Headers }): string | null {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) {
-    const first = xff.split(",")[0]?.trim();
-    if (first) return first;
-  }
-  const real = req.headers.get("x-real-ip");
-  return real?.trim() || null;
+// Resolve the client IP for rate-limit bucketing. We deliberately only
+// trust `x-vercel-forwarded-for`: Vercel sets this header itself to a
+// single, untainted client IP. The standard `x-forwarded-for` is
+// appended-to (not overridden) at the edge, so its leftmost entry is
+// whatever the client sent — using it as the bucket key let an attacker
+// rotate IPs by simply varying the header on each request.
+//
+// In local dev there is no Vercel edge, so the header is absent and we
+// fall back to a constant. That puts all un-identifiable requests into
+// a single shared bucket — fail-closed under abuse (3 trials per show
+// total for the whole anonymous pool), painless for local development.
+export function getClientIp(req: { headers: Headers }): string {
+  const vercelIp = req.headers.get("x-vercel-forwarded-for")?.trim();
+  if (vercelIp) return vercelIp;
+  return "unknown";
 }
 
 // Called from pages that the user lands on after Clerk sign-up. Attaches any

@@ -26,6 +26,10 @@ import { MatioLogo } from "@/components/site/matio-logo";
 import { useT } from "@/lib/i18n/client";
 import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
 import { Paywall } from "./paywall";
+import {
+  PlaybackUnavailable,
+  RateLimitedNotice,
+} from "./playback-status";
 import { EpisodesOverlay } from "./episodes-overlay";
 import { UpNextOverlay } from "./up-next-overlay";
 
@@ -47,6 +51,26 @@ export type PlayerEpisode = {
 
 type Mode = "subscriber" | "trial";
 type OverlayKind = "none" | "episodes" | "upnext";
+
+// End-states for the player. Distinct from a transient error: once we
+// hit one of these, the <MediaController> stops rendering and a focused
+// overlay takes over the slot.
+//
+// - paywall: trial preview ended naturally (token route 403). Shows the
+//   plan-picker sheet. Reserved for this exact case — using it for
+//   anything else (rate limit, server error, decode failure) frames
+//   infrastructure problems as a payment issue.
+// - rateLimited: too many trial starts from this IP/show bucket in the
+//   last hour (429). Distinct visuals, still offers subscribe.
+// - unavailable: anything else — 5xx, network failure, malformed
+//   response, video decode error. Retryable.
+type EndState = "paywall" | "rateLimited" | "unavailable";
+
+function classifyTokenStatus(status: number): EndState {
+  if (status === 403) return "paywall";
+  if (status === 429) return "rateLimited";
+  return "unavailable";
+}
 
 // Outer shell owns episode selection, overlay visibility, and the locked
 // flag — none of which should reset on episode swap. The inner
@@ -167,7 +191,17 @@ function EpisodePlayback({
   const [lastSaved, setLastSaved] = useState(0);
   const [token, setToken] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
-  const [paywall, setPaywall] = useState(false);
+  const [endState, setEndState] = useState<EndState | null>(null);
+  // Bumped by retry() — included in the token-fetch effect's deps so the
+  // fetch reruns without unmounting the inner playback component (which
+  // would also tear down the MediaController and any captured renditions).
+  const [fetchKey, setFetchKey] = useState(0);
+  const retry = useCallback(() => {
+    setEndState(null);
+    setToken(null);
+    setExpiresAt(null);
+    setFetchKey((k) => k + 1);
+  }, []);
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   // Whether the underlying media element exposes at least one real
   // caption/subtitle track. media-chrome's built-in auto-hide on
@@ -185,6 +219,8 @@ function EpisodePlayback({
   // Fetch playback token. Inner is keyed on current.id, so this runs
   // exactly once per episode-mount; per-episode state starts at its
   // initial value (no setState resets at the top of the effect body).
+  // Branches on response status so that a 429 / 5xx / parse failure
+  // doesn't get framed as a "preview ended" paywall.
   useEffect(() => {
     let cancelled = false;
     fetch(
@@ -194,26 +230,39 @@ function EpisodePlayback({
       .then(async (r) => {
         if (cancelled) return;
         if (!r.ok) {
-          setPaywall(true);
+          setEndState(classifyTokenStatus(r.status));
           return;
         }
-        const data = (await r.json()) as {
-          token: string;
-          expiresIn: number;
-        };
-        setToken(data.token);
-        setExpiresAt(Date.now() + data.expiresIn * 1000);
+        try {
+          const data = (await r.json()) as {
+            token: unknown;
+            expiresIn: unknown;
+          };
+          if (
+            typeof data.token !== "string" ||
+            typeof data.expiresIn !== "number"
+          ) {
+            setEndState("unavailable");
+            return;
+          }
+          setToken(data.token);
+          setExpiresAt(Date.now() + data.expiresIn * 1000);
+        } catch {
+          if (!cancelled) setEndState("unavailable");
+        }
       })
       .catch(() => {
-        if (!cancelled) setPaywall(true);
+        if (!cancelled) setEndState("unavailable");
       });
     return () => {
       cancelled = true;
     };
-  }, [current.id]);
+  }, [current.id, fetchKey]);
 
   // Token refresh on expiry. Subscribers get a fresh 1h token; trial users
-  // who've used their time get 403 and the player flips to paywall.
+  // who've used their time get 403 and the player flips to the paywall.
+  // Non-403 failures land on the same end-state classifier as the initial
+  // fetch — a 429 mid-session is still rate-limited, not paywall-worthy.
   useEffect(() => {
     if (!expiresAt) return;
     const ms = expiresAt - Date.now();
@@ -226,18 +275,27 @@ function EpisodePlayback({
         );
         if (r.ok) {
           const data = (await r.json()) as {
-            token: string;
-            expiresIn: number;
+            token: unknown;
+            expiresIn: unknown;
           };
-          setToken(data.token);
-          setExpiresAt(Date.now() + data.expiresIn * 1000);
+          if (
+            typeof data.token === "string" &&
+            typeof data.expiresIn === "number"
+          ) {
+            setToken(data.token);
+            setExpiresAt(Date.now() + data.expiresIn * 1000);
+            return;
+          }
+          videoRef.current?.pause();
+          setEndState("unavailable");
           return;
         }
+        videoRef.current?.pause();
+        setEndState(classifyTokenStatus(r.status));
       } catch {
-        // fall through to paywall
+        videoRef.current?.pause();
+        setEndState("unavailable");
       }
-      videoRef.current?.pause();
-      setPaywall(true);
     }, ms);
     return () => clearTimeout(timer);
   }, [expiresAt, current.id]);
@@ -323,7 +381,7 @@ function EpisodePlayback({
     return () => el.removeEventListener("timeupdate", update);
   }, [current.introStartSeconds, current.introEndSeconds, token]);
 
-  if (paywall) {
+  if (endState === "paywall") {
     return (
       <Paywall
         showSlug={showSlug}
@@ -332,6 +390,14 @@ function EpisodePlayback({
         episodeLabel={episodeLabel}
       />
     );
+  }
+
+  if (endState === "rateLimited") {
+    return <RateLimitedNotice showSlug={showSlug} />;
+  }
+
+  if (endState === "unavailable") {
+    return <PlaybackUnavailable showSlug={showSlug} onRetry={retry} />;
   }
 
   if (!token) {
@@ -413,7 +479,7 @@ function EpisodePlayback({
             setAspectRatio(v.videoWidth / v.videoHeight);
           }
         }}
-        onError={() => setPaywall(true)}
+        onError={() => setEndState("unavailable")}
         onEnded={() => {
           const el = videoRef.current;
           if (el) {

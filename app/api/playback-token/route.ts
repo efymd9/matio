@@ -143,9 +143,15 @@ export async function GET(req: NextRequest) {
     mintedExpiresAt = fresh.expiresAt;
   } catch (err) {
     if (err instanceof TrialRateLimitError) {
+      // Generic body — don't confirm to an adversary that they hit a
+      // per-network bucket (signal to rotate IPs / proxies); the client
+      // identifies the case by status code, not text.
       return NextResponse.json(
-        { error: "Too many trial starts from this network" },
-        { status: 429 },
+        { error: "Too many requests" },
+        {
+          status: 429,
+          headers: { "Retry-After": String(60 * 60) },
+        },
       );
     }
     throw err;

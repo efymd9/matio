@@ -74,6 +74,18 @@ export const es = {
     noEpisodesReady: "Aún no hay episodios disponibles.",
     backToShowAria: "Volver a la serie",
     loading: "Cargando",
+    rateLimitedKicker: "Has visto varias vistas previas",
+    rateLimitedTitle: "Espera un momento antes de continuar.",
+    rateLimitedBody:
+      "Para evitar que las vistas previas se conviertan en visionado completo, las limitamos durante una hora. Suscríbete para seguir sin pausas.",
+    rateLimitedSubscribe: "Suscribirse",
+    rateLimitedBack: "Volver al catálogo",
+    unavailableKicker: "Reproducción no disponible",
+    unavailableTitle: "No conseguimos cargar este episodio.",
+    unavailableBody:
+      "Probablemente sea cosa nuestra. Inténtalo de nuevo en un momento.",
+    unavailableRetry: "Reintentar",
+    unavailableBack: "Volver a la serie",
   },
   watchError: {
     kicker: "Reproducción interrumpida",
@@ -262,6 +274,18 @@ export const en: Dict = {
     noEpisodesReady: "No episodes ready yet.",
     backToShowAria: "Back to show",
     loading: "Loading",
+    rateLimitedKicker: "Too many previews",
+    rateLimitedTitle: "Take a breather before the next one.",
+    rateLimitedBody:
+      "We cap previews for an hour so they don't quietly become full viewings. Subscribe to keep watching without limits.",
+    rateLimitedSubscribe: "Subscribe",
+    rateLimitedBack: "Back to catalog",
+    unavailableKicker: "Playback unavailable",
+    unavailableTitle: "We couldn't load this episode.",
+    unavailableBody:
+      "Looks like a hiccup on our side. Give it another try in a moment.",
+    unavailableRetry: "Try again",
+    unavailableBack: "Back to show",
   },
   watchError: {
     kicker: "Playback interrupted",
