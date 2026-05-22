@@ -51,7 +51,7 @@ export default async function SubscribePage({
 
   const { show, resume, plan: planParam } = await searchParams;
   // Honour ?plan= from the watch paywall so the user's selection
-  // carries across the sign-in step. Anything other than "monthly"
+  // carries across the sign-up step. Anything other than "monthly"
   // falls back to "annual" (the recommended default).
   const initialPlan: "monthly" | "annual" =
     planParam === "monthly" ? "monthly" : "annual";

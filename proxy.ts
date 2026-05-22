@@ -50,8 +50,13 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   if (isAuthRoute(req)) {
-    const { userId, redirectToSignIn } = await auth();
-    if (!userId) return redirectToSignIn({ returnBackUrl: req.url });
+    // Default the subscribe flow to sign-up rather than sign-in: most
+    // visitors who reach /subscribe are first-timers about to create an
+    // account, not returning users. Clerk's hosted sign-up page still
+    // offers a "Already have an account? Sign in" affordance for the
+    // minority case.
+    const { userId, redirectToSignUp } = await auth();
+    if (!userId) return redirectToSignUp({ returnBackUrl: req.url });
     return;
   }
 });
