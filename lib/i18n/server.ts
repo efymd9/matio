@@ -8,8 +8,10 @@ import {
   type Dict,
   type Locale,
 } from "./dictionaries";
+import { LOCALE_COOKIE_NAME } from "./shared";
 
-export const LOCALE_COOKIE = "locale";
+// Re-exported under its historical name so server-side callers don't break.
+export const LOCALE_COOKIE = LOCALE_COOKIE_NAME;
 
 // Read the user's selected locale from the cookie. Falls back to Spanish
 // (the site's default locale). Used by the root layout to set <html lang>
