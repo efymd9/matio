@@ -12,6 +12,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
+    "db:check-sub-dupes": "tsx scripts/check-subscription-dupes.ts",
     "promote-to-admin": "tsx scripts/promote-to-admin.ts",
     "stripe:setup": "tsx scripts/stripe-setup.ts",
     "backfill:mux-policy": "tsx scripts/backfill-mux-policy.ts",

@@ -46,6 +46,12 @@ export const trialSessions = pgTable(
       t.showId,
       t.startedAt,
     ),
+    // FK indexes: Postgres doesn't auto-index FK columns, so CASCADE
+    // deletes from shows / users would do sequential scans without
+    // these. show_id is also the cascade target when an admin deletes
+    // a show; user_id is hit by linkTrialSessionsToCurrentUser.
+    index("trial_sessions_show_id_idx").on(t.showId),
+    index("trial_sessions_user_id_idx").on(t.userId),
   ],
 );
 

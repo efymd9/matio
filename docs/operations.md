@@ -28,6 +28,7 @@ Clerk runs in **keyless** mode if you leave `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` 
 | `pnpm db:migrate` | Apply pending migrations against `DATABASE_URL` |
 | `pnpm db:push` | (Use sparingly.) Skip migration files; push schema directly to DB — declarative mode |
 | `pnpm db:studio` | Open Drizzle Studio (web UI for the DB) |
+| `pnpm db:check-sub-dupes` | Pre-flight gate for migration 0008 (partial unique on access-granting subs). Exits non-zero if any user has multiple rows in active/trialing/past_due — clean those up before `db:migrate` or 0008 will fail to apply on a fresh env. |
 | `pnpm promote-to-admin <email>` | `UPDATE users SET role='admin' WHERE email=…` |
 | `pnpm stripe:setup` | Idempotently create/find the two Stripe products+prices; prints `STRIPE_PRICE_*` env lines |
 
@@ -35,9 +36,10 @@ Clerk runs in **keyless** mode if you leave `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` 
 
 1. Edit `db/schema/<domain>.ts`.
 2. `pnpm db:generate` — emits `drizzle/<NNNN>_<slug>.sql` and updates `drizzle/meta/`.
-3. **Review the generated SQL** — drizzle-kit can occasionally pick the wrong rename strategy.
-4. `pnpm db:migrate` — applies pending migrations.
-5. Commit both the schema files AND the `drizzle/` artifacts. Migrations are append-only.
+3. **Review the generated SQL** — drizzle-kit can occasionally pick the wrong rename strategy, and any migration touching a non-trivial existing dataset (NOT NULL on an existing column, partial unique on a column with duplicates, etc.) usually wants a hand-written backfill statement inserted before the constraint.
+4. **Run any pre-flight gate scripts.** On a fresh DB applying the full chain, `pnpm db:check-sub-dupes` must pass before `db:migrate` — see the scripts table above.
+5. `pnpm db:migrate` — applies pending migrations.
+6. Commit both the schema files AND the `drizzle/` artifacts. Migrations are append-only.
 
 For dev branches, `pnpm db:push` is acceptable. **Never** run `db:push` against prod (drops/recreates with no migration record).
 

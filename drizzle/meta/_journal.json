@@ -71,6 +71,13 @@
       "when": 1779454208500,
       "tag": "0009_sleepy_proemial_gods",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779454602631,
+      "tag": "0010_lethal_doctor_octopus",
+      "breakpoints": true
     }
   ]
 }

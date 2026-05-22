@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  index,
   pgEnum,
   pgTable,
   text,
@@ -34,6 +35,14 @@ export const subscriptions = pgTable(
     plan: subscriptionPlan("plan").notNull(),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }).notNull(),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    // Separate from updated_at: the latter resets on every status change
+    // (e.g. a late customer.subscription.updated webhook), which made the
+    // "cancellations in the last 30 days" analytics query meaningless.
+    // Existing rows get back-filled from updated_at in the migration so
+    // historical churn numbers stay approximately right.
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow()
@@ -51,6 +60,13 @@ export const subscriptions = pgTable(
     uniqueIndex("subscriptions_active_user_id_unique")
       .on(t.userId)
       .where(sql`status IN ('active','trialing','past_due')`),
+    // Supports listing a user's subscription history (latest first) for
+    // /subscribe's AlreadySubscribed lookup and for analytics. The
+    // partial unique above covers the access-granting subset only.
+    index("subscriptions_user_id_updated_at_idx").on(
+      t.userId,
+      t.updatedAt.desc(),
+    ),
   ],
 );
 
