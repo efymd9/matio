@@ -9,8 +9,12 @@ Browser ──► proxy.ts (clerkMiddleware) ──► (gate check) ──► Pa
                 │                                              │
                 ├── /admin/*    : Clerk userId + users.role     ├── Server Component
                 │                = "admin" (DB lookup, 5s       │   – reads cookies()
-                │                module-cached)                 │   – calls db / Clerk
-                ├── /subscribe/*: Clerk userId                  │   – returns JSX
+                │                module-cached); anonymous →    │   – calls db / Clerk
+                │                redirectToSignIn               │   – returns JSX
+                ├── /subscribe/*: Clerk userId; anonymous →     │
+                │                redirectToSignUp (paywall      │
+                │                conversion path defaults to    │
+                │                creating an account)           │
                 └── everything else: passes through             │
                                                                 └── Server Action
                                                                     – "use server"
@@ -29,14 +33,17 @@ Schemas live in `db/schema/`, one file per logical domain (CLAUDE.md convention)
 | Table | Purpose | Key columns |
 |---|---|---|
 | `users` | Clerk-id-keyed mirror of Clerk users | `id` (Clerk user id, PK), `email`, `role` (`user`\|`admin`), `stripe_customer_id` |
-| `subscriptions` | Stripe-mirrored subscription state | `user_id`, `stripe_subscription_id`, `status`, `plan`, `current_period_end`, `cancel_at_period_end` |
+| `subscriptions` | Stripe-mirrored subscription state | `user_id`, `stripe_subscription_id`, `status`, `plan`, `current_period_end`, `cancel_at_period_end`, `created_at` (independent of `updated_at` so churn analytics don't drift on later webhook updates) |
+| `stripe_events` | Webhook idempotency log | `event_id` (PK, the Stripe event id) — claimed via INSERT … ON CONFLICT DO NOTHING before the handler runs; conflicts return 200 OK with no work. Rolled back (DELETE) on handler exception so Stripe's retry can re-attempt |
 | `shows` | The catalog | `slug` (unique), `genre[]`, `status` (`draft`\|`published`), `deleted_at` (soft-delete) |
 | `seasons` | Season per show | `(show_id, number)` unique |
 | `episodes` | Episode with Mux linkage | `mux_asset_id`, `mux_playback_id`, `mux_playback_policy` (`public`\|`signed`), `status` (`processing`\|`ready`\|`errored`), `intro_start_seconds` + `intro_end_seconds` (nullable; drive the "Skip intro" chip), `(season_id, number)` unique |
-| `trial_sessions` | Anonymous-first 60s trial | `(session_token, show_id)` unique, `expires_at`, `user_id` (nullable, set on signup), `converted`, `last_position_seconds`, `ip_hash` (nullable HMAC-SHA256 of client IP; drives per-(IP, show) trial rate-limit) |
+| `trial_sessions` | Anonymous-first 60s trial | `(session_token, show_id)` unique, `expires_at`, `user_id` (nullable, set on signup), `converted`, `last_position_seconds`, `ip_hash` (HMAC-SHA256 of `x-vercel-forwarded-for`; drives per-(IP, show) trial rate-limit) |
 | `watch_progress` | Per-user, per-episode resume position | `(user_id, episode_id)` unique |
 
 FK cascade defaults: deleting a `show` removes its `seasons` → `episodes` → `trial_sessions` (via FK CASCADE). `users.id` cascades into `subscriptions` and `watch_progress`; nulls out `trial_sessions.user_id`.
+
+Hot-path indexes (migration 0010): `subscriptions(user_id, updated_at DESC)` for AlreadySubscribed / history reads, `watch_progress(episode_id)` for the episodes→progress join in admin analytics, `trial_sessions(show_id)` + `trial_sessions(user_id)` for cascade deletes + signup linking. Postgres doesn't auto-index FK columns; without these, every hot read does a sequential scan at scale.
 
 ## Auth model
 
@@ -64,8 +71,12 @@ End-to-end:
    - Outer `Player` picks the initial episode; the inner `EpisodePlayback` (keyed on `current.id`) does the actual playback work.
    - Inner fetches `/api/playback-token?episode_id=<id>` on mount, captures `token` + `expiresIn`, sets `expiresAt = Date.now() + expiresIn*1000`.
    - Renders `<MediaController>` + `<MuxVideo slot="media" playbackId tokens={{ playback }} />` (headless mux-video + media-chrome — not `@mux/mux-player-react`).
-   - `setTimeout(expiresAt - now)` fires at expiry → re-fetches token. Subscriber gets new 1h token. Trial gets 403 → `videoRef.current.pause()` + Paywall overlay. This is what stops a buffered-ahead Mux stream from running past the cutoff.
-   - Every 10s while playing, writes `last_position_seconds` (trial → `trial_sessions`) or `watch_progress` (subscriber).
+   - `setTimeout(expiresAt - now)` fires at expiry → re-fetches token. Subscriber gets new 1h token. Other responses are classified into distinct end-states (`paywall` / `rateLimited` / `unavailable`) via `classifyTokenStatus(r.status)`:
+     - **403** → `Paywall` overlay (trial preview ended naturally — "Sign up to keep watching")
+     - **429** → `RateLimitedNotice` overlay (trial cap hit for this network — "Too many previews this hour", still offers subscribe)
+     - **5xx / network / JSON parse failure / `<video>` decode error** → `PlaybackUnavailable` overlay with a retry button; the retry bumps `fetchKey` so the token-fetch effect re-runs without unmounting the controller
+   - `videoRef.current.pause()` is called alongside the end-state flip so a buffered-ahead Mux stream stops at the cutoff.
+   - Every 10s while playing, writes `last_position_seconds` (trial → `trial_sessions`) or `watch_progress` (subscriber). Both writes clamp the position to `[0, 24h]` server-side; the trial path additionally verifies the episode is `status='ready'` on a `published`, non-deleted show.
 3. **Token endpoint** (`app/api/playback-token/route.ts`) — this is the actual gate. The handler:
    - Joins episode → season → show and filters on `episodes.status='ready' AND shows.status='published' AND shows.deleted_at IS NULL`. A leaked draft episode id returns 404 here, regardless of any cookie.
    - Signed-in user with `subscriptions.status='active'` → 1h subscriber JWT.
@@ -76,8 +87,9 @@ End-to-end:
      - If no row yet → `mintTrialSession({ sessionToken, showId, ipHash })`: enforces a per-(`ip_hash`, `show_id`) cap of `TRIAL_RATELIMIT_PER_HOUR = 3` trial creations / hour, inserts the row, sets the `trial_session` cookie if it was missing, and returns the JWT. Cap exceeded → 429.
 4. **IP rate-limit details**:
    - `hashClientIp(ip)` returns `HMAC-SHA256(MUX_SIGNING_KEY_PRIVATE_KEY, ip)` so the bucket is stable across requests but unrecoverable without the Mux signing key (no raw IPs in the DB).
-   - Client IP comes from the leftmost `x-forwarded-for` entry (Vercel's convention); `x-real-ip` is a fallback. If neither is present, `ipHash` is `null` and the rate-limit is skipped (fail-open) — preferable to locking out users behind unusual proxy chains.
+   - Client IP is sourced **only** from `x-vercel-forwarded-for` — Vercel sets it to a single, untainted client IP. The standard `x-forwarded-for` is appended-to (not replaced) at the edge, so its leftmost entry is whatever the client sent; using it let an attacker rotate IPs by varying the header. If the trusted header is missing (e.g. local dev), the bucket key falls back to a constant `"unknown"`, which puts all unidentified requests into one shared bucket — fail-CLOSED under abuse, painless in dev.
    - The cap is **per-(IP, show)** — a household watching a different show on the same IP isn't disrupted.
+   - 429 responses include `Retry-After: 3600` and a generic body (no "from this network" framing — no need to confirm to an adversary that they hit a per-network bucket).
 5. **Conversion linking**:
    - **Page-level** (primary): `/subscribe` server component runs `linkTrialSessionsToCurrentUser()` on render — claims any trial rows with the user's cookie that have `user_id IS NULL`. Catches the common case (user comes from trial → Subscribe → signup → back to /subscribe).
    - **Stripe webhook**: when `customer.subscription.*` lands with active/trialing status, `markUserTrialsConverted(user.id)` flips `converted=true` on all the user's trial rows. This is an **analytics-only** marker (powers the trial→paid metric on the admin dashboard). It does not affect playback — gating is purely based on `subscriptions.status='active'` and the trial expiry timestamp.
@@ -91,8 +103,11 @@ Admin uploads via @mux/upchunk (components/admin/upload-widget.tsx)
         │
         ▼ (Server Action createMuxUpload)
 mux.video.uploads.create({ playback_policies: ["signed"], passthrough: episode.id })
-        │
+        │  (no DB writes here — see "re-upload safety" below)
         ▼ (browser uploads chunks directly to Mux)
+upchunk fires `success` → client calls markEpisodeReprocessing(episodeId)
+        │
+        ▼ (DB: status="processing", mux_asset_id=NULL, mux_playback_id=NULL, …)
 Mux processes (transcodes etc.)
         │
         ▼ (video.asset.ready webhook → app/api/webhooks/mux/route.ts)
@@ -111,6 +126,8 @@ Player fetches /api/playback-token → RS256 JWT (lib/mux-token.ts)
 
 `passthrough` carries the episode id through Mux → webhook → our DB without needing an extra column. Webhook uses `mux.webhooks.unwrap(body, headers, secret)` for signature verification.
 
+**Re-upload safety**: `createMuxUpload` deliberately doesn't touch the episode row — it only mints the upload URL. The DB clearing happens in `markEpisodeReprocessing`, which the upload widget calls **after** upchunk's `success` event fires (i.e., the browser → Mux upload has actually completed). Previously `createMuxUpload` cleared playback fields preemptively, which meant a cancelled mid-upload left the row stuck in `status='processing'` with no path back: the Mux webhook's `resolveEpisodeFromPassthrough` refuses to overwrite a different existing `mux_asset_id` (anti-spoofing — see [gotchas → Mux SDK](./gotchas.md#mux-sdk-14)), so no later upload could rescue it. With the clear-on-success ordering, a cancelled upload simply leaves the previous asset live.
+
 **Caveat**: existing assets uploaded before the policy switch have **public** playback IDs and play without a token. Re-upload to gate them — or run `pnpm backfill:mux-policy` if the script applies.
 
 ## Player architecture
@@ -124,7 +141,8 @@ The watch surface uses **headless `<mux-video>` + media-chrome** for full visual
   - **`EpisodePlayback` (inner, `key={current.id}`)** — owns per-episode state: token, expiresAt, paywall, aspect ratio, captions detection, skip-intro chip, last-saved position. The `key` prop is what makes this work: every episode swap unmounts and remounts the inner, so all per-episode state resets to its initial value naturally. This pattern is required by React 19's `react-hooks/set-state-in-effect` rule — see [gotchas → React 19 hooks rules](./gotchas.md#react-19-hooks-rules).
 - `components/watch/episodes-overlay.tsx` — season-grouped episode picker. Portal'd to `document.body` (see [gotchas → media-chrome overlays](./gotchas.md#media-chrome)). Uses `useSyncExternalStore` for an SSR-safe "are we on the client" check (not `useState + useEffect(setMounted)` — see gotchas).
 - `components/watch/up-next-overlay.tsx` — bottom-right slide-in card with 7-second auto-advance. Same `useSyncExternalStore` SSR pattern.
-- `components/watch/paywall.tsx` — soft-sidekick bottom sheet shown on trial expiry / token 403. Client component (rendered from inside the client `Player`). Two interactive plan tiles (Monthly / Annual, Annual default) drive a `plan` state that highlights the selected card (cinema-red border, gradient bg, dropped glow, corner radio dot, swapped "Selected" label). The "Continue · Subscribe" button uses `useTransition` + `router.push` so it shows press feedback (`active:scale-[0.98]`) and a spinner during the navigation. The chosen plan rides along as `?plan=` on the `/subscribe` URL; `/subscribe` reads it and pre-selects the matching radio card so the user doesn't have to pick twice.
+- `components/watch/paywall.tsx` — bottom-sheet overlay shown on trial 403. Leads with **sign-up**, not plan selection: primary CTA is Clerk's `<SignUpButton mode="modal" forceRedirectUrl="/subscribe?show=…&resume=…">`. Signed-in non-subscribers (rare — paid → canceled → returned) get a direct `<Link>` to `/subscribe` instead. A secondary "Already have an account? Sign in" link uses `<SignInButton>` with matching redirect. Plan picking happens after signup, on `/subscribe` — two decisions ("which plan?" + "make an account?") at the same in-player moment was decision overload.
+- `components/watch/playback-status.tsx` — `RateLimitedNotice` (429) and `PlaybackUnavailable` (5xx / network / video decode) overlays. Same visual idiom as `Paywall` but reserved for non-paywall end-states; framing 429 as "Preview ended" was misleading (the user hadn't burned their trial — the IP bucket did).
 
 **Chrome layout (all positioned relative to `MediaController`):**
 - Top scrim — back button, `S<n>·E<n>` mono kicker, show — title, AirPlay, captions, quality menu trigger
@@ -156,7 +174,7 @@ The downside of the keyed-remount pattern is a brief Loading splash on every swa
 
 **Lock toggle:** sets a `locked` boolean; all chrome layers get `!opacity-0 !pointer-events-none` and a single "🔒 Tap to unlock" pill renders center. Tap unlocks.
 
-**Token expiry:** subscriber gets a fresh 1h token via re-fetch; trial gets 403 → `videoRef.current.pause()` + `paywall=true`. This is what stops buffered-ahead chunks from running past the trial cutoff.
+**Token expiry:** subscriber gets a fresh 1h token via re-fetch; trial gets 403 → `videoRef.current.pause()` + `endState="paywall"`. This is what stops buffered-ahead chunks from running past the trial cutoff. 429 / 5xx / network failures route to `rateLimited` / `unavailable` end-states instead (the player's `classifyTokenStatus` helper) — they shouldn't be framed as a payment issue.
 
 ## Mux thumbnail signing
 
@@ -192,36 +210,62 @@ Approximations called out in code comments:
 
 ```
 In-player paywall (components/watch/paywall.tsx)
-   │  client component, radio-card selection (monthly | annual)
-   ▼  useTransition + router.push("/subscribe?show=<slug>&plan=<picked>&resume=<n>")
-/subscribe (signed-in, gated by proxy.ts; reads ?plan= to pre-select)
-   │  single <form action={startCheckout}> with hidden show/resume + radio name="plan"
-   │  client SubmitButton (useFormStatus) shows spinner while pending
+   │  primary CTA: <SignUpButton mode="modal" forceRedirectUrl=…>
+   ▼  Clerk sign-up modal → after signup, Clerk redirects to
+/subscribe?show=<slug>&resume=<n>
+   │  proxy.ts: anonymous /subscribe → redirectToSignUp (so URL
+   │           bookmarks + server-side redirects from /watch also
+   │           land on sign-up first); signed-in passes through
+   │  page render: getOrSyncCurrentUser (closes user.created webhook
+   │              race) → linkTrialSessionsToCurrentUser → plan picker
+   │  single <form action={startCheckout}> with hidden show/resume +
+   │  radio name="plan"; SubmitButton shows spinner while pending
    ▼
 startCheckout (app/subscribe/actions.ts)
    │
-   ├── getOrSyncCurrentUser ran on /subscribe page render before this,
-   │     then linkTrialSessionsToCurrentUser
+   ├── validate ?show= slug against published, non-deleted shows
+   │     (open-redirect guard — slug flows into success/cancel URL)
+   ├── Layer 1: DB dedupe (no existing access-granting row)
+   ├── Layer 2: Stripe-list dedupe (catches the race where our DB
+   │           mirror is behind because the previous webhook hasn't
+   │           landed)
    ├── findOrCreate Stripe customer (stores stripe_customer_id on users)
-   ├── checkout.sessions.create with success_url = /watch/<slug>?resume=<n>
-   │     (or /?welcome=1 when there's no show context — /account is gone)
+   ├── checkout.sessions.create with idempotencyKey = checkout:user:plan:hour
+   │     and success_url = /watch/<slug>?resume=<n> (or /?welcome=1
+   │     when there's no show context — /account is gone)
    └── redirect(session.url)
    │
    ▼ Stripe Checkout (hosted)
    │
-   ▼ (customer.subscription.created webhook → app/api/webhooks/stripe/route.ts)
+   ▼ Webhook → app/api/webhooks/stripe/route.ts
+Idempotency: claim stripe_events.event_id before processing; conflicts
+return 200 without re-applying. On handler exception the claim is
+DELETED so Stripe's retry can re-attempt.
+   │
+   │  Events handled:
+   │  - checkout.session.completed: retrieves the subscription and
+   │      runs mirrorSubscription. Closes the race where
+   │      customer.subscription.created lags and the user lands on
+   │      /watch with a 403 because no row exists yet.
+   │  - customer.subscription.{created,updated,deleted}: mirrorSubscription
+   │  - invoice.{paid,payment_failed}: pull subscription, mirrorSubscription
+   ▼
 mirrorSubscription:
    - lookup user by stripe_customer_id
+   - require current_period_end on access-granting statuses (throws if
+       missing, so Stripe retries — defaulting to now() locked out
+       just-paid users)
    - upsert subscriptions row keyed on stripe_subscription_id
      (partial unique index on (user_id) WHERE status IN active/trialing/
      past_due — only one access-granting row per user at a time)
+   - paused → past_due (customer who pauses billing keeps access)
    - markUserTrialsConverted (active/trialing only)
    │
    ▼ redirect to success_url
 /watch/<slug>?resume=<n>  or  /?welcome=1
 ```
 
-**Subscription gate (read path).** Every place we check "is this user a subscriber?" — `/api/playback-token`, `app/watch/[showSlug]/page.tsx`, `saveWatchProgress` — applies the same filter: `status='active' AND current_period_end > now()`, ordered by `updated_at DESC LIMIT 1`. Defense-in-depth: even if a `customer.subscription.deleted` webhook is dropped and the row stays "active" in our DB, the period-end check expires playback at the user's actual term.
+**Subscription gate (read path).** Every place we check "is this user a subscriber?" — `/api/playback-token`, `app/watch/[showSlug]/page.tsx`, `saveWatchProgress` — goes through `hasActiveSubscription(userId)` in `lib/subscription-access.ts`. The filter is `status IN ACCESS_GRANTING_STATUSES AND current_period_end > now()`, ordered by `updated_at DESC LIMIT 1`. `ACCESS_GRANTING_STATUSES = ["active","trialing","past_due"]` — past_due grants access because Stripe is mid-retry on a failed invoice and locking the user out makes Customer-Portal recovery impossible. Defense-in-depth: even if a `customer.subscription.deleted` webhook is dropped and the row stays in an access-granting state in our DB, the period-end check expires playback at the user's actual term.
 
 **Billing portal.** `/api/billing-portal` is the only entry — a GET handler that does auth + customer lookup + `stripe.billingPortal.sessions.create` + 302 in one server hop. The Clerk user-menu's "Manage subscription" item, the `/subscribe` "you're already subscribed" CTA, and any future "manage billing" affordance all link straight to it. There is no `/account` page.
 
@@ -234,8 +278,8 @@ isAdminRoute = createRouteMatcher(["/admin(.*)"]);
 isAuthRoute  = createRouteMatcher(["/subscribe(.*)"]);
 ```
 
-- `/admin/*`: Clerk userId required, then DB lookup `users.role='admin'`. Non-admin → redirect `/`. The role read is wrapped in a module-scope 5-second cache (`roleCache: Map<userId, {role, expiresAt}>`) so RSC prefetch fan-out + matcher-caught traffic don't translate 1:1 into Neon queries — without it a single signed-in user could saturate the pooled connection by spamming admin URLs.
-- `/subscribe/*`: Clerk userId required. Anonymous → `redirectToSignIn({ returnBackUrl })`.
+- `/admin/*`: Clerk userId required, then DB lookup `users.role='admin'`. Non-admin → redirect `/`. The role read is wrapped in a module-scope 5-second cache (`roleCache: Map<userId, {role, expiresAt}>`) so RSC prefetch fan-out + matcher-caught traffic don't translate 1:1 into Neon queries — without it a single signed-in user could saturate the pooled connection by spamming admin URLs. Anonymous → `redirectToSignIn` (admins already have accounts).
+- `/subscribe/*`: Clerk userId required. Anonymous → `redirectToSignUp({ returnBackUrl })` — the paywall conversion path defaults to creating an account; Clerk's hosted sign-up page links to sign-in for the minority returning case.
 - `/watch/*`: public. Trial cookie is **not** set here — `/api/playback-token` mints it on first play, after verifying the show is published+ready.
 - Everything else: passes through.
 

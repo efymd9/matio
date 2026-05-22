@@ -187,8 +187,42 @@ const cancelScheduled = sub.cancel_at_period_end || sub.cancel_at != null;
 Stripe's `Subscription.Status` includes `incomplete`, `incomplete_expired`, `paused`, `unpaid`. Our DB enum is `active | past_due | canceled | trialing`. The map in `app/api/webhooks/stripe/route.ts`:
 - `active` → `active`
 - `trialing` → `trialing`
-- `past_due`, `unpaid` → `past_due`
-- everything else → `canceled` (safer than granting access)
+- `past_due`, `unpaid`, `paused` → `past_due`
+- `canceled`, `incomplete`, `incomplete_expired` → `canceled`
+
+`paused` was originally mapped to `canceled`, which killed playback the instant a user paused billing for a trip via the Customer Portal. It now maps to `past_due` (access-granting) — a paused customer is still a customer, billing is just suspended.
+
+### `current_period_end` is mandatory on access-granting statuses
+
+The webhook used to default to `new Date()` when `sub.items.data[0]?.current_period_end` was missing — which made the gate `currentPeriodEnd > now()` evaluate false the instant the row was written, locking a just-paid user out. Now `mirrorSubscription` throws on missing `current_period_end` for access-granting statuses so Stripe retries (the field is typically present by the second delivery); canceled-track statuses store epoch and the gate correctly evaluates false.
+
+### Webhook idempotency via `stripe_events`
+
+`POST /api/webhooks/stripe` claims `event.id` in the `stripe_events` table via `INSERT … ON CONFLICT DO NOTHING` **before** running the handler. If the insert returns no row, the event was already processed (or is in-flight on another instance) and we 200-OK without re-applying state. Without this, a replayed `customer.subscription.deleted` after a re-subscribe would silently downgrade the active row.
+
+On handler exception the claim is `DELETE`'d before returning 500 so Stripe's retry can re-attempt. Don't move event work into the same transaction as the claim — `mirrorSubscription` already uses `db` (not a passed `tx`), and threading transactions through would touch every helper.
+
+### `checkout.session.completed` fires before `customer.subscription.created`
+
+Stripe routes these through different pipelines; ordering between them isn't guaranteed and the gap is often seconds. Handle `checkout.session.completed` (retrieve the subscription, call `mirrorSubscription`) — otherwise the user pays, lands on `/watch` via `success_url`, and gets a 403 because the subscriptions row hasn't been written yet. Subscribe `checkout.session.completed` in the Stripe dashboard webhook config (see [services.md → Stripe webhook setup](./services.md#stripe-subscriptions)).
+
+## Vercel platform
+
+### Trusted client IP comes from `x-vercel-forwarded-for`, not leftmost `x-forwarded-for`
+
+Vercel **appends** to `x-forwarded-for` rather than replacing it. So if a client sends `x-forwarded-for: 1.2.3.4` and Vercel later adds the real client IP, the header becomes `1.2.3.4, <real>` — using the leftmost entry as a rate-limit bucket key let an attacker rotate IPs by varying the header. `x-real-ip` has the same issue depending on configuration.
+
+Vercel sets `x-vercel-forwarded-for` to a single, untainted client IP. Read that header only:
+
+```ts
+export function getClientIp(req: { headers: Headers }): string {
+  const vercelIp = req.headers.get("x-vercel-forwarded-for")?.trim();
+  if (vercelIp) return vercelIp;
+  return "unknown"; // local dev or missing edge — see below
+}
+```
+
+In local dev there's no Vercel edge, so the header is absent. Fall back to a constant ("unknown") rather than `null` — that puts all unidentified requests into one shared rate-limit bucket. Fail-CLOSED under abuse, painless in dev. **Never `if (ip) ratelimit(...)`** — that branch is the bypass.
 
 ## Mux SDK 14+
 
@@ -234,6 +268,12 @@ mux.video.uploads.create({
 A playback ID with `policy: "public"` plays without a JWT. The Mux Player just ignores `tokens={{ playback }}`. This means:
 - If you switch new uploads to `["signed"]` but existing assets stay public, the existing assets bypass your gate.
 - To migrate: re-upload, or use the Mux API to add a signed playback ID to existing assets, then store that one.
+
+### Passthrough spoof guard refuses to overwrite a different `asset_id`
+
+`resolveEpisodeFromPassthrough` in the Mux webhook handler refuses an event whose `event.data.id` differs from the episode's existing `mux_asset_id`. This blocks the "edit passthrough in the Mux dashboard to redirect events at someone else's episode" attack — but it also means a re-upload's new asset would be rejected at webhook time if the row still pointed at the old one.
+
+The workaround drives the re-upload flow: **don't clear playback fields in `createMuxUpload`**. Clear them in a separate server action (`markEpisodeReprocessing`) that the upload widget calls from upchunk's `success` event handler — i.e., only after the browser → Mux upload genuinely completed. A cancelled mid-upload then leaves the previous asset live and recoverable; the previous design's preemptive clear would leave the row stuck in `processing` forever (no later webhook could overwrite `mux_asset_id=NULL` because the next upload would only fire `asset.ready` for its own id, and the guard accepted that — but if the row had been left with the old id, the guard would have refused).
 
 ### Mux client-side buffer behavior
 
@@ -363,6 +403,18 @@ updatedAt: timestamp("...").notNull().defaultNow().$onUpdate(() => new Date()),
 ### Schema reload after editing
 
 After editing `db/schema/*.ts`, run `pnpm db:generate` — it writes a migration AND a JSON snapshot under `drizzle/meta/`. Forgetting `db:generate` means subsequent `db:migrate` doesn't see your changes.
+
+## i18n / locale switching
+
+### Optimistic locale state, not just context
+
+The `LocaleProvider` (`lib/i18n/client.tsx`) holds the current locale in `useState` seeded from a server prop. `useSetLocale` flips state + writes `document.cookie` synchronously, then fires the `setLocale` server action + `router.refresh()` in the background. The whole tree re-renders with the new dictionary on the same tick the user clicks — without the optimistic state, every locale change blocked on a server action + `revalidatePath` + `router.refresh()` roundtrip and felt molasses-slow.
+
+A `useEffect` reconciles state if the prop later changes (e.g. another tab flipped the cookie and a refresh streamed in new RSC for this tab). React's `useState` initial value is sticky after mount — without the effect, cross-tab updates would never propagate to the React tree.
+
+### Locale cookie is intentionally `httpOnly: false`
+
+`actions.ts` sets the locale cookie with `httpOnly: false` so the optimistic provider can mirror the value via `document.cookie` before the server action's `Set-Cookie` lands. This isn't a security regression — the locale isn't an auth token, just a UI preference. Anything authentication-related stays `httpOnly: true`.
 
 ## TypeScript / build
 
