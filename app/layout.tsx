@@ -2,11 +2,19 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
+import { enUS, esES } from "@clerk/localizations";
 import { SiteHeader } from "@/components/site/site-header";
 import { UserMenu } from "@/components/site/user-menu";
 import { LocaleProvider } from "@/lib/i18n/client";
 import { getDict } from "@/lib/i18n/server";
 import "./globals.css";
+
+// Clerk's hosted UI (sign-in modal, sign-up modal, UserButton dropdown,
+// any form copy + validation messages) speaks the locale matching the
+// site dictionary. Spanish is the default; English when the cookie
+// resolves to "en". Both bundles ship server-side; only the chosen one
+// crosses the server→client boundary via the ClerkProvider prop.
+const CLERK_LOCALIZATIONS = { es: esES, en: enUS } as const;
 
 const geistSans = Geist({
   variable: "--font-sans",
@@ -68,6 +76,7 @@ export default async function RootLayout({
   const { locale, t } = await getDict();
   return (
     <ClerkProvider
+      localization={CLERK_LOCALIZATIONS[locale]}
       appearance={{
         // Official Clerk-designed dark baseTheme. Handles the navbar /
         // panel split, hover states, and opacity ramps so every surface
