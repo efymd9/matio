@@ -2,19 +2,19 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
-import { and, asc, desc, eq, gt, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   episodes,
   seasons,
   shows,
-  subscriptions,
   watchProgress,
 } from "@/db/schema";
 import { Player, type PlayerEpisode } from "@/components/watch/player";
 import { WatchShell } from "@/components/watch/watch-shell";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
+import { hasActiveSubscription } from "@/lib/subscription-access";
 import { TRIAL_COOKIE, findTrialSession, isTrialActive } from "@/lib/trial";
 
 export default async function WatchPage({
@@ -127,27 +127,10 @@ export default async function WatchPage({
     : playable[0];
 
   const { userId } = await auth();
-  let isSubscriber = false;
-  if (userId) {
-    // Belt-and-braces on the subscription gate: status='active' AND
-    // current_period_end > now(). Otherwise a dropped
-    // customer.subscription.deleted webhook lets the user keep playback
-    // past their term. Order by updatedAt to pick the freshest row when
-    // multiple exist (resubscribe history).
-    const [sub] = await db
-      .select({ id: subscriptions.id })
-      .from(subscriptions)
-      .where(
-        and(
-          eq(subscriptions.userId, userId),
-          eq(subscriptions.status, "active"),
-          gt(subscriptions.currentPeriodEnd, new Date()),
-        ),
-      )
-      .orderBy(desc(subscriptions.updatedAt))
-      .limit(1);
-    isSubscriber = !!sub;
-  }
+  // hasActiveSubscription bundles the status-set and current_period_end
+  // checks in one place; see lib/subscription-access.ts for why past_due
+  // grants access and why the period-end timestamp is also enforced.
+  const isSubscriber = userId ? await hasActiveSubscription(userId) : false;
 
   // For subscribers, look up per-episode watch progress so a refresh / new
   // tab resumes where they left off without relying on URL ?resume=.

@@ -1,13 +1,13 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { subscriptions, users } from "@/db/schema";
+import { shows, subscriptions, users } from "@/db/schema";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import { getStripe } from "@/lib/stripe";
+import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 
-const HAS_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
 const STRIPE_HAS_SUBSCRIPTION_STATUSES = new Set([
   "active",
   "trialing",
@@ -36,7 +36,7 @@ export async function startCheckout(formData: FormData) {
     .where(
       and(
         eq(subscriptions.userId, userId),
-        inArray(subscriptions.status, [...HAS_SUBSCRIPTION_STATUSES]),
+        inArray(subscriptions.status, [...ACCESS_GRANTING_STATUSES]),
       ),
     )
     .limit(1);
@@ -79,22 +79,45 @@ export async function startCheckout(formData: FormData) {
 
   const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-  // If the user came from a watch flow, carry show+resume through so we can
-  // drop them back into playback after Stripe Checkout.
-  const showSlug = formData.get("show");
+  // If the user came from a watch flow, carry show+resume through so we
+  // can drop them back into playback after Stripe Checkout.
+  const showSlugRaw = formData.get("show");
   const resume = formData.get("resume");
+
+  // Validate the slug against an actual published show before letting it
+  // shape any redirect URL. Without this, formData.show is attacker-
+  // controlled input that flows into the Stripe-hosted Checkout page's
+  // cancel link and the post-payment success URL — both surfaces a user
+  // (or anti-phishing scanner) would inspect. A bad slug would also 404
+  // the user after a successful payment.
+  let showSlug: string | null = null;
+  if (typeof showSlugRaw === "string" && showSlugRaw) {
+    const [match] = await db
+      .select({ slug: shows.slug })
+      .from(shows)
+      .where(
+        and(
+          eq(shows.slug, showSlugRaw),
+          eq(shows.status, "published"),
+          isNull(shows.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (match) showSlug = match.slug;
+  }
+
   // No /account page anymore — Stripe Checkout success lands back on the
   // catalog. If the user came from a watch flow, the override below sends
   // them straight back into playback.
   let successUrl = `${origin}/?welcome=1`;
-  if (typeof showSlug === "string" && showSlug) {
+  if (showSlug) {
     const watchParams = new URLSearchParams();
     if (typeof resume === "string" && resume) watchParams.set("resume", resume);
     const qs = watchParams.toString();
     successUrl = `${origin}/watch/${encodeURIComponent(showSlug)}${qs ? `?${qs}` : ""}`;
   }
   const cancelParams = new URLSearchParams();
-  if (typeof showSlug === "string" && showSlug) cancelParams.set("show", showSlug);
+  if (showSlug) cancelParams.set("show", showSlug);
   if (typeof resume === "string" && resume) cancelParams.set("resume", resume);
   const cancelQs = cancelParams.toString();
   const cancelUrl = `${origin}/subscribe${cancelQs ? `?${cancelQs}` : ""}`;

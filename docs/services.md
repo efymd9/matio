@@ -48,6 +48,7 @@ Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@cle
 3. **Customer Portal** — Dashboard → Settings → Billing → Customer portal. Enable "Cancel subscriptions" (mode: at period end). This is what makes the "Manage subscription" button work.
 4. **Local webhook**: `stripe listen --forward-to localhost:3000/api/webhooks/stripe` → it prints a `whsec_…` → paste into `.env.local` `STRIPE_WEBHOOK_SECRET`.
 5. **Prod webhook**: Dashboard → Developers → Webhooks → Add endpoint → `https://matio.tv/api/webhooks/stripe` → subscribe to:
+   - `checkout.session.completed`
    - `customer.subscription.created`
    - `customer.subscription.updated`
    - `customer.subscription.deleted`

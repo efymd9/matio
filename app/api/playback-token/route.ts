@@ -1,12 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
-import { and, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { db } from "@/db";
-import { episodes, seasons, shows, subscriptions } from "@/db/schema";
+import { episodes, seasons, shows } from "@/db/schema";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
+import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
   TRIAL_COOKIE,
   TRIAL_DURATION_SECONDS,
@@ -64,34 +65,20 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Subscriber path: status='active' AND current_period_end is still in the
-  // future. The period-end check is belt-and-braces: if a
-  // customer.subscription.deleted webhook drops, the row stays "active" in
-  // our DB and free playback continues past the user's term without it.
-  // Multiple subscriptions per user are possible (cancel + resubscribe), so
-  // order by updatedAt desc and look at the freshest.
+  // Subscriber path. The access-granting set + current_period_end check
+  // both live in hasActiveSubscription() — past_due users (whose latest
+  // invoice failed and is being retried) keep playback, but a row whose
+  // current_period_end already passed (e.g. a dropped
+  // customer.subscription.deleted webhook left it as "active" forever)
+  // is treated as unsubscribed.
   const { userId } = await auth();
-  if (userId) {
-    const [sub] = await db
-      .select({ id: subscriptions.id })
-      .from(subscriptions)
-      .where(
-        and(
-          eq(subscriptions.userId, userId),
-          eq(subscriptions.status, "active"),
-          gt(subscriptions.currentPeriodEnd, new Date()),
-        ),
-      )
-      .orderBy(desc(subscriptions.updatedAt))
-      .limit(1);
-    if (sub) {
-      const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
-      return NextResponse.json({
-        token,
-        expiresIn: SUBSCRIBER_TTL,
-        mode: "subscriber",
-      });
-    }
+  if (userId && (await hasActiveSubscription(userId))) {
+    const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
+    return NextResponse.json({
+      token,
+      expiresIn: SUBSCRIBER_TTL,
+      mode: "subscriber",
+    });
   }
 
   // Trial path. Note we intentionally do NOT special-case trial.converted —

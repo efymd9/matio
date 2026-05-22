@@ -8,11 +8,10 @@ import { Icon } from "@/components/site/icon";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
+import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 import { linkTrialSessionsToCurrentUser } from "@/lib/trial";
 import { startCheckout } from "./actions";
 import { SubmitButton } from "./submit-button";
-
-const HAS_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
 
 export default async function SubscribePage({
   searchParams,
@@ -39,7 +38,7 @@ export default async function SubscribePage({
     .where(
       and(
         eq(subscriptions.userId, userId),
-        inArray(subscriptions.status, [...HAS_SUBSCRIPTION_STATUSES]),
+        inArray(subscriptions.status, [...ACCESS_GRANTING_STATUSES]),
       ),
     )
     .orderBy(desc(subscriptions.updatedAt))

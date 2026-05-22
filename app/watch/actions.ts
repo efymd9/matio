@@ -1,16 +1,16 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
 import {
   episodes,
   seasons,
-  subscriptions,
   trialSessions,
   watchProgress,
 } from "@/db/schema";
+import { hasActiveSubscription } from "@/lib/subscription-access";
 import { TRIAL_COOKIE } from "@/lib/trial";
 
 export async function saveWatchProgress(
@@ -21,23 +21,13 @@ export async function saveWatchProgress(
   const { userId } = await auth();
   if (!userId) return;
 
-  // Ownership gate: only active subscribers may write watch_progress.
-  // Without this, any signed-in user could call the action with any
-  // episode UUID and poison their own row — or use error/no-error
-  // differentiation to enumerate episode UUIDs (since watchProgress has
-  // an FK to episodes.id). Same shape as the watch page subscriber check.
-  const [sub] = await db
-    .select({ id: subscriptions.id })
-    .from(subscriptions)
-    .where(
-      and(
-        eq(subscriptions.userId, userId),
-        eq(subscriptions.status, "active"),
-        gt(subscriptions.currentPeriodEnd, new Date()),
-      ),
-    )
-    .limit(1);
-  if (!sub) return;
+  // Ownership gate: only access-granting subscribers may write
+  // watch_progress. Without this, any signed-in user could call the
+  // action with any episode UUID and poison their own row — or use
+  // error/no-error differentiation to enumerate episode UUIDs (since
+  // watchProgress has an FK to episodes.id). Mirrors the watch page
+  // and playback-token route gates.
+  if (!(await hasActiveSubscription(userId))) return;
 
   await db
     .insert(watchProgress)
