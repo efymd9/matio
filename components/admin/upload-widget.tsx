@@ -3,7 +3,7 @@
 import { createUpload } from "@mux/upchunk";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { createMuxUpload } from "@/app/admin/actions";
+import { createMuxUpload, markEpisodeReprocessing } from "@/app/admin/actions";
 import { Button } from "@/components/ui/button";
 
 type Status = "idle" | "preparing" | "uploading" | "uploaded" | "error";
@@ -47,9 +47,25 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
     upload.on("progress", (e) => {
       setProgress((e as CustomEvent<number>).detail);
     });
-    upload.on("success", () => {
-      setStatus("uploaded");
+    upload.on("success", async () => {
       setProgress(100);
+      // Now that the browser → Mux upload genuinely finished, clear the
+      // episode's previous asset/playback fields and flip status to
+      // processing. Doing this earlier (inside createMuxUpload) made a
+      // cancelled upload permanently break the episode, because the Mux
+      // webhook refuses to overwrite an asset_id with a different one.
+      try {
+        await markEpisodeReprocessing(episodeId);
+      } catch (err) {
+        setStatus("error");
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Upload finished but server could not mark the episode reprocessing",
+        );
+        return;
+      }
+      setStatus("uploaded");
       // Mux fires the asset.ready webhook asynchronously after transcoding.
       // Refresh once to surface the new status; user can re-refresh later.
       setTimeout(() => router.refresh(), 5000);

@@ -1,17 +1,30 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
 import {
   episodes,
   seasons,
+  shows,
   trialSessions,
   watchProgress,
 } from "@/db/schema";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import { TRIAL_COOKIE } from "@/lib/trial";
+
+// Hard ceiling on position values that can be written. The longest
+// imaginable single episode is ~3-4h; 24h is a generous bound that
+// rejects pathological values (negative, NaN, 10^9, …) without
+// constraining real playback. Returns null when the value is anything
+// other than a finite non-negative number within range.
+const POSITION_SECONDS_MAX = 24 * 60 * 60;
+function clampPositionSeconds(n: unknown): number | null {
+  if (typeof n !== "number" || !Number.isFinite(n)) return null;
+  if (n < 0 || n > POSITION_SECONDS_MAX) return null;
+  return Math.floor(n);
+}
 
 export async function saveWatchProgress(
   episodeId: string,
@@ -29,13 +42,41 @@ export async function saveWatchProgress(
   // and playback-token route gates.
   if (!(await hasActiveSubscription(userId))) return;
 
+  const clamped = clampPositionSeconds(positionSeconds);
+  if (clamped === null) return;
+
+  // Verify the episode is actually playable: status='ready', on a
+  // published, non-deleted show. The FK alone (episodeId → episodes.id)
+  // would allow drafts and soft-deleted catalog entries to leak into
+  // the resume queue.
+  const [ep] = await db
+    .select({ id: episodes.id })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .innerJoin(shows, eq(seasons.showId, shows.id))
+    .where(
+      and(
+        eq(episodes.id, episodeId),
+        eq(episodes.status, "ready"),
+        eq(shows.status, "published"),
+        isNull(shows.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!ep) return;
+
   await db
     .insert(watchProgress)
-    .values({ userId, episodeId, positionSeconds, completed })
+    .values({
+      userId,
+      episodeId,
+      positionSeconds: clamped,
+      completed,
+    })
     .onConflictDoUpdate({
       target: [watchProgress.userId, watchProgress.episodeId],
       set: {
-        positionSeconds,
+        positionSeconds: clamped,
         completed,
         updatedAt: new Date(),
       },
@@ -53,17 +94,36 @@ export async function saveTrialPosition(
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   if (!sessionToken) return;
 
+  const clamped = clampPositionSeconds(positionSeconds);
+  if (clamped === null) return;
+
+  // Same episode-validity gate as the subscriber path: only ready
+  // episodes on published, non-deleted shows. Stops a stray client
+  // (or a forged form post on the cookie) from writing positions
+  // against drafts or unpublished assets.
   const [row] = await db
     .select({ showId: seasons.showId })
     .from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
-    .where(eq(episodes.id, episodeId))
+    .innerJoin(shows, eq(seasons.showId, shows.id))
+    .where(
+      and(
+        eq(episodes.id, episodeId),
+        eq(episodes.status, "ready"),
+        eq(shows.status, "published"),
+        isNull(shows.deletedAt),
+      ),
+    )
     .limit(1);
   if (!row) return;
 
+  // Ownership scope: only the row matching (cookie, show) gets the
+  // write. An attacker with any old/expired cookie can in principle
+  // dirty their own trial position, but the clamp above bounds the
+  // damage, and the row is rate-limit / ip-hash gated at creation.
   await db
     .update(trialSessions)
-    .set({ lastPositionSeconds: positionSeconds })
+    .set({ lastPositionSeconds: clamped })
     .where(
       and(
         eq(trialSessions.sessionToken, sessionToken),

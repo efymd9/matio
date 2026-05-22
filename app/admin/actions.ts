@@ -109,7 +109,9 @@ export async function updateShow(id: string, formData: FormData) {
 }
 
 // Atomic "only one featured at a time": flips the target to true and
-// every other row to false in a single transaction.
+// every other row to false in a single transaction. Refuses to feature
+// a draft or soft-deleted show — the public hero would render an
+// invisible (404) link otherwise.
 export async function setFeaturedShow(id: string) {
   await requireAdmin();
   await db.transaction(async (tx) => {
@@ -120,7 +122,13 @@ export async function setFeaturedShow(id: string) {
     await tx
       .update(shows)
       .set({ featured: true })
-      .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
+      .where(
+        and(
+          eq(shows.id, id),
+          eq(shows.status, "published"),
+          isNull(shows.deletedAt),
+        ),
+      );
   });
   revalidatePath("/");
   revalidatePath("/admin");
@@ -132,7 +140,7 @@ export async function unsetFeaturedShow(id: string) {
   await db
     .update(shows)
     .set({ featured: false })
-    .where(eq(shows.id, id));
+    .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
   revalidatePath("/");
   revalidatePath("/admin");
   revalidatePath(`/admin/shows/${id}`);
@@ -172,7 +180,12 @@ export async function createSeason(showId: string, formData: FormData) {
 
 export async function deleteSeason(id: string, showId: string) {
   await requireAdmin();
-  await db.delete(seasons).where(eq(seasons.id, id));
+  // Scope the delete to (season_id, show_id) so a crafted form post
+  // with mismatched ids can't reach across shows. The form sends both
+  // ids; the relationship is enforced here.
+  await db
+    .delete(seasons)
+    .where(and(eq(seasons.id, id), eq(seasons.showId, showId)));
   revalidatePath(`/admin/shows/${showId}`);
 }
 
@@ -192,6 +205,17 @@ export async function createEpisode(
   if (number === null || number < 1) {
     throw new Error("Episode number must be a positive integer");
   }
+
+  // Verify the (season, show) pair actually exists together. The form
+  // sends both ids and we'd otherwise trust them blindly — a crafted
+  // post could insert an episode under one show's season while
+  // surfacing under another show's URL.
+  const [season] = await db
+    .select({ id: seasons.id })
+    .from(seasons)
+    .where(and(eq(seasons.id, seasonId), eq(seasons.showId, showId)))
+    .limit(1);
+  if (!season) throw new Error("Season not found for this show");
 
   await db.insert(episodes).values({
     seasonId,
@@ -239,6 +263,23 @@ export async function updateEpisode(
   const introEndFinal =
     introStart !== null && introEnd !== null ? introEnd : null;
 
+  // Verify (episode, season, show) chain before mutating, same as the
+  // delete path. The route only renders this form for matching ids, but
+  // the server can't trust that.
+  const [chain] = await db
+    .select({ id: episodes.id })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .where(
+      and(
+        eq(episodes.id, id),
+        eq(episodes.seasonId, seasonId),
+        eq(seasons.showId, showId),
+      ),
+    )
+    .limit(1);
+  if (!chain) throw new Error("Episode not in this season/show");
+
   await db
     .update(episodes)
     .set({
@@ -260,6 +301,22 @@ export async function deleteEpisode(
   showId: string,
 ) {
   await requireAdmin();
+  // Verify the full (episode, season, show) chain before deleting.
+  // Form posts could otherwise pass mismatched ids and reach across
+  // unrelated shows.
+  const [chain] = await db
+    .select({ id: episodes.id })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .where(
+      and(
+        eq(episodes.id, id),
+        eq(episodes.seasonId, seasonId),
+        eq(seasons.showId, showId),
+      ),
+    )
+    .limit(1);
+  if (!chain) throw new Error("Episode not in this season/show");
   await db.delete(episodes).where(eq(episodes.id, id));
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
 }
@@ -294,19 +351,34 @@ export async function createMuxUpload(
     },
   });
 
-  // Mark the episode as processing — covers fresh uploads and re-uploads
-  // (e.g. after a previous upload errored).
+  if (!upload.url) throw new Error("Mux did not return an upload URL");
+
+  // Deliberately do NOT clear playback fields or flip status here. If we
+  // did and the admin closed the tab before the upload progressed, the
+  // episode would be stuck in "processing" forever (the webhook's
+  // resolveEpisodeFromPassthrough refuses to overwrite a different
+  // existing asset_id — see app/api/webhooks/mux/route.ts). Clearing is
+  // done by markEpisodeReprocessing after the browser → Mux upload
+  // actually completes, bounding the broken window to the transcoding
+  // duration only.
+  return { uploadUrl: upload.url, uploadId: upload.id };
+}
+
+// Called by the admin upload widget once `@mux/upchunk` fires its
+// `success` event — the upload has finished and Mux will (eventually)
+// transcode. Clearing here, rather than inside createMuxUpload, makes
+// cancelled uploads non-destructive: the previous asset stays live
+// until the new one is genuinely on its way.
+export async function markEpisodeReprocessing(episodeId: string) {
+  await requireAdmin();
   await db
     .update(episodes)
     .set({
       status: "processing",
       muxAssetId: null,
       muxPlaybackId: null,
+      muxPlaybackPolicy: null,
       durationSeconds: null,
     })
     .where(eq(episodes.id, episodeId));
-
-  if (!upload.url) throw new Error("Mux did not return an upload URL");
-
-  return { uploadUrl: upload.url, uploadId: upload.id };
 }
