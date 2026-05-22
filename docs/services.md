@@ -27,6 +27,8 @@ Production prod URL: **https://matio.tv**. Stripe webhook URL on prod = `https:/
 
 Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@clerk/nextjs/webhooks` (not `/server`). It picks up the secret from env automatically.
 
+**Localization**: `@clerk/localizations@^4.6.7` provides per-locale string bundles. `app/layout.tsx` reads the site locale via `getDict()` and passes the matching bundle (`esES` default, `enUS` when the cookie says so) to `ClerkProvider`'s `localization` prop. Every Clerk-rendered surface — sign-in/sign-up modal, UserButton dropdown, validation copy — picks it up. Locale changes via the in-header switcher propagate to Clerk's UI on the next `router.refresh` tick (a few hundred ms after the optimistic site dictionary flip — see [gotchas → optimistic locale state](./gotchas.md#optimistic-locale-state-not-just-context)). Adding a new locale = add another entry to the `CLERK_LOCALIZATIONS` map keyed on the site's `Locale` type.
+
 ## Stripe (subscriptions)
 
 **Used for**: subscription billing, Checkout, Customer Portal.
