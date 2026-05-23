@@ -410,7 +410,7 @@ After editing `db/schema/*.ts`, run `pnpm db:generate` — it writes a migration
 
 The `LocaleProvider` (`lib/i18n/client.tsx`) holds the current locale in `useState` seeded from a server prop. `useSetLocale` flips state + writes `document.cookie` synchronously, then fires the `setLocale` server action + `router.refresh()` in the background. The whole tree re-renders with the new dictionary on the same tick the user clicks — without the optimistic state, every locale change blocked on a server action + `revalidatePath` + `router.refresh()` roundtrip and felt molasses-slow.
 
-A `useEffect` reconciles state if the prop later changes (e.g. another tab flipped the cookie and a refresh streamed in new RSC for this tab). React's `useState` initial value is sticky after mount — without the effect, cross-tab updates would never propagate to the React tree.
+An "adjust state during render" block reconciles state if the prop later changes (e.g. another tab flipped the cookie and a refresh streamed in new RSC for this tab). React's `useState` initial value is sticky after mount — without the reconciliation, cross-tab updates would never propagate to the React tree. The earlier `useEffect(() => setLocaleState(initialLocale), [initialLocale])` version was the obvious shape but tripped React 19's `react-hooks/set-state-in-effect` rule; comparing the prop against a `prevInitialLocale` state during render is React's documented replacement and avoids the cascading render the rule warns about.
 
 ### Locale cookie is intentionally `httpOnly: false`
 

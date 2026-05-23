@@ -4,7 +4,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useState,
   type ReactNode,
 } from "react";
@@ -52,12 +51,17 @@ export function LocaleProvider({
   const [isPending, setIsPending] = useState(false);
 
   // Reconcile if the server later re-renders the tree with a different
-  // locale (e.g. the cookie was changed in another tab and a refresh
-  // streamed through new layout RSC). Because useState's initial value
-  // is sticky after mount, we manually re-sync to the prop.
-  useEffect(() => {
+  // locale (e.g. another tab flipped the cookie and a refresh streamed
+  // through new layout RSC). Adjust state during render rather than in
+  // an effect — the React 19 idiom for "reset state when a prop
+  // changes" (avoids the cascading render that
+  // react-hooks/set-state-in-effect flags).
+  const [lastInitialLocale, setLastInitialLocale] =
+    useState<Locale>(initialLocale);
+  if (lastInitialLocale !== initialLocale) {
+    setLastInitialLocale(initialLocale);
     setLocaleState(initialLocale);
-  }, [initialLocale]);
+  }
 
   const setLocale = useCallback(
     (next: Locale) => {
