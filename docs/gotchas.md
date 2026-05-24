@@ -277,7 +277,9 @@ The workaround drives the re-upload flow: **don't clear playback fields in `crea
 
 ### Mux client-side buffer behavior
 
-mux-video buffers HLS chunks ahead of the playhead. Token authorization happens **per-segment-request**, so chunks already in the buffer continue to play even after the token expires. This is why `components/watch/player.tsx` runs a `setTimeout(expiresAt - now)` and calls `videoRef.current.pause()` — without that, trial videos run several minutes past the 60s cutoff.
+mux-video buffers HLS chunks ahead of the playhead. Token authorization happens **per-segment-request**, so chunks already in the buffer continue to play even after the token expires. This is why `components/watch/player.tsx` runs a `setTimeout` keyed off `expiresAt` and pauses the video — without that, trial videos run several minutes past the 60s cutoff.
+
+The same per-segment validation is why the subscriber refresh fires **60s before** expiry, not at. Refreshing exactly at the boundary races segments whose fetch goes out a hair late: Mux sees a stale `exp`, returns 403 for that segment, and playback stalls mid-stream. The 60s lead lets the new token install while the old one still works. 5xx and network errors during refresh retry with exponential backoff (1s/2s/4s) before falling through to `PlaybackUnavailable`; the existing token keeps playing through the retry window.
 
 ### We use mux-video (headless) for the main player
 
@@ -359,6 +361,57 @@ video::-webkit-media-controls-overlay-play-button {
 ```
 
 That kills the big "tap to play" disc that overlays inline iOS video. Leave the rest of the WebKit pseudo set alone.
+
+## Cross-browser CSS (iOS Safari < 15.4)
+
+Tailwind v4 targets "Safari 16.4+, Chrome 111+, Firefox 128+" and emits zero fallbacks. iPhones still in active use — 6s/SE-1st-gen/7/8 frozen on iOS 14/15.0–15.3 — drop entire declarations they can't parse, which silently breaks UI when load-bearing properties are involved.
+
+### `oklch()` colors need a hex fallback first
+
+Safari < 15.4 can't parse `oklch()`. Single declarations get dropped, the `--background` / `--foreground` / etc. variables fall through to their CSS initial values, and the whole dark theme collapses. The repo uses a **double-declaration** pattern in `app/globals.css`:
+
+```css
+.dark {
+  --background: #0a0a0c;                     /* Safari < 15.4 lands here */
+  --background: oklch(0.115 0.005 270);      /* modern browsers override */
+  ...
+}
+```
+
+Add new theme tokens the same way: hex/rgb declaration first, oklch second. Modern browsers see both and pick `oklch()`. Older Safari sees only the hex.
+
+### Don't drive critical UI state with `:has()` / `group-has-[*]:`
+
+CSS `:has()` is Safari 15.4+ — older Safari silently no-ops the selector. The audit caught this on `app/subscribe/page.tsx` where `group-has-[:checked]/plan:` drove the entire plan-card selection state (border, gradient, "Selected" label). On iOS 15.0–15.3 the radio still toggled, but the card never visually responded — the conversion path looked broken.
+
+Two safe alternatives:
+
+1. **`peer-checked:` / `peer-focus-visible:`** — same DOM with `class="peer"` on the input + `class="peer-checked:foo"` on a later sibling. Compiles to the sibling combinator (`~`), supported back to Safari 3. This is what the subscribe page uses now.
+2. **React-controlled state** — pay the small client-bundle cost, get full control. Worth it only when the state needs to drive non-CSS behavior too.
+
+`group-has-[*]:` in non-critical surfaces (`components/ui/button.tsx`, `components/ui/card.tsx`, `components/ui/table.tsx`) is left as-is — those degrade to slightly-different padding, not a broken interaction.
+
+### `viewport-fit=cover` is required for `env(safe-area-inset-*)`
+
+Without it, `env(safe-area-inset-bottom)` resolves to `0` on iOS regardless of the device — safe-area-inset is a no-op. The repo sets it via Next's `viewport` export in `app/layout.tsx`:
+
+```ts
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#0a0a0c",
+};
+```
+
+When adding any UI pinned to the bottom of the page or player, follow up with `pb-[max(env(safe-area-inset-bottom),<floor>)]`. Floor keeps the existing cushion on non-notched devices. Same pattern for `safe-area-inset-left` / `safe-area-inset-right` on landscape iPhones (Dynamic Island sits on the side in landscape).
+
+### iOS Safari sticky-hover after tap
+
+Tapping a `:hover`-styled element on iOS Safari leaves the hover style "stuck" until the user taps elsewhere. Two practical mitigations:
+
+1. **Don't gate essential content behind `:hover`.** Show-card titles used to render only on `group-hover:opacity-100` — invisible on touch. Now they render by default on `pointer-coarse:` devices.
+2. **Use `pointer-coarse:` for touch-only adjustments.** Tailwind v4 supports the variant natively (`@media (pointer: coarse)`). Pattern: `pointer-coarse:px-3 pointer-coarse:py-2` expands touch hit areas without inflating desktop visual size. Player bottom-bar icon buttons use this for ~44pt comfort targets.
 
 ## shadcn (current generation)
 

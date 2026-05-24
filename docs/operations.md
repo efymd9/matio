@@ -186,8 +186,8 @@ The admin form has two image URL fields. Both are optional (a show with neither 
 
 **File format / size**
 - JPG, PNG, WebP, or AVIF. WebP/AVIF give the smallest files at the same visual quality.
-- Target weight: posters under ~150 KB, heroes under ~400 KB. There's no automatic optimisation in the path right now — `next/image` migration is post-launch backlog (see audit), so the bytes ship as-is.
-- Hosting: any HTTPS URL works. For dev, you can paste an Unsplash hotlink to test layout. For production, host on Vercel Blob / S3 / a CDN you control.
+- Target weight: posters under ~150 KB, heroes under ~400 KB. All artwork goes through `next/image` (responsive `srcset` + WebP conversion at the edge) — see `next.config.ts` `images.remotePatterns`. To allow a new source host, add it there; without an entry `next/image` refuses the URL.
+- Hosting: any HTTPS URL works. For dev, you can paste an Unsplash hotlink to test layout. For production, host on Vercel Blob / S3 / a CDN you control. Mux thumbnails (`image.mux.com`) are already in `remotePatterns`.
 
 ### Trial flow (incognito, anon visitor)
 

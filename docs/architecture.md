@@ -70,14 +70,15 @@ End-to-end:
    - **Not** a shortcut: `trial.converted = true` does **not** grant subscriber-mode rendering. Access for converted-and-still-paying users is granted via the active-subscription lookup above; converted-but-canceled users get the same trial-expired flow as any anonymous visitor.
 2. **Player mounts** (`components/watch/player.tsx`):
    - Outer `Player` picks the initial episode; the inner `EpisodePlayback` (keyed on `current.id`) does the actual playback work.
-   - Inner fetches `/api/playback-token?episode_id=<id>` on mount, captures `token` + `expiresIn`, sets `expiresAt = Date.now() + expiresIn*1000`.
+   - Inner fetches `/api/playback-token?episode_id=<id>` on mount with an `AbortController` (cancels in-flight on episode swap so a slow response can't race the new fetch). Captures `token` + `expiresIn`, sets `expiresAt = Date.now() + expiresIn*1000`.
    - Renders `<MediaController>` + `<MuxVideo slot="media" playbackId tokens={{ playback }} />` (headless mux-video + media-chrome — not `@mux/mux-player-react`).
-   - `setTimeout(expiresAt - now)` fires at expiry → re-fetches token. Subscriber gets new 1h token. Other responses are classified into distinct end-states (`paywall` / `rateLimited` / `unavailable`) via `classifyTokenStatus(r.status)`:
-     - **403** → `Paywall` overlay (trial preview ended naturally — "Sign up to keep watching")
+   - `setTimeout((expiresAt - now) - 60_000)` fires **60s before** expiry → re-fetches token. Early rotation is required because Mux validates the JWT `exp` per-segment-request — a refresh at the boundary races segments that go out a hair late. 5xx and network errors retry with exponential backoff (1s/2s/4s, 4 attempts total) before falling through to the `unavailable` end-state; the existing token keeps playing through the retry window so a transient network blip doesn't black out the player. Non-success responses are still classified into distinct end-states via `classifyTokenStatus(r.status)`:
+     - **403** → `Paywall` overlay (trial preview ended naturally — "Sign up to keep watching"). Trial users land here at the natural expiry.
      - **429** → `RateLimitedNotice` overlay (trial cap hit for this network — "Too many previews this hour", still offers subscribe)
      - **5xx / network / JSON parse failure / `<video>` decode error** → `PlaybackUnavailable` overlay with a retry button; the retry bumps `fetchKey` so the token-fetch effect re-runs without unmounting the controller
-   - `videoRef.current.pause()` is called alongside the end-state flip so a buffered-ahead Mux stream stops at the cutoff.
-   - Every 10s while playing, writes `last_position_seconds` (trial → `trial_sessions`) or `watch_progress` (subscriber). Both writes clamp the position to `[0, 24h]` server-side; the trial path additionally verifies the episode is `status='ready'` on a `published`, non-deleted show.
+   - On the trial 403 (paywall), `videoRef.current.pause()` is called alongside the end-state flip so the buffered-ahead Mux stream stops at the cutoff. The refresh path no longer calls `pause()` on transient 5xx — the existing token may still have headroom.
+   - The `<video>` `onError` handler uses a rolling 10-second / 3-error window before flipping to `PlaybackUnavailable`. `MediaError.code` 3 (`MEDIA_ERR_DECODE`) and 4 (`MEDIA_ERR_SRC_NOT_SUPPORTED`) flip immediately; code 1 (`MEDIA_ERR_ABORTED`) is ignored; code 2 (`MEDIA_ERR_NETWORK`) counts toward the threshold but lets Mux/HLS retry first. A single rendition-switch hiccup on cellular previously killed the player permanently.
+   - Every 10s **while visible and playing**, writes `last_position_seconds` (trial → `trial_sessions`) or `watch_progress` (subscriber). The interval is gated on `document.visibilityState === "visible"` and a final flush fires on `visibilitychange` (hide) and `pagehide` — without it, mobile users lost up to 10s every time they backgrounded the app. Both writes clamp the position to `[0, 24h]` server-side; the trial path additionally verifies the episode is `status='ready'` on a `published`, non-deleted show.
 3. **Token endpoint** (`app/api/playback-token/route.ts`) — this is the actual gate. The handler:
    - Joins episode → season → show and filters on `episodes.status='ready' AND shows.status='published' AND shows.deleted_at IS NULL`. A leaked draft episode id returns 404 here, regardless of any cookie.
    - Signed-in user with `subscriptions.status='active'` → 1h subscriber JWT.
@@ -175,7 +176,7 @@ The downside of the keyed-remount pattern is a brief Loading splash on every swa
 
 **Lock toggle:** sets a `locked` boolean; all chrome layers get `!opacity-0 !pointer-events-none` and a single "🔒 Tap to unlock" pill renders center. Tap unlocks.
 
-**Token expiry:** subscriber gets a fresh 1h token via re-fetch; trial gets 403 → `videoRef.current.pause()` + `endState="paywall"`. This is what stops buffered-ahead chunks from running past the trial cutoff. 429 / 5xx / network failures route to `rateLimited` / `unavailable` end-states instead (the player's `classifyTokenStatus` helper) — they shouldn't be framed as a payment issue.
+**Token expiry:** refresh fires 60s **before** expiry (not at), so the new JWT installs while the old one still has headroom — Mux validates `exp` per-segment-request and a refresh exactly at the boundary loses the race for any segment going out a hair late. Subscriber gets a fresh 1h token via re-fetch; trial gets 403 → `videoRef.current.pause()` + `endState="paywall"` (this is what stops buffered-ahead chunks from running past the trial cutoff). 5xx/network errors retry with backoff (1s/2s/4s) before flipping to `unavailable` — a brief CDN blip doesn't black out the player. 429 routes to `rateLimited` end-state. The end-state branches use `classifyTokenStatus` to keep infrastructure failures from being framed as a payment issue.
 
 ## Mux thumbnail signing
 

@@ -180,13 +180,12 @@ function AlreadySubscribed({ sub, t }: { sub: Subscription; t: Dict }) {
 }
 
 // Radio-card plan picker. The whole card is a <label> wrapping a
-// visually-hidden <input type="radio">. We tag the label as
-// `group/plan` and use Tailwind's `group-has-[:checked]/plan:` variant
-// to drive every visual change (outer border + gradient, the dot inside
-// the selected indicator, the indicator's label colour) from the
-// input's checked state — zero client JS. The browser handles keyboard
-// nav (Tab to focus, Arrow keys between same-name radios) for free, and
-// `group-has-[:focus-visible]/plan:` puts a focus ring on the card.
+// visually-hidden <input type="radio">. Selection state drives every
+// visual change via Tailwind's `peer-checked:` variant — which compiles
+// to the `:checked ~` sibling combinator (Safari 3+), unlike `:has()`
+// which silently no-ops on iOS Safari < 15.4. Same zero-JS interaction;
+// browser handles keyboard nav (Tab/Arrow) and we get a focus ring via
+// `peer-focus-visible:` for free.
 function PlanCard({
   plan,
   title,
@@ -209,15 +208,15 @@ function PlanCard({
   chooseLabel: string;
 }) {
   return (
-    <label className="group/plan relative block cursor-pointer">
+    <label className="relative block cursor-pointer">
       <input
         type="radio"
         name="plan"
         value={plan}
         defaultChecked={defaultChecked}
-        className="sr-only"
+        className="peer sr-only"
       />
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-5 transition-all duration-200 hover:border-white/25 hover:bg-white/[0.07] group-has-[:checked]/plan:border-[1.5px] group-has-[:checked]/plan:border-[#ff3d3d] group-has-[:checked]/plan:bg-gradient-to-br group-has-[:checked]/plan:from-[#ff3d3d22] group-has-[:checked]/plan:to-white/[0.04] group-has-[:checked]/plan:shadow-[0_12px_40px_-20px_rgba(255,61,61,0.55)] group-has-[:focus-visible]/plan:ring-2 group-has-[:focus-visible]/plan:ring-[#ff3d3d]/70 group-has-[:focus-visible]/plan:ring-offset-2 group-has-[:focus-visible]/plan:ring-offset-background sm:p-6">
+      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-5 transition-all duration-200 hover:border-white/25 hover:bg-white/[0.07] peer-checked:border-[1.5px] peer-checked:border-[#ff3d3d] peer-checked:bg-gradient-to-br peer-checked:from-[#ff3d3d22] peer-checked:to-white/[0.04] peer-checked:shadow-[0_12px_40px_-20px_rgba(255,61,61,0.55)] peer-focus-visible:ring-2 peer-focus-visible:ring-[#ff3d3d]/70 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background sm:p-6">
         {badge ? (
           <span className="absolute right-4 top-4 rounded-full bg-[#ff3d3d] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.06em] text-white">
             {badge}
@@ -236,19 +235,15 @@ function PlanCard({
 
         {/* Selected indicator — empty ring by default; cinema-red label +
             filled dot when the radio is checked. */}
-        <div className="mt-5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white/40 transition-colors group-has-[:checked]/plan:text-[#ff3d3d]">
+        <div className="mt-5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white/40 transition-colors peer-checked:text-[#ff3d3d]">
           <span
             aria-hidden
-            className="relative inline-flex size-4 items-center justify-center rounded-full border border-white/25 transition-colors group-has-[:checked]/plan:border-[#ff3d3d]"
+            className="relative inline-flex size-4 items-center justify-center rounded-full border border-white/25 transition-colors peer-checked:border-[#ff3d3d]"
           >
-            <span className="size-2 scale-0 rounded-full bg-[#ff3d3d] transition-transform duration-150 group-has-[:checked]/plan:scale-100" />
+            <span className="size-2 scale-0 rounded-full bg-[#ff3d3d] transition-transform duration-150 peer-checked:scale-100" />
           </span>
-          <span className="hidden group-has-[:checked]/plan:inline">
-            {selectedLabel}
-          </span>
-          <span className="group-has-[:checked]/plan:hidden">
-            {chooseLabel}
-          </span>
+          <span className="hidden peer-checked:inline">{selectedLabel}</span>
+          <span className="peer-checked:hidden">{chooseLabel}</span>
         </div>
       </div>
     </label>

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
@@ -52,7 +53,9 @@ export function UpNextOverlay({
     ((COUNTDOWN_SECONDS - remaining) / COUNTDOWN_SECONDS) * 100;
 
   return createPortal(
-    <div className="pointer-events-none fixed inset-0 z-[100] flex items-end justify-end p-5 sm:p-8">
+    // Side/bottom padding honors iOS landscape notch + home-indicator
+    // safe-area; pt-/pl- keep the original p-5/p-8 cushion.
+    <div className="pointer-events-none fixed inset-0 z-[100] flex items-end justify-end pt-5 pl-5 pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pt-8 sm:pl-8 sm:pr-[max(env(safe-area-inset-right),2rem)] sm:pb-[max(env(safe-area-inset-bottom),2rem)]">
       <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f0f12]/95 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
           {t.upNextOverlay.label}
@@ -67,13 +70,13 @@ export function UpNextOverlay({
             }
           >
             {next.thumbnailUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <Image
                 src={next.thumbnailUrl}
                 alt=""
                 aria-hidden
-                loading="lazy"
-                className="absolute inset-0 h-full w-full object-cover"
+                fill
+                sizes="(max-width: 640px) 128px, 160px"
+                className="object-cover"
               />
             ) : (
               <div

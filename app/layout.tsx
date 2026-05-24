@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
@@ -38,6 +38,16 @@ const instrumentSerif = Instrument_Serif({
 // so link unfurls in Slack/Twitter from staging URLs still point at the
 // right host.
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://matio.tv";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  // viewport-fit=cover lets us paint into the iOS notch / home-indicator
+  // chin via env(safe-area-inset-*). Without it, those CSS values resolve
+  // to 0 and any sticky/fixed UI sits on top of system chrome.
+  viewportFit: "cover",
+  themeColor: "#0a0a0c",
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getDict();

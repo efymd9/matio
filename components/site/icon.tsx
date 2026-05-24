@@ -27,7 +27,8 @@ export type IconName =
   | "lock"
   | "star"
   | "flame"
-  | "info";
+  | "info"
+  | "menu";
 
 export function Icon({
   name,
@@ -221,6 +222,12 @@ export function Icon({
           <circle cx="12" cy="12" r="9" />
           <path d="M12 11v5" />
           <circle cx="12" cy="8" r="0.4" fill={color} />
+        </svg>
+      );
+    case "menu":
+      return (
+        <svg {...stroke}>
+          <path d="M4 7h16M4 12h16M4 17h16" />
         </svg>
       );
   }

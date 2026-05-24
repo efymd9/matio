@@ -85,38 +85,76 @@
 }
 
 /* Matio cinema dark — near-black bg #0a0a0c, cream foreground, cinema-red
-   accent #ff3d3d. Used app-wide via the `dark` class on <html>. */
+   accent #ff3d3d. Used app-wide via the `dark` class on <html>.
+
+   Double-declaration pattern: hex fallback first, oklch() second. Safari
+   < 15.4 / iOS < 15.4 can't parse oklch(), drops the second declaration,
+   and ends up on the hex. Modern browsers see both, pick oklch(). Without
+   the fallback those older iPhones (6s/SE-1st-gen/7/8 still in use)
+   would render the entire dark theme as the CSS-initial value cascade,
+   collapsing the UI to default light. */
 .dark {
-  --background: oklch(0.115 0.005 270);         /* #0a0a0c — cool near-black */
-  --foreground: oklch(0.985 0 0);               /* pure white */
-  --card: oklch(0.155 0.005 270);               /* one tone above bg */
+  --background: #0a0a0c;
+  --background: oklch(0.115 0.005 270);
+  --foreground: #fafafa;
+  --foreground: oklch(0.985 0 0);
+  --card: #141417;
+  --card: oklch(0.155 0.005 270);
+  --card-foreground: #fafafa;
   --card-foreground: oklch(0.985 0 0);
+  --popover: #141417;
   --popover: oklch(0.155 0.005 270);
+  --popover-foreground: #fafafa;
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);                  /* white as primary button bg */
-  --primary-foreground: oklch(0.115 0.005 270); /* bg as text on it */
+  --primary: #fafafa;
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: #0a0a0c;
+  --primary-foreground: oklch(0.115 0.005 270);
+  --secondary: #1f1f23;
   --secondary: oklch(0.22 0.005 270);
+  --secondary-foreground: #fafafa;
   --secondary-foreground: oklch(0.985 0 0);
+  --muted: #1c1c20;
   --muted: oklch(0.2 0.005 270);
+  --muted-foreground: #a1a1aa;
   --muted-foreground: oklch(0.65 0.005 270);
-  --accent: oklch(0.66 0.235 27);               /* #ff3d3d — cinema red */
+  --accent: #ff3d3d;
+  --accent: oklch(0.66 0.235 27);
+  --accent-foreground: #fafafa;
   --accent-foreground: oklch(0.985 0 0);
+  --destructive: #ff3d3d;
   --destructive: oklch(0.66 0.235 27);
+  --border: #28282d;
   --border: oklch(0.26 0.005 270);
+  --input: #1f1f23;
   --input: oklch(0.22 0.005 270);
+  --ring: #ff3d3d;
   --ring: oklch(0.66 0.235 27);
+  --chart-1: #ff3d3d;
   --chart-1: oklch(0.66 0.235 27);
+  --chart-2: #a1a1aa;
   --chart-2: oklch(0.65 0.005 270);
+  --chart-3: #6b6b6b;
   --chart-3: oklch(0.439 0 0);
+  --chart-4: #5a5a5a;
   --chart-4: oklch(0.371 0 0);
+  --chart-5: #3f3f3f;
   --chart-5: oklch(0.269 0 0);
+  --sidebar: #141417;
   --sidebar: oklch(0.155 0.005 270);
+  --sidebar-foreground: #fafafa;
   --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: #ff3d3d;
   --sidebar-primary: oklch(0.66 0.235 27);
+  --sidebar-primary-foreground: #fafafa;
   --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: #1f1f23;
   --sidebar-accent: oklch(0.22 0.005 270);
+  --sidebar-accent-foreground: #fafafa;
   --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: #28282d;
   --sidebar-border: oklch(0.26 0.005 270);
+  --sidebar-ring: #ff3d3d;
   --sidebar-ring: oklch(0.66 0.235 27);
 }
 
@@ -131,7 +169,9 @@
     @apply font-sans;
   }
   ::selection {
+    background: rgba(255, 61, 61, 0.4);
     background: oklch(0.66 0.235 27 / 0.4);
+    color: #fafafa;
     color: oklch(0.985 0 0);
   }
 }

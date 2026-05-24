@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
@@ -129,13 +130,13 @@ export function EpisodesOverlay({
                             }
                           >
                             {ep.thumbnailUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
+                              <Image
                                 src={ep.thumbnailUrl}
                                 alt=""
                                 aria-hidden
-                                loading="lazy"
-                                className="absolute inset-0 h-full w-full object-cover"
+                                fill
+                                sizes="(max-width: 640px) 128px, 160px"
+                                className="object-cover"
                               />
                             ) : (
                               <div

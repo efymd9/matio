@@ -28,6 +28,7 @@ export const es = {
     search: "Buscar",
     signIn: "Iniciar sesión",
     signUp: "Crear cuenta",
+    menuAria: "Abrir menú",
   },
   userMenu: {
     manageSubscription: "Gestionar suscripción",
@@ -232,6 +233,7 @@ export const en: Dict = {
     search: "Search",
     signIn: "Sign in",
     signUp: "Sign up",
+    menuAria: "Open menu",
   },
   userMenu: {
     manageSubscription: "Manage subscription",

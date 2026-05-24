@@ -1,12 +1,21 @@
 "use client";
 
-import MuxPlayer from "@mux/mux-player-react";
+import dynamic from "next/dynamic";
+import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
 import { Icon } from "./icon";
+
+// Lazy-load the Mux player to keep ~350KB of player+media-chrome+hls out
+// of the home-page initial JS chunk. The backdrop <Image> becomes LCP;
+// the autoplay preview fades in once the dynamic import resolves after
+// hydration.
+const MuxPlayer = dynamic(() => import("@mux/mux-player-react"), {
+  ssr: false,
+});
 
 // Cinema-style hero. Layered:
 //   1. backdrop image OR tone gradient
@@ -43,13 +52,15 @@ export function HeroBanner({
     <section className="relative isolate min-h-[640px] w-full overflow-hidden bg-background sm:h-[90vh]">
       {/* Static backdrop: image or tone gradient placeholder */}
       {backdrop ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <Image
           src={backdrop}
           alt=""
           aria-hidden
+          fill
+          priority
+          sizes="100vw"
           className={cn(
-            "absolute inset-0 h-full w-full object-cover transition-opacity duration-1000",
+            "object-cover transition-opacity duration-1000",
             videoPlaying ? "opacity-0" : "opacity-100",
           )}
         />

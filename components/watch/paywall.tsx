@@ -59,8 +59,10 @@ export function Paywall({
         {t.paywall.previewComplete}
       </div>
 
-      {/* Bottom sheet */}
-      <div className="absolute inset-x-0 bottom-0 z-10 border-t border-white/10 bg-[#0f0f12]/95 px-5 pb-5 pt-3 backdrop-blur-2xl sm:px-8 sm:pb-7 sm:pt-4">
+      {/* Bottom sheet. Padding honors iOS home-indicator + notch safe-area
+          so the CTA never sits beneath the system gesture bar. Floors keep
+          the original 1.25rem/2rem cushion on devices with no inset. */}
+      <div className="absolute inset-x-0 bottom-0 z-10 border-t border-white/10 bg-[#0f0f12]/95 pt-3 backdrop-blur-2xl pl-[max(env(safe-area-inset-left),1.25rem)] pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pt-4 sm:pl-[max(env(safe-area-inset-left),2rem)] sm:pr-[max(env(safe-area-inset-right),2rem)] sm:pb-[max(env(safe-area-inset-bottom),1.75rem)]">
         <div className="mx-auto max-w-2xl text-center">
           <div
             className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/20"

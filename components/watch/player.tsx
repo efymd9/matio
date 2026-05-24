@@ -213,6 +213,10 @@ function EpisodePlayback({
   // zero-height container; corrects to e.g. 9/16 for portrait shorts
   // within ~200ms of the manifest arriving.
   const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
+  // Rolling timestamps of recent video <error> events. A single decode
+  // hiccup on cellular is normal noise; we only surrender the slot to
+  // PlaybackUnavailable when 3 errors land inside a 10s window.
+  const errorTimesRef = useRef<number[]>([]);
 
   const episodeLabel = `S${current.seasonNumber}·E${current.number}`;
 
@@ -220,15 +224,16 @@ function EpisodePlayback({
   // exactly once per episode-mount; per-episode state starts at its
   // initial value (no setState resets at the top of the effect body).
   // Branches on response status so that a 429 / 5xx / parse failure
-  // doesn't get framed as a "preview ended" paywall.
+  // doesn't get framed as a "preview ended" paywall. AbortController
+  // cancels the in-flight fetch on episode swap so a slow response
+  // can't race the new episode's fetch.
   useEffect(() => {
-    let cancelled = false;
+    const abort = new AbortController();
     fetch(
       `/api/playback-token?episode_id=${encodeURIComponent(current.id)}`,
-      { cache: "no-store" },
+      { cache: "no-store", signal: abort.signal },
     )
       .then(async (r) => {
-        if (cancelled) return;
         if (!r.ok) {
           setEndState(classifyTokenStatus(r.status));
           return;
@@ -248,63 +253,89 @@ function EpisodePlayback({
           setToken(data.token);
           setExpiresAt(Date.now() + data.expiresIn * 1000);
         } catch {
-          if (!cancelled) setEndState("unavailable");
+          setEndState("unavailable");
         }
       })
-      .catch(() => {
-        if (!cancelled) setEndState("unavailable");
+      .catch((err: unknown) => {
+        if ((err as { name?: string })?.name === "AbortError") return;
+        setEndState("unavailable");
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => abort.abort();
   }, [current.id, fetchKey]);
 
-  // Token refresh on expiry. Subscribers get a fresh 1h token; trial users
-  // who've used their time get 403 and the player flips to the paywall.
-  // Non-403 failures land on the same end-state classifier as the initial
-  // fetch — a 429 mid-session is still rate-limited, not paywall-worthy.
+  // Token refresh BEFORE expiry (60s lead). Refreshing exactly at expiry
+  // raced segment fetches that ran a hair late — Mux validates `exp` on
+  // each segment, so a stale token meant a 403 mid-playback. The lead
+  // window lets the new token install while the old one still works.
+  //
+  // 4xx (paywall/rate-limit) is terminal — surfaces the matching
+  // end-state and stops retrying. 5xx and network errors retry with
+  // exponential backoff (3 attempts) before falling through to the
+  // unavailable end-state. We deliberately do NOT pause the video on
+  // failure — the user's existing token may still have time on it.
   useEffect(() => {
     if (!expiresAt) return;
-    const ms = expiresAt - Date.now();
-    if (ms <= 0) return;
+    const REFRESH_LEAD_MS = 60_000;
+    const wait = Math.max(0, expiresAt - Date.now() - REFRESH_LEAD_MS);
+    const abort = new AbortController();
+    let cancelled = false;
     const timer = setTimeout(async () => {
-      try {
-        const r = await fetch(
-          `/api/playback-token?episode_id=${encodeURIComponent(current.id)}`,
-          { cache: "no-store" },
-        );
-        if (r.ok) {
-          const data = (await r.json()) as {
-            token: unknown;
-            expiresIn: unknown;
-          };
-          if (
-            typeof data.token === "string" &&
-            typeof data.expiresIn === "number"
-          ) {
-            setToken(data.token);
-            setExpiresAt(Date.now() + data.expiresIn * 1000);
+      const backoffs = [0, 1_000, 2_000, 4_000];
+      for (let i = 0; i < backoffs.length; i++) {
+        if (cancelled) return;
+        if (backoffs[i] > 0) {
+          await new Promise((r) => setTimeout(r, backoffs[i]));
+          if (cancelled) return;
+        }
+        try {
+          const r = await fetch(
+            `/api/playback-token?episode_id=${encodeURIComponent(current.id)}`,
+            { cache: "no-store", signal: abort.signal },
+          );
+          if (r.ok) {
+            const data = (await r.json()) as {
+              token: unknown;
+              expiresIn: unknown;
+            };
+            if (
+              typeof data.token === "string" &&
+              typeof data.expiresIn === "number"
+            ) {
+              setToken(data.token);
+              setExpiresAt(Date.now() + data.expiresIn * 1000);
+              return;
+            }
+            setEndState("unavailable");
             return;
           }
-          videoRef.current?.pause();
-          setEndState("unavailable");
-          return;
+          if (r.status >= 400 && r.status < 500) {
+            setEndState(classifyTokenStatus(r.status));
+            return;
+          }
+          // 5xx — fall through to retry.
+        } catch (err) {
+          if ((err as { name?: string })?.name === "AbortError") return;
+          // Network — fall through to retry.
         }
-        videoRef.current?.pause();
-        setEndState(classifyTokenStatus(r.status));
-      } catch {
-        videoRef.current?.pause();
-        setEndState("unavailable");
       }
-    }, ms);
-    return () => clearTimeout(timer);
+      if (!cancelled) setEndState("unavailable");
+    }, wait);
+    return () => {
+      cancelled = true;
+      abort.abort();
+      clearTimeout(timer);
+    };
   }, [expiresAt, current.id]);
 
-  // Save progress every 10s while playing.
+  // Save progress every 10s while playing AND visible. On tab hide
+  // (visibilitychange/pagehide) we flush a final save immediately —
+  // otherwise mobile users lose up to 10s every time they background
+  // the app. Skipping ticks while hidden also saves battery on long
+  // backgrounded tabs.
   useEffect(() => {
-    const interval = setInterval(() => {
+    const flush = () => {
       const el = videoRef.current;
-      if (!el || el.paused) return;
+      if (!el) return;
       const t = Math.floor(el.currentTime ?? 0);
       if (t > 0 && t !== lastSavedRef.current) {
         lastSavedRef.current = t;
@@ -315,8 +346,23 @@ function EpisodePlayback({
           void saveWatchProgress(current.id, t, false).catch(() => {});
         }
       }
+    };
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      const el = videoRef.current;
+      if (!el || el.paused) return;
+      flush();
     }, 10_000);
-    return () => clearInterval(interval);
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", flush);
+    };
   }, [current.id, mode]);
 
   // Seek to resume position once the player has metadata for the episode.
@@ -479,7 +525,31 @@ function EpisodePlayback({
             setAspectRatio(v.videoWidth / v.videoHeight);
           }
         }}
-        onError={() => setEndState("unavailable")}
+        onError={(e) => {
+          // HTMLMediaElement exposes MediaError on the element after an
+          // error fires. Codes:
+          //   1 MEDIA_ERR_ABORTED              — user-driven, ignore.
+          //   2 MEDIA_ERR_NETWORK              — transient, let HLS retry.
+          //   3 MEDIA_ERR_DECODE               — terminal.
+          //   4 MEDIA_ERR_SRC_NOT_SUPPORTED    — terminal.
+          // Transient errors (no code, NETWORK, or unknown) trip the
+          // unavailable end-state only after 3 occurrences in 10s — a
+          // single buffer-stall on cellular shouldn't kill the player.
+          const code = e.currentTarget.error?.code;
+          if (code === 3 || code === 4) {
+            setEndState("unavailable");
+            return;
+          }
+          if (code === 1) return;
+          const now = Date.now();
+          errorTimesRef.current = [
+            ...errorTimesRef.current.filter((ts) => now - ts < 10_000),
+            now,
+          ];
+          if (errorTimesRef.current.length >= 3) {
+            setEndState("unavailable");
+          }
+        }}
         onEnded={() => {
           const el = videoRef.current;
           if (el) {
@@ -519,9 +589,11 @@ function EpisodePlayback({
           </div>
           <div className="hidden items-center gap-5 text-white/85 sm:flex">
             {/* AirPlay button auto-hides when no AirPlay targets are
-                available (Safari with a discoverable device only). */}
+                available (Safari with a discoverable device only).
+                pointer-coarse pads the hit-area on touch without
+                inflating desktop visual size. */}
             <MediaAirplayButton
-              className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
+              className="!bg-transparent !p-0 pointer-coarse:!p-2 text-current transition-colors hover:text-white"
               aria-label={t.player.castAria}
             >
               <span slot="icon" className="contents">
@@ -534,7 +606,7 @@ function EpisodePlayback({
                 placeholder tracks, so we control visibility ourselves. */}
             {hasCaptions ? (
               <MediaCaptionsButton
-                className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
+                className="!bg-transparent !p-0 pointer-coarse:!p-2 text-current transition-colors hover:text-white"
                 aria-label={t.player.captionsAria}
               >
                 <span slot="icon" className="contents">
@@ -611,9 +683,11 @@ function EpisodePlayback({
         <MatioLogo size={11} accent="#ff3d3d" color="#ffffff" />
       </div>
 
-      {/* Bottom bar */}
+      {/* Bottom bar. Side/bottom padding honors iOS landscape notch +
+          home-indicator safe-area; floors keep the original 1.25rem/2rem
+          cushion on devices with no inset. */}
       <div
-        className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 to-transparent px-5 pb-5 pt-4 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8 ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
+        className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 to-transparent pt-4 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 pl-[max(env(safe-area-inset-left),1.25rem)] pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pl-[max(env(safe-area-inset-left),2rem)] sm:pr-[max(env(safe-area-inset-right),2rem)] ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
       >
         <MediaTimeRange className="!block !h-3 !w-full !bg-transparent" />
         <div className="mt-1 flex justify-between font-mono text-[11px] tabular-nums text-white/85">
@@ -623,10 +697,15 @@ function EpisodePlayback({
             className="!bg-transparent !p-0 !text-white/55"
           />
         </div>
-        <div className="mt-3 flex items-center justify-between text-white/85">
+        {/* Bottom controls. Right cluster wraps on narrow viewports so 5
+            elements + 2 left controls don't overflow at 320–375px (made
+            worse by Spanish localizations of Episodes/Up Next). Icon
+            buttons grow padding on touch devices (pointer-coarse:) so
+            they meet a ~44pt comfort target without inflating desktop. */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-y-2 text-white/85">
           <div className="flex items-center gap-5">
             <MediaMuteButton
-              className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
+              className="!bg-transparent !p-0 pointer-coarse:!p-2 text-current transition-colors hover:text-white"
               aria-label={t.player.muteAria}
             >
               <span slot="high" className="contents">
@@ -646,12 +725,12 @@ function EpisodePlayback({
               type="button"
               aria-label={t.player.lockAria}
               onClick={() => onLockChange(true)}
-              className="text-current transition-colors hover:text-white"
+              className="-m-2 p-2 text-current transition-colors hover:text-white"
             >
               <Icon name="lock" size={18} />
             </button>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <MediaPlaybackRateButton
               rates={[0.5, 1, 1.25, 1.5, 2]}
               className="!rounded !bg-white/10 !px-2 !py-1 font-mono !text-[11px] !text-white transition-colors hover:!bg-white/15"
@@ -668,7 +747,7 @@ function EpisodePlayback({
               <button
                 type="button"
                 onClick={() => onSwap(next.id)}
-                className="rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15"
+                className="hidden rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15 sm:inline-flex"
               >
                 {t.player.upNextBtn}
               </button>
@@ -678,7 +757,7 @@ function EpisodePlayback({
                 clipped against the player edge). Auto-populates from the
                 stream's renditions; auto-hides when there's only one. */}
             <MediaRenditionMenuButton
-              className="!ml-1 !bg-transparent !p-0 text-current transition-colors hover:text-white"
+              className="!ml-1 !bg-transparent !p-0 pointer-coarse:!p-2 text-current transition-colors hover:text-white"
               aria-label={t.player.qualityAria}
             >
               <span slot="icon" className="contents">
@@ -686,7 +765,7 @@ function EpisodePlayback({
               </span>
             </MediaRenditionMenuButton>
             <MediaFullscreenButton
-              className="!bg-transparent !p-0 text-current transition-colors hover:text-white"
+              className="!bg-transparent !p-0 pointer-coarse:!p-2 text-current transition-colors hover:text-white"
               aria-label={t.player.fullscreenAria}
             >
               <span slot="enter" className="contents">

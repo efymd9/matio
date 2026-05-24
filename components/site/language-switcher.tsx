@@ -27,7 +27,9 @@ export function LanguageSwitcher() {
       <Menu.Trigger
         aria-label={t.language.switchAria}
         className={cn(
-          "inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.06em] text-white/85 backdrop-blur transition-colors hover:bg-white/[0.08] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 data-[popup-open]:bg-white/[0.08]",
+          // Compact pill on desktop; expands its hit area to a 40px
+          // comfort target on touch via pointer-coarse: variant.
+          "inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 pointer-coarse:px-3 pointer-coarse:py-2 text-[11px] font-bold uppercase tracking-[0.06em] text-white/85 backdrop-blur transition-colors hover:bg-white/[0.08] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 data-[popup-open]:bg-white/[0.08]",
           isPending && "opacity-70",
         )}
       >

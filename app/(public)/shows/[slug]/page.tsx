@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
@@ -143,12 +144,14 @@ export default async function ShowDetailPage({
       {/* Hero */}
       <section className="relative isolate h-[65vh] min-h-[480px] w-full overflow-hidden">
         {backdrop ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={backdrop}
             alt=""
             aria-hidden
-            className="absolute inset-0 h-full w-full object-cover"
+            fill
+            priority
+            sizes="100vw"
+            className="object-cover"
           />
         ) : (
           <div
@@ -320,13 +323,13 @@ function EpisodeRow({
           }
         >
           {ep.thumbnailUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <Image
               src={ep.thumbnailUrl}
               alt=""
               aria-hidden
-              loading="lazy"
-              className="absolute inset-0 h-full w-full object-cover"
+              fill
+              sizes="(max-width: 640px) 128px, 160px"
+              className="object-cover"
             />
           ) : (
             <div
