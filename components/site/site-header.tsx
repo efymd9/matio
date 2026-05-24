@@ -21,8 +21,15 @@ export function SiteHeader({ authSlot }: { authSlot: React.ReactNode }) {
 
   useEffect(() => {
     if (hidden) return;
-    const onScroll = () => setScrolled(window.scrollY > 24);
-    onScroll();
+    let last = window.scrollY > 24;
+    setScrolled(last);
+    const onScroll = () => {
+      const next = window.scrollY > 24;
+      if (next !== last) {
+        last = next;
+        setScrolled(next);
+      }
+    };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, [hidden]);
@@ -71,13 +78,6 @@ export function SiteHeader({ authSlot }: { authSlot: React.ReactNode }) {
               sm:flex-gated). Desktop hides the trigger and renders the
               inline nav above instead. */}
           <MobileNavMenu t={t} />
-          <button
-            type="button"
-            aria-label={t.header.search}
-            className="hidden h-10 w-10 items-center justify-center rounded-full text-white/80 transition-colors hover:text-white hover:bg-white/[0.06] sm:inline-flex"
-          >
-            <Icon name="search" size={20} />
-          </button>
           <LanguageSwitcher />
           {authSlot}
         </div>

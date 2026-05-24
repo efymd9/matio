@@ -24,14 +24,28 @@ import {
 import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { useT } from "@/lib/i18n/client";
+import dynamic from "next/dynamic";
 import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
-import { Paywall } from "./paywall";
-import {
-  PlaybackUnavailable,
-  RateLimitedNotice,
-} from "./playback-status";
-import { EpisodesOverlay } from "./episodes-overlay";
-import { UpNextOverlay } from "./up-next-overlay";
+
+const Paywall = dynamic(() => import("./paywall").then((m) => m.Paywall), {
+  ssr: false,
+});
+const PlaybackUnavailable = dynamic(
+  () => import("./playback-status").then((m) => m.PlaybackUnavailable),
+  { ssr: false },
+);
+const RateLimitedNotice = dynamic(
+  () => import("./playback-status").then((m) => m.RateLimitedNotice),
+  { ssr: false },
+);
+const EpisodesOverlay = dynamic(
+  () => import("./episodes-overlay").then((m) => m.EpisodesOverlay),
+  { ssr: false },
+);
+const UpNextOverlay = dynamic(
+  () => import("./up-next-overlay").then((m) => m.UpNextOverlay),
+  { ssr: false },
+);
 
 export type PlayerEpisode = {
   id: string;
@@ -64,6 +78,11 @@ type OverlayKind = "none" | "episodes" | "upnext";
 //   last hour (429). Distinct visuals, still offers subscribe.
 // - unavailable: anything else — 5xx, network failure, malformed
 //   response, video decode error. Retryable.
+const SUPPORTS_ASPECT_RATIO =
+  typeof CSS !== "undefined" &&
+  typeof CSS.supports === "function" &&
+  CSS.supports("aspect-ratio", "16 / 9");
+
 type EndState = "paywall" | "rateLimited" | "unavailable";
 
 function classifyTokenStatus(status: number): EndState {
@@ -213,6 +232,7 @@ function EpisodePlayback({
   // zero-height container; corrects to e.g. 9/16 for portrait shorts
   // within ~200ms of the manifest arriving.
   const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
+  const supportsAspectRatio = SUPPORTS_ASPECT_RATIO;
   // Rolling timestamps of recent video <error> events. A single decode
   // hiccup on cellular is normal noise; we only surrender the slot to
   // PlaybackUnavailable when 3 errors land inside a 10s window.
@@ -228,12 +248,15 @@ function EpisodePlayback({
   // cancels the in-flight fetch on episode swap so a slow response
   // can't race the new episode's fetch.
   useEffect(() => {
-    const abort = new AbortController();
+    const hasAbort = typeof AbortController !== "undefined";
+    const abort = hasAbort ? new AbortController() : null;
+    let cancelled = false;
     fetch(
       `/api/playback-token?episode_id=${encodeURIComponent(current.id)}`,
-      { cache: "no-store", signal: abort.signal },
+      { cache: "no-store", ...(abort ? { signal: abort.signal } : {}) },
     )
       .then(async (r) => {
+        if (cancelled) return;
         if (!r.ok) {
           setEndState(classifyTokenStatus(r.status));
           return;
@@ -243,6 +266,7 @@ function EpisodePlayback({
             token: unknown;
             expiresIn: unknown;
           };
+          if (cancelled) return;
           if (
             typeof data.token !== "string" ||
             typeof data.expiresIn !== "number"
@@ -253,14 +277,17 @@ function EpisodePlayback({
           setToken(data.token);
           setExpiresAt(Date.now() + data.expiresIn * 1000);
         } catch {
-          setEndState("unavailable");
+          if (!cancelled) setEndState("unavailable");
         }
       })
       .catch((err: unknown) => {
         if ((err as { name?: string })?.name === "AbortError") return;
-        setEndState("unavailable");
+        if (!cancelled) setEndState("unavailable");
       });
-    return () => abort.abort();
+    return () => {
+      cancelled = true;
+      abort?.abort();
+    };
   }, [current.id, fetchKey]);
 
   // Token refresh BEFORE expiry (60s lead). Refreshing exactly at expiry
@@ -277,7 +304,8 @@ function EpisodePlayback({
     if (!expiresAt) return;
     const REFRESH_LEAD_MS = 60_000;
     const wait = Math.max(0, expiresAt - Date.now() - REFRESH_LEAD_MS);
-    const abort = new AbortController();
+    const hasAbort = typeof AbortController !== "undefined";
+    const abort = hasAbort ? new AbortController() : null;
     let cancelled = false;
     const timer = setTimeout(async () => {
       const backoffs = [0, 1_000, 2_000, 4_000];
@@ -290,9 +318,10 @@ function EpisodePlayback({
         try {
           const r = await fetch(
             `/api/playback-token?episode_id=${encodeURIComponent(current.id)}`,
-            { cache: "no-store", signal: abort.signal },
+            { cache: "no-store", ...(abort ? { signal: abort.signal } : {}) },
           );
           if (r.ok) {
+            if (cancelled) return;
             const data = (await r.json()) as {
               token: unknown;
               expiresIn: unknown;
@@ -322,7 +351,7 @@ function EpisodePlayback({
     }, wait);
     return () => {
       cancelled = true;
-      abort.abort();
+      abort?.abort();
       clearTimeout(timer);
     };
   }, [expiresAt, current.id]);
@@ -465,7 +494,10 @@ function EpisodePlayback({
         {
           display: "block",
           width: "100%",
-          aspectRatio,
+          aspectRatio: supportsAspectRatio ? aspectRatio : undefined,
+          ...(!supportsAspectRatio
+            ? { position: "relative" as const, height: 0, paddingBottom: `${(1 / aspectRatio) * 100}%` }
+            : {}),
           // Letterbox to fit the viewport whichever way the video is shaped:
           // vertical assets cap at `100vh * ratio` (narrow on landscape,
           // ~viewport-wide on portrait); horizontal assets cap by width.

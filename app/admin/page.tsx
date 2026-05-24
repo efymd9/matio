@@ -2,7 +2,7 @@ import Link from "next/link";
 import { desc, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { shows } from "@/db/schema";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import { softDeleteShow } from "./actions";
 
 export default async function AdminShowsPage() {
@@ -94,9 +95,9 @@ export default async function AdminShowsPage() {
                         Edit
                       </Link>
                       <form action={softDeleteShow.bind(null, show.id)}>
-                        <Button variant="destructive" size="sm" type="submit">
+                        <ConfirmDeleteButton message={`Delete "${show.title}"? This cannot be undone.`}>
                           Delete
-                        </Button>
+                        </ConfirmDeleteButton>
                       </form>
                     </div>
                   </TableCell>

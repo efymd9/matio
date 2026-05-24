@@ -52,6 +52,8 @@ export function Poster({
         <img
           src={imageUrl}
           alt={title}
+          width={214}
+          height={321}
           loading={priority ? "eager" : "lazy"}
           // aspect-[2/3] on the img itself, not just the parent. Without it,
           // landscape source images (e.g. Mux thumbnails set as

@@ -154,6 +154,7 @@ export async function softDeleteShow(id: string) {
     .set({ deletedAt: new Date() })
     .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
 
+  revalidatePath("/");
   revalidatePath("/admin");
   redirect("/admin");
 }

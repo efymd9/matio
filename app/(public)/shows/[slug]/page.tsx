@@ -200,13 +200,6 @@ export default async function ShowDetailPage({
                 <Icon name="play" size={18} color="#0a0a0c" />
                 {t.showDetail.play}
               </Link>
-              <button
-                type="button"
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-white/15 text-sm font-semibold text-white transition-colors hover:bg-white/25"
-              >
-                <Icon name="download" size={16} />
-                {t.showDetail.downloadEp1}
-              </button>
             </div>
           )}
 
@@ -228,8 +221,6 @@ export default async function ShowDetailPage({
             <span className="border-b-2 border-[#ff3d3d] pb-3 text-white">
               {t.showDetail.tabEpisodes}
             </span>
-            <span className="pb-3 text-white/50">{t.showDetail.tabRelated}</span>
-            <span className="pb-3 text-white/50">{t.showDetail.tabAbout}</span>
           </div>
         </div>
       </section>

@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 // SSR-safe "are we on the client" flag without setState-in-effect.
@@ -41,6 +41,32 @@ export function EpisodesOverlay({
   );
   const t = useT();
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, []);
+
+  const trapFocus = useCallback((e: React.KeyboardEvent) => {
+    if (e.key !== "Tab") return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusable = dialog.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -62,10 +88,12 @@ export function EpisodesOverlay({
 
   return createPortal(
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={t.episodesOverlay.title}
       onClick={onClose}
+      onKeyDown={trapFocus}
       className="fixed inset-0 z-[100] flex flex-col bg-black/85 backdrop-blur-2xl"
     >
       <div
@@ -82,6 +110,7 @@ export function EpisodesOverlay({
             </h2>
           </div>
           <button
+            ref={closeRef}
             type="button"
             onClick={(e) => {
               e.stopPropagation();

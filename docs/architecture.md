@@ -70,7 +70,7 @@ End-to-end:
    - **Not** a shortcut: `trial.converted = true` does **not** grant subscriber-mode rendering. Access for converted-and-still-paying users is granted via the active-subscription lookup above; converted-but-canceled users get the same trial-expired flow as any anonymous visitor.
 2. **Player mounts** (`components/watch/player.tsx`):
    - Outer `Player` picks the initial episode; the inner `EpisodePlayback` (keyed on `current.id`) does the actual playback work.
-   - Inner fetches `/api/playback-token?episode_id=<id>` on mount with an `AbortController` (cancels in-flight on episode swap so a slow response can't race the new fetch). Captures `token` + `expiresIn`, sets `expiresAt = Date.now() + expiresIn*1000`.
+   - Inner fetches `/api/playback-token?episode_id=<id>` on mount with an `AbortController` guard — checks `typeof AbortController !== 'undefined'` and falls back to a `cancelled` flag for iOS < 12.2 (see [gotchas → AbortController](./gotchas.md#abortcontroller-ios-122)). Cancels in-flight on episode swap so a slow response can't race the new fetch. Captures `token` + `expiresIn`, sets `expiresAt = Date.now() + expiresIn*1000`.
    - Renders `<MediaController>` + `<MuxVideo slot="media" playbackId tokens={{ playback }} />` (headless mux-video + media-chrome — not `@mux/mux-player-react`).
    - `setTimeout((expiresAt - now) - 60_000)` fires **60s before** expiry → re-fetches token. Early rotation is required because Mux validates the JWT `exp` per-segment-request — a refresh at the boundary races segments that go out a hair late. 5xx and network errors retry with exponential backoff (1s/2s/4s, 4 attempts total) before falling through to the `unavailable` end-state; the existing token keeps playing through the retry window so a transient network blip doesn't black out the player. Non-success responses are still classified into distinct end-states via `classifyTokenStatus(r.status)`:
      - **403** → `Paywall` overlay (trial preview ended naturally — "Sign up to keep watching"). Trial users land here at the natural expiry.
@@ -137,12 +137,13 @@ Player fetches /api/playback-token → RS256 JWT (lib/mux-token.ts)
 The watch surface uses **headless `<mux-video>` + media-chrome** for full visual control. `@mux/mux-player-react` is retained only for the auto-playing hero preview on `/`.
 
 **File layout:**
-- `components/watch/watch-shell.tsx` — fullscreen black canvas, cursor auto-hide on idle. No max-width; player sizes itself.
+- `components/watch/watch-shell.tsx` — fullscreen black canvas, cursor auto-hide on idle (`mousemove`/`mousedown`/`touchstart` listeners throttled via `requestAnimationFrame` to avoid re-rendering on every pixel of mouse movement). No max-width; player sizes itself.
 - `components/watch/player.tsx` — split into two components in one file:
   - **`Player` (outer)** — owns state that should survive episode swaps: `currentEpisodeId`, overlay visibility, lock toggle, and the `swap` callback that updates the URL.
   - **`EpisodePlayback` (inner, `key={current.id}`)** — owns per-episode state: token, expiresAt, paywall, aspect ratio, captions detection, skip-intro chip, last-saved position. The `key` prop is what makes this work: every episode swap unmounts and remounts the inner, so all per-episode state resets to its initial value naturally. This pattern is required by React 19's `react-hooks/set-state-in-effect` rule — see [gotchas → React 19 hooks rules](./gotchas.md#react-19-hooks-rules).
-- `components/watch/episodes-overlay.tsx` — season-grouped episode picker. Portal'd to `document.body` (see [gotchas → media-chrome overlays](./gotchas.md#media-chrome)). Uses `useSyncExternalStore` for an SSR-safe "are we on the client" check (not `useState + useEffect(setMounted)` — see gotchas).
-- `components/watch/up-next-overlay.tsx` — bottom-right slide-in card with 7-second auto-advance. Same `useSyncExternalStore` SSR pattern.
+  - **Overlays are `next/dynamic` imports** (`ssr: false`): `Paywall`, `PlaybackUnavailable`, `RateLimitedNotice`, `EpisodesOverlay`, and `UpNextOverlay` are all loaded via `next/dynamic` with `ssr: false`. This keeps ~30KB+ of overlay code (and their transitive deps) out of the initial player bundle — none of these render on first paint. The dynamic boundary also means their portal'd `document.body` references are safe without the `useSyncExternalStore` mounted guard at the import site.
+- `components/watch/episodes-overlay.tsx` — season-grouped episode picker. Portal'd to `document.body` (see [gotchas → media-chrome overlays](./gotchas.md#media-chrome)). Uses `useSyncExternalStore` for an SSR-safe "are we on the client" check (not `useState + useEffect(setMounted)` — see gotchas). Has a manual focus trap: close button receives initial focus, Tab/Shift+Tab cycle within the dialog, Escape dismisses.
+- `components/watch/up-next-overlay.tsx` — bottom-right slide-in card with 7-second auto-advance. Same `useSyncExternalStore` SSR pattern. Renders as `role="dialog" aria-modal="true"` with Escape-to-dismiss. The countdown text has `aria-live="polite" aria-atomic="true"` so screen readers announce the remaining seconds. "Watch now" button receives initial focus.
 - `components/watch/paywall.tsx` — bottom-sheet overlay shown on trial 403. Leads with **sign-up**, not plan selection: primary CTA is Clerk's `<SignUpButton mode="modal" forceRedirectUrl="/subscribe?show=…&resume=…">`. Signed-in non-subscribers (rare — paid → canceled → returned) get a direct `<Link>` to `/subscribe` instead. A secondary "Already have an account? Sign in" link uses `<SignInButton>` with matching redirect. Plan picking happens after signup, on `/subscribe` — two decisions ("which plan?" + "make an account?") at the same in-player moment was decision overload.
 - `components/watch/playback-status.tsx` — `RateLimitedNotice` (429) and `PlaybackUnavailable` (5xx / network / video decode) overlays. Same visual idiom as `Paywall` but reserved for non-paywall end-states; framing 429 as "Preview ended" was misleading (the user hadn't burned their trial — the IP bucket did).
 
@@ -190,6 +191,11 @@ signMuxThumbnailToken(playbackId, ttl)  // aud='t' (image)
 Plus a `muxThumbnailUrl(playbackId, policy, opts)` helper that builds `https://image.mux.com/<id>/thumbnail.jpg?width=…&height=…&fit_mode=smartcrop[&token=<jwt>]`. Token is included only when the asset's `mux_playback_policy === "signed"`. TTL is 1h — long enough for typical sessions, short enough to avoid leaking long-lived URLs.
 
 Consumed by: episodes overlay, up-next card, public show-detail episode rows. All pre-computed server-side in the route handlers / page components.
+
+## Admin mutations
+
+- **Delete confirmations**: all destructive admin actions (soft-delete show, delete season) use `components/admin/confirm-delete-button.tsx` — a client-side `<Button variant="destructive">` that calls `window.confirm(message)` before allowing the form submit. Prevents one-click data loss in the admin panel.
+- **`softDeleteShow` revalidation**: the action revalidates both `/admin` (the show list) and `/` (the public catalog) so the soft-deleted show disappears from the homepage immediately, not just the admin panel.
 
 ## Admin analytics
 
@@ -287,6 +293,17 @@ isAuthRoute  = createRouteMatcher(["/subscribe(.*)"]);
 
 Public catalog (`/`, `/shows/[slug]`) isn't gated — it surfaces only `status='published' AND deleted_at IS NULL` rows.
 
+## Accessibility
+
+- **Skip-to-content link**: `app/layout.tsx` renders an `<a href="#main-content">` that is `sr-only` by default and becomes visible on focus. The `#main-content` div wraps `{children}` so keyboard users can skip past the header and nav.
+
+## Error boundaries
+
+- `app/(public)/shows/[slug]/error.tsx` — catches errors in the show detail page (bad DB query, missing show data after a race with soft-delete, etc.). Renders a "Something went wrong" fallback with a retry button.
+- `app/subscribe/error.tsx` — catches errors in the subscribe page (Stripe config issues, missing price IDs, etc.). Same pattern.
+
+Error boundaries are React client components (`"use client"`) that receive `error` and `reset` props. They don't catch errors in `layout.tsx` or in route handlers — only in the page component tree below them.
+
 ## Route groups
 
 - `app/(public)/` — `/`, `/shows/[slug]` — root layout, no auth
@@ -302,7 +319,7 @@ Public catalog (`/`, `/shows/[slug]`) isn't gated — it surfaces only `status='
 - **Server actions**: app mutations (admin CRUD, startCheckout, openBillingPortal, saveWatchProgress, saveTrialPosition).
 - **Route handlers**: webhooks from external services (Clerk/Mux/Stripe) and the JWT issuer (`/api/playback-token`).
 
-Webhook handlers always declare `export const runtime = "nodejs";` — the SDK signature verifiers need raw bytes and don't run on the Edge.
+Webhook handlers always declare `export const runtime = "nodejs";` — the SDK signature verifiers need raw bytes and don't run on the Edge. The `evt` / `event` variables are explicitly typed via `Awaited<ReturnType<…>>` of the respective SDK's verify/unwrap function — no implicit `any`.
 
 ## Why these specific choices
 

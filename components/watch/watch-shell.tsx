@@ -26,14 +26,32 @@ export function WatchShell({
 }) {
   const [visible, setVisible] = useState(true);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rafPending = useRef(false);
+  const visibleRef = useRef(true);
 
   useEffect(() => {
-    const reset = () => {
-      setVisible(true);
+    const scheduleHide = () => {
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setVisible(false), IDLE_MS);
+      timer.current = setTimeout(() => {
+        visibleRef.current = false;
+        setVisible(false);
+      }, IDLE_MS);
     };
-    reset();
+
+    const reset = () => {
+      if (rafPending.current) return;
+      rafPending.current = true;
+      requestAnimationFrame(() => {
+        rafPending.current = false;
+        if (!visibleRef.current) {
+          visibleRef.current = true;
+          setVisible(true);
+        }
+        scheduleHide();
+      });
+    };
+
+    scheduleHide();
     const events: (keyof WindowEventMap)[] = [
       "mousemove",
       "mousedown",

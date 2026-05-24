@@ -25,13 +25,14 @@ export const runtime = "nodejs";
 const SUBSCRIBER_TTL = 60 * 60; // 1h
 // Cap trial JWT TTL at the trial duration so a token never outlives the row.
 const TRIAL_TTL_CAP = TRIAL_DURATION_SECONDS;
+const NO_CACHE = { "Cache-Control": "private, no-store" } as const;
 
 export async function GET(req: NextRequest) {
   const episodeId = req.nextUrl.searchParams.get("episode_id");
   if (!episodeId) {
     return NextResponse.json(
       { error: "Missing episode_id" },
-      { status: 400 },
+      { status: 400, headers: NO_CACHE },
     );
   }
 
@@ -61,7 +62,7 @@ export async function GET(req: NextRequest) {
   if (!row || !row.playbackId) {
     return NextResponse.json(
       { error: "Episode not found or not ready" },
-      { status: 404 },
+      { status: 404, headers: NO_CACHE },
     );
   }
 
@@ -78,7 +79,7 @@ export async function GET(req: NextRequest) {
       token,
       expiresIn: SUBSCRIBER_TTL,
       mode: "subscriber",
-    });
+    }, { headers: NO_CACHE });
   }
 
   // Trial path. Note we intentionally do NOT special-case trial.converted —
@@ -109,11 +110,11 @@ export async function GET(req: NextRequest) {
         token,
         expiresIn: ttl,
         mode: "trial",
-      });
+      }, { headers: NO_CACHE });
     }
     // Expired row exists — don't issue a new trial for this show on the
     // same cookie. User must subscribe.
-    return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+    return NextResponse.json({ error: "Not authorized" }, { status: 403, headers: NO_CACHE });
   }
 
   // No row yet for (cookie, show) — first preview for this show. Mint a
@@ -137,7 +138,7 @@ export async function GET(req: NextRequest) {
         { error: "Too many requests" },
         {
           status: 429,
-          headers: { "Retry-After": String(60 * 60) },
+          headers: { ...NO_CACHE, "Retry-After": String(60 * 60) },
         },
       );
     }
@@ -149,7 +150,7 @@ export async function GET(req: NextRequest) {
   );
   const ttl = Math.min(Math.max(remaining, 0), TRIAL_TTL_CAP);
   const token = signMuxPlaybackToken(row.playbackId, ttl);
-  const res = NextResponse.json({ token, expiresIn: ttl, mode: "trial" });
+  const res = NextResponse.json({ token, expiresIn: ttl, mode: "trial" }, { headers: NO_CACHE });
   if (!existingToken) {
     res.cookies.set(TRIAL_COOKIE, sessionToken, {
       httpOnly: true,

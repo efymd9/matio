@@ -32,5 +32,7 @@ export async function GET() {
     return_url: `${origin}/`,
   });
 
-  return NextResponse.redirect(session.url);
+  const res = NextResponse.redirect(session.url);
+  res.headers.set("Cache-Control", "no-store");
+  return res;
 }

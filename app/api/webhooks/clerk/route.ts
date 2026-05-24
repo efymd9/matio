@@ -8,7 +8,7 @@ import { users } from "@/db/schema";
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  let evt;
+  let evt: Awaited<ReturnType<typeof verifyWebhook>>;
   try {
     evt = await verifyWebhook(req);
   } catch (err) {

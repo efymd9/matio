@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 // SSR-safe "are we on the client" flag without setState-in-effect.
@@ -37,14 +37,27 @@ export function UpNextOverlay({
   const [remaining, setRemaining] = useState(COUNTDOWN_SECONDS);
   const tone = toneFor(showSlug);
   const t = useT();
+  const playRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    playRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
 
   useEffect(() => {
     if (remaining <= 0) {
       onPlayNow();
       return;
     }
-    const t = setTimeout(() => setRemaining((n) => n - 1), 1000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setRemaining((n) => n - 1), 1000);
+    return () => clearTimeout(timer);
   }, [remaining, onPlayNow]);
 
   if (!mounted) return null;
@@ -55,7 +68,12 @@ export function UpNextOverlay({
   return createPortal(
     // Side/bottom padding honors iOS landscape notch + home-indicator
     // safe-area; pt-/pl- keep the original p-5/p-8 cushion.
-    <div className="pointer-events-none fixed inset-0 z-[100] flex items-end justify-end pt-5 pl-5 pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pt-8 sm:pl-8 sm:pr-[max(env(safe-area-inset-right),2rem)] sm:pb-[max(env(safe-area-inset-bottom),2rem)]">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t.upNextOverlay.label}
+      className="pointer-events-none fixed inset-0 z-[100] flex items-end justify-end pt-5 pl-5 pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pt-8 sm:pl-8 sm:pr-[max(env(safe-area-inset-right),2rem)] sm:pb-[max(env(safe-area-inset-bottom),2rem)]"
+    >
       <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f0f12]/95 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
           {t.upNextOverlay.label}
@@ -118,6 +136,7 @@ export function UpNextOverlay({
 
         <div className="mt-3 flex gap-2">
           <button
+            ref={playRef}
             type="button"
             onClick={(e) => {
               e.stopPropagation();
@@ -139,7 +158,7 @@ export function UpNextOverlay({
             {t.upNextOverlay.cancel}
           </button>
         </div>
-        <p className="mt-2 text-center text-[10px] text-white/45">
+        <p className="mt-2 text-center text-[10px] text-white/45" aria-live="polite" aria-atomic="true">
           {t.upNextOverlay.playingIn(remaining)}
         </p>
       </div>

@@ -4,6 +4,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { seasons, shows } from "@/db/schema";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import {
   Card,
   CardContent,
@@ -222,9 +223,9 @@ export default async function EditShowPage({
                     Manage episodes
                   </Link>
                   <form action={deleteSeason.bind(null, season.id, show.id)}>
-                    <Button variant="destructive" size="sm" type="submit">
+                    <ConfirmDeleteButton message={`Delete Season ${season.number}? All its episodes will also be removed.`}>
                       Delete
-                    </Button>
+                    </ConfirmDeleteButton>
                   </form>
                 </div>
               </li>
@@ -262,9 +263,9 @@ export default async function EditShowPage({
         </CardHeader>
         <CardContent>
           <form action={softDeleteShow.bind(null, show.id)}>
-            <Button variant="destructive" type="submit">
+            <ConfirmDeleteButton message={`Delete "${show.title}"? This cannot be undone.`}>
               Delete this show
-            </Button>
+            </ConfirmDeleteButton>
           </form>
         </CardContent>
       </Card>

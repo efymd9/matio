@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.text();
 
-  let event;
+  let event: Awaited<ReturnType<ReturnType<typeof getMux>["webhooks"]["unwrap"]>>;
   try {
     event = await getMux().webhooks.unwrap(body, req.headers, signingSecret);
   } catch (err) {

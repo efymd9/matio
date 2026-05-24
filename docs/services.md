@@ -119,9 +119,9 @@ stripe login
 
 **Driver config** (`db/index.ts`):
 ```ts
-postgres(connectionString, { prepare: false });
+postgres(connectionString, { prepare: false, max: 1 });
 ```
-`prepare: false` is **required** for pgbouncer transaction-pool mode (the pooled endpoint). Without it you'll see prepared-statement errors under load.
+`prepare: false` is **required** for pgbouncer transaction-pool mode (the pooled endpoint). Without it you'll see prepared-statement errors under load. `max: 1` caps each serverless isolate to a single connection so traffic bursts don't exhaust Neon's pooler limit — see [gotchas → Neon / postgres-js](./gotchas.md#neon--postgres-js).
 
 **Migrations**: Drizzle schemas in `db/schema/*.ts`. `drizzle.config.ts` uses the same `DATABASE_URL`. See [operations.md → DB migrations](./operations.md#db-migrations).
 

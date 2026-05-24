@@ -362,6 +362,29 @@ video::-webkit-media-controls-overlay-play-button {
 
 That kills the big "tap to play" disc that overlays inline iOS video. Leave the rest of the WebKit pseudo set alone.
 
+## AbortController (iOS 12.2+)
+
+`AbortController` landed in Safari 12.1 / iOS 12.2. Older WebKit (rare, but still in the wild on SE 1st-gen / iPod Touch 7th-gen stuck on iOS 12.0–12.1) throws `ReferenceError` if you `new AbortController()` unconditionally. The player's token-fetch effects guard with:
+
+```ts
+const hasAbort = typeof AbortController !== "undefined";
+const abort = hasAbort ? new AbortController() : null;
+let cancelled = false;
+// ...
+fetch(url, { cache: "no-store", ...(abort ? { signal: abort.signal } : {}) })
+  .then((r) => {
+    if (cancelled) return;
+    // ...
+  })
+  .catch((err) => {
+    if ((err as { name?: string })?.name === "AbortError") return;
+    if (!cancelled) setEndState("unavailable");
+  });
+return () => { cancelled = true; abort?.abort(); };
+```
+
+The `cancelled` flag handles the cleanup path for browsers without `AbortController`. All other features work back to iOS 12.2+; this is the current browser compat floor for the player.
+
 ## Cross-browser CSS (iOS Safari < 15.4)
 
 Tailwind v4 targets "Safari 16.4+, Chrome 111+, Firefox 128+" and emits zero fallbacks. iPhones still in active use — 6s/SE-1st-gen/7/8 frozen on iOS 14/15.0–15.3 — drop entire declarations they can't parse, which silently breaks UI when load-bearing properties are involved.
@@ -390,6 +413,37 @@ Two safe alternatives:
 2. **React-controlled state** — pay the small client-bundle cost, get full control. Worth it only when the state needs to drive non-CSS behavior too.
 
 `group-has-[*]:` in non-critical surfaces (`components/ui/button.tsx`, `components/ui/card.tsx`, `components/ui/table.tsx`) is left as-is — those degrade to slightly-different padding, not a broken interaction.
+
+### `aspect-ratio` needs a padding-bottom fallback
+
+CSS `aspect-ratio` is Safari 15+, Chrome 88+, Firefox 89+. Without a fallback, `.aspect-video` containers collapse to zero height on older browsers. `app/globals.css` includes:
+
+```css
+@supports not (aspect-ratio: 16 / 9) {
+  .aspect-video {
+    position: relative;
+    height: 0;
+    padding-bottom: 56.25%;       /* 9/16 = 0.5625 */
+  }
+  .aspect-video > * {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+}
+```
+
+The dynamic player (`components/watch/player.tsx`) also checks at module scope:
+
+```ts
+const SUPPORTS_ASPECT_RATIO =
+  typeof CSS !== "undefined" &&
+  typeof CSS.supports === "function" &&
+  CSS.supports("aspect-ratio", "16 / 9");
+```
+
+When false, the `<MediaController>` inline style falls back to the padding-bottom intrinsic-ratio hack instead of setting `aspectRatio`. Both paths produce the same visual result; the fallback just uses `position: relative; height: 0; paddingBottom: <ratio>%` instead.
 
 ### `viewport-fit=cover` is required for `env(safe-area-inset-*)`
 
@@ -503,6 +557,22 @@ Or use `tsx --env-file=.env.local script.ts` — Node loads env before the scrip
 ### Top-level await in `.ts` scripts
 
 Plain `.ts` scripts run by `tsx` are CommonJS by default. CJS doesn't allow top-level await. Wrap in `async function main()` instead.
+
+## Neon / postgres-js
+
+### `max: 1` for serverless functions
+
+Vercel Functions (and any serverless runtime) spin up many concurrent isolates, each holding its own connection. Without capping the per-isolate pool, a traffic burst can exhaust Neon's pooler connection limit. `db/index.ts` sets:
+
+```ts
+postgres(connectionString, { prepare: false, max: 1 });
+```
+
+`prepare: false` is for pgbouncer transaction mode (unchanged); `max: 1` keeps each isolate to a single connection. On a persistent long-running server (e.g. `pnpm dev`) this is conservative but harmless — `postgres-js` queues queries internally.
+
+### Cache-Control on token and auth redirect endpoints
+
+`/api/playback-token` and `/api/billing-portal` both set `Cache-Control: private, no-store` on every response. Without it, aggressive CDN or browser caching can replay a stale JWT (playback continues past trial cutoff) or a stale Stripe portal redirect (session expired). The playback-token route centralizes the header in a `NO_CACHE` constant applied to all seven response paths — if you add a new exit, include it.
 
 ## Misc
 
