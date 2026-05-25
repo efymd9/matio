@@ -8,6 +8,7 @@ import {
   episodes,
   seasons,
   shows,
+  users,
   watchProgress,
 } from "@/db/schema";
 import { Player, type PlayerEpisode } from "@/components/watch/player";
@@ -132,6 +133,19 @@ export default async function WatchPage({
   // grants access and why the period-end timestamp is also enforced.
   const isSubscriber = userId ? await hasActiveSubscription(userId) : false;
 
+  // Look up the user's email to pre-fill the SeriesEndOverlay reminder
+  // form. Cheap single-row lookup; only fires for signed-in viewers
+  // (anonymous trial users never reach the series-end overlay anyway).
+  let userEmail: string | null = null;
+  if (userId) {
+    const [u] = await db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    userEmail = u?.email ?? null;
+  }
+
   // For subscribers, look up per-episode watch progress so a refresh / new
   // tab resumes where they left off without relying on URL ?resume=.
   let resumeFromProgress: number | null = null;
@@ -158,11 +172,13 @@ export default async function WatchPage({
       <WatchShell>
         <Player
           mode="subscriber"
+          showId={show.id}
           showSlug={show.slug}
           showTitle={show.title}
           episodes={playable}
           initialEpisodeId={initial.id}
           resumeSeconds={queryResume ?? resumeFromProgress}
+          userEmail={userEmail}
         />
       </WatchShell>
     );
@@ -199,11 +215,13 @@ export default async function WatchPage({
     <WatchShell>
       <Player
         mode="trial"
+        showId={show.id}
         showSlug={show.slug}
         showTitle={show.title}
         episodes={playable}
         initialEpisodeId={initial.id}
         resumeSeconds={queryResume ?? (trial?.lastPositionSeconds || null)}
+        userEmail={userEmail}
       />
     </WatchShell>
   );

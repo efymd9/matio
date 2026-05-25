@@ -46,6 +46,10 @@ const UpNextOverlay = dynamic(
   () => import("./up-next-overlay").then((m) => m.UpNextOverlay),
   { ssr: false },
 );
+const SeriesEndOverlay = dynamic(
+  () => import("./series-end-overlay").then((m) => m.SeriesEndOverlay),
+  { ssr: false },
+);
 
 export type PlayerEpisode = {
   id: string;
@@ -64,7 +68,7 @@ export type PlayerEpisode = {
 };
 
 type Mode = "subscriber" | "trial";
-type OverlayKind = "none" | "episodes" | "upnext";
+type OverlayKind = "none" | "episodes" | "upnext" | "seriesEnd";
 
 // End-states for the player. Distinct from a transient error: once we
 // hit one of these, the <MediaController> stops rendering and a focused
@@ -101,16 +105,22 @@ export function Player({
   episodes,
   initialEpisodeId,
   mode,
+  showId,
   showSlug,
   showTitle,
   resumeSeconds,
+  userEmail,
 }: {
   episodes: PlayerEpisode[];
   initialEpisodeId: string;
   mode: Mode;
+  showId: string;
   showSlug: string;
   showTitle?: string;
   resumeSeconds?: number | null;
+  // Pre-fill for the SeriesEndOverlay reminder form. Null for trial
+  // users and any case where we couldn't resolve a user email.
+  userEmail?: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -162,6 +172,7 @@ export function Player({
       next={next}
       episodes={episodes}
       mode={mode}
+      showId={showId}
       showSlug={showSlug}
       showTitle={showTitle}
       resumeSeconds={resumeForThisLoad}
@@ -170,6 +181,7 @@ export function Player({
       overlay={overlay}
       onOverlayChange={setOverlay}
       onSwap={swap}
+      userEmail={userEmail}
     />
   );
 }
@@ -179,6 +191,7 @@ function EpisodePlayback({
   next,
   episodes,
   mode,
+  showId,
   showSlug,
   showTitle,
   resumeSeconds,
@@ -187,11 +200,13 @@ function EpisodePlayback({
   overlay,
   onOverlayChange,
   onSwap,
+  userEmail,
 }: {
   current: PlayerEpisode;
   next: PlayerEpisode | null;
   episodes: PlayerEpisode[];
   mode: Mode;
+  showId: string;
   showSlug: string;
   showTitle?: string;
   resumeSeconds: number | null;
@@ -200,6 +215,7 @@ function EpisodePlayback({
   overlay: OverlayKind;
   onOverlayChange: (overlay: OverlayKind) => void;
   onSwap: (episodeId: string) => void;
+  userEmail?: string | null;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const t = useT();
@@ -592,7 +608,17 @@ function EpisodePlayback({
               void saveWatchProgress(current.id, t, true).catch(() => {});
             }
           }
-          if (next) onOverlayChange("upnext");
+          if (next) {
+            onOverlayChange("upnext");
+          } else if (mode === "subscriber") {
+            // Last episode of the show finished. Subscribers see the
+            // "next episode in production" reminder sheet. Trial users
+            // realistically can't reach this branch (60s preview vs
+            // full episode duration); skip the overlay for them so a
+            // freak edge case — say a 30s teaser — doesn't dump a paid
+            // surface on a free preview.
+            onOverlayChange("seriesEnd");
+          }
         }}
         className="h-full w-full"
       />
@@ -852,6 +878,14 @@ function EpisodePlayback({
           showSlug={showSlug}
           onPlayNow={() => onSwap(next.id)}
           onCancel={() => onOverlayChange("none")}
+        />
+      ) : null}
+      {overlay === "seriesEnd" ? (
+        <SeriesEndOverlay
+          showId={showId}
+          showTitle={showTitle ?? current.title}
+          defaultEmail={userEmail}
+          onDismiss={() => onOverlayChange("none")}
         />
       ) : null}
     </MediaController>

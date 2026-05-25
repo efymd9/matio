@@ -7,6 +7,7 @@ import { db } from "@/db";
 import {
   episodes,
   seasons,
+  showReminders,
   shows,
   trialSessions,
   watchProgress,
@@ -130,4 +131,78 @@ export async function saveTrialPosition(
         eq(trialSessions.showId, row.showId),
       ),
     );
+}
+
+// RFC 5322 email regex would be 100+ chars and still wouldn't fully
+// validate. We just need to reject obvious garbage before the DB
+// constraint catches duplicates — keep this lax and let Resend do the
+// real deliverability check at send time.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_MAX_LEN = 254; // RFC 3696 — full address upper bound
+
+export type ShowReminderResult =
+  | { ok: true }
+  | { ok: false; reason: "invalid_email" | "invalid_show" };
+
+// Records an email-reminder request for a show. Called from the
+// SeriesEndOverlay when a viewer asks to be notified about the next
+// episode. Idempotent on (show_id, email) via the unique constraint —
+// the duplicate path returns ok=true so the UI shows the success state
+// either way (no information leak about who already subscribed).
+//
+// Anonymous and trial users can submit; the user_id column is filled in
+// when an auth context is available, NULL otherwise. We don't gate on
+// subscription status — a churned subscriber asking for episode pings
+// is exactly the audience to re-engage.
+export async function subscribeToShowReminder(input: {
+  showId: string;
+  email: string;
+}): Promise<ShowReminderResult> {
+  const rawEmail = typeof input.email === "string" ? input.email.trim() : "";
+  // Lowercase before hitting the unique constraint — otherwise
+  // "Alice@Example.com" and "alice@example.com" map to two rows.
+  const email = rawEmail.toLowerCase();
+  if (
+    !email ||
+    email.length > EMAIL_MAX_LEN ||
+    !EMAIL_RE.test(email)
+  ) {
+    return { ok: false, reason: "invalid_email" };
+  }
+
+  const showId =
+    typeof input.showId === "string" && input.showId ? input.showId : null;
+  if (!showId) return { ok: false, reason: "invalid_show" };
+
+  // Verify the show exists, is published, and not soft-deleted. Without
+  // this, any UUID would create a row tying the email to a phantom
+  // show — would clog the future dispatcher and lets an attacker probe
+  // for show id existence by error/no-error differentiation.
+  const [show] = await db
+    .select({ id: shows.id })
+    .from(shows)
+    .where(
+      and(
+        eq(shows.id, showId),
+        eq(shows.status, "published"),
+        isNull(shows.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!show) return { ok: false, reason: "invalid_show" };
+
+  // Best-effort link to the user when auth is available. The column is
+  // nullable and the row is identified by (show_id, email), so a later
+  // signed-in resubmission with the same email will hit the unique
+  // constraint and be deduped without us needing to backfill user_id.
+  const { userId } = await auth();
+
+  await db
+    .insert(showReminders)
+    .values({ showId: show.id, email, userId: userId ?? null })
+    .onConflictDoNothing({
+      target: [showReminders.showId, showReminders.email],
+    });
+
+  return { ok: true };
 }
