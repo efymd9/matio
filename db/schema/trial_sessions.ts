@@ -32,6 +32,17 @@ export const trialSessions = pgTable(
     // Nullable so existing rows (created before this column) don't need a
     // backfill; the rate-limit query just sees fewer rows for that bucket.
     ipHash: text("ip_hash"),
+    // Campaign attribution snapshot taken at row creation (first play of
+    // this show on this cookie). First-touch is what was in the
+    // attribution_first cookie at that moment; last-touch what was in the
+    // attribution_last cookie. Both nullable for organic / direct visits
+    // and for rows created before this column existed.
+    attributionFirstSource: text("attribution_first_source"),
+    attributionFirstMedium: text("attribution_first_medium"),
+    attributionFirstCampaign: text("attribution_first_campaign"),
+    attributionLastSource: text("attribution_last_source"),
+    attributionLastMedium: text("attribution_last_medium"),
+    attributionLastCampaign: text("attribution_last_campaign"),
   },
   (t) => [
     unique("trial_sessions_session_token_show_id_unique").on(

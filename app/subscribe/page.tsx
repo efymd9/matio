@@ -6,6 +6,7 @@ import { subscriptions, type Subscription } from "@/db/schema";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { Icon } from "@/components/site/icon";
 import { getOrSyncCurrentUser } from "@/lib/admin";
+import { applyUserAttribution } from "@/lib/attribution";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
@@ -29,6 +30,12 @@ export default async function SubscribePage({
   const userId = user.id;
 
   await linkTrialSessionsToCurrentUser();
+  // Stamp the user's UTM cookies onto their users row. /subscribe is
+  // the conversion-funnel checkpoint everyone passes through, so this
+  // catches paywall-driven signups, header-driven signups followed by
+  // a subscribe attempt, and returning users hitting the page via a
+  // remarketing link.
+  await applyUserAttribution(userId);
 
   const { t } = await getDict();
 

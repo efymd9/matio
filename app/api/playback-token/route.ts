@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
+import { readAttributionCookiesFromRequest } from "@/lib/attribution";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
@@ -121,12 +122,18 @@ export async function GET(req: NextRequest) {
   // new row (with IP-bucket rate-limit) and set the cookie if missing.
   const sessionToken = existingToken ?? crypto.randomUUID();
   const ipHash = hashClientIp(getClientIp(req));
+  // Snapshot the UTM cookies (set by proxy.ts on landing) at the moment
+  // of first play. Stamping at trial-creation means every campaign's
+  // trial-start count is queryable from the analytics dashboard without
+  // requiring user signup.
+  const attribution = readAttributionCookiesFromRequest(req);
   let mintedExpiresAt: Date;
   try {
     const fresh = await mintTrialSession({
       sessionToken,
       showId: row.showId,
       ipHash,
+      attribution,
     });
     mintedExpiresAt = fresh.expiresAt;
   } catch (err) {

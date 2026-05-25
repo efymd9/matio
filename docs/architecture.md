@@ -38,8 +38,10 @@ Schemas live in `db/schema/`, one file per logical domain (CLAUDE.md convention)
 | `shows` | The catalog | `slug` (unique), `genre[]`, `status` (`draft`\|`published`), `deleted_at` (soft-delete) |
 | `seasons` | Season per show | `(show_id, number)` unique |
 | `episodes` | Episode with Mux linkage | `mux_asset_id`, `mux_playback_id`, `mux_playback_policy` (`public`\|`signed`), `status` (`processing`\|`ready`\|`errored`), `intro_start_seconds` + `intro_end_seconds` (nullable; drive the "Skip intro" chip), `(season_id, number)` unique |
-| `trial_sessions` | Anonymous-first 60s trial | `(session_token, show_id)` unique, `expires_at`, `user_id` (nullable, set on signup), `converted`, `last_position_seconds`, `ip_hash` (HMAC-SHA256 of `x-vercel-forwarded-for`; drives per-(IP, show) trial rate-limit) |
+| `trial_sessions` | Anonymous-first 60s trial | `(session_token, show_id)` unique, `expires_at`, `user_id` (nullable, set on signup), `converted`, `last_position_seconds`, `ip_hash` (HMAC-SHA256 of `x-vercel-forwarded-for`; drives per-(IP, show) trial rate-limit), `attribution_{first,last}_{source,medium,campaign}` (UTM snapshot at row creation) |
 | `watch_progress` | Per-user, per-episode resume position | `(user_id, episode_id)` unique |
+
+Attribution columns (`attribution_first_*` / `attribution_last_*` triples) also live on `users` (stamped at `/subscribe` render) and `subscriptions` (stamped at Stripe Checkout creation via metadata, never overwritten on renewal). See [Campaign attribution](#campaign-attribution).
 
 FK cascade defaults: deleting a `show` removes its `seasons` → `episodes` → `trial_sessions` (via FK CASCADE). `users.id` cascades into `subscriptions` and `watch_progress`; nulls out `trial_sessions.user_id`.
 
@@ -199,7 +201,7 @@ Consumed by: episodes overlay, up-next card, public show-detail episode rows. Al
 
 ## Admin analytics
 
-`app/admin/analytics/page.tsx` is a server component that fires eight parallel Drizzle queries via `Promise.all`:
+`app/admin/analytics/page.tsx` is a server component that fires fourteen parallel Drizzle queries via `Promise.all`:
 
 - Users: total + 30-day count
 - Active subscriptions by plan (for MRR + active count)
@@ -207,12 +209,65 @@ Consumed by: episodes overlay, up-next card, public show-detail episode rows. Al
 - Trials started in the last 30 days + how many converted
 - Top 10 shows by `SUM(watch_progress.position_seconds)` joined episodes → seasons → shows
 - Daily signup buckets (`TO_CHAR(... AT TIME ZONE 'UTC', 'YYYY-MM-DD')`)
+- Per-campaign first-touch breakdown: trials (30d) + signups (30d) + active subs by plan, each grouped by `(attribution_first_source, attribution_first_medium, attribution_first_campaign)`
+- Per-campaign last-touch breakdown: same three queries, grouped by `attribution_last_*` columns
 
-Rendered as metric cards + a 30-bar histogram + a normalized horizontal bar list. No Recharts dep — Tailwind/CSS only.
+Rendered as metric cards + a 30-bar histogram + a normalized horizontal bar list + two side-by-side campaign tables (first-touch default, last-touch reconciliation view). Each campaign table merges its three group-by queries in JS on the key `${source}|${medium}|${campaign}`, sorts by MRR DESC then trials DESC, and collapses all-NULL rows into a single `(direct)` bucket so organic traffic stays grouped. No Recharts dep — Tailwind/CSS only.
 
 Approximations called out in code comments:
 - Churn = cancellations / (cancellations + still-active). True churn needs a snapshot of "active at start of window," which we don't maintain.
 - Watch time = sum of last-known position; doesn't account for repeat watching.
+- First-touch attribution on users only captures the first authenticated touch where UTM cookies were present (specifically the `/subscribe` page render). A user who signs up via the header on `/` and never visits `/subscribe` stays NULL — they don't appear in conversion attribution because they're not paid users anyway.
+
+## Campaign attribution
+
+`lib/attribution.ts` owns the UTM capture + persistence flow. The pipeline:
+
+```
+Ad landing  ──►  proxy.ts  ──►  sets two cookies:
+?utm_source         (any non-admin route)        attribution_first  (90d, write-if-absent)
+?utm_medium                                      attribution_last   (30d, overwrite)
+?utm_campaign
+        │
+        │ (subset captured: only source/medium/campaign — utm_term/content
+        │  skipped to keep cookies <200B and schema lean)
+        ▼
+Funnel touchpoints snapshot the cookies into nullable text cols:
+
+  • mintTrialSession (lib/trial.ts)
+      → trial_sessions.attribution_{first,last}_{source,medium,campaign}
+      at row creation (first play of this show on this cookie)
+
+  • applyUserAttribution (lib/attribution.ts) — called from /subscribe page render
+      → users.attribution_first_*   (idempotent: WHERE all three first-touch
+                                     cols are still NULL, so partial UTMs
+                                     don't half-overwrite)
+      → users.attribution_last_*    (COALESCE per-column, so a partial UTM
+                                     landing doesn't NULL out previously
+                                     captured fields)
+
+  • startCheckout (app/subscribe/actions.ts)
+      → Stripe Checkout subscription_data.metadata
+        (flattened to six string keys via toStripeMetadata — Stripe metadata
+         is string-only and capped at 50 keys × 500 chars per value)
+
+  • Stripe webhook mirrorSubscription
+      → subscriptions.attribution_{first,last}_{source,medium,campaign}
+        on INSERT. The .onConflictDoUpdate set clause deliberately omits
+        these columns: a customer.subscription.updated landing months
+        later (renewal, status change, cancellation) carries no UTM
+        metadata, so updating would silently erase the original
+        conversion attribution. New row writes only.
+```
+
+Why first-touch + last-touch both: they answer different questions.
+
+- **First-touch** = "which campaign opened the relationship". Right default for a delayed-conversion product like Matio (60s trial → leave → come back later → subscribe). Last-touch would over-credit retargeting and branded search for users your awareness campaign actually brought in.
+- **Last-touch** = "what Meta/Google report as the conversion source". Used for reconciling with ad-platform dashboards.
+
+Storing both costs six extra nullable TEXT columns × three tables. Effectively free, removes the "which model did we pick?" debate, lets the dashboard show the two side-by-side.
+
+The `(direct)` bucket on the campaign tables collapses **all-NULL** rows — i.e. organic traffic, direct visits, pre-attribution-feature users. A row where only `utm_source` is set (e.g. `?utm_source=twitter` linked from a tweet without a campaign label) keeps its own row keyed on `("twitter", null, null)` — it's not collapsed into direct, because it does carry attribution signal.
 
 ## Subscription pipeline
 

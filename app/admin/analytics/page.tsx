@@ -17,6 +17,33 @@ import {
 const MONTHLY_PRICE = 9.99;
 const ANNUAL_PRICE = 79.99;
 
+// Stable key for grouping campaign rows across the four independent
+// queries (trials, signups, subs, MRR). NULL columns collapse to a
+// shared "(direct)" bucket — organic / direct traffic carries no UTM
+// cookies and we want a single row for the unattributed pool, not one
+// per NULL combination.
+const DIRECT_BUCKET = "(direct)";
+function campaignKey(
+  source: string | null,
+  medium: string | null,
+  campaign: string | null,
+): string {
+  return [source ?? "", medium ?? "", campaign ?? ""].join("|");
+}
+function campaignLabel(
+  source: string | null,
+  medium: string | null,
+  campaign: string | null,
+): { source: string; medium: string; campaign: string; isDirect: boolean } {
+  const isDirect = source === null && medium === null && campaign === null;
+  return {
+    source: source ?? DIRECT_BUCKET,
+    medium: medium ?? DIRECT_BUCKET,
+    campaign: campaign ?? DIRECT_BUCKET,
+    isDirect,
+  };
+}
+
 export default async function AnalyticsPage() {
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
@@ -30,6 +57,17 @@ export default async function AnalyticsPage() {
     convertedTrialsRecentRow,
     topShowsRows,
     dailySignupRows,
+    // Campaign breakdown queries. Each runs independently grouped by the
+    // (source, medium, campaign) triple of either the first-touch or
+    // last-touch attribution columns. We merge in JS rather than try to
+    // pivot/full-outer-join in SQL — simpler and the row count is small
+    // (one row per campaign per dimension; typically <50 even at scale).
+    firstTouchTrialsRows,
+    firstTouchSignupsRows,
+    firstTouchSubsRows,
+    lastTouchTrialsRows,
+    lastTouchSignupsRows,
+    lastTouchSubsRows,
   ] = await Promise.all([
     db.select({ n: count() }).from(users),
     db
@@ -89,6 +127,96 @@ export default async function AnalyticsPage() {
       .from(users)
       .where(gte(users.createdAt, thirtyDaysAgo))
       .groupBy(sql`TO_CHAR(${users.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD')`),
+    // ----- First-touch campaign breakdown -----
+    db
+      .select({
+        source: trialSessions.attributionFirstSource,
+        medium: trialSessions.attributionFirstMedium,
+        campaign: trialSessions.attributionFirstCampaign,
+        n: count(),
+      })
+      .from(trialSessions)
+      .where(gte(trialSessions.startedAt, thirtyDaysAgo))
+      .groupBy(
+        trialSessions.attributionFirstSource,
+        trialSessions.attributionFirstMedium,
+        trialSessions.attributionFirstCampaign,
+      ),
+    db
+      .select({
+        source: users.attributionFirstSource,
+        medium: users.attributionFirstMedium,
+        campaign: users.attributionFirstCampaign,
+        n: count(),
+      })
+      .from(users)
+      .where(gte(users.createdAt, thirtyDaysAgo))
+      .groupBy(
+        users.attributionFirstSource,
+        users.attributionFirstMedium,
+        users.attributionFirstCampaign,
+      ),
+    db
+      .select({
+        source: subscriptions.attributionFirstSource,
+        medium: subscriptions.attributionFirstMedium,
+        campaign: subscriptions.attributionFirstCampaign,
+        plan: subscriptions.plan,
+        n: count(),
+      })
+      .from(subscriptions)
+      .where(eq(subscriptions.status, "active"))
+      .groupBy(
+        subscriptions.attributionFirstSource,
+        subscriptions.attributionFirstMedium,
+        subscriptions.attributionFirstCampaign,
+        subscriptions.plan,
+      ),
+    // ----- Last-touch campaign breakdown -----
+    db
+      .select({
+        source: trialSessions.attributionLastSource,
+        medium: trialSessions.attributionLastMedium,
+        campaign: trialSessions.attributionLastCampaign,
+        n: count(),
+      })
+      .from(trialSessions)
+      .where(gte(trialSessions.startedAt, thirtyDaysAgo))
+      .groupBy(
+        trialSessions.attributionLastSource,
+        trialSessions.attributionLastMedium,
+        trialSessions.attributionLastCampaign,
+      ),
+    db
+      .select({
+        source: users.attributionLastSource,
+        medium: users.attributionLastMedium,
+        campaign: users.attributionLastCampaign,
+        n: count(),
+      })
+      .from(users)
+      .where(gte(users.createdAt, thirtyDaysAgo))
+      .groupBy(
+        users.attributionLastSource,
+        users.attributionLastMedium,
+        users.attributionLastCampaign,
+      ),
+    db
+      .select({
+        source: subscriptions.attributionLastSource,
+        medium: subscriptions.attributionLastMedium,
+        campaign: subscriptions.attributionLastCampaign,
+        plan: subscriptions.plan,
+        n: count(),
+      })
+      .from(subscriptions)
+      .where(eq(subscriptions.status, "active"))
+      .groupBy(
+        subscriptions.attributionLastSource,
+        subscriptions.attributionLastMedium,
+        subscriptions.attributionLastCampaign,
+        subscriptions.plan,
+      ),
   ]);
 
   const totalUsers = totalUsersRow[0].n;
@@ -128,6 +256,17 @@ export default async function AnalyticsPage() {
 
   const maxShowSeconds =
     topShowsRows.length > 0 ? Number(topShowsRows[0].seconds) : 0;
+
+  const firstTouchRows = mergeCampaignRows(
+    firstTouchTrialsRows,
+    firstTouchSignupsRows,
+    firstTouchSubsRows,
+  );
+  const lastTouchRows = mergeCampaignRows(
+    lastTouchTrialsRows,
+    lastTouchSignupsRows,
+    lastTouchSubsRows,
+  );
 
   return (
     <div className="space-y-8">
@@ -256,10 +395,183 @@ export default async function AnalyticsPage() {
         )}
       </section>
 
+      {/* Campaign attribution */}
+      <CampaignSection
+        title="By first-touch campaign"
+        kicker="Which channel opened the relationship"
+        rows={firstTouchRows}
+      />
+      <CampaignSection
+        title="By last-touch campaign"
+        kicker="What ad platforms attribute the conversion to"
+        rows={lastTouchRows}
+      />
+
       <p className="text-center text-[10px] text-white/35">
         Mux Data video-quality metrics will be wired in a follow-up.
       </p>
     </div>
+  );
+}
+
+type CampaignRowAgg = {
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  trials: number;
+  signups: number;
+  monthlySubs: number;
+  annualSubs: number;
+  mrr: number;
+};
+
+function mergeCampaignRows(
+  trialsRows: {
+    source: string | null;
+    medium: string | null;
+    campaign: string | null;
+    n: number;
+  }[],
+  signupsRows: {
+    source: string | null;
+    medium: string | null;
+    campaign: string | null;
+    n: number;
+  }[],
+  subsRows: {
+    source: string | null;
+    medium: string | null;
+    campaign: string | null;
+    plan: "monthly" | "annual";
+    n: number;
+  }[],
+): CampaignRowAgg[] {
+  const map = new Map<string, CampaignRowAgg>();
+  const upsert = (
+    source: string | null,
+    medium: string | null,
+    campaign: string | null,
+  ): CampaignRowAgg => {
+    const key = campaignKey(source, medium, campaign);
+    let row = map.get(key);
+    if (!row) {
+      row = {
+        source,
+        medium,
+        campaign,
+        trials: 0,
+        signups: 0,
+        monthlySubs: 0,
+        annualSubs: 0,
+        mrr: 0,
+      };
+      map.set(key, row);
+    }
+    return row;
+  };
+  for (const r of trialsRows) {
+    upsert(r.source, r.medium, r.campaign).trials += Number(r.n);
+  }
+  for (const r of signupsRows) {
+    upsert(r.source, r.medium, r.campaign).signups += Number(r.n);
+  }
+  for (const r of subsRows) {
+    const row = upsert(r.source, r.medium, r.campaign);
+    const n = Number(r.n);
+    if (r.plan === "monthly") {
+      row.monthlySubs += n;
+      row.mrr += n * MONTHLY_PRICE;
+    } else {
+      row.annualSubs += n;
+      row.mrr += n * (ANNUAL_PRICE / 12);
+    }
+  }
+  // Sort by MRR DESC, falling back to trials count for campaigns that
+  // haven't produced revenue yet — top-of-funnel volume is still useful
+  // signal for a new campaign that just launched.
+  return Array.from(map.values()).sort((a, b) => {
+    if (b.mrr !== a.mrr) return b.mrr - a.mrr;
+    return b.trials - a.trials;
+  });
+}
+
+function CampaignSection({
+  title,
+  kicker,
+  rows,
+}: {
+  title: string;
+  kicker: string;
+  rows: CampaignRowAgg[];
+}) {
+  return (
+    <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5">
+      <div className="mb-4 flex items-baseline justify-between gap-3">
+        <h2 className="text-sm font-bold text-white">{title}</h2>
+        <span className="text-[11px] text-white/45">{kicker}</span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="py-6 text-center text-sm text-white/55">
+          No campaign data yet. Tag landing URLs with utm_source / utm_medium /
+          utm_campaign to start attributing.
+        </p>
+      ) : (
+        <div className="-mx-5 overflow-x-auto">
+          <table className="w-full min-w-[640px] border-collapse text-sm">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-[0.08em] text-white/45">
+                <th className="px-5 py-2 text-left font-semibold">Campaign</th>
+                <th className="px-3 py-2 text-left font-semibold">Source / medium</th>
+                <th className="px-3 py-2 text-right font-semibold">Trials · 30d</th>
+                <th className="px-3 py-2 text-right font-semibold">Signups · 30d</th>
+                <th className="px-3 py-2 text-right font-semibold">Active subs</th>
+                <th className="px-5 py-2 text-right font-semibold">MRR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const label = campaignLabel(r.source, r.medium, r.campaign);
+                return (
+                  <tr
+                    key={campaignKey(r.source, r.medium, r.campaign)}
+                    className="border-t border-white/[0.05]"
+                  >
+                    <td className="px-5 py-3 align-top">
+                      <span
+                        className={
+                          label.isDirect
+                            ? "font-mono text-xs text-white/45"
+                            : "text-sm font-semibold text-white"
+                        }
+                      >
+                        {label.campaign}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 align-top text-xs text-white/55">
+                      <span>{label.source}</span>
+                      <span className="text-white/30"> · </span>
+                      <span>{label.medium}</span>
+                    </td>
+                    <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
+                      {r.trials.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
+                      {r.signups.toLocaleString()}
+                    </td>
+                    <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
+                      {(r.monthlySubs + r.annualSubs).toLocaleString()}
+                    </td>
+                    <td className="px-5 py-3 text-right align-top font-mono text-xs font-semibold text-white">
+                      ${r.mrr.toFixed(2)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 

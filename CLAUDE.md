@@ -76,6 +76,8 @@ lib/
   stripe.ts                # lazy Stripe SDK client
   subscription-access.ts   # ACCESS_GRANTING_STATUSES + hasActiveSubscription()
   trial.ts                 # mintTrialSession, link/convert helpers, IP hashing
+  attribution.ts           # UTM cookie capture + per-funnel-milestone
+                           #   persistence + Stripe metadata flatten/unflatten
   i18n/                    # dictionaries.ts + server.ts + client.tsx (optimistic
                            #   LocaleProvider) + actions.ts + shared.ts
   utils.ts                 # cn() from shadcn
@@ -103,6 +105,7 @@ scripts/
 - **Clerk UI locale**: `ClerkProvider` in `app/layout.tsx` receives the `@clerk/localizations` bundle matching the site locale (`esES` default, `enUS` when switched). Sign-in/sign-up modals, UserButton menu, and form validation copy all follow the site language; the switch propagates to Clerk on the next `router.refresh` tick after the optimistic site flip.
 - **Mux re-upload safety**: `createMuxUpload` only creates the upload URL — it does NOT clear the episode's playback fields. The clearing happens in `markEpisodeReprocessing`, which the upload widget calls from upchunk's `success` event. A cancelled mid-upload no longer permanently breaks the episode (Mux's webhook refuses to overwrite a different existing `asset_id`).
 - Playback always goes through `/api/playback-token` → signed Mux JWT. Subscriber TTL: 1 hour (auto-refreshed). Trial TTL: `min(remaining, TRIAL_DURATION_SECONDS)`.
+- **Campaign attribution**: `proxy.ts` reads `?utm_source / utm_medium / utm_campaign` on every non-admin request and writes two cookies — `attribution_first` (90d, write-if-absent) and `attribution_last` (30d, overwrite). Helpers in `lib/attribution.ts`. The cookies are snapshotted at each funnel milestone: `trial_sessions.attribution_*` (six cols) on first play via `mintTrialSession`, `users.attribution_*` on `/subscribe` render via `applyUserAttribution`, and `subscriptions.attribution_*` at Stripe Checkout creation via `subscription_data.metadata` → webhook `mirrorSubscription`. Subscription attribution is **never overwritten on conflict** (renewals would otherwise erase the original conversion campaign months later, when no UTM cookies are present). Admin analytics renders two side-by-side per-campaign tables — first-touch is the default and the right cut for "is this awareness channel working?" since Matio's funnel is delayed-conversion; last-touch is the comparison view for reconciling with Meta/Google dashboards.
 
 ## What NOT to do
 

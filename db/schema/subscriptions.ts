@@ -47,6 +47,18 @@ export const subscriptions = pgTable(
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
+    // Conversion-moment attribution. Snapshotted at Stripe Checkout
+    // creation (startCheckout reads the cookies, ships them through
+    // Stripe metadata) and persisted here when the webhook mirrors the
+    // subscription. This is the cut marketing wants — "which campaign
+    // produced this paid subscription?" — independent of the user-level
+    // attribution which only captures the original visit.
+    attributionFirstSource: text("attribution_first_source"),
+    attributionFirstMedium: text("attribution_first_medium"),
+    attributionFirstCampaign: text("attribution_first_campaign"),
+    attributionLastSource: text("attribution_last_source"),
+    attributionLastMedium: text("attribution_last_medium"),
+    attributionLastCampaign: text("attribution_last_campaign"),
   },
   (t) => [
     // Schema-level guarantee that a user can have at most one active-ish

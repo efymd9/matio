@@ -1,8 +1,18 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
+import {
+  ATTRIBUTION_FIRST_COOKIE,
+  ATTRIBUTION_FIRST_MAX_AGE,
+  ATTRIBUTION_LAST_COOKIE,
+  ATTRIBUTION_LAST_MAX_AGE,
+  hasAnyField,
+  readAttributionFromSearchParams,
+  serializeAttribution,
+} from "@/lib/attribution";
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
 const isAuthRoute = createRouteMatcher(["/subscribe(.*)"]);
@@ -37,6 +47,38 @@ async function getUserRoleCached(userId: string): Promise<string | null> {
   return role;
 }
 
+// Returns a NextResponse with attribution cookies set if the request has
+// utm_* query params; null otherwise. attribution_first writes only when
+// absent (preserving the original campaign across re-visits);
+// attribution_last overwrites every time so the conversion-moment
+// snapshot reflects whatever brought the user back most recently.
+function applyAttributionCookies(req: NextRequest): NextResponse | null {
+  const incoming = readAttributionFromSearchParams(req.nextUrl.searchParams);
+  if (!hasAnyField(incoming)) return null;
+
+  const res = NextResponse.next();
+  const payload = serializeAttribution(incoming);
+
+  if (!req.cookies.get(ATTRIBUTION_FIRST_COOKIE)) {
+    res.cookies.set(ATTRIBUTION_FIRST_COOKIE, payload, {
+      maxAge: ATTRIBUTION_FIRST_MAX_AGE,
+      sameSite: "lax",
+      path: "/",
+      // Not httpOnly: client-side analytics scripts (if added later) may
+      // want to read these; the values are non-sensitive UTM params the
+      // browser was already sending in the URL.
+      secure: process.env.NODE_ENV === "production",
+    });
+  }
+  res.cookies.set(ATTRIBUTION_LAST_COOKIE, payload, {
+    maxAge: ATTRIBUTION_LAST_MAX_AGE,
+    sameSite: "lax",
+    path: "/",
+    secure: process.env.NODE_ENV === "production",
+  });
+  return res;
+}
+
 export default clerkMiddleware(async (auth, req) => {
   if (isAdminRoute(req)) {
     const { userId, redirectToSignIn } = await auth();
@@ -57,8 +99,15 @@ export default clerkMiddleware(async (auth, req) => {
     // minority case.
     const { userId, redirectToSignUp } = await auth();
     if (!userId) return redirectToSignUp({ returnBackUrl: req.url });
-    return;
+    // Attribution still captured for signed-in /subscribe visits — e.g.
+    // a remarketing campaign that links a returning user straight here.
+    return applyAttributionCookies(req) ?? undefined;
   }
+
+  // Catch-all: every other passthrough route captures attribution. Ad
+  // landings are nearly always /, /shows/*, or /watch/* — anything not
+  // gated above.
+  return applyAttributionCookies(req) ?? undefined;
 });
 
 export const config = {

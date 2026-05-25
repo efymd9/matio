@@ -5,6 +5,10 @@ import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { shows, subscriptions, users } from "@/db/schema";
 import { getOrSyncCurrentUser } from "@/lib/admin";
+import {
+  readAttributionCookies,
+  toStripeMetadata,
+} from "@/lib/attribution";
 import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 
@@ -130,6 +134,16 @@ export async function startCheckout(formData: FormData) {
   const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
   const idempotencyKey = `checkout:${userId}:${plan}:${hourBucket}`;
 
+  // Snapshot the user's UTM cookies and ship them through Stripe so the
+  // webhook can stamp them onto the subscription row. This is the cut
+  // marketing wants — "which campaign produced this paid sub?" — at the
+  // exact conversion moment, independent of the user-level first-touch.
+  const attribution = await readAttributionCookies();
+  const attributionMetadata = toStripeMetadata(
+    attribution.first,
+    attribution.last,
+  );
+
   const session = await stripe.checkout.sessions.create(
     {
       mode: "subscription",
@@ -137,7 +151,7 @@ export async function startCheckout(formData: FormData) {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
-      subscription_data: { metadata: { userId } },
+      subscription_data: { metadata: { userId, ...attributionMetadata } },
     },
     { idempotencyKey },
   );

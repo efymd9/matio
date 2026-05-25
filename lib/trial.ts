@@ -5,6 +5,12 @@ import { and, count, eq, gt, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
 import { trialSessions, users, type TrialSession } from "@/db/schema";
+import {
+  type AttributionPayload,
+  EMPTY_ATTRIBUTION,
+  toFirstColumns,
+  toLastColumns,
+} from "@/lib/attribution";
 
 export const TRIAL_DURATION_SECONDS = 60;
 export const TRIAL_COOKIE = "trial_session";
@@ -49,14 +55,22 @@ export async function findTrialSession(
 // TrialRateLimitError when exceeded — there is no skip-on-missing-IP
 // branch, because that path was a bypass: clients that scrubbed the
 // upstream proxy header would get unlimited trial mints.
+//
+// Optional attribution.{first,last} snapshot what the user's UTM cookies
+// looked like at the moment of first play — defaults to empty so callers
+// from contexts without a request (scripts, internal callbacks) still
+// work. Persisted to attribution_{first,last}_{source,medium,campaign}
+// columns; null entries leave the columns null.
 export async function mintTrialSession({
   sessionToken,
   showId,
   ipHash,
+  attribution,
 }: {
   sessionToken: string;
   showId: string;
   ipHash: string;
+  attribution?: { first: AttributionPayload; last: AttributionPayload };
 }): Promise<TrialSession> {
   const since = new Date(Date.now() - RATELIMIT_WINDOW_MS);
   const [{ value }] = await db
@@ -74,9 +88,18 @@ export async function mintTrialSession({
   }
 
   const expiresAt = new Date(Date.now() + TRIAL_DURATION_SECONDS * 1000);
+  const first = attribution?.first ?? EMPTY_ATTRIBUTION;
+  const last = attribution?.last ?? EMPTY_ATTRIBUTION;
   const inserted = await db
     .insert(trialSessions)
-    .values({ sessionToken, showId, expiresAt, ipHash })
+    .values({
+      sessionToken,
+      showId,
+      expiresAt,
+      ipHash,
+      ...toFirstColumns(first),
+      ...toLastColumns(last),
+    })
     .onConflictDoNothing({
       target: [trialSessions.sessionToken, trialSessions.showId],
     })

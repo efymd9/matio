@@ -3,6 +3,11 @@ import type { NextRequest } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { stripeEvents, subscriptions, users } from "@/db/schema";
+import {
+  fromStripeMetadata,
+  toFirstColumns,
+  toLastColumns,
+} from "@/lib/attribution";
 import { getStripe } from "@/lib/stripe";
 import { markUserTrialsConverted } from "@/lib/trial";
 
@@ -90,6 +95,11 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
   const cancelScheduled =
     sub.cancel_at_period_end || sub.cancel_at != null;
 
+  // Stripe metadata is string-only; null / undefined slots simply aren't
+  // present so fromStripeMetadata returns nulls for missing keys.
+  // attribution lives on subscription_data.metadata, set by startCheckout.
+  const attribution = fromStripeMetadata(sub.metadata);
+
   await db
     .insert(subscriptions)
     .values({
@@ -99,6 +109,8 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
       plan,
       currentPeriodEnd: periodEnd,
       cancelAtPeriodEnd: cancelScheduled,
+      ...toFirstColumns(attribution.first),
+      ...toLastColumns(attribution.last),
     })
     .onConflictDoUpdate({
       target: subscriptions.stripeSubscriptionId,
@@ -108,6 +120,11 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
         currentPeriodEnd: periodEnd,
         cancelAtPeriodEnd: cancelScheduled,
         updatedAt: new Date(),
+        // Attribution is intentionally NOT updated on conflict — the
+        // row was first written at checkout-creation time with the cookies
+        // present then. Later subscription updates (renewals, status
+        // changes) might land months later with no cookies; we don't
+        // want a renewal to erase the original conversion attribution.
       },
     });
 
