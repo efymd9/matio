@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { COOKIE_PREFS_EVENT } from "@/lib/cookie-consent";
 import { useT } from "@/lib/i18n/client";
 import { MatioLogo } from "./matio-logo";
 
@@ -36,6 +37,17 @@ function SiteFooterContent() {
           <FooterLink href="/terms">{t.footer.terms}</FooterLink>
           <FooterLink href="/privacy">{t.footer.privacy}</FooterLink>
           <FooterLink href="/cookies">{t.footer.cookies}</FooterLink>
+          <li>
+            <button
+              type="button"
+              onClick={() =>
+                window.dispatchEvent(new Event(COOKIE_PREFS_EVENT))
+              }
+              className="text-left text-sm text-white/70 transition-colors hover:text-white focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-2"
+            >
+              {t.footer.cookiePreferences}
+            </button>
+          </li>
         </FooterColumn>
       </div>
       <div className="mx-auto max-w-screen-2xl border-t border-white/[0.04] py-5 text-[11px] text-white/40 pb-[max(env(safe-area-inset-bottom),1.25rem)]">

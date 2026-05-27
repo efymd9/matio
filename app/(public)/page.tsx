@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { episodes, seasons, shows } from "@/db/schema";
+import { episodes, seasons } from "@/db/schema";
 import { GenreRow } from "@/components/site/genre-row";
 import { HeroBanner } from "@/components/site/hero-banner";
 import { MatioLogo } from "@/components/site/matio-logo";
+import { getPublishedShows } from "@/lib/catalog";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import { TRIAL_DURATION_SECONDS } from "@/lib/trial";
@@ -23,14 +24,11 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const { t } = await getDict();
-  // One published-shows query, partitioned in JS into the two homepage
-  // sections. A show can be in both, either, or neither — neither hides it
-  // from / but it stays reachable at /shows/[slug].
-  const published = await db
-    .select()
-    .from(shows)
-    .where(and(eq(shows.status, "published"), isNull(shows.deletedAt)))
-    .orderBy(desc(shows.createdAt));
+  // Cached published-shows read. lib/catalog.ts wraps the query in
+  // unstable_cache with tag CATALOG_TAG; admin mutations bust the tag.
+  // Page is still force-dynamic for the hero JWT — only the catalog
+  // query is cached, not the page itself.
+  const published = await getPublishedShows();
 
   const justReleased = published.filter((s) => s.justReleased);
   const popularNow = published.filter((s) => s.popularNow);

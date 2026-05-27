@@ -1,7 +1,7 @@
 "use server";
 
 import { and, eq, isNull } from "drizzle-orm";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import {
@@ -11,7 +11,17 @@ import {
   type NewShow,
 } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin";
+import { CATALOG_TAG } from "@/lib/catalog";
 import { getMux } from "@/lib/mux";
+
+// Bust the home/sitemap catalog cache (lib/catalog.ts:getPublishedShows).
+// Called after any show mutation that can change which rows have
+// status='published' AND deleted_at IS NULL. The second arg to
+// revalidateTag is the cache-life profile to recompute under — since
+// unstable_cache sets its own TTL, "default" is the no-op pick.
+function bustCatalog() {
+  revalidateTag(CATALOG_TAG, "default");
+}
 
 function str(formData: FormData, key: string): string {
   const v = formData.get(key);
@@ -71,6 +81,7 @@ export async function createShow(formData: FormData) {
   const [created] = await db.insert(shows).values(values).returning({ id: shows.id });
 
   revalidatePath("/");
+  bustCatalog();
   revalidatePath("/admin");
   redirect(`/admin/shows/${created.id}`);
 }
@@ -104,6 +115,7 @@ export async function updateShow(id: string, formData: FormData) {
     .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
 
   revalidatePath("/");
+  bustCatalog();
   revalidatePath("/admin");
   revalidatePath(`/admin/shows/${id}`);
 }
@@ -131,6 +143,7 @@ export async function setFeaturedShow(id: string) {
       );
   });
   revalidatePath("/");
+  bustCatalog();
   revalidatePath("/admin");
   revalidatePath(`/admin/shows/${id}`);
 }
@@ -142,6 +155,7 @@ export async function unsetFeaturedShow(id: string) {
     .set({ featured: false })
     .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
   revalidatePath("/");
+  bustCatalog();
   revalidatePath("/admin");
   revalidatePath(`/admin/shows/${id}`);
 }
@@ -155,6 +169,7 @@ export async function softDeleteShow(id: string) {
     .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
 
   revalidatePath("/");
+  bustCatalog();
   revalidatePath("/admin");
   redirect("/admin");
 }

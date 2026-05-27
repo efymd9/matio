@@ -13,6 +13,7 @@ import {
   readAttributionFromSearchParams,
   serializeAttribution,
 } from "@/lib/attribution";
+import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
 const isAuthRoute = createRouteMatcher(["/subscribe(.*)"]);
@@ -52,9 +53,15 @@ async function getUserRoleCached(userId: string): Promise<string | null> {
 // absent (preserving the original campaign across re-visits);
 // attribution_last overwrites every time so the conversion-moment
 // snapshot reflects whatever brought the user back most recently.
+//
+// Gated on cookie_consent.marketing === true so we don't drop tracking
+// cookies on EU visitors before they've accepted the banner (ePrivacy /
+// PECR / Spain LSSI). UTM params still flow through the request — they
+// just don't get persisted across requests until consent is given.
 function applyAttributionCookies(req: NextRequest): NextResponse | null {
   const incoming = readAttributionFromSearchParams(req.nextUrl.searchParams);
   if (!hasAnyField(incoming)) return null;
+  if (!hasMarketingConsent(req.cookies.get(CONSENT_COOKIE)?.value)) return null;
 
   const res = NextResponse.next();
   const payload = serializeAttribution(incoming);

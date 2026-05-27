@@ -3,9 +3,12 @@ import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { enUS, esES } from "@clerk/localizations";
+import { cookies } from "next/headers";
 import { SiteHeader } from "@/components/site/site-header";
 import { SiteFooter } from "@/components/site/site-footer";
+import { CookieBanner } from "@/components/site/cookie-banner";
 import { UserMenu } from "@/components/site/user-menu";
+import { CONSENT_COOKIE, parseConsent } from "@/lib/cookie-consent";
 import { LocaleProvider } from "@/lib/i18n/client";
 import { getDict } from "@/lib/i18n/server";
 import "./globals.css";
@@ -85,6 +88,11 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const { locale, t } = await getDict();
+  // Read consent server-side so the banner doesn't flash in for users who
+  // already chose. Layout is already dynamic via Clerk so reading cookies
+  // here doesn't cost a static-generation opt-out.
+  const consentCookie = (await cookies()).get(CONSENT_COOKIE)?.value;
+  const initialConsent = parseConsent(consentCookie);
   return (
     <ClerkProvider
       localization={CLERK_LOCALIZATIONS[locale]}
@@ -117,6 +125,7 @@ export default async function RootLayout({
               {children}
             </div>
             <SiteFooter />
+            <CookieBanner initialConsent={initialConsent} />
           </LocaleProvider>
         </body>
       </html>
