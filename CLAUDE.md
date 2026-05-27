@@ -46,6 +46,9 @@ Always check these before changing integrations or guessing API shapes:
 ```
 app/
   (public)/                # Public catalog: /, /shows/[slug]
+    terms/                 # /terms — bilingual legal page (DRAFT, see TODO placeholders)
+    privacy/               # /privacy — bilingual privacy policy (DRAFT)
+    cookies/               # /cookies — bilingual cookie policy (DRAFT)
   admin/                   # /admin — admin role required (proxy-gated, DB check)
   api/
     billing-portal/        # /api/billing-portal — 302 to Stripe Customer Portal
@@ -56,13 +59,16 @@ app/
       stripe/              # checkout.session.completed, customer.subscription.*,
                            #   invoice.{paid,payment_failed} — idempotency via
                            #   stripe_events.event_id claim before processing
-  subscribe/               # /subscribe — radio-card pricing + Checkout redirect
+  subscribe/               # /subscribe — single $38/mo card + Checkout redirect
   watch/[showSlug]/        # /watch/<slug> — public, trial-aware
 components/
   ui/                      # shadcn primitives (Base UI under the hood)
   admin/                   # admin-specific (upload widget, status select)
-  site/                    # header, language switcher, posters, hero, logo
+  site/                    # header, footer, cookie-banner, language switcher,
+                           #   posters, hero, logo
   watch/                   # player, paywall, playback-status, overlays
+                           #   (series-end-overlay's email capture is hidden
+                           #   until Resend is wired — server action stays)
 db/
   index.ts                 # postgres-js client (prepare: false for pooler)
   schema/                  # one file per domain; re-exported from schema/index.ts
@@ -71,6 +77,10 @@ db/
 drizzle/                   # migrations (sql) + drizzle-kit meta
 lib/
   admin.ts                 # getCurrentUser / requireAdmin
+  catalog.ts               # getPublishedShows() cached via unstable_cache
+                           #   (tag 'catalog'); shared by / + /sitemap.xml
+  cookie-consent.ts        # cookie_consent parse/serialize, banner helpers
+                           #   (universal — imported by proxy.ts AND banner)
   mux.ts                   # lazy Mux SDK client
   mux-token.ts             # RS256 JWT signer for signed playback
   stripe.ts                # lazy Stripe SDK client
@@ -78,13 +88,17 @@ lib/
   trial.ts                 # mintTrialSession, link/convert helpers, IP hashing
   attribution.ts           # UTM cookie capture + per-funnel-milestone
                            #   persistence + Stripe metadata flatten/unflatten
+                           #   (writes gated on cookie consent in proxy.ts)
   i18n/                    # dictionaries.ts + server.ts + client.tsx (optimistic
                            #   LocaleProvider) + actions.ts + shared.ts
   utils.ts                 # cn() from shadcn
 proxy.ts                   # Auth + admin gating (Next 16: was middleware.ts)
+vercel.json                # regions=['fra1'] (co-located with Neon eu-central-1)
+                           # + Cache-Control headers for /shows/* static assets
 scripts/
   promote-to-admin.ts      # pnpm promote-to-admin <email>
-  stripe-setup.ts          # pnpm stripe:setup — creates products+prices
+  stripe-setup.ts          # pnpm stripe:setup — single "Matio Membership" $38/mo
+                           #   product+price. Archives stale prices on amount mismatch.
   check-subscription-dupes.ts # pnpm db:check-sub-dupes — pre-flight for 0008
 ```
 
@@ -95,7 +109,7 @@ scripts/
 - Trial creation is rate-limited at 3 per (`ip_hash`, `show_id`) per hour (`TRIAL_RATELIMIT_PER_HOUR`). The client IP is sourced from `x-vercel-forwarded-for` only — `x-forwarded-for` is appended-to by Vercel (not replaced) so the leftmost entry is attacker-controlled. Missing header → fallback to `"unknown"`, which puts all unidentified requests in one shared bucket (fail-CLOSED). `ip_hash = HMAC-SHA256(MUX_SIGNING_KEY_PRIVATE_KEY, client_ip)` — no raw IPs in the DB. Cap exceeded → `/api/playback-token` returns 429 (with `Retry-After: 3600`).
 - **Subscriptions**: single monthly plan at $38/mo — no annual, no other tiers. Stored in `subscriptions` table; mirrored from Stripe via webhook (one source of truth). The `subscription_plan` enum still carries an `'annual'` value for any historical (pre-launch test) rows but no new row is ever written with it. The webhook is idempotent — every delivery claims its `event.id` in `stripe_events` before processing; duplicates short-circuit. Partial unique index on `(user_id) WHERE status IN ('active','trialing','past_due')` guarantees at most one access-granting row per user; historic rows (status='canceled') stay. Every subscription gate also checks `current_period_end > now()` so a dropped `customer.subscription.deleted` webhook can't extend playback past the user's term.
 - **Subscription gate**: all read sites (`/api/playback-token`, `/watch/[showSlug]`, `saveWatchProgress`) go through `hasActiveSubscription(userId)` in `lib/subscription-access.ts`. `ACCESS_GRANTING_STATUSES = ["active","trialing","past_due"]` — past_due grants access (Stripe is mid-retry on a failed invoice; locking the user out makes recovery via Customer Portal impossible). Stripe's `paused` status maps to `past_due` for the same reason.
-- **Subscribe surface**: `/subscribe` shows two radio-card plans (Monthly / Annual, Annual default). The in-player paywall (`components/watch/paywall.tsx`) leads with **sign-up**, not plan selection — the in-player CTA opens Clerk's `<SignUpButton mode="modal">` with `forceRedirectUrl=/subscribe?show=…`. Plan picking happens on `/subscribe` after the user has an account. Signed-in non-subscribers (paid→canceled→returned) skip the sign-up step via a direct `<Link>` to `/subscribe`.
+- **Subscribe surface**: `/subscribe` shows a single membership card at $38/mo — no plan picker. The in-player paywall (`components/watch/paywall.tsx`) leads with **sign-up**, not pricing — the in-player CTA opens Clerk's `<SignUpButton mode="modal">` with `forceRedirectUrl=/subscribe?show=…`. Signed-in non-subscribers (paid→canceled→returned) skip the sign-up step via a direct `<Link>` to `/subscribe`. Checkout collects billing address (`customer_update.address: "auto"`, `billing_address_collection: "required"`) and runs `automatic_tax: { enabled: true }` so EU/UK customers pay $38 + VAT — the live price has `tax_behavior=exclusive`.
 - **Player end-states**: token-fetch failures branch into three distinct overlays in `components/watch/`: `Paywall` (403 in trial → "Sign up to keep watching"), `RateLimitedNotice` (429 → "Too many previews this hour"), `PlaybackUnavailable` (5xx / network / video decode error → "Try again"). The latter two used to all dump into the paywall, which framed infrastructure failures as a payment issue. The `<video>` element's own `error` event uses a rolling 10-second 3-error window before tripping `PlaybackUnavailable` — codes `MEDIA_ERR_DECODE` (3) and `MEDIA_ERR_SRC_NOT_SUPPORTED` (4) are terminal and flip immediately; transient `MEDIA_ERR_NETWORK` (2) gives Mux/HLS room to retry. A single buffer-stall on cellular shouldn't kill the player.
 - **Token refresh**: subscriber tokens auto-refresh **60 seconds before expiry** (not at expiry). Mux validates the JWT `exp` per-segment-request, so a refresh exactly at the boundary races segment fetches that go out a hair late and 403s mid-playback. 5xx/network failures during refresh retry with exponential backoff (1s/2s/4s, 4 attempts total) before flipping to `PlaybackUnavailable`. The existing token keeps playing through the refresh window — we deliberately don't `pause()` while retrying.
 - **Watch-progress save** (`components/watch/player.tsx`) is gated on `document.visibilityState === "visible"` and flushes immediately on `visibilitychange`/`pagehide`. Without the gate, mobile users lost up to 10s of progress every time they backgrounded the app and burned battery on hidden tabs.
@@ -105,7 +119,10 @@ scripts/
 - **Clerk UI locale**: `ClerkProvider` in `app/layout.tsx` receives the `@clerk/localizations` bundle matching the site locale (`esES` default, `enUS` when switched). Sign-in/sign-up modals, UserButton menu, and form validation copy all follow the site language; the switch propagates to Clerk on the next `router.refresh` tick after the optimistic site flip.
 - **Mux re-upload safety**: `createMuxUpload` only creates the upload URL — it does NOT clear the episode's playback fields. The clearing happens in `markEpisodeReprocessing`, which the upload widget calls from upchunk's `success` event. A cancelled mid-upload no longer permanently breaks the episode (Mux's webhook refuses to overwrite a different existing `asset_id`).
 - Playback always goes through `/api/playback-token` → signed Mux JWT. Subscriber TTL: 1 hour (auto-refreshed). Trial TTL: `min(remaining, TRIAL_DURATION_SECONDS)`.
-- **Campaign attribution**: `proxy.ts` reads `?utm_source / utm_medium / utm_campaign` on every non-admin request and writes two cookies — `attribution_first` (90d, write-if-absent) and `attribution_last` (30d, overwrite). Helpers in `lib/attribution.ts`. The cookies are snapshotted at each funnel milestone: `trial_sessions.attribution_*` (six cols) on first play via `mintTrialSession`, `users.attribution_*` on `/subscribe` render via `applyUserAttribution`, and `subscriptions.attribution_*` at Stripe Checkout creation via `subscription_data.metadata` → webhook `mirrorSubscription`. Subscription attribution is **never overwritten on conflict** (renewals would otherwise erase the original conversion campaign months later, when no UTM cookies are present). Admin analytics renders two side-by-side per-campaign tables — first-touch is the default and the right cut for "is this awareness channel working?" since Matio's funnel is delayed-conversion; last-touch is the comparison view for reconciling with Meta/Google dashboards.
+- **Campaign attribution**: `proxy.ts` reads `?utm_source / utm_medium / utm_campaign` on every non-admin request and writes two cookies — `attribution_first` (90d, write-if-absent) and `attribution_last` (30d, overwrite). Helpers in `lib/attribution.ts`. **Both writes are gated on `hasMarketingConsent(cookie_consent)`** — without consent the UTM params still flow through the request but aren't persisted to cookies, so we never drop tracking on EU visitors before they've accepted the banner. The cookies are snapshotted at each funnel milestone: `trial_sessions.attribution_*` (six cols) on first play via `mintTrialSession`, `users.attribution_*` on `/subscribe` render via `applyUserAttribution`, and `subscriptions.attribution_*` at Stripe Checkout creation via `subscription_data.metadata` → webhook `mirrorSubscription`. Subscription attribution is **never overwritten on conflict** (renewals would otherwise erase the original conversion campaign months later, when no UTM cookies are present). Admin analytics renders two side-by-side per-campaign tables — first-touch is the default and the right cut for "is this awareness channel working?" since Matio's funnel is delayed-conversion; last-touch is the comparison view for reconciling with Meta/Google dashboards.
+- **Cookie consent**: `components/site/cookie-banner.tsx` (mounted in root layout) renders a bottom bar when no `cookie_consent` cookie is present. Two equally-prominent buttons ("Accept all" / "Essential only") satisfy ICO/AEPD/CNIL guidance. The banner reads its initial state server-side (`cookies().get(CONSENT_COOKIE)`) so it doesn't flash for returning users. The SiteFooter has a "Cookie preferences" button that dispatches `COOKIE_PREFS_EVENT` to reopen the banner. `lib/cookie-consent.ts` exports the parse/serialize helpers and is universal (imported by both `proxy.ts` for the attribution gate and the client banner).
+- **Catalog cache**: `lib/catalog.ts:getPublishedShows()` wraps the published-shows query in `unstable_cache` (tag `'catalog'`, 1h fallback TTL). Consumed by both `/` and `/sitemap.xml`. Admin server actions that mutate `shows.status` or `shows.deleted_at` call `revalidateTag('catalog', 'default')` (Next 16 changed the signature to require the second profile arg) so the catalog reflects publish/unpublish/soft-delete immediately. The page itself stays `force-dynamic` because the hero mints a fresh Mux JWT per request.
+- **Legal pages**: `/terms`, `/privacy`, `/cookies` live in `app/(public)/` and are bilingual (ES default, EN via switcher). They are **DRAFT** until the `[COMPANY LEGAL NAME]`, `[REGISTERED ADDRESS]`, `[CONTACT EMAIL]`, `[GOVERNING LAW]`, `[JURISDICTION]`, `[DPO_CONTACT_OR_NONE]` placeholders are filled and the docs reviewed by counsel. ToS §6 references an EU 14-day right-of-withdrawal waiver that needs `consent_collection.terms_of_service: 'required'` + `custom_text` on Stripe Checkout — blocked on a ToS URL being set in the Stripe account's Public Details (`https://matio.tv/terms`).
 
 ## What NOT to do
 
@@ -125,7 +142,10 @@ scripts/
 ## Production context
 
 - Vercel project: `mad-matttts-projects/matio` (id `prj_bT5c7cdVTRzAIPX7uLGYjQLBF5EI`)
-- Prod URL: `https://matio.tv` (legacy Vercel alias still resolves: `https://matio-ten.vercel.app`)
+- Prod URL: `https://matio.tv` (apex is canonical; `www.matio.tv` 307-redirects to apex; legacy Vercel alias `matio-ten.vercel.app` still resolves)
+- Functions pinned to **`fra1`** (Frankfurt) via `vercel.json` so they co-locate with Neon's `aws-eu-central-1`. Without this every DB query was a trans-atlantic round-trip; warm TTFB dropped from ~1s to ~300ms after pinning.
 - Neon project: `little-base-06482402` (org `Matvei`, aws-eu-central-1, Postgres 18, pooled endpoint)
-- Stripe is in **test mode** (`sk_test_…`) — switch to `sk_live_…` when going live
-- GitHub auto-deploy is NOT wired (Vercel account ≠ GitHub repo owner). Push via `vercel --prod --yes` from CLI.
+- **Stripe is in LIVE mode** (`sk_live_…`) as of 2026-05-27. Single product (`prod_UatJzLBiTYS8pS` "Matio Membership"), single price (`price_1TbhWlCGXbzphNyzoAGW3wXM` — $38/mo USD, `tax_behavior=exclusive`). Webhook endpoint `we_1Tbdh2CGXbzphNyzsw1zWSZf` at `https://matio.tv/api/webhooks/stripe` (apex, not www — Stripe doesn't follow redirects). Stripe Tax `status=active`, head office GB. Customer Portal default config has `subscription_cancel.enabled=true, mode=at_period_end`.
+- **Clerk is in production instance** with custom domain (`clerk.matio.tv`, `accounts.matio.tv`). DNS CNAMEs are all live (`accounts`, `clerk`, `clk._domainkey`, `clk2._domainkey`, `clkmail`). Webhook URL: `https://matio.tv/api/webhooks/clerk` (apex — needs verifying / updating from www in Clerk dashboard if not yet on apex).
+- **Mux**: webhook URL also should be on apex — `https://matio.tv/api/webhooks/mux`. Add referrer restriction on the signing key (`matio.tv`) in Mux dashboard for defence in depth on the hero preview JWT.
+- GitHub auto-deploy is NOT wired (Vercel account ≠ GitHub repo owner). Push via `vercel --prod --yes` from CLI. `git push origin main` is for source-of-truth backup; it does not trigger a deploy.

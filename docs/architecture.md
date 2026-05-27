@@ -224,7 +224,7 @@ Approximations called out in code comments:
 `lib/attribution.ts` owns the UTM capture + persistence flow. The pipeline:
 
 ```
-Ad landing  ──►  proxy.ts  ──►  sets two cookies:
+Ad landing  ──►  proxy.ts  ──►  sets two cookies (iff cookie_consent.marketing=true):
 ?utm_source         (any non-admin route)        attribution_first  (90d, write-if-absent)
 ?utm_medium                                      attribution_last   (30d, overwrite)
 ?utm_campaign
@@ -268,6 +268,55 @@ Why first-touch + last-touch both: they answer different questions.
 Storing both costs six extra nullable TEXT columns × three tables. Effectively free, removes the "which model did we pick?" debate, lets the dashboard show the two side-by-side.
 
 The `(direct)` bucket on the campaign tables collapses **all-NULL** rows — i.e. organic traffic, direct visits, pre-attribution-feature users. A row where only `utm_source` is set (e.g. `?utm_source=twitter` linked from a tweet without a campaign label) keeps its own row keyed on `("twitter", null, null)` — it's not collapsed into direct, because it does carry attribution signal.
+
+## Cookie consent
+
+`lib/cookie-consent.ts` owns the consent state. Universal module (no `"server-only"`) so the cookie banner client component and `proxy.ts` both read/write the same shape.
+
+```
+First visit                         Banner: "Accept all" / "Essential only"
+   │                                  │
+   ▼                                  ▼
+SiteLayout reads cookies()      writeConsentToDocument({ necessary:true,
+  → initialConsent = null         marketing:bool, ts, v:1 })
+  → renders CookieBanner            → sets cookie_consent (1y, samesite=lax)
+                                    → if marketing=false, also clears any
+                                      pre-existing attribution_first/last
+
+Subsequent visits                 proxy.ts before writing attribution_* cookies:
+  → initialConsent = ConsentRecord    if (!hasMarketingConsent(cookie)) return null;
+  → banner null on mount            → UTM still flows in URL, just not persisted
+                                      to cookies / not attributed downstream
+```
+
+Two equally-prominent buttons satisfy ICO / AEPD / CNIL guidance ("reject must be no harder than accept"). The CookieBanner reopens via `window.dispatchEvent(new Event(COOKIE_PREFS_EVENT))` — the SiteFooter has a "Cookie preferences" button that dispatches it.
+
+Only one non-essential category (`marketing`) so no "Customize" sub-flow. If a second category lands (analytics, prefs), bump `CONSENT_VERSION` so stored consents that didn't cover the new category fall back to "show banner again".
+
+## Catalog cache
+
+`lib/catalog.ts:getPublishedShows()` wraps the published-shows query in `unstable_cache` (tag `'catalog'`, 1h fallback TTL). Both the home page and `/sitemap.xml` consume it — they share a single cached read instead of issuing redundant identical DB queries.
+
+```
+Home or sitemap         lib/catalog.ts:getPublishedShows()
+  ─────────────►        ┌──────────────────────┐
+                        │  unstable_cache wrap │
+                        │  tag = 'catalog'     │
+                        │  revalidate = 1h     │
+                        └────┬────────────┬────┘
+                             ▼            ▼
+                          DB miss       cache hit
+                         (one query)    (no DB)
+
+Admin mutation that changes shows.status or shows.deleted_at:
+  ─►  revalidateTag('catalog', 'default')
+      (Next 16 requires the second profile arg)
+  ─►  next read recomputes from DB and re-fills the cache
+```
+
+The home page stays `dynamic = "force-dynamic"` because the hero embeds a fresh 60s Mux preview JWT per request — only the catalog query inside is cached. `/sitemap.xml` is also `force-dynamic` so freshly soft-deleted shows drop out on the next crawl rather than being frozen at build time; the cached query keeps the DB cost trivial on warm hits.
+
+Migration to Next 16's `'use cache'` + `cacheTag` + `updateTag` is deliberately deferred — enabling `cacheComponents: true` requires removing `runtime = "nodejs"` from all 5 webhook routes and `dynamic = "force-dynamic"` from the home + sitemap. Separate refactor.
 
 ## Subscription pipeline
 

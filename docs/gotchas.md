@@ -42,6 +42,35 @@ Next 16 mandates `jsx: react-jsx` and silently rewrites tsconfig on first build.
 
 `app/(public)/page.tsx` and `app/page.tsx` both resolve to `/`. The `(group)` is purely organizational — sharing a layout or signaling intent. Having both = build error.
 
+### `revalidateTag` requires 2 args now
+
+Next 16 changed the signature:
+
+```ts
+// before (Next 15 and earlier)
+revalidateTag("catalog");
+
+// after (Next 16+) — TS error "Expected 2 arguments, but got 1" otherwise
+revalidateTag("catalog", "default");           // string profile name
+revalidateTag("catalog", { expire: 0 });       // CacheLifeConfig
+```
+
+The second arg is the cache-life profile to recompute under. For `unstable_cache` tags (where the TTL is set inside the wrapper) `"default"` is the no-op pick. The newer `updateTag(tag)` (single arg, server-action only, read-your-own-writes) is the modern path but only works with the `'use cache'` directive, which needs `cacheComponents: true`.
+
+### `cacheComponents: true` is incompatible with explicit `runtime` / `dynamic` exports
+
+Enabling Cache Components fails the build for any route that has:
+
+```
+Route segment config "runtime" is not compatible with `nextConfig.cacheComponents`. Please remove it.
+```
+
+Hits every `export const runtime = "nodejs";` in `app/api/webhooks/*` and any `export const dynamic = "force-dynamic";` on a page. Migrating means letting Next infer runtime + dynamic from the API surface — `cookies()`, `auth()`, `fetch({ cache: 'no-store' })` etc. all flag a route dynamic automatically. Not a one-line flag flip — schedule the migration deliberately.
+
+### `'use cache'` needs the experimental opt-in
+
+`'use cache'` + `cacheTag` + `cacheLife` are exported from `next/cache` in 16.x stable, but trying to use the directive in a function body without `cacheComponents: true` in `next.config.ts` builds-but-errors at runtime. See above for what enabling it then breaks.
+
 ## React 19 hooks rules
 
 `eslint-config-next@16` ships `eslint-plugin-react-hooks@5+`, which adds two rules that flag patterns that were idiomatic in React 18 and earlier. Both fail the Vercel build by default (Next runs ESLint during `next build`).

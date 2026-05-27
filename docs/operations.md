@@ -122,7 +122,7 @@ Always idempotent (retries happen) — use `onConflictDoNothing` / `onConflictDo
 vercel --prod --yes
 ```
 
-Outputs a JSON object with the immutable deployment URL. Production aliases (`matio.tv` + legacy `matio-ten.vercel.app`) update automatically.
+Outputs a JSON object with the immutable deployment URL. Production aliases (`matio.tv` apex + `www.matio.tv` + legacy `matio-ten.vercel.app`) update automatically. The apex is the canonical surface — `www` 307-redirects to apex, so external integrations that don't follow redirects (Stripe / Mux / Clerk webhooks) **must** point at the apex form.
 
 **Env vars**: changes to env vars in Vercel only take effect on the **next** deployment. Push then redeploy.
 

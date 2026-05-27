@@ -27,6 +27,8 @@ Production prod URL: **https://matio.tv**. Stripe webhook URL on prod = `https:/
 
 Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@clerk/nextjs/webhooks` (not `/server`). It picks up the secret from env automatically.
 
+**Production instance**: live as of 2026-05-27 on the custom domain `clerk.matio.tv` / `accounts.matio.tv`. DNS records (`accounts`, `clerk`, `clk._domainkey`, `clk2._domainkey`, `clkmail`) are CNAMEs configured at Namecheap. Keys (`pk_live_…`, `sk_live_…`) and a fresh webhook signing secret are in Vercel production env.
+
 **Localization**: `@clerk/localizations@^4.6.7` provides per-locale string bundles. `app/layout.tsx` reads the site locale via `getDict()` and passes the matching bundle (`esES` default, `enUS` when the cookie says so) to `ClerkProvider`'s `localization` prop. Every Clerk-rendered surface — sign-in/sign-up modal, UserButton dropdown, validation copy — picks it up. Locale changes via the in-header switcher propagate to Clerk's UI on the next `router.refresh` tick (a few hundred ms after the optimistic site dictionary flip — see [gotchas → optimistic locale state](./gotchas.md#optimistic-locale-state-not-just-context)). Adding a new locale = add another entry to the `CLERK_LOCALIZATIONS` map keyed on the site's `Locale` type.
 
 ## Stripe (subscriptions)
@@ -57,7 +59,14 @@ Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@cle
    - `invoice.payment_failed`
 6. Copy that endpoint's signing secret to Vercel as `STRIPE_WEBHOOK_SECRET` (different value from local).
 
-**Test mode → Live mode**: swap `sk_test_…` for `sk_live_…`, recreate the products+prices in live mode, recreate the live webhook endpoint, repush all env vars. The Stripe accounts (test/live) are separate.
+**Live mode (current)**: production has been on `sk_live_…` since 2026-05-27. Current live artifacts:
+- Product `prod_UatJzLBiTYS8pS` ("Matio Membership")
+- Price `price_1TbhWlCGXbzphNyzoAGW3wXM` — $38/mo USD, `tax_behavior=exclusive`
+- Webhook endpoint `we_1Tbdh2CGXbzphNyzsw1zWSZf` → `https://matio.tv/api/webhooks/stripe` (apex, not www — Stripe doesn't follow 307 redirects, so a webhook URL on the www subdomain silently fails since www → apex)
+
+**Stripe Tax**: `tax/settings.status = active`, head office GB. The live price carries `tax_behavior=exclusive` (VAT/GST added on top of $38). `startCheckout` passes `automatic_tax: { enabled: true }` + `customer_update: { address: "auto", name: "auto" }` + `billing_address_collection: "required"` so Checkout collects the billing address, computes tax, and persists the address on the Customer for renewal invoicing. Flip `tax_behavior` to `inclusive` on the price (one Stripe API call) if you decide to absorb VAT instead of stacking it on top.
+
+**Test mode → Live mode flow** (for reference / re-running): swap `sk_test_…` for `sk_live_…`, run `pnpm stripe:setup` against live (idempotent product + price create), create the live webhook endpoint, repush all env vars. The Stripe accounts (test/live) are separate.
 
 **Stripe CLI install on macOS** (when `brew install stripe/stripe-cli/stripe` fails because Xcode CLT is outdated):
 ```bash
