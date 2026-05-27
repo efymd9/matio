@@ -254,7 +254,7 @@ vercel logs https://matio-<deployment>.vercel.app --no-follow --expand --since 1
 
 **"Trial fires but cookie isn't in browser"**: cookie is `httpOnly` — won't show in `document.cookie`. Open DevTools → Application → Cookies. Confirm it's there.
 
-**"Pricing/Subscribe button does nothing"**: missing `STRIPE_PRICE_MONTHLY` / `STRIPE_PRICE_ANNUAL` in env. Server action throws `Stripe price for monthly not configured`. Run `pnpm stripe:setup` and update env.
+**"Pricing/Subscribe button does nothing"**: missing `STRIPE_PRICE_MONTHLY` in env. Server action throws `Stripe price for monthly not configured`. Run `pnpm stripe:setup` and update env.
 
 **"Mux upload succeeds, episode stays processing"**: webhook isn't reaching prod. Confirm Mux dashboard webhook URL points at prod and the signing secret in env matches. Test by checking Mux dashboard → Webhooks → recent deliveries.
 

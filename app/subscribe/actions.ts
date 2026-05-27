@@ -20,11 +20,6 @@ const STRIPE_HAS_SUBSCRIPTION_STATUSES = new Set([
 ]);
 
 export async function startCheckout(formData: FormData) {
-  const plan = formData.get("plan");
-  if (plan !== "monthly" && plan !== "annual") {
-    throw new Error("Invalid plan");
-  }
-
   // getOrSyncCurrentUser handles the race where Clerk's user.created webhook
   // hasn't landed before a brand-new signup hits Subscribe. If we still come
   // back empty here something is wrong with auth — bounce to home, proxy
@@ -46,12 +41,9 @@ export async function startCheckout(formData: FormData) {
     .limit(1);
   if (existing) redirect("/");
 
-  const priceId =
-    plan === "monthly"
-      ? process.env.STRIPE_PRICE_MONTHLY
-      : process.env.STRIPE_PRICE_ANNUAL;
+  const priceId = process.env.STRIPE_PRICE_MONTHLY;
   if (!priceId) {
-    throw new Error(`Stripe price for ${plan} not configured`);
+    throw new Error("Stripe price for monthly not configured");
   }
 
   const stripe = getStripe();
@@ -127,12 +119,12 @@ export async function startCheckout(formData: FormData) {
   const cancelUrl = `${origin}/subscribe${cancelQs ? `?${cancelQs}` : ""}`;
 
   // Idempotency key dedupes parallel-tab clicks: two simultaneous
-  // submissions for the same (user, plan) inside the same hour bucket
-  // return the same Checkout session from Stripe, so the user can only
-  // ever complete one subscription per intent. Layer 1 + Layer 2 above
-  // catch most cases but neither is atomic with sessions.create.
+  // submissions inside the same hour bucket return the same Checkout
+  // session from Stripe, so the user can only ever complete one
+  // subscription per intent. Layer 1 + Layer 2 above catch most cases
+  // but neither is atomic with sessions.create.
   const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
-  const idempotencyKey = `checkout:${userId}:${plan}:${hourBucket}`;
+  const idempotencyKey = `checkout:${userId}:${hourBucket}`;
 
   // Snapshot the user's UTM cookies and ship them through Stripe so the
   // webhook can stamp them onto the subscription row. This is the cut

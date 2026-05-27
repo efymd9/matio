@@ -17,7 +17,7 @@ import { SubmitButton } from "./submit-button";
 export default async function SubscribePage({
   searchParams,
 }: {
-  searchParams: Promise<{ show?: string; resume?: string; plan?: string }>;
+  searchParams: Promise<{ show?: string; resume?: string }>;
 }) {
   // Sync the user mirror before anything that touches FKs against users.id.
   // On a fresh signup the Clerk user.created webhook can lag behind the
@@ -55,12 +55,7 @@ export default async function SubscribePage({
     return <AlreadySubscribed sub={existing} t={t} />;
   }
 
-  const { show, resume, plan: planParam } = await searchParams;
-  // Honour ?plan= from the watch paywall so the user's selection
-  // carries across the sign-up step. Anything other than "monthly"
-  // falls back to "annual" (the recommended default).
-  const initialPlan: "monthly" | "annual" =
-    planParam === "monthly" ? "monthly" : "annual";
+  const { show, resume } = await searchParams;
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background pb-16 pt-28 sm:pt-32">
@@ -74,7 +69,7 @@ export default async function SubscribePage({
         }}
       />
 
-      <div className="relative mx-auto max-w-3xl px-6 sm:px-8">
+      <div className="relative mx-auto max-w-md px-6 sm:px-8">
         <div className="space-y-4 text-center">
           <div className="flex justify-center">
             <MatioLogo size={20} accent="#ff3d3d" />
@@ -83,7 +78,7 @@ export default async function SubscribePage({
             {t.subscribe.membershipKicker}
           </p>
           <h1 className="text-4xl font-extrabold leading-[0.95] tracking-tight text-white sm:text-5xl">
-            {t.subscribe.pickAPlan}
+            {t.subscribe.membershipHeadline}
             <br />
             <span className="text-white/55">{t.subscribe.watchEverything}</span>
           </h1>
@@ -96,32 +91,12 @@ export default async function SubscribePage({
           {show && <input type="hidden" name="show" value={show} />}
           {resume && <input type="hidden" name="resume" value={resume} />}
 
-          <fieldset
-            className="grid gap-3 sm:grid-cols-2"
-            aria-label={t.subscribe.choosePlanAria}
-          >
-            <PlanCard
-              plan="monthly"
-              title={t.subscribe.monthly}
-              price={t.subscribe.monthlyPrice}
-              interval={t.subscribe.monthlyInterval}
-              sub={t.subscribe.monthlySub}
-              defaultChecked={initialPlan === "monthly"}
-              selectedLabel={t.subscribe.selected}
-              chooseLabel={t.subscribe.chooseThisPlan}
-            />
-            <PlanCard
-              plan="annual"
-              title={t.subscribe.annual}
-              price={t.subscribe.annualPrice}
-              interval={t.subscribe.annualInterval}
-              sub={t.subscribe.annualSub}
-              badge={t.subscribe.bestValueBadge}
-              defaultChecked={initialPlan === "annual"}
-              selectedLabel={t.subscribe.selected}
-              chooseLabel={t.subscribe.chooseThisPlan}
-            />
-          </fieldset>
+          <MembershipCard
+            title={t.subscribe.monthly}
+            price={t.subscribe.monthlyPrice}
+            interval={t.subscribe.monthlyInterval}
+            sub={t.subscribe.monthlySub}
+          />
 
           <SubmitButton />
         </form>
@@ -186,73 +161,32 @@ function AlreadySubscribed({ sub, t }: { sub: Subscription; t: Dict }) {
   );
 }
 
-// Radio-card plan picker. The whole card is a <label> wrapping a
-// visually-hidden <input type="radio">. Selection state drives every
-// visual change via Tailwind's `peer-checked:` variant — which compiles
-// to the `:checked ~` sibling combinator (Safari 3+), unlike `:has()`
-// which silently no-ops on iOS Safari < 15.4. Same zero-JS interaction;
-// browser handles keyboard nav (Tab/Arrow) and we get a focus ring via
-// `peer-focus-visible:` for free.
-function PlanCard({
-  plan,
+// Single-plan membership card. No radio, no selection state — the form
+// submits the only plan we sell. Kept the framed card visual so the
+// price is visually anchored above the CTA rather than floating loose.
+function MembershipCard({
   title,
   price,
   interval,
   sub,
-  badge,
-  defaultChecked = false,
-  selectedLabel,
-  chooseLabel,
 }: {
-  plan: "monthly" | "annual";
   title: string;
   price: string;
   interval: string;
   sub?: string;
-  badge?: string;
-  defaultChecked?: boolean;
-  selectedLabel: string;
-  chooseLabel: string;
 }) {
   return (
-    <label className="relative block cursor-pointer">
-      <input
-        type="radio"
-        name="plan"
-        value={plan}
-        defaultChecked={defaultChecked}
-        className="peer sr-only"
-      />
-      <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-5 transition-all duration-200 hover:border-white/25 hover:bg-white/[0.07] peer-checked:border-[1.5px] peer-checked:border-[#ff3d3d] peer-checked:bg-gradient-to-br peer-checked:from-[#ff3d3d22] peer-checked:to-white/[0.04] peer-checked:shadow-[0_12px_40px_-20px_rgba(255,61,61,0.55)] peer-focus-visible:ring-2 peer-focus-visible:ring-[#ff3d3d]/70 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background sm:p-6">
-        {badge ? (
-          <span className="absolute right-4 top-4 rounded-full bg-[#ff3d3d] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.06em] text-white">
-            {badge}
-          </span>
-        ) : null}
-        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/55">
-          {title}
-        </p>
-        <div className="mt-4 flex items-baseline gap-1.5">
-          <span className="text-3xl font-extrabold tracking-tight text-white">
-            {price}
-          </span>
-          <span className="text-sm text-white/55"> / {interval}</span>
-        </div>
-        {sub && <p className="mt-1 text-xs text-white/55">{sub}</p>}
-
-        {/* Selected indicator — empty ring by default; cinema-red label +
-            filled dot when the radio is checked. */}
-        <div className="mt-5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white/40 transition-colors peer-checked:text-[#ff3d3d]">
-          <span
-            aria-hidden
-            className="relative inline-flex size-4 items-center justify-center rounded-full border border-white/25 transition-colors peer-checked:border-[#ff3d3d]"
-          >
-            <span className="size-2 scale-0 rounded-full bg-[#ff3d3d] transition-transform duration-150 peer-checked:scale-100" />
-          </span>
-          <span className="hidden peer-checked:inline">{selectedLabel}</span>
-          <span className="peer-checked:hidden">{chooseLabel}</span>
-        </div>
+    <div className="relative overflow-hidden rounded-2xl border-[1.5px] border-[#ff3d3d] bg-gradient-to-br from-[#ff3d3d22] to-white/[0.04] p-5 shadow-[0_12px_40px_-20px_rgba(255,61,61,0.55)] sm:p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/55">
+        {title}
+      </p>
+      <div className="mt-4 flex items-baseline gap-1.5">
+        <span className="text-3xl font-extrabold tracking-tight text-white">
+          {price}
+        </span>
+        <span className="text-sm text-white/55"> / {interval}</span>
       </div>
-    </label>
+      {sub && <p className="mt-1 text-xs text-white/55">{sub}</p>}
+    </div>
   );
 }

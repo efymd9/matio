@@ -33,12 +33,14 @@ const STATUS_MAP: Record<
   paused: "past_due",
 };
 
+// We only sell the single monthly membership now. The 'annual' enum
+// value is retained in db/schema/subscriptions.ts for historical rows
+// (pre-launch test data) but isn't issued for any new subscription.
 function planFromPriceId(
   priceId: string | undefined,
-): "monthly" | "annual" | null {
+): "monthly" | null {
   if (!priceId) return null;
   if (priceId === process.env.STRIPE_PRICE_MONTHLY) return "monthly";
-  if (priceId === process.env.STRIPE_PRICE_ANNUAL) return "annual";
   return null;
 }
 

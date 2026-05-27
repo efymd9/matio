@@ -40,13 +40,12 @@ Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@cle
 |---|---|
 | `STRIPE_SECRET_KEY` | Dashboard → Developers → API keys (`sk_test_…` / `sk_live_…`) |
 | `STRIPE_WEBHOOK_SECRET` | Dashboard → Developers → Webhooks → endpoint signing secret (`whsec_…`). **Different per environment.** Local `stripe listen` prints a different one than the dashboard endpoint. |
-| `STRIPE_PRICE_MONTHLY` | Printed by `pnpm stripe:setup` |
-| `STRIPE_PRICE_ANNUAL` | Printed by `pnpm stripe:setup` |
+| `STRIPE_PRICE_MONTHLY` | Printed by `pnpm stripe:setup`. Single $38/mo membership; no annual price anymore. |
 | `NEXT_PUBLIC_APP_URL` | Origin used in Checkout `success_url` / `cancel_url`. `http://localhost:3000` locally; `https://matio.tv` in prod. |
 
 **One-time setup**:
 1. Drop a `sk_test_…` into `.env.local`.
-2. `pnpm stripe:setup` (scripts/stripe-setup.ts) — idempotently creates "Matio Monthly" ($9.99/mo) and "Matio Annual" ($79.99/yr) products+prices, tagged with `metadata.plan`. Prints the price IDs.
+2. `pnpm stripe:setup` (scripts/stripe-setup.ts) — idempotently creates the single "Matio Membership" product + a $38/mo price, tagged with `metadata.plan=monthly`. If a stale active price exists for that product at a different amount (e.g. the legacy $9.99) the script archives it and creates a new one before printing the id — Stripe prices are immutable so the amount can't be patched in place.
 3. **Customer Portal** — Dashboard → Settings → Billing → Customer portal. Enable "Cancel subscriptions" (mode: at period end). This is what makes the "Manage subscription" button work.
 4. **Local webhook**: `stripe listen --forward-to localhost:3000/api/webhooks/stripe` → it prints a `whsec_…` → paste into `.env.local` `STRIPE_WEBHOOK_SECRET`.
 5. **Prod webhook**: Dashboard → Developers → Webhooks → Add endpoint → `https://matio.tv/api/webhooks/stripe` → subscribe to:

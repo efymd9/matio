@@ -12,71 +12,92 @@ if (!process.env.STRIPE_SECRET_KEY) {
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-async function ensureProduct(name: string, plan: "monthly" | "annual") {
+const PRODUCT_NAME = "Matio Membership";
+const PLAN = "monthly";
+const UNIT_AMOUNT = 3800; // $38.00 USD
+const INTERVAL = "month" as const;
+const CURRENCY = "usd";
+
+async function ensureProduct() {
   const list = await stripe.products.list({ limit: 100 });
   const existing = list.data.find(
-    (p) => p.active && p.metadata.plan === plan,
+    (p) => p.active && p.metadata.plan === PLAN,
   );
   if (existing) {
-    console.log(`✓ product plan=${plan} already exists: ${existing.id}`);
+    // Keep the product but make sure the display name reflects the
+    // current single-plan branding. Stripe lets us update the name in
+    // place without rotating the product id (which prices reference).
+    if (existing.name !== PRODUCT_NAME) {
+      const renamed = await stripe.products.update(existing.id, {
+        name: PRODUCT_NAME,
+      });
+      console.log(`~ renamed product ${existing.id} → "${PRODUCT_NAME}"`);
+      return renamed;
+    }
+    console.log(`✓ product already exists: ${existing.id}`);
     return existing;
   }
-  const created = await stripe.products.create({ name, metadata: { plan } });
-  console.log(`+ created product plan=${plan}: ${created.id}`);
+  const created = await stripe.products.create({
+    name: PRODUCT_NAME,
+    metadata: { plan: PLAN },
+  });
+  console.log(`+ created product: ${created.id}`);
   return created;
 }
 
-async function ensurePrice(
-  productId: string,
-  plan: "monthly" | "annual",
-  unitAmount: number,
-  interval: "month" | "year",
-) {
+async function ensurePrice(productId: string) {
   const list = await stripe.prices.list({
     product: productId,
     limit: 100,
     active: true,
   });
-  const existing = list.data.find((p) => p.metadata.plan === plan);
-  if (existing) {
+  const matching = list.data.find(
+    (p) =>
+      p.metadata.plan === PLAN &&
+      p.unit_amount === UNIT_AMOUNT &&
+      p.currency === CURRENCY &&
+      p.recurring?.interval === INTERVAL,
+  );
+  if (matching) {
     console.log(
-      `✓ price plan=${plan} already exists: ${existing.id} ($${(existing.unit_amount ?? 0) / 100}/${interval})`,
+      `✓ price already exists at $${UNIT_AMOUNT / 100}/${INTERVAL}: ${matching.id}`,
     );
-    return existing;
+    return matching;
+  }
+  // Stripe prices are immutable — to change the amount we archive any
+  // stale active price for this product+plan and create a fresh one.
+  // Past subscriptions on the old price keep billing at the old amount;
+  // only new checkouts switch to the new price.
+  const stale = list.data.filter((p) => p.metadata.plan === PLAN);
+  for (const p of stale) {
+    await stripe.prices.update(p.id, { active: false });
+    console.log(
+      `~ archived stale price: ${p.id} ($${(p.unit_amount ?? 0) / 100}/${p.recurring?.interval ?? "?"})`,
+    );
   }
   const created = await stripe.prices.create({
     product: productId,
-    unit_amount: unitAmount,
-    currency: "usd",
-    recurring: { interval },
-    metadata: { plan },
+    unit_amount: UNIT_AMOUNT,
+    currency: CURRENCY,
+    recurring: { interval: INTERVAL },
+    metadata: { plan: PLAN },
   });
   console.log(
-    `+ created price plan=${plan}: ${created.id} ($${unitAmount / 100}/${interval})`,
+    `+ created price: ${created.id} ($${UNIT_AMOUNT / 100}/${INTERVAL})`,
   );
   return created;
 }
 
 async function main() {
-  const monthlyProduct = await ensureProduct("Matio Monthly", "monthly");
-  const monthlyPrice = await ensurePrice(
-    monthlyProduct.id,
-    "monthly",
-    999,
-    "month",
-  );
+  const product = await ensureProduct();
+  const price = await ensurePrice(product.id);
 
-  const annualProduct = await ensureProduct("Matio Annual", "annual");
-  const annualPrice = await ensurePrice(
-    annualProduct.id,
-    "annual",
-    7999,
-    "year",
+  console.log("\nAdd this to .env.local (replace any existing value):\n");
+  console.log(`STRIPE_PRICE_MONTHLY=${price.id}`);
+  console.log(
+    "\nThen push to Vercel:\n  vercel env rm STRIPE_PRICE_MONTHLY production --yes",
   );
-
-  console.log("\nAdd these to .env.local (replace any existing values):\n");
-  console.log(`STRIPE_PRICE_MONTHLY=${monthlyPrice.id}`);
-  console.log(`STRIPE_PRICE_ANNUAL=${annualPrice.id}`);
+  console.log(`  echo -n "${price.id}" | vercel env add STRIPE_PRICE_MONTHLY production`);
 }
 
 main().catch((err) => {

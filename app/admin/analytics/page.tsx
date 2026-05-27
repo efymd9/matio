@@ -11,11 +11,12 @@ import {
   watchProgress,
 } from "@/db/schema";
 
-// Plan prices (USD). Match the values in scripts/stripe-setup.ts. Past-due
+// Plan price (USD). Match the value in scripts/stripe-setup.ts. Past-due
 // subscriptions are intentionally excluded from MRR and active count below —
-// they're behind on payment, so we shouldn't claim that revenue.
-const MONTHLY_PRICE = 9.99;
-const ANNUAL_PRICE = 79.99;
+// they're behind on payment, so we shouldn't claim that revenue. Historical
+// 'annual' rows (pre-launch test data) are ignored: that plan isn't sold
+// anymore and there shouldn't be any in production.
+const MONTHLY_PRICE = 38;
 
 // Stable key for grouping campaign rows across the four independent
 // queries (trials, signups, subs, MRR). NULL columns collapse to a
@@ -224,10 +225,8 @@ export default async function AnalyticsPage() {
 
   const monthlySubs =
     activeSubsByPlan.find((r) => r.plan === "monthly")?.n ?? 0;
-  const annualSubs = activeSubsByPlan.find((r) => r.plan === "annual")?.n ?? 0;
-  const activeCount = monthlySubs + annualSubs;
-  // MRR: monthly plan = full price; annual plan = price / 12.
-  const mrr = monthlySubs * MONTHLY_PRICE + annualSubs * (ANNUAL_PRICE / 12);
+  const activeCount = monthlySubs;
+  const mrr = monthlySubs * MONTHLY_PRICE;
 
   const cancelledRecent = cancelledRecentRow[0].n;
   // Approximate 30-day churn: cancellations / (cancellations + still-active).
@@ -284,15 +283,11 @@ export default async function AnalyticsPage() {
       </div>
 
       {/* Top-level metrics */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Metric label="Total signups" value={String(totalUsers)} />
         <Metric label="Signups · 30d" value={String(recentUsers)} />
         <Metric label="Active subscriptions" value={String(activeCount)} />
-        <Metric
-          label="MRR"
-          value={`$${mrr.toFixed(2)}`}
-          sub={`${monthlySubs} monthly · ${annualSubs} annual`}
-        />
+        <Metric label="MRR" value={`$${mrr.toFixed(2)}`} />
         <Metric
           label="Trial → paid · 30d"
           value={`${conversionRate.toFixed(1)}%`}
@@ -302,14 +297,6 @@ export default async function AnalyticsPage() {
           label="Churn · 30d"
           value={`${churnRate.toFixed(1)}%`}
           sub={`${cancelledRecent} cancellations`}
-        />
-        <Metric
-          label="Monthly plan rev"
-          value={`$${(monthlySubs * MONTHLY_PRICE).toFixed(2)}/mo`}
-        />
-        <Metric
-          label="Annual plan rev"
-          value={`$${(annualSubs * ANNUAL_PRICE).toFixed(2)}/yr`}
         />
       </div>
 
@@ -420,8 +407,7 @@ type CampaignRowAgg = {
   campaign: string | null;
   trials: number;
   signups: number;
-  monthlySubs: number;
-  annualSubs: number;
+  activeSubs: number;
   mrr: number;
 };
 
@@ -461,8 +447,7 @@ function mergeCampaignRows(
         campaign,
         trials: 0,
         signups: 0,
-        monthlySubs: 0,
-        annualSubs: 0,
+        activeSubs: 0,
         mrr: 0,
       };
       map.set(key, row);
@@ -475,16 +460,15 @@ function mergeCampaignRows(
   for (const r of signupsRows) {
     upsert(r.source, r.medium, r.campaign).signups += Number(r.n);
   }
+  // Single plan now — every sub contributes MONTHLY_PRICE to MRR.
+  // The subs query still selects/groups by plan; historical 'annual'
+  // rows (test data) are treated the same. The plan field is left in
+  // the query shape so the SQL doesn't need re-touching.
   for (const r of subsRows) {
     const row = upsert(r.source, r.medium, r.campaign);
     const n = Number(r.n);
-    if (r.plan === "monthly") {
-      row.monthlySubs += n;
-      row.mrr += n * MONTHLY_PRICE;
-    } else {
-      row.annualSubs += n;
-      row.mrr += n * (ANNUAL_PRICE / 12);
-    }
+    row.activeSubs += n;
+    row.mrr += n * MONTHLY_PRICE;
   }
   // Sort by MRR DESC, falling back to trials count for campaigns that
   // haven't produced revenue yet — top-of-funnel volume is still useful
@@ -559,7 +543,7 @@ function CampaignSection({
                       {r.signups.toLocaleString()}
                     </td>
                     <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
-                      {(r.monthlySubs + r.annualSubs).toLocaleString()}
+                      {r.activeSubs.toLocaleString()}
                     </td>
                     <td className="px-5 py-3 text-right align-top font-mono text-xs font-semibold text-white">
                       ${r.mrr.toFixed(2)}
