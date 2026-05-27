@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { enUS, esES } from "@clerk/localizations";
 import { SiteHeader } from "@/components/site/site-header";
+import { SiteFooter } from "@/components/site/site-footer";
 import { UserMenu } from "@/components/site/user-menu";
 import { LocaleProvider } from "@/lib/i18n/client";
 import { getDict } from "@/lib/i18n/server";
@@ -115,6 +116,7 @@ export default async function RootLayout({
             <div id="main-content">
               {children}
             </div>
+            <SiteFooter />
           </LocaleProvider>
         </body>
       </html>

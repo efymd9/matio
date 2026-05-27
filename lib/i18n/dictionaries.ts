@@ -215,6 +215,26 @@ export const es = {
     title: ["Historias originales,", "en streaming."],
     tagline: "Mira los primeros 60 segundos gratis.",
   },
+  footer: {
+    sectionLegal: "Legal",
+    sectionMatio: "matio",
+    terms: "Términos del servicio",
+    privacy: "Política de privacidad",
+    cookies: "Política de cookies",
+    contact: "Contacto",
+    browse: "Explorar",
+    subscribe: "Suscribirse",
+    manage: "Gestionar suscripción",
+    tagline: "Historias originales, en streaming.",
+    copyright: (year: number) => `© ${year} matio. Todos los derechos reservados.`,
+  },
+  legal: {
+    backHome: "Volver al inicio",
+    lastUpdated: (date: string) => `Última actualización: ${date}`,
+    termsTitle: "Términos del servicio",
+    privacyTitle: "Política de privacidad",
+    cookiesTitle: "Política de cookies",
+  },
 };
 
 // `Dict` is structurally defined by the Spanish dictionary so the English
@@ -423,6 +443,26 @@ export const en: Dict = {
     kicker: "Streaming originals",
     title: ["Original stories,", "streamed."],
     tagline: "Watch the first 60 seconds free.",
+  },
+  footer: {
+    sectionLegal: "Legal",
+    sectionMatio: "matio",
+    terms: "Terms of Service",
+    privacy: "Privacy Policy",
+    cookies: "Cookie Policy",
+    contact: "Contact",
+    browse: "Browse",
+    subscribe: "Subscribe",
+    manage: "Manage subscription",
+    tagline: "Original stories, streamed.",
+    copyright: (year: number) => `© ${year} matio. All rights reserved.`,
+  },
+  legal: {
+    backHome: "Back to home",
+    lastUpdated: (date: string) => `Last updated: ${date}`,
+    termsTitle: "Terms of Service",
+    privacyTitle: "Privacy Policy",
+    cookiesTitle: "Cookie Policy",
   },
 };
 

@@ -35,5 +35,25 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "weekly" as const,
       priority: 0.8,
     })),
+    // Legal pages are public and worth indexing for trust signals + GDPR
+    // discoverability. Low priority so they don't compete with content.
+    {
+      url: `${APP_URL}/terms`,
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority: 0.2,
+    },
+    {
+      url: `${APP_URL}/privacy`,
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority: 0.2,
+    },
+    {
+      url: `${APP_URL}/cookies`,
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority: 0.2,
+    },
   ];
 }
