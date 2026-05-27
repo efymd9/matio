@@ -144,6 +144,13 @@ export async function startCheckout(formData: FormData) {
       success_url: successUrl,
       cancel_url: cancelUrl,
       subscription_data: { metadata: { userId, ...attributionMetadata } },
+      // Stripe Tax — collect billing address, compute VAT/sales tax, and
+      // persist the address back to the Customer so renewals invoice
+      // correctly. Without this, EU/UK customers were billed at the flat
+      // price with zero VAT, leaving the company on the hook.
+      automatic_tax: { enabled: true },
+      customer_update: { address: "auto", name: "auto" },
+      billing_address_collection: "required",
     },
     { idempotencyKey },
   );
