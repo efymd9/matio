@@ -7,8 +7,10 @@ import { shows } from "@/db/schema";
 // shows — same filter the catalog applies. /watch and /admin and other
 // gated routes are excluded here AND blocked in robots.ts.
 //
-// Re-fetched on every request because /shows entries change daily as the
-// admin publishes new content; with ~tens of shows the cost is trivial.
+// force-dynamic so a freshly-soft-deleted show drops out of the sitemap
+// on the next crawler hit, rather than being frozen at build time.
+// With ~tens of shows the DB cost is trivial.
+export const dynamic = "force-dynamic";
 
 const APP_URL =
   process.env.NEXT_PUBLIC_APP_URL ?? "https://matio.tv";
