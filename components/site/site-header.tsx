@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { Menu } from "@base-ui/react/menu";
 import { cn } from "@/lib/utils";
@@ -12,29 +12,38 @@ import { LanguageSwitcher } from "./language-switcher";
 
 // Sticky transparent → frosted-dark header. Hides on /watch (immersive
 // fullscreen player) and /admin (own nav).
+//
+// Split into outer (route gating) + inner (scroll state) because React 19's
+// `react-hooks/set-state-in-effect` rule forbids the initialize-from-window
+// pattern via useEffect+setState. useSyncExternalStore is the documented
+// replacement, but hooks must run unconditionally — so we keep the scroll
+// subscription off /watch + /admin by mounting the inner only when needed.
 export function SiteHeader({ authSlot }: { authSlot: React.ReactNode }) {
   const pathname = usePathname();
-  const [scrolled, setScrolled] = useState(false);
-  const t = useT();
-
-  const hidden = pathname?.startsWith("/watch") || pathname?.startsWith("/admin");
-
-  useEffect(() => {
-    if (hidden) return;
-    let last = window.scrollY > 24;
-    setScrolled(last);
-    const onScroll = () => {
-      const next = window.scrollY > 24;
-      if (next !== last) {
-        last = next;
-        setScrolled(next);
-      }
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [hidden]);
-
+  const hidden =
+    pathname?.startsWith("/watch") || pathname?.startsWith("/admin");
   if (hidden) return null;
+  return <SiteHeaderContent authSlot={authSlot} />;
+}
+
+function subscribeToScroll(cb: () => void) {
+  window.addEventListener("scroll", cb, { passive: true });
+  return () => window.removeEventListener("scroll", cb);
+}
+function getScrolledSnapshot() {
+  return window.scrollY > 24;
+}
+function getScrolledServerSnapshot() {
+  return false;
+}
+
+function SiteHeaderContent({ authSlot }: { authSlot: React.ReactNode }) {
+  const scrolled = useSyncExternalStore(
+    subscribeToScroll,
+    getScrolledSnapshot,
+    getScrolledServerSnapshot,
+  );
+  const t = useT();
 
   return (
     <header
