@@ -342,9 +342,15 @@ startCheckout (app/subscribe/actions.ts)
    │           mirror is behind because the previous webhook hasn't
    │           landed)
    ├── findOrCreate Stripe customer (stores stripe_customer_id on users)
-   ├── checkout.sessions.create with idempotencyKey = checkout:user:plan:hour
-   │     and success_url = /watch/<slug>?resume=<n> (or /?welcome=1
-   │     when there's no show context — /account is gone)
+   ├── checkout.sessions.create with idempotencyKey = checkout:user:hour
+   │     - success_url = /watch/<slug>?resume=<n> (or /?welcome=1 when
+   │       there's no show context — /account is gone)
+   │     - automatic_tax + customer_update.address + billing_address_
+   │       collection (Stripe Tax; $0 until a registration is added)
+   │     - consent_collection.terms_of_service:"required" + localized
+   │       custom_text (EU 14-day withdrawal waiver; needs ToS URL in
+   │       Stripe Public details)
+   │     - locale (Stripe-hosted page matches site language)
    └── redirect(session.url)
    │
    ▼ Stripe Checkout (hosted)

@@ -167,6 +167,23 @@ The classic example: a fresh signup goes straight from Clerk's hosted signup →
 
 Fix: anywhere a missing mirror would block the flow, use `getOrSyncCurrentUser()` from `lib/admin.ts` instead of a raw query. It reads the row, and if it's missing, upserts from Clerk's `currentUser()` (idempotent with the webhook via `onConflictDoNothing`).
 
+### "Send Example" test payload has no email → return 200, not 400
+
+Clerk's dashboard **Webhooks → Testing → Send Example** `user.created` ships a sample user with an empty `email_addresses` array. The handler requires an email (`users.email` is NOT NULL), so it used to return 400 — which (a) made Clerk **retry the example endlessly** and (b) showed the dashboard test as failed even when the signing secret was correct, sending you on a wild goose chase. Fixed: `app/api/webhooks/clerk/route.ts` now logs a warning and returns **200** for any emailless `user.created` (real email-signups always have one; phone/username-only would also hit this). General rule: only return non-2xx from a webhook for something a retry could fix (signature failure, transient DB error) — acknowledge structurally-unprocessable events with 200.
+
+## Webhook signing secrets are per-instance / per-environment
+
+The single biggest time-sink of the launch. **When you create a production Clerk instance, switch Stripe to live, or use a different Mux environment, each webhook endpoint gets its OWN signing secret.** If the env var still holds the old (dev/test) secret, *every* delivery fails with `signature verification failed` → 400, and the handler never runs. Symptoms: webhooks visibly reaching the route (you see the POST in logs) but always 400; DB never updates.
+
+Checklist when going live or rotating instances:
+- `CLERK_WEBHOOK_SIGNING_SECRET` ← the **production** Clerk instance's endpoint secret (not the dev one).
+- `STRIPE_WEBHOOK_SECRET` ← the **live-mode** endpoint secret (the `stripe listen` CLI secret is different again).
+- `MUX_WEBHOOK_SIGNING_SECRET` ← the secret for the environment the prod tokens belong to.
+- Update them in **Vercel** (not just `.env.local`) and **redeploy** — env changes only take effect on the next deploy.
+- Verify with a real signed delivery (dashboard "send test", or a real signup/upload), then check the log shows **200**, not 400. A 400 that says "signature" = wrong secret; a 400 that says something else = the secret is fine, look at the handler.
+
+Also: webhook URLs must point at the **apex** (`https://matio.tv/api/webhooks/*`). The `www` subdomain 307-redirects to apex and none of Stripe/Clerk/Mux follow redirects on delivery — so a www webhook URL silently fails the same way a bad secret does. See [operations → deploy](./operations.md#deploy).
+
 ## Stripe API 2024+ moves
 
 These three field moves caused real bugs during build:
