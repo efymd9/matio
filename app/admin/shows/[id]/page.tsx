@@ -3,18 +3,10 @@ import { notFound } from "next/navigation";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { seasons, shows } from "@/db/schema";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Icon } from "@/components/site/icon";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { ShowForm } from "@/components/admin/show-form";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { StatusSelect } from "@/components/admin/status-select";
 import {
   createSeason,
   deleteSeason,
@@ -45,230 +37,249 @@ export default async function EditShowPage({
     .where(eq(seasons.showId, show.id))
     .orderBy(asc(seasons.number));
 
+  const isPublished = show.status === "published";
+
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-3xl space-y-7">
+      {/* Header */}
       <div>
         <Link
           href="/admin"
-          className="text-sm text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1.5 text-sm text-white/50 transition-colors hover:text-white"
         >
-          ← Back to shows
+          <Icon name="back" size={14} />
+          Shows
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold">{show.title}</h1>
+        <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-3xl font-extrabold tracking-tight text-white">
+                {show.title}
+              </h1>
+              <StatusPill status={show.status} />
+              {show.featured ? <FeaturedPill /> : null}
+            </div>
+            <p className="mt-1 font-mono text-xs text-white/45">/{show.slug}</p>
+          </div>
+          {isPublished ? (
+            <Link
+              href={`/shows/${show.slug}`}
+              target="_blank"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md border border-white/15 px-3.5 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"
+            >
+              View on site
+              <Icon name="chevron-right" size={14} />
+            </Link>
+          ) : null}
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Show details</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form
-            action={updateShow.bind(null, show.id)}
-            className="max-w-2xl space-y-4"
-          >
-            <div className="space-y-2">
-              <Label htmlFor="title">Title *</Label>
-              <Input
-                id="title"
-                name="title"
-                defaultValue={show.title}
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="slug">Slug *</Label>
-              <Input id="slug" name="slug" defaultValue={show.slug} required />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                name="description"
-                defaultValue={show.description ?? ""}
-                rows={4}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="posterImageUrl">Poster image URL</Label>
-              <Input
-                id="posterImageUrl"
-                name="posterImageUrl"
-                defaultValue={show.posterImageUrl ?? ""}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Portrait 2:3 (e.g. 600×900). Used on catalog rows and as
-                the OG fallback when no hero is set.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="heroImageUrl">Hero image URL</Label>
-              <Input
-                id="heroImageUrl"
-                name="heroImageUrl"
-                defaultValue={show.heroImageUrl ?? ""}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Wide 16:9 (e.g. 2560×1440). Used on the show detail page,
-                the home hero, and OG / Twitter unfurls. Compose subject
-                slightly right-of-centre — the left third is overlaid
-                with title + CTAs.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="genre">Genre</Label>
-              <Input
-                id="genre"
-                name="genre"
-                defaultValue={show.genre.join(", ")}
-                placeholder="action, drama, sci-fi"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <StatusSelect name="status" defaultValue={show.status} />
-            </div>
-            <fieldset className="space-y-3 rounded-md border border-border/60 p-4">
-              <legend className="px-1 text-sm font-medium">
-                Homepage sections
-              </legend>
-              <p className="text-xs text-muted-foreground">
-                Choose which rows this show appears in on /. A show can be in
-                both, either, or neither.
-              </p>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  name="justReleased"
-                  defaultChecked={show.justReleased}
-                  className="size-4 accent-accent"
-                />
-                Just released
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  name="popularNow"
-                  defaultChecked={show.popularNow}
-                  className="size-4 accent-accent"
-                />
-                Popular now
-              </label>
-            </fieldset>
-            <div className="flex justify-end pt-2">
-              <Button type="submit">Save</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      {/* Details / artwork / visibility — unified form */}
+      <ShowForm
+        action={updateShow.bind(null, show.id)}
+        mode="edit"
+        defaultValues={{
+          title: show.title,
+          slug: show.slug,
+          description: show.description ?? "",
+          posterImageUrl: show.posterImageUrl ?? "",
+          heroImageUrl: show.heroImageUrl ?? "",
+          genre: show.genre.join(", "),
+          status: show.status,
+          justReleased: show.justReleased,
+          popularNow: show.popularNow,
+        }}
+      />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Home hero</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {show.featured ? (
-            <>
-              <p className="text-sm">
-                <span className="font-medium text-accent">Featured</span>{" "}
-                <span className="text-muted-foreground">
-                  on the home page hero. Only one show can be featured at a
-                  time.
-                </span>
-              </p>
-              <form action={unsetFeaturedShow.bind(null, show.id)}>
-                <Button variant="outline" type="submit">
-                  Remove from hero
-                </Button>
-              </form>
-            </>
+      {/* Home hero feature toggle */}
+      <Panel kicker="Home hero" title="Featured show">
+        {show.featured ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-white/65">
+              This show is the home-page hero. Only one show can hold the
+              hero at a time.
+            </p>
+            <form action={unsetFeaturedShow.bind(null, show.id)}>
+              <button
+                type="submit"
+                className="inline-flex h-9 items-center rounded-md border border-white/15 px-4 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"
+              >
+                Remove from hero
+              </button>
+            </form>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-white/65">
+              {isPublished
+                ? "Promote this show to the home-page hero. The current hero will be unfeatured."
+                : "Publish the show first — only published shows can be featured."}
+            </p>
+            <form action={setFeaturedShow.bind(null, show.id)}>
+              <button
+                type="submit"
+                disabled={!isPublished}
+                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#ff3d3d] px-4 text-sm font-bold text-white transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Icon name="star" size={14} color="#ffffff" />
+                Feature on home
+              </button>
+            </form>
+          </div>
+        )}
+      </Panel>
+
+      {/* Seasons */}
+      <Panel
+        kicker="Content"
+        title="Seasons"
+        right={
+          <span className="font-mono text-xs text-white/45">
+            {showSeasons.length} {showSeasons.length === 1 ? "season" : "seasons"}
+          </span>
+        }
+      >
+        <div className="space-y-2">
+          {showSeasons.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-white/10 py-6 text-center text-sm text-white/45">
+              No seasons yet. Add the first one below.
+            </p>
           ) : (
-            <>
-              <p className="text-sm text-muted-foreground">
-                {show.status === "published"
-                  ? "Promote this show to the home page hero. Any other featured show will be unfeatured."
-                  : "Publish the show first — only published shows appear on the home page."}
-              </p>
-              <form action={setFeaturedShow.bind(null, show.id)}>
-                <Button type="submit" disabled={show.status !== "published"}>
-                  Feature on home
-                </Button>
-              </form>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Seasons</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <ul className="divide-y">
-            {showSeasons.length === 0 && (
-              <li className="py-3 text-sm text-muted-foreground">
-                No seasons yet.
-              </li>
-            )}
-            {showSeasons.map((season) => (
-              <li key={season.id} className="flex items-center gap-4 py-3">
-                <span className="font-medium">Season {season.number}</span>
-                {season.title && (
-                  <span className="text-muted-foreground">— {season.title}</span>
-                )}
-                <div className="ml-auto flex gap-2">
-                  <Link
-                    href={`/admin/shows/${show.id}/seasons/${season.id}`}
-                    className={buttonVariants({ variant: "outline", size: "sm" })}
+            showSeasons.map((season) => (
+              <div
+                key={season.id}
+                className="flex items-center gap-3 rounded-lg border border-white/[0.07] bg-black/20 px-4 py-3"
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-white/[0.06] font-mono text-sm font-bold text-white">
+                  {season.number}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm text-white/85">
+                  <span className="font-semibold text-white">
+                    Season {season.number}
+                  </span>
+                  {season.title ? (
+                    <span className="text-white/55"> · {season.title}</span>
+                  ) : null}
+                </span>
+                <Link
+                  href={`/admin/shows/${show.id}/seasons/${season.id}`}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 px-3 text-xs font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"
+                >
+                  Episodes
+                  <Icon name="chevron-right" size={13} />
+                </Link>
+                <form action={deleteSeason.bind(null, season.id, show.id)}>
+                  <ConfirmDeleteButton
+                    message={`Delete Season ${season.number}? All its episodes will also be removed.`}
                   >
-                    Manage episodes
-                  </Link>
-                  <form action={deleteSeason.bind(null, season.id, show.id)}>
-                    <ConfirmDeleteButton message={`Delete Season ${season.number}? All its episodes will also be removed.`}>
-                      Delete
-                    </ConfirmDeleteButton>
-                  </form>
-                </div>
-              </li>
-            ))}
-          </ul>
+                    Delete
+                  </ConfirmDeleteButton>
+                </form>
+              </div>
+            ))
+          )}
+        </div>
 
-          <form
-            action={createSeason.bind(null, show.id)}
-            className="space-y-3 border-t pt-4"
+        <form
+          action={createSeason.bind(null, show.id)}
+          className="mt-4 flex gap-2 border-t border-white/[0.06] pt-4"
+        >
+          <Input
+            name="number"
+            type="number"
+            min={1}
+            placeholder="#"
+            required
+            className="w-16 text-center"
+            aria-label="Season number"
+          />
+          <Input
+            name="title"
+            placeholder="Title (optional)"
+            className="flex-1"
+            aria-label="Season title"
+          />
+          <button
+            type="submit"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-white px-4 text-sm font-bold text-black transition-colors hover:bg-white/90"
           >
-            <p className="text-sm font-medium">Add a season</p>
-            <div className="flex gap-2">
-              <Input
-                name="number"
-                type="number"
-                min={1}
-                placeholder="#"
-                required
-                className="w-20"
-              />
-              <Input
-                name="title"
-                placeholder="Title (optional)"
-                className="flex-1"
-              />
-              <Button type="submit">Add</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+            <Icon name="plus" size={14} color="#0a0a0c" />
+            Add
+          </button>
+        </form>
+      </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-destructive">Danger zone</CardTitle>
-        </CardHeader>
-        <CardContent>
+      {/* Danger zone */}
+      <section className="rounded-2xl border border-[#ff3d3d]/25 bg-[#ff3d3d]/[0.04] p-5 sm:p-6">
+        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+          Danger zone
+        </p>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-white/65">
+            Deleting removes this show from the catalog. Seasons and episodes
+            go with it.
+          </p>
           <form action={softDeleteShow.bind(null, show.id)}>
-            <ConfirmDeleteButton message={`Delete "${show.title}"? This cannot be undone.`}>
+            <ConfirmDeleteButton
+              message={`Delete "${show.title}"? This cannot be undone.`}
+            >
               Delete this show
             </ConfirmDeleteButton>
           </form>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     </div>
+  );
+}
+
+function Panel({
+  kicker,
+  title,
+  right,
+  children,
+}: {
+  kicker: string;
+  title: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5 sm:p-6">
+      <div className="mb-5 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+            {kicker}
+          </p>
+          <h2 className="mt-1 text-base font-bold tracking-tight text-white">
+            {title}
+          </h2>
+        </div>
+        {right}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function StatusPill({ status }: { status: "draft" | "published" }) {
+  return (
+    <span
+      className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] ${
+        status === "published"
+          ? "bg-[#7fd87a]/15 text-[#7fd87a]"
+          : "bg-white/10 text-white/65"
+      }`}
+    >
+      {status}
+    </span>
+  );
+}
+
+function FeaturedPill() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-[#ff3d3d]/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-[#ff3d3d]">
+      <Icon name="star" size={10} color="#ff3d3d" />
+      Featured
+    </span>
   );
 }

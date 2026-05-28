@@ -1,97 +1,36 @@
 import Link from "next/link";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Icon } from "@/components/site/icon";
+import { EMPTY_SHOW_FORM, ShowForm } from "@/components/admin/show-form";
 import { createShow } from "@/app/admin/actions";
 
 export default function NewShowPage() {
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-3xl space-y-7">
       <div>
         <Link
           href="/admin"
-          className="text-sm text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1.5 text-sm text-white/50 transition-colors hover:text-white"
         >
-          ← Back to shows
+          <Icon name="back" size={14} />
+          Shows
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold">New show</h1>
+        <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+          New show
+        </p>
+        <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-white">
+          Create a show
+        </h1>
+        <p className="mt-1 text-sm text-white/55">
+          You can add seasons and episodes after it’s created.
+        </p>
       </div>
 
-      <form action={createShow} className="max-w-2xl space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="title">Title *</Label>
-          <Input id="title" name="title" required />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="slug">Slug *</Label>
-          <Input
-            id="slug"
-            name="slug"
-            required
-            placeholder="lowercase-with-hyphens"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="description">Description</Label>
-          <Textarea id="description" name="description" rows={4} />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="posterImageUrl">Poster image URL</Label>
-          <Input id="posterImageUrl" name="posterImageUrl" />
-          <p className="text-[11px] text-muted-foreground">
-            Portrait 2:3 (e.g. 600×900). Used on catalog rows and as the
-            OG fallback when no hero is set.
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="heroImageUrl">Hero image URL</Label>
-          <Input id="heroImageUrl" name="heroImageUrl" />
-          <p className="text-[11px] text-muted-foreground">
-            Wide 16:9 (e.g. 2560×1440). Used on the show detail page,
-            the home hero, and OG / Twitter unfurls. Compose subject
-            slightly right-of-centre — the left third is overlaid with
-            title + CTAs.
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="genre">Genre</Label>
-          <Input id="genre" name="genre" placeholder="action, drama, sci-fi" />
-        </div>
-
-        <fieldset className="space-y-3 rounded-md border border-border/60 p-4">
-          <legend className="px-1 text-sm font-medium">
-            Homepage sections
-          </legend>
-          <p className="text-xs text-muted-foreground">
-            Choose which rows this show appears in on /. A show can be in
-            both, either, or neither.
-          </p>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              name="justReleased"
-              className="size-4 accent-accent"
-            />
-            Just released
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              name="popularNow"
-              className="size-4 accent-accent"
-            />
-            Popular now
-          </label>
-        </fieldset>
-
-        <div className="flex justify-end gap-2 pt-2">
-          <Link href="/admin" className={buttonVariants({ variant: "outline" })}>
-            Cancel
-          </Link>
-          <Button type="submit">Create</Button>
-        </div>
-      </form>
+      <ShowForm
+        action={createShow}
+        defaultValues={EMPTY_SHOW_FORM}
+        mode="create"
+        cancelHref="/admin"
+      />
     </div>
   );
 }
