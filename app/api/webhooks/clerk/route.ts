@@ -23,8 +23,16 @@ export async function POST(req: NextRequest) {
         ?.email_address ?? data.email_addresses[0]?.email_address;
 
     if (!email) {
-      console.error("user.created event missing email", { id: data.id });
-      return new Response("Missing email", { status: 400 });
+      // No email to mirror. Real email-signup users always have one;
+      // this hits for Clerk's "Send Example" test payload and any
+      // phone/username-only signup. Acknowledge with 200 so Clerk
+      // doesn't retry an event we can't act on — getOrSyncCurrentUser
+      // backfills the row on the first authenticated /subscribe hit
+      // regardless.
+      console.warn("user.created event has no email — skipping", {
+        id: data.id,
+      });
+      return new Response("OK (no email, skipped)", { status: 200 });
     }
 
     // onConflictDoNothing makes this idempotent — Clerk retries failed webhooks.
