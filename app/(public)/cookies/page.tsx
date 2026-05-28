@@ -1,9 +1,7 @@
-// DRAFT — review with legal counsel. This policy describes the cookies
-// the site already sets today (CLAUDE.md §"Campaign attribution" + Clerk +
-// Stripe). The `attribution_first` / `attribution_last` marketing cookies
-// are currently set unconditionally by proxy.ts — they must move behind
-// a consent banner before this policy is accurate (task #5 in audit).
-// Placeholders: [COMPANY LEGAL NAME], [CONTACT EMAIL].
+// DRAFT pending legal-counsel review. Describes the cookies the site sets
+// (Clerk + Stripe + attribution). The attribution_first / attribution_last
+// marketing cookies are gated on cookie_consent.marketing via proxy.ts +
+// the consent banner. Contact details filled 2026-05-27.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDict } from "@/lib/i18n/server";
@@ -125,9 +123,8 @@ function CookiesEn() {
       <Section id="manage" title="3. How to manage cookies">
         <p>
           You can refuse or withdraw your consent for non-essential cookies at
-          any time through our cookie banner. Once the banner is wired (this
-          is a draft policy ahead of that work), reopening it from the footer
-          link will let you change your choices.
+          any time through our cookie banner — reopen it whenever you like from
+          the &ldquo;Cookie preferences&rdquo; link in the site footer.
         </p>
         <p>
           You can also delete cookies directly from your browser settings.
@@ -145,7 +142,7 @@ function CookiesEn() {
 
       <Section id="contact" title="5. Contact">
         <p>
-          Cookie questions: <strong>[CONTACT EMAIL]</strong>. See also our{" "}
+          Cookie questions: <strong>hello@matio.tv</strong>. See also our{" "}
           <Link href="/privacy" className="underline underline-offset-2 hover:text-white">
             Privacy Policy
           </Link>{" "}
@@ -238,10 +235,9 @@ function CookiesEs() {
       <Section id="gestionar" title="3. Cómo gestionar las cookies">
         <p>
           Puedes rechazar o retirar tu consentimiento para las cookies no
-          esenciales en cualquier momento desde nuestro banner de cookies.
-          Una vez activado el banner (esta es una política preliminar antes
-          de ese trabajo), podrás reabrirlo desde el enlace del pie de
-          página para modificar tus elecciones.
+          esenciales en cualquier momento desde nuestro banner de cookies:
+          reábrelo cuando quieras desde el enlace &laquo;Preferencias de
+          cookies&raquo; del pie de página.
         </p>
         <p>
           También puedes eliminar las cookies directamente desde la
@@ -261,7 +257,7 @@ function CookiesEs() {
 
       <Section id="contacto" title="5. Contacto">
         <p>
-          Consultas sobre cookies: <strong>[CONTACT EMAIL]</strong>. Consulta
+          Consultas sobre cookies: <strong>hello@matio.tv</strong>. Consulta
           también nuestra{" "}
           <Link href="/privacy" className="underline underline-offset-2 hover:text-white">
             Política de privacidad

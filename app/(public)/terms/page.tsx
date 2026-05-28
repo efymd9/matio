@@ -1,9 +1,7 @@
-// DRAFT — review with legal counsel before publishing.
-// Placeholders to fill: [COMPANY LEGAL NAME], [REGISTERED ADDRESS],
-// [CONTACT EMAIL], [GOVERNING LAW], [JURISDICTION]. Once filled, also
-// wire the Stripe Checkout `consent_collection.terms_of_service` flow
-// pointing at /terms so EU customers explicitly accept these terms
-// (and the digital-content waiver in §6) before payment.
+// DRAFT pending legal-counsel review. Trading party + contact details
+// filled 2026-05-27 (Matvei Dobrovolskii, sole trader t/a Matio, England
+// & Wales). The Stripe Checkout consent_collection.terms_of_service flow
+// (digital-content waiver, §6) is wired in app/subscribe/actions.ts.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDict } from "@/lib/i18n/server";
@@ -55,8 +53,8 @@ function TermsEn() {
       <Section id="acceptance" title="1. Acceptance of these terms">
         <p>
           These Terms of Service (the &ldquo;Terms&rdquo;) form a binding agreement
-          between you and [COMPANY LEGAL NAME] (&ldquo;matio&rdquo;, &ldquo;we&rdquo;,
-          &ldquo;us&rdquo;), registered at [REGISTERED ADDRESS]. By creating an account
+          between you and Matvei Dobrovolskii trading as Matio (&ldquo;matio&rdquo;, &ldquo;we&rdquo;,
+          &ldquo;us&rdquo;), with a business address at 221 Derby Road, Nottingham, NG7 1QJ, United Kingdom. By creating an account
           or paying for a subscription, you confirm you have read, understood and
           accept these Terms. If you do not accept them, do not use the service.
         </p>
@@ -205,8 +203,8 @@ function TermsEn() {
 
       <Section id="law" title="13. Governing law and disputes">
         <p>
-          These Terms are governed by the laws of [GOVERNING LAW]. The courts of
-          [JURISDICTION] have exclusive jurisdiction over disputes, except that
+          These Terms are governed by the laws of England and Wales. The courts of
+          England and Wales have exclusive jurisdiction over disputes, except that
           consumers may rely on mandatory protections of the law of their
           habitual residence. You can also use the European Commission&rsquo;s
           online dispute-resolution platform at{" "}
@@ -230,7 +228,7 @@ function TermsEn() {
 
       <Section id="contact" title="15. Contact">
         <p>
-          Questions about these Terms or the service: <strong>[CONTACT EMAIL]</strong>.
+          Questions about these Terms or the service: <strong>hello@matio.tv</strong>.
           See also the <Link href="/privacy" className="underline underline-offset-2 hover:text-white">Privacy Policy</Link>{" "}
           and{" "}
           <Link href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</Link>.
@@ -246,8 +244,8 @@ function TermsEs() {
       <Section id="aceptacion" title="1. Aceptación de estos términos">
         <p>
           Estos Términos del servicio (los &laquo;Términos&raquo;) constituyen un
-          contrato vinculante entre tú y [COMPANY LEGAL NAME] (&laquo;matio&raquo;,
-          &laquo;nosotros&raquo;), con domicilio en [REGISTERED ADDRESS]. Al crear
+          contrato vinculante entre tú y Matvei Dobrovolskii trading as Matio (&laquo;matio&raquo;,
+          &laquo;nosotros&raquo;), con domicilio en 221 Derby Road, Nottingham, NG7 1QJ, United Kingdom. Al crear
           una cuenta o pagar una suscripción, confirmas que has leído,
           comprendido y aceptado estos Términos. Si no los aceptas, no utilices
           el servicio.
@@ -406,8 +404,8 @@ function TermsEs() {
 
       <Section id="ley" title="13. Legislación aplicable y resolución de litigios">
         <p>
-          Estos Términos se rigen por la legislación de [GOVERNING LAW]. Los
-          tribunales de [JURISDICTION] tienen jurisdicción exclusiva sobre los
+          Estos Términos se rigen por la legislación de England and Wales. Los
+          tribunales de England and Wales tienen jurisdicción exclusiva sobre los
           litigios, salvo que el consumidor pueda invocar protecciones
           imperativas de la ley de su residencia habitual. También puedes
           recurrir a la plataforma europea de resolución de litigios en línea
@@ -434,7 +432,7 @@ function TermsEs() {
       <Section id="contacto" title="15. Contacto">
         <p>
           Para cualquier consulta sobre estos Términos o el servicio:{" "}
-          <strong>[CONTACT EMAIL]</strong>. Consulta también la{" "}
+          <strong>hello@matio.tv</strong>. Consulta también la{" "}
           <Link href="/privacy" className="underline underline-offset-2 hover:text-white">
             Política de privacidad
           </Link>{" "}

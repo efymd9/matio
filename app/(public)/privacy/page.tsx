@@ -1,9 +1,8 @@
-// DRAFT — review with legal counsel (especially Art. 13/14 GDPR & UK GDPR
-// disclosures, retention periods, DPO contact). Placeholders to fill:
-// [COMPANY LEGAL NAME], [REGISTERED ADDRESS], [CONTACT EMAIL],
-// [DPO_CONTACT_OR_NONE], [SUPERVISORY AUTHORITY] (AEPD for ES / ICO for UK).
-// This template assumes the controller is established in the UK (GB head
-// office per Stripe Tax settings); revisit if that changes.
+// DRAFT pending legal-counsel review (esp. Art. 13/14 UK GDPR disclosures
+// + retention periods). Controller details filled 2026-05-27 (Matvei
+// Dobrovolskii, sole trader t/a Matio, UK). No DPO appointed (not required
+// under Art. 37). Supervisory authorities named inline: AEPD (ES) / ICO (UK).
+// Sole trader, so "business address" not "registered office".
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDict } from "@/lib/i18n/server";
@@ -54,11 +53,12 @@ function PrivacyEn() {
     <div className="prose-legal space-y-8 text-[15px] leading-relaxed text-white/75">
       <Section id="controller" title="1. Who we are">
         <p>
-          [COMPANY LEGAL NAME], with registered office at [REGISTERED ADDRESS],
+          Matvei Dobrovolskii trading as Matio, with its business address at 221 Derby Road, Nottingham, NG7 1QJ, United Kingdom,
           is the data controller for the personal data processed through{" "}
           <strong>matio.tv</strong>. You can reach us at{" "}
-          <strong>[CONTACT EMAIL]</strong>. Our data-protection contact is
-          [DPO_CONTACT_OR_NONE].
+          <strong>hello@matio.tv</strong>. Our data-protection contact is
+          the same address. We have not appointed a Data Protection Officer
+          and are not required to under Article 37 UK GDPR.
         </p>
       </Section>
 
@@ -213,7 +213,7 @@ function PrivacyEn() {
           object to the processing of your personal data, and to withdraw any
           consent you have given (e.g. by clearing marketing cookies in the
           cookie banner). To exercise these rights, contact us at{" "}
-          <strong>[CONTACT EMAIL]</strong>. We will respond within 30 days.
+          <strong>hello@matio.tv</strong>. We will respond within 30 days.
         </p>
         <p>
           If you believe we have not handled your data correctly, you can lodge
@@ -260,7 +260,7 @@ function PrivacyEn() {
 
       <Section id="contact" title="11. Contact">
         <p>
-          Privacy questions: <strong>[CONTACT EMAIL]</strong>. See also our{" "}
+          Privacy questions: <strong>hello@matio.tv</strong>. See also our{" "}
           <Link href="/terms" className="underline underline-offset-2 hover:text-white">
             Terms of Service
           </Link>{" "}
@@ -280,11 +280,13 @@ function PrivacyEs() {
     <div className="prose-legal space-y-8 text-[15px] leading-relaxed text-white/75">
       <Section id="responsable" title="1. Quiénes somos">
         <p>
-          [COMPANY LEGAL NAME], con domicilio social en [REGISTERED ADDRESS], es
+          Matvei Dobrovolskii trading as Matio, con domicilio profesional en 221 Derby Road, Nottingham, NG7 1QJ, United Kingdom, es
           el responsable del tratamiento de los datos personales recogidos a
           través de <strong>matio.tv</strong>. Puedes contactarnos en{" "}
-          <strong>[CONTACT EMAIL]</strong>. Nuestro contacto en materia de
-          protección de datos es [DPO_CONTACT_OR_NONE].
+          <strong>hello@matio.tv</strong>. Nuestro contacto en materia de
+          protección de datos es esa misma dirección. No hemos designado un
+          Delegado de Protección de Datos y no estamos obligados a hacerlo
+          conforme al artículo 37 del RGPD del Reino Unido.
         </p>
       </Section>
 
@@ -451,7 +453,7 @@ function PrivacyEs() {
           portabilidad y oposición al tratamiento de tus datos personales, así
           como a retirar el consentimiento que hubieras prestado (por ejemplo
           rechazando las cookies de marketing en el banner). Para ejercerlos,
-          escríbenos a <strong>[CONTACT EMAIL]</strong>. Responderemos en un
+          escríbenos a <strong>hello@matio.tv</strong>. Responderemos en un
           plazo de 30 días.
         </p>
         <p>
@@ -500,7 +502,7 @@ function PrivacyEs() {
 
       <Section id="contacto" title="11. Contacto">
         <p>
-          Consultas de privacidad: <strong>[CONTACT EMAIL]</strong>. Consulta
+          Consultas de privacidad: <strong>hello@matio.tv</strong>. Consulta
           también nuestros{" "}
           <Link href="/terms" className="underline underline-offset-2 hover:text-white">
             Términos del servicio
