@@ -9,6 +9,7 @@ import {
   readAttributionCookies,
   toStripeMetadata,
 } from "@/lib/attribution";
+import { getDict } from "@/lib/i18n/server";
 import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 
@@ -136,6 +137,10 @@ export async function startCheckout(formData: FormData) {
     attribution.last,
   );
 
+  // Locale drives both the Stripe-hosted page language and the
+  // language of the withdrawal-waiver acceptance text below.
+  const { locale, t } = await getDict();
+
   const session = await stripe.checkout.sessions.create(
     {
       mode: "subscription",
@@ -151,6 +156,19 @@ export async function startCheckout(formData: FormData) {
       automatic_tax: { enabled: true },
       customer_update: { address: "auto", name: "auto" },
       billing_address_collection: "required",
+      // EU 14-day right-of-withdrawal waiver (Terms §6). The required
+      // ToS checkbox links to the URL set in the Stripe account's Public
+      // Details (https://matio.tv/terms); custom_text replaces Stripe's
+      // default acceptance line with the digital-content waiver so the
+      // customer expressly consents to immediate supply. Stripe records
+      // the acceptance on the session.
+      consent_collection: { terms_of_service: "required" },
+      custom_text: {
+        terms_of_service_acceptance: {
+          message: t.subscribe.withdrawalWaiver,
+        },
+      },
+      locale,
     },
     { idempotencyKey },
   );

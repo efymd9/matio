@@ -173,6 +173,8 @@ export const es = {
     fourKWhenAvailable: "4K cuando está disponible",
     redirectingToCheckout: "Redirigiendo al pago…",
     continueSubscribe: "Continuar · Suscribirse",
+    withdrawalWaiver:
+      "Solicito que matio comience la reproducción de inmediato y reconozco que pierdo mi derecho de desistimiento de 14 días una vez que comience la reproducción.",
     alreadyMemberKicker: "Ya eres miembro",
     youreSubscribed: "Estás suscrito.",
     yourPlanIs: (plan: string, status: string) =>
@@ -410,6 +412,8 @@ export const en: Dict = {
     fourKWhenAvailable: "4K when available",
     redirectingToCheckout: "Redirecting to checkout…",
     continueSubscribe: "Continue · Subscribe",
+    withdrawalWaiver:
+      "I request that matio begin streaming immediately and I acknowledge that I lose my 14-day right of withdrawal once playback starts.",
     alreadyMemberKicker: "Already a member",
     youreSubscribed: "You're subscribed.",
     yourPlanIs: (plan: string, status: string) =>
