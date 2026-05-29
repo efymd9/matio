@@ -10,6 +10,11 @@ import {
   users,
   watchProgress,
 } from "@/db/schema";
+import {
+  getMuxData,
+  type MuxShowRow,
+  type MuxWatchSummary,
+} from "@/lib/mux-data";
 
 // Plan price (USD). Match the value in scripts/stripe-setup.ts. Past-due
 // subscriptions are intentionally excluded from MRR and active count below —
@@ -72,6 +77,7 @@ export default async function AnalyticsPage() {
     watchEngagementRow,
     avgCompletionRow,
     trialDepthRow,
+    muxDataResult,
   ] = await Promise.all([
     db.select({ n: count() }).from(users),
     db
@@ -258,6 +264,9 @@ export default async function AnalyticsPage() {
       })
       .from(trialSessions)
       .where(gte(trialSessions.startedAt, thirtyDaysAgo)),
+    // Real watch-time from the Mux Data API (last 30 days, hero excluded).
+    // Server-side, cached 5 min, best-effort — null/hint when unconfigured.
+    getMuxData("30:days"),
   ]);
 
   const totalUsers = totalUsersRow[0].n;
@@ -489,11 +498,112 @@ export default async function AnalyticsPage() {
         </div>
         <p className="mt-3 text-[10px] leading-relaxed text-white/35">
           Approximate — derived from the last-saved playhead per episode (resume
-          position), not cumulative minutes. Mux Data adds true watch-time,
-          unique viewers and retention curves once its env key is set (and only
-          for visitors who accept marketing cookies).
+          position), not cumulative minutes. The Mux Data panel below has the
+          real watch-time.
         </p>
       </section>
+
+      {/* Real watch time (Mux Data API) */}
+      <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5">
+        <div className="mb-4 flex items-baseline justify-between gap-3">
+          <h2 className="text-sm font-bold text-white">Watch time · Mux Data</h2>
+          <span className="text-[11px] text-white/45">
+            real playback · last 30 days · hero excluded
+          </span>
+        </div>
+        {muxDataResult.status === "not_configured" ? (
+          <p className="py-6 text-center text-sm leading-relaxed text-white/55">
+            Not connected. Add a Mux access token with{" "}
+            <span className="font-mono text-white/70">Mux Data: Read</span>{" "}
+            permission as{" "}
+            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
+              MUX_DATA_API_TOKEN_ID
+            </code>{" "}
+            /{" "}
+            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
+              MUX_DATA_API_TOKEN_SECRET
+            </code>{" "}
+            to show real watch-time here.
+          </p>
+        ) : muxDataResult.status === "error" ? (
+          <p className="py-6 text-center text-sm text-white/55">
+            {muxDataResult.message}
+          </p>
+        ) : (
+          <MuxDataPanel
+            summary={muxDataResult.summary}
+            byShow={muxDataResult.byShow}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function MuxDataPanel({
+  summary,
+  byShow,
+}: {
+  summary: MuxWatchSummary;
+  byShow: MuxShowRow[];
+}) {
+  const hours = summary.watchTimeMs / 3_600_000;
+  const totalMinutes = Math.round(summary.watchTimeMs / 60_000);
+  const avgViewMin =
+    summary.views > 0 ? summary.watchTimeMs / summary.views / 60_000 : 0;
+  const maxShowMs =
+    byShow.length > 0 ? Math.max(...byShow.map((s) => s.watchTimeMs), 1) : 1;
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric
+          label="Total watch time"
+          value={`${hours.toFixed(1)} h`}
+          sub={`${totalMinutes.toLocaleString()} min`}
+        />
+        <Metric label="Views" value={summary.views.toLocaleString()} />
+        <Metric
+          label="Unique viewers"
+          value={summary.uniqueViewers.toLocaleString()}
+        />
+        <Metric
+          label="Avg view"
+          value={`${avgViewMin.toFixed(1)} min`}
+          sub="per view"
+        />
+      </div>
+      {byShow.length > 0 ? (
+        <ul className="space-y-2.5">
+          {byShow.slice(0, 10).map((s) => {
+            const minutes = Math.round(s.watchTimeMs / 60_000);
+            const pct = (s.watchTimeMs / maxShowMs) * 100;
+            return (
+              <li key={s.show} className="flex items-center gap-3">
+                <span className="w-44 shrink-0 truncate text-sm font-semibold text-white">
+                  {s.show}
+                </span>
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
+                  <div
+                    className="h-full bg-[#ff3d3d]"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span className="w-28 shrink-0 text-right font-mono text-[11px] leading-tight text-white/65">
+                  {minutes.toLocaleString()} min
+                  <span className="block text-white/35">
+                    {s.views.toLocaleString()} view{s.views === 1 ? "" : "s"}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="text-center text-xs text-white/45">
+          No views recorded yet — Mux Data appears a few minutes after consenting
+          viewers watch.
+        </p>
+      )}
     </div>
   );
 }
