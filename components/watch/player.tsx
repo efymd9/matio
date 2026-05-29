@@ -4,6 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import MuxVideo from "@mux/mux-video-react";
+import { useMarketingConsent } from "@/lib/use-marketing-consent";
+
+// Public Mux Data env key (distinct from the API token / signing key). Empty
+// when unset → Mux Data stays fully off.
+const MUX_DATA_ENV_KEY = process.env.NEXT_PUBLIC_MUX_DATA_ENV_KEY ?? "";
 import {
   MediaAirplayButton,
   MediaCaptionsButton,
@@ -235,6 +240,13 @@ function EpisodePlayback({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const t = useT();
+  // Mux Data (watch-time/QoE analytics) is gated on marketing consent AND a
+  // configured env key. Until both hold we pass disableTracking/disableCookies
+  // so no beacons or viewer-id cookies fire — this also closes the pre-consent
+  // telemetry leak. <MuxVideo> only renders client-side (after the token
+  // effect), so the consent value is settled before it mounts.
+  const marketingConsent = useMarketingConsent();
+  const muxDataEnabled = marketingConsent && !!MUX_DATA_ENV_KEY;
   // Mirrored ref + state: ref handles the fast tick comparison inside the
   // 10s interval (avoids re-creating the interval on every save), state
   // is what the paywall branch reads (refs can't be accessed in render).
@@ -583,7 +595,16 @@ function EpisodePlayback({
         // surface; the fullscreen button still hands off to the system
         // player on demand.
         playsInline
-        metadata={{ video_id: current.id, video_title: current.title }}
+        envKey={muxDataEnabled ? MUX_DATA_ENV_KEY : undefined}
+        disableTracking={!muxDataEnabled}
+        disableCookies={!muxDataEnabled}
+        metadata={{
+          video_id: current.id,
+          video_title: current.title,
+          // video_series gives the per-show breakdown in the Mux dashboard.
+          video_series: showTitle ?? showSlug,
+          player_name: "matio-watch",
+        }}
         onLoadedMetadata={(e) => {
           // HTMLVideoElement exposes intrinsic dimensions once the
           // manifest is parsed. Use those to size the player container

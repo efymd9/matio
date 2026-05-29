@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, count, desc, eq, gte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   episodes,
@@ -69,6 +69,9 @@ export default async function AnalyticsPage() {
     lastTouchTrialsRows,
     lastTouchSignupsRows,
     lastTouchSubsRows,
+    watchEngagementRow,
+    avgCompletionRow,
+    trialDepthRow,
   ] = await Promise.all([
     db.select({ n: count() }).from(users),
     db
@@ -105,11 +108,15 @@ export default async function AnalyticsPage() {
     // Top shows by total watched seconds (sum of every viewer's
     // last-known position per episode). Not perfect for repeat-watching
     // — we don't have per-session event logs — but a useful proxy at v1.
+    // Also returns distinct viewers and a completion ratio per show.
     db
       .select({
         title: shows.title,
         slug: shows.slug,
         seconds: sql<number>`COALESCE(SUM(${watchProgress.positionSeconds}), 0)::int`,
+        viewers: sql<number>`COUNT(DISTINCT ${watchProgress.userId})::int`,
+        completed: sql<number>`COUNT(*) FILTER (WHERE ${watchProgress.completed})::int`,
+        plays: sql<number>`COUNT(*)::int`,
       })
       .from(watchProgress)
       .innerJoin(episodes, eq(watchProgress.episodeId, episodes.id))
@@ -218,6 +225,39 @@ export default async function AnalyticsPage() {
         subscriptions.attributionLastCampaign,
         subscriptions.plan,
       ),
+    // ----- Engagement (subscribers) -----
+    // Completion rate, distinct viewers, and total watched seconds across all
+    // watch_progress rows. `completed` is set true on onEnded; positionSeconds
+    // is the last-saved playhead per (user, episode) — a resume position, so
+    // totals are an approximation, not true cumulative minutes.
+    db
+      .select({
+        total: count(),
+        completed: sql<number>`COUNT(*) FILTER (WHERE ${watchProgress.completed})::int`,
+        viewers: sql<number>`COUNT(DISTINCT ${watchProgress.userId})::int`,
+        seconds: sql<number>`COALESCE(SUM(${watchProgress.positionSeconds}), 0)::int`,
+      })
+      .from(watchProgress),
+    // Average % of episode watched (last position / duration), clamped to 100%.
+    // Guard out episodes with no duration (still processing / errored) to avoid
+    // divide-by-zero skew.
+    db
+      .select({
+        pct: sql<number>`COALESCE(AVG(LEAST(${watchProgress.positionSeconds}::float / NULLIF(${episodes.durationSeconds}, 0), 1)) * 100, 0)`,
+      })
+      .from(watchProgress)
+      .innerJoin(episodes, eq(watchProgress.episodeId, episodes.id))
+      .where(and(isNotNull(episodes.durationSeconds), gt(episodes.durationSeconds, 0))),
+    // Trial preview depth · 30d — how far into the 60s preview anonymous
+    // viewers get (last_position_seconds per trial session).
+    db
+      .select({
+        avgDepth: sql<number>`COALESCE(AVG(${trialSessions.lastPositionSeconds}), 0)`,
+        withProgress: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.lastPositionSeconds} > 0)::int`,
+        total: count(),
+      })
+      .from(trialSessions)
+      .where(gte(trialSessions.startedAt, thirtyDaysAgo)),
   ]);
 
   const totalUsers = totalUsersRow[0].n;
@@ -266,6 +306,24 @@ export default async function AnalyticsPage() {
     lastTouchSignupsRows,
     lastTouchSubsRows,
   );
+
+  // Engagement (subscribers). All approximate — see the query comments and the
+  // note rendered under the section: positionSeconds is the last-saved playhead
+  // (resume position), not cumulative watch time. Mux Data (consent-gated)
+  // provides true watch-time + retention curves once its env key is set.
+  const engagement = watchEngagementRow[0];
+  const watchRows = Number(engagement.total);
+  const completedRows = Number(engagement.completed);
+  const distinctViewers = Number(engagement.viewers);
+  const completionRate = watchRows > 0 ? (completedRows / watchRows) * 100 : 0;
+  const avgCompletionPct = Number(avgCompletionRow[0].pct);
+  const avgWatchedMinPerViewer =
+    distinctViewers > 0
+      ? Math.round(Number(engagement.seconds) / distinctViewers / 60)
+      : 0;
+  const trialDepth = trialDepthRow[0];
+  const avgTrialDepth = Math.round(Number(trialDepth.avgDepth));
+  const trialDepthTotal = Number(trialDepth.total);
 
   return (
     <div className="space-y-8">
@@ -355,6 +413,9 @@ export default async function AnalyticsPage() {
               const minutes = Math.round(seconds / 60);
               const pct =
                 maxShowSeconds > 0 ? (seconds / maxShowSeconds) * 100 : 0;
+              const plays = Number(s.plays);
+              const showCompletion =
+                plays > 0 ? Math.round((Number(s.completed) / plays) * 100) : 0;
               return (
                 <li key={s.slug} className="flex items-center gap-3">
                   <span className="w-6 font-mono text-xs text-white/45">
@@ -372,8 +433,12 @@ export default async function AnalyticsPage() {
                       style={{ width: `${pct}%` }}
                     />
                   </div>
-                  <span className="w-20 text-right font-mono text-xs text-white/65">
+                  <span className="w-28 shrink-0 text-right font-mono text-[11px] leading-tight text-white/65">
                     {minutes.toLocaleString()} min
+                    <span className="block text-white/35">
+                      {Number(s.viewers).toLocaleString()} viewer
+                      {Number(s.viewers) === 1 ? "" : "s"} · {showCompletion}%
+                    </span>
                   </span>
                 </li>
               );
@@ -394,9 +459,41 @@ export default async function AnalyticsPage() {
         rows={lastTouchRows}
       />
 
-      <p className="text-center text-[10px] text-white/35">
-        Mux Data video-quality metrics will be wired in a follow-up.
-      </p>
+      {/* Engagement (subscribers + trial) */}
+      <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5">
+        <div className="mb-4 flex items-baseline justify-between gap-3">
+          <h2 className="text-sm font-bold text-white">Engagement</h2>
+          <span className="text-[11px] text-white/45">watch behaviour</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Metric
+            label="Completion rate"
+            value={`${completionRate.toFixed(0)}%`}
+            sub={`${completedRows}/${watchRows} episodes finished`}
+          />
+          <Metric
+            label="Avg % watched"
+            value={`${avgCompletionPct.toFixed(0)}%`}
+            sub="of episode length"
+          />
+          <Metric
+            label="Avg watched / viewer"
+            value={`${avgWatchedMinPerViewer} min`}
+            sub={`${distinctViewers} viewer${distinctViewers === 1 ? "" : "s"}`}
+          />
+          <Metric
+            label="Trial preview depth"
+            value={`${avgTrialDepth}s`}
+            sub={`avg of ${trialDepthTotal} trials · 60s cap`}
+          />
+        </div>
+        <p className="mt-3 text-[10px] leading-relaxed text-white/35">
+          Approximate — derived from the last-saved playhead per episode (resume
+          position), not cumulative minutes. Mux Data adds true watch-time,
+          unique viewers and retention curves once its env key is set (and only
+          for visitors who accept marketing cookies).
+        </p>
+      </section>
     </div>
   );
 }

@@ -7,7 +7,11 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
+import { useMarketingConsent } from "@/lib/use-marketing-consent";
 import { Icon } from "./icon";
+
+// Public Mux Data env key. Empty when unset → Mux Data stays fully off.
+const MUX_DATA_ENV_KEY = process.env.NEXT_PUBLIC_MUX_DATA_ENV_KEY ?? "";
 
 // Lazy-load the Mux player to keep ~350KB of player+media-chrome+hls out
 // of the home-page initial JS chunk. The backdrop <Image> becomes LCP;
@@ -47,6 +51,11 @@ export function HeroBanner({
   const backdrop = heroImageUrl ?? posterImageUrl;
   const tone = toneFor(slug);
   const t = useT();
+  // The hero autoplays on every home visit (pre-consent), so Mux Data here must
+  // be gated: no env key / no consent → disableTracking + disableCookies, no
+  // beacons. MuxPlayer is dynamic(ssr:false) so the consent value is settled
+  // before it mounts.
+  const muxDataEnabled = useMarketingConsent() && !!MUX_DATA_ENV_KEY;
 
   return (
     <section className="relative isolate min-h-[640px] w-full overflow-hidden bg-background sm:h-[90vh]">
@@ -82,6 +91,15 @@ export function HeroBanner({
           preload="auto"
           nohotkeys
           streamType="on-demand"
+          envKey={muxDataEnabled ? MUX_DATA_ENV_KEY : undefined}
+          disableTracking={!muxDataEnabled}
+          disableCookies={!muxDataEnabled}
+          metadata={{
+            video_id: slug,
+            video_title: title,
+            // Distinguish autoplay hero views from real episode watch-time.
+            player_name: "matio-hero",
+          }}
           className="hero-preview"
           style={{
             position: "absolute",

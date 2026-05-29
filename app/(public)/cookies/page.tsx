@@ -126,6 +126,13 @@ function CookiesEn() {
               expiry: "90 days",
               category: "Marketing",
             },
+            {
+              name: "muxData / mux_viewer_id (Mux)",
+              purpose:
+                "Set by Mux Data (our video provider’s analytics) to measure watch time, unique viewers and playback quality. Only used after you accept marketing cookies.",
+              expiry: "Up to 1 year",
+              category: "Marketing",
+            },
           ]}
         />
         <p>
@@ -137,8 +144,11 @@ function CookiesEn() {
           <strong>Meta Platforms Ireland Ltd</strong> &mdash; a hashed
           (SHA-256) version of your email address, your IP address, and event
           signals such as page views, sign-ups and subscriptions. We do not use
-          Google Analytics. Mux collects playback-quality telemetry from inside
-          the player without setting third-party cookies.
+          Google Analytics. Our video provider <strong>Mux</strong> measures
+          playback quality and watch time via <strong>Mux Data</strong>; like
+          the Pixel, this runs <strong>only after you accept marketing
+          cookies</strong> and sets a viewer identifier so we can count unique
+          viewers.
         </p>
       </Section>
 
@@ -259,6 +269,13 @@ function CookiesEs() {
               expiry: "90 días",
               category: "Marketing",
             },
+            {
+              name: "muxData / mux_viewer_id (Mux)",
+              purpose:
+                "La coloca Mux Data (la analítica de nuestro proveedor de vídeo) para medir el tiempo de visionado, los espectadores únicos y la calidad de reproducción. Solo se usa tras aceptar las cookies de marketing.",
+              expiry: "Hasta 1 año",
+              category: "Marketing",
+            },
           ]}
         />
         <p>
@@ -270,8 +287,12 @@ function CookiesEs() {
           datos con <strong>Meta Platforms Ireland Ltd</strong>: una versión
           cifrada (hash SHA-256) de tu correo electrónico, tu dirección IP y
           señales de eventos como visitas de página, registros y suscripciones.
-          No utilizamos Google Analytics. Mux recopila telemetría de calidad de
-          reproducción desde el reproductor sin instalar cookies de terceros.
+          No utilizamos Google Analytics. Nuestro proveedor de vídeo{" "}
+          <strong>Mux</strong> mide la calidad de reproducción y el tiempo de
+          visionado mediante <strong>Mux Data</strong>; al igual que el Pixel,
+          esto se ejecuta <strong>solo tras aceptar las cookies de
+          marketing</strong> y coloca un identificador de espectador para contar
+          espectadores únicos.
         </p>
       </Section>
 
