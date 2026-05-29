@@ -13,6 +13,7 @@ import {
   readAttributionFromSearchParams,
   serializeAttribution,
 } from "@/lib/attribution";
+import { FBC_COOKIE, buildFbc } from "@/lib/capi-identity";
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
@@ -48,41 +49,65 @@ async function getUserRoleCached(userId: string): Promise<string | null> {
   return role;
 }
 
-// Returns a NextResponse with attribution cookies set if the request has
-// utm_* query params; null otherwise. attribution_first writes only when
-// absent (preserving the original campaign across re-visits);
-// attribution_last overwrites every time so the conversion-moment
-// snapshot reflects whatever brought the user back most recently.
+// Returns a NextResponse with marketing cookies set, or null if there's
+// nothing to persist. Two things ride here:
+//   - attribution_first / attribution_last — UTM campaign snapshots.
+//     attribution_first writes only when absent (preserving the original
+//     campaign across re-visits); attribution_last overwrites every time so
+//     the conversion-moment snapshot reflects whatever brought the user back.
+//   - _fbc — derived from a Meta click id (?fbclid=) so an ad clickthrough is
+//     matchable by the Conversions API even if the pixel JS is slow/blocked.
+//     Write-if-absent (first click wins), 90-day life (Meta's _fbc window).
 //
-// Gated on cookie_consent.marketing === true so we don't drop tracking
-// cookies on EU visitors before they've accepted the banner (ePrivacy /
-// PECR / Spain LSSI). UTM params still flow through the request — they
-// just don't get persisted across requests until consent is given.
-function applyAttributionCookies(req: NextRequest): NextResponse | null {
-  const incoming = readAttributionFromSearchParams(req.nextUrl.searchParams);
-  if (!hasAnyField(incoming)) return null;
+// All gated on cookie_consent.marketing === true so we don't drop tracking
+// cookies on EU visitors before they've accepted the banner (ePrivacy / PECR /
+// Spain LSSI). The params still flow through the request — they just aren't
+// persisted across requests until consent is given. _fbp is set by the pixel
+// JS itself, never here.
+function applyMarketingCookies(req: NextRequest): NextResponse | null {
   if (!hasMarketingConsent(req.cookies.get(CONSENT_COOKIE)?.value)) return null;
 
-  const res = NextResponse.next();
-  const payload = serializeAttribution(incoming);
+  const incoming = readAttributionFromSearchParams(req.nextUrl.searchParams);
+  const hasAttribution = hasAnyField(incoming);
 
-  if (!req.cookies.get(ATTRIBUTION_FIRST_COOKIE)) {
-    res.cookies.set(ATTRIBUTION_FIRST_COOKIE, payload, {
+  const fbclid = req.nextUrl.searchParams.get("fbclid");
+  const needFbc = !!fbclid && !req.cookies.get(FBC_COOKIE);
+
+  if (!hasAttribution && !needFbc) return null;
+
+  const res = NextResponse.next();
+  const prod = process.env.NODE_ENV === "production";
+
+  if (hasAttribution) {
+    const payload = serializeAttribution(incoming);
+    if (!req.cookies.get(ATTRIBUTION_FIRST_COOKIE)) {
+      res.cookies.set(ATTRIBUTION_FIRST_COOKIE, payload, {
+        maxAge: ATTRIBUTION_FIRST_MAX_AGE,
+        sameSite: "lax",
+        path: "/",
+        // Not httpOnly: client-side analytics may read these; the values are
+        // non-sensitive UTM params the browser was already sending in the URL.
+        secure: prod,
+      });
+    }
+    res.cookies.set(ATTRIBUTION_LAST_COOKIE, payload, {
+      maxAge: ATTRIBUTION_LAST_MAX_AGE,
+      sameSite: "lax",
+      path: "/",
+      secure: prod,
+    });
+  }
+
+  if (needFbc && fbclid) {
+    res.cookies.set(FBC_COOKIE, buildFbc(fbclid, Date.now()), {
       maxAge: ATTRIBUTION_FIRST_MAX_AGE,
       sameSite: "lax",
       path: "/",
-      // Not httpOnly: client-side analytics scripts (if added later) may
-      // want to read these; the values are non-sensitive UTM params the
-      // browser was already sending in the URL.
-      secure: process.env.NODE_ENV === "production",
+      // Not httpOnly: the Meta Pixel reads _fbc client-side to attach to
+      // browser events, and CAPI reads it server-side via cookies().
+      secure: prod,
     });
   }
-  res.cookies.set(ATTRIBUTION_LAST_COOKIE, payload, {
-    maxAge: ATTRIBUTION_LAST_MAX_AGE,
-    sameSite: "lax",
-    path: "/",
-    secure: process.env.NODE_ENV === "production",
-  });
   return res;
 }
 
@@ -108,13 +133,13 @@ export default clerkMiddleware(async (auth, req) => {
     if (!userId) return redirectToSignUp({ returnBackUrl: req.url });
     // Attribution still captured for signed-in /subscribe visits — e.g.
     // a remarketing campaign that links a returning user straight here.
-    return applyAttributionCookies(req) ?? undefined;
+    return applyMarketingCookies(req) ?? undefined;
   }
 
-  // Catch-all: every other passthrough route captures attribution. Ad
+  // Catch-all: every other passthrough route captures attribution + _fbc. Ad
   // landings are nearly always /, /shows/*, or /watch/* — anything not
   // gated above.
-  return applyAttributionCookies(req) ?? undefined;
+  return applyMarketingCookies(req) ?? undefined;
 });
 
 export const config = {

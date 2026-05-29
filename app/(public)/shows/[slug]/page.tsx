@@ -8,6 +8,7 @@ import { episodes, seasons, shows } from "@/db/schema";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
+import { ViewContentPixel } from "@/components/site/view-content-pixel";
 
 // Per-show metadata: makes Slack / Twitter / iMessage unfurls show the
 // actual show title and (where set) its hero artwork instead of the
@@ -141,6 +142,13 @@ export default async function ShowDetailPage({
 
   return (
     <main className="bg-background">
+      {/* Meta Pixel ViewContent — renders nothing; fires once the consent-
+          gated pixel has loaded. */}
+      <ViewContentPixel
+        slug={show.slug}
+        title={show.title}
+        genre={show.genre[0] ?? null}
+      />
       {/* Hero */}
       <section className="relative isolate h-[65vh] min-h-[480px] w-full overflow-hidden">
         {backdrop ? (

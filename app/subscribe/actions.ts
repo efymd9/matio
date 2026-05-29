@@ -1,6 +1,7 @@
 "use server";
 
 import { and, eq, inArray, isNull } from "drizzle-orm";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { shows, subscriptions, users } from "@/db/schema";
@@ -9,6 +10,8 @@ import {
   readAttributionCookies,
   toStripeMetadata,
 } from "@/lib/attribution";
+import { readCapiIdentity, toCapiMetadata } from "@/lib/capi-identity";
+import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 import { getDict } from "@/lib/i18n/server";
 import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
@@ -137,6 +140,18 @@ export async function startCheckout(formData: FormData) {
     attribution.last,
   );
 
+  // Snapshot the Meta CAPI identity (_fbp / _fbc / client IP / user-agent) at
+  // the conversion moment so the context-less Stripe webhook can fire a
+  // well-matched Purchase event. Gated on marketing consent — the capi_consent
+  // sentinel inside this metadata is the signal the webhook reads to decide
+  // whether CAPI may fire at all. No consent ⇒ no capi metadata ⇒ no Purchase
+  // event. Like attribution, it is written on the subscription at creation and
+  // never overwritten on renewal.
+  const consentRaw = (await cookies()).get(CONSENT_COOKIE)?.value;
+  const capiMetadata = hasMarketingConsent(consentRaw)
+    ? toCapiMetadata(await readCapiIdentity())
+    : {};
+
   // Locale drives both the Stripe-hosted page language and the
   // language of the withdrawal-waiver acceptance text below.
   const { locale, t } = await getDict();
@@ -148,7 +163,9 @@ export async function startCheckout(formData: FormData) {
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
-      subscription_data: { metadata: { userId, ...attributionMetadata } },
+      subscription_data: {
+        metadata: { userId, ...attributionMetadata, ...capiMetadata },
+      },
       // Stripe Tax — collect billing address, compute VAT/sales tax, and
       // persist the address back to the Customer so renewals invoice
       // correctly. Without this, EU/UK customers were billed at the flat

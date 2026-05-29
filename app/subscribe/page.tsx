@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { subscriptions, type Subscription } from "@/db/schema";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { Icon } from "@/components/site/icon";
+import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import { applyUserAttribution } from "@/lib/attribution";
 import { getDict } from "@/lib/i18n/server";
@@ -59,6 +60,9 @@ export default async function SubscribePage({
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background pb-16 pt-28 sm:pt-32">
+      {/* Meta Pixel CompleteRegistration — fires once per user (new signups
+          land here right after Clerk sign-up). Renders nothing. */}
+      <CompleteRegistrationPixel userId={userId} />
       {/* Soft radial accent behind the content */}
       <div
         className="pointer-events-none absolute inset-0 opacity-40"

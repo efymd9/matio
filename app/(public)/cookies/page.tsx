@@ -1,7 +1,8 @@
 // DRAFT pending legal-counsel review. Describes the cookies the site sets
-// (Clerk + Stripe + attribution). The attribution_first / attribution_last
-// marketing cookies are gated on cookie_consent.marketing via proxy.ts +
-// the consent banner. Contact details filled 2026-05-27.
+// (Clerk + Stripe + attribution + Meta Pixel). The attribution_first /
+// attribution_last / _fbp / _fbc marketing cookies are gated on
+// cookie_consent.marketing via proxy.ts + the consent banner. Contact details
+// filled 2026-05-27; Meta Pixel + Conversions API disclosure added 2026-05-29.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDict } from "@/lib/i18n/server";
@@ -14,8 +15,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED_ES = "27 de mayo de 2026";
-const LAST_UPDATED_EN = "May 27, 2026";
+const LAST_UPDATED_ES = "29 de mayo de 2026";
+const LAST_UPDATED_EN = "May 29, 2026";
 
 export default async function CookiesPage() {
   const { locale, t } = await getDict();
@@ -111,12 +112,33 @@ function CookiesEn() {
               expiry: "30 days",
               category: "Marketing",
             },
+            {
+              name: "_fbp (Meta)",
+              purpose:
+                "Set by the Meta Pixel to identify your browser for advertising measurement and to attribute conversions to our Meta ad campaigns. Only set after you accept marketing cookies.",
+              expiry: "90 days",
+              category: "Marketing",
+            },
+            {
+              name: "_fbc / fbclid (Meta)",
+              purpose:
+                "Stores the Meta click identifier when you arrive from a Facebook or Instagram ad, so a later sign-up or subscription can be matched to that ad. Only used after you accept marketing cookies.",
+              expiry: "90 days",
+              category: "Marketing",
+            },
           ]}
         />
         <p>
-          We do not use Google Analytics, Facebook Pixel or any cross-site
-          tracking trackers. Mux collects playback quality telemetry from
-          inside the player without setting third-party cookies.
+          We use the <strong>Meta Pixel</strong> and Meta&rsquo;s{" "}
+          <strong>Conversions API</strong> to measure how our advertising on
+          Facebook and Instagram performs. These run{" "}
+          <strong>only after you accept marketing cookies</strong> in the
+          banner. When active they share a limited set of data with{" "}
+          <strong>Meta Platforms Ireland Ltd</strong> &mdash; a hashed
+          (SHA-256) version of your email address, your IP address, and event
+          signals such as page views, sign-ups and subscriptions. We do not use
+          Google Analytics. Mux collects playback-quality telemetry from inside
+          the player without setting third-party cookies.
         </p>
       </Section>
 
@@ -223,12 +245,33 @@ function CookiesEs() {
               expiry: "30 días",
               category: "Marketing",
             },
+            {
+              name: "_fbp (Meta)",
+              purpose:
+                "La coloca el Meta Pixel para identificar tu navegador en la medición publicitaria y atribuir conversiones a nuestras campañas de Meta. Solo se coloca tras aceptar las cookies de marketing.",
+              expiry: "90 días",
+              category: "Marketing",
+            },
+            {
+              name: "_fbc / fbclid (Meta)",
+              purpose:
+                "Guarda el identificador de clic de Meta cuando llegas desde un anuncio de Facebook o Instagram, para vincular un registro o suscripción posterior a ese anuncio. Solo se usa tras aceptar las cookies de marketing.",
+              expiry: "90 días",
+              category: "Marketing",
+            },
           ]}
         />
         <p>
-          No utilizamos Google Analytics, Facebook Pixel ni rastreadores
-          entre sitios. Mux recopila telemetría de calidad de reproducción
-          desde el reproductor sin instalar cookies de terceros.
+          Utilizamos el <strong>Meta Pixel</strong> y la{" "}
+          <strong>API de Conversiones</strong> de Meta para medir el
+          rendimiento de nuestra publicidad en Facebook e Instagram. Solo se
+          activan <strong>después de que aceptes las cookies de marketing</strong>{" "}
+          en el banner. Cuando están activos, comparten un conjunto limitado de
+          datos con <strong>Meta Platforms Ireland Ltd</strong>: una versión
+          cifrada (hash SHA-256) de tu correo electrónico, tu dirección IP y
+          señales de eventos como visitas de página, registros y suscripciones.
+          No utilizamos Google Analytics. Mux recopila telemetría de calidad de
+          reproducción desde el reproductor sin instalar cookies de terceros.
         </p>
       </Section>
 

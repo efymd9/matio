@@ -15,8 +15,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED_ES = "27 de mayo de 2026";
-const LAST_UPDATED_EN = "May 27, 2026";
+const LAST_UPDATED_ES = "29 de mayo de 2026";
+const LAST_UPDATED_EN = "May 29, 2026";
 
 export default async function PrivacyPage() {
   const { locale, t } = await getDict();
@@ -89,7 +89,11 @@ function PrivacyEn() {
             <strong>Marketing-attribution data</strong> — if you arrive from a
             campaign URL we record the source / medium / campaign in two cookies
             and may attach the snapshot to your account at checkout for revenue
-            attribution. See the <Link href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</Link>.
+            attribution. If you accept marketing cookies, we also run the Meta
+            Pixel and Meta Conversions API for advertising measurement: this
+            shares a hashed (SHA-256) email address, your IP address and
+            conversion events (page views, sign-ups, subscriptions) with Meta.
+            See the <Link href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</Link>.
           </li>
           <li>
             <strong>Communications</strong> — emails you send us, support
@@ -127,12 +131,13 @@ function PrivacyEn() {
             <em>legitimate interests</em>.
           </li>
           <li>
-            <strong>Marketing attribution</strong> via the{" "}
+            <strong>Marketing and advertising measurement</strong> via the{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_first</code>{" "}
             and{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_last</code>{" "}
-            cookies. Lawful basis: <em>consent</em> — set only after you accept
-            via the cookie banner.
+            cookies and, where enabled, the Meta Pixel and Meta Conversions API.
+            Lawful basis: <em>consent</em> — these run only after you accept
+            marketing cookies in the banner, and stop if you withdraw consent.
           </li>
         </ul>
       </Section>
@@ -164,6 +169,15 @@ function PrivacyEn() {
           <li>
             <strong>Neon Inc.</strong> (US, EU region for our database) — our
             Postgres database is hosted on AWS Frankfurt (eu-central-1). SCCs.
+          </li>
+          <li>
+            <strong>Meta Platforms Ireland Ltd</strong> (Ireland, with
+            transfers to Meta Platforms Inc. in the US) — advertising
+            measurement via the Meta Pixel and Conversions API. Only engaged
+            after you accept marketing cookies. We share a hashed (SHA-256)
+            email address, IP address and conversion events so Meta can
+            attribute and optimise our ad campaigns. US transfers covered by
+            SCCs.
           </li>
         </ul>
         <p>
@@ -320,7 +334,11 @@ function PrivacyEs() {
             <strong>Datos de atribución</strong>: si llegas desde una URL de
             campaña, guardamos la fuente, el medio y el nombre de campaña en
             dos cookies y podemos vincular la instantánea a tu cuenta al pagar
-            para atribución de ingresos. Consulta la{" "}
+            para atribución de ingresos. Si aceptas las cookies de marketing,
+            además usamos el Meta Pixel y la API de Conversiones de Meta para
+            medición publicitaria: esto comparte con Meta un correo electrónico
+            cifrado (hash SHA-256), tu dirección IP y eventos de conversión
+            (visitas de página, registros, suscripciones). Consulta la{" "}
             <Link href="/cookies" className="underline underline-offset-2 hover:text-white">
               Política de cookies
             </Link>
@@ -363,12 +381,15 @@ function PrivacyEs() {
             jurídica: <em>interés legítimo</em>.
           </li>
           <li>
-            <strong>Atribución de marketing</strong> mediante las cookies{" "}
+            <strong>Marketing y medición publicitaria</strong> mediante las
+            cookies{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_first</code>{" "}
             y{" "}
-            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_last</code>
-            . Base jurídica: <em>consentimiento</em>, otorgado a través del
-            banner de cookies.
+            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_last</code>{" "}
+            y, cuando está activado, el Meta Pixel y la API de Conversiones de
+            Meta. Base jurídica: <em>consentimiento</em>: solo se ejecutan tras
+            aceptar las cookies de marketing en el banner y se detienen si
+            retiras el consentimiento.
           </li>
         </ul>
       </Section>
@@ -402,6 +423,15 @@ function PrivacyEs() {
             <strong>Neon Inc.</strong> (EE. UU., región europea para nuestra
             base de datos) — Postgres alojado en AWS Fráncfort (eu-central-1).
             CCT.
+          </li>
+          <li>
+            <strong>Meta Platforms Ireland Ltd</strong> (Irlanda, con
+            transferencias a Meta Platforms Inc. en EE. UU.) — medición
+            publicitaria mediante el Meta Pixel y la API de Conversiones. Solo
+            se utiliza tras aceptar las cookies de marketing. Compartimos un
+            correo electrónico cifrado (hash SHA-256), la dirección IP y eventos
+            de conversión para que Meta pueda atribuir y optimizar nuestras
+            campañas. Transferencias a EE. UU. amparadas por CCT.
           </li>
         </ul>
         <p>

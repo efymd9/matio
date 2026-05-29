@@ -24,6 +24,7 @@ import {
 import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { useT } from "@/lib/i18n/client";
+import { trackPixel } from "@/lib/meta-pixel-events";
 import dynamic from "next/dynamic";
 import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
 
@@ -129,6 +130,18 @@ export function Player({
   const [currentEpisodeId, setCurrentEpisodeId] = useState(initialEpisodeId);
   const [overlay, setOverlay] = useState<OverlayKind>("none");
   const [locked, setLocked] = useState(false);
+  // Meta Pixel Lead fires once per show-preview session, not per episode — the
+  // ref lives here in the outer shell so swapping episodes mid-trial doesn't
+  // re-fire it. No-op without marketing consent (fbq isn't loaded).
+  const trialLeadFiredRef = useRef(false);
+  const onTrialStart = useCallback(() => {
+    if (trialLeadFiredRef.current) return;
+    trialLeadFiredRef.current = true;
+    trackPixel("Lead", {
+      content_name: showTitle ?? showSlug,
+      content_category: "trial_preview",
+    });
+  }, [showTitle, showSlug]);
 
   const current = useMemo(
     () => episodes.find((e) => e.id === currentEpisodeId) ?? episodes[0],
@@ -181,6 +194,7 @@ export function Player({
       overlay={overlay}
       onOverlayChange={setOverlay}
       onSwap={swap}
+      onTrialStart={onTrialStart}
       userEmail={userEmail}
     />
   );
@@ -200,6 +214,7 @@ function EpisodePlayback({
   overlay,
   onOverlayChange,
   onSwap,
+  onTrialStart,
   userEmail,
 }: {
   current: PlayerEpisode;
@@ -215,6 +230,7 @@ function EpisodePlayback({
   overlay: OverlayKind;
   onOverlayChange: (overlay: OverlayKind) => void;
   onSwap: (episodeId: string) => void;
+  onTrialStart: () => void;
   userEmail?: string | null;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -281,6 +297,7 @@ function EpisodePlayback({
           const data = (await r.json()) as {
             token: unknown;
             expiresIn: unknown;
+            mode?: unknown;
           };
           if (cancelled) return;
           if (
@@ -292,6 +309,9 @@ function EpisodePlayback({
           }
           setToken(data.token);
           setExpiresAt(Date.now() + data.expiresIn * 1000);
+          // Trial-mode token issued → a 60s preview just started. Fire the
+          // Meta Pixel Lead (deduped to once per show-preview by the shell).
+          if (data.mode === "trial") onTrialStart();
         } catch {
           if (!cancelled) setEndState("unavailable");
         }
@@ -304,7 +324,7 @@ function EpisodePlayback({
       cancelled = true;
       abort?.abort();
     };
-  }, [current.id, fetchKey]);
+  }, [current.id, fetchKey, onTrialStart]);
 
   // Token refresh BEFORE expiry (60s lead). Refreshing exactly at expiry
   // raced segment fetches that ran a hair late — Mux validates `exp` on

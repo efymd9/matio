@@ -168,6 +168,28 @@ Existing deployments keep their snapshot of env vars — only the **next** deplo
 
 **Build settings**: framework auto-detected as Next.js. Routes are dynamic (`ƒ`) by default since they hit DB / cookies.
 
+## Meta (Pixel + Conversions API)
+
+**Used for**: advertising measurement for Facebook/Instagram campaigns. Browser **Meta Pixel** (top-of-funnel events) + server-side **Conversions API** (the reliable Purchase signal). Both are **gated on marketing consent** — nothing fires until the visitor accepts marketing cookies in the banner, consistent with the existing attribution gate.
+
+**Setup**: Business Manager → Events Manager → Data Sources → your pixel. The Pixel ID is public; the Conversions API access token (Events Manager → Settings → Conversions API → *Generate access token*) is a secret.
+
+**Env vars**:
+- `NEXT_PUBLIC_META_PIXEL_ID` — pixel id (public; ships in client JS and is also read server-side for CAPI).
+- `META_CAPI_ACCESS_TOKEN` — Conversions API token (**secret**, never `NEXT_PUBLIC`, never logged).
+- `META_CAPI_TEST_EVENT_CODE` — optional; only while testing in the Events Manager "Test events" tab.
+- `META_GRAPH_API_VERSION` — optional; defaults to `v21.0` in `lib/meta-capi.ts`. Bump when Meta deprecates the version.
+
+**Events**:
+- Browser (`lib/meta-pixel-events.ts` → `fbq`): `PageView` (all pages + SPA route changes), `ViewContent` (`/shows/[slug]`), `Lead` (60s trial-preview start), `InitiateCheckout` (`/subscribe` submit), `CompleteRegistration` (first authenticated `/subscribe`, deduped per-user via localStorage).
+- Server CAPI (`lib/meta-capi.ts`): `Purchase` — fired from the Stripe webhook on the *transition into* an access-granting status (guards against renewal double-counts), `event_id = sub.id` for de-dup, with hashed email + external_id and the `_fbp`/`_fbc`/IP/UA captured at checkout.
+
+**Identity plumbing**: `_fbp`/`_fbc` are set by the browser pixel; `_fbc` is also derived from `?fbclid` in `proxy.ts` (consent-gated). At checkout, `startCheckout` snapshots `_fbp`/`_fbc`/IP/UA into Stripe `subscription_data.metadata` (the `capi_*` keys, incl. a `capi_consent` sentinel) — the same channel UTM attribution uses — so the context-less webhook can match the Purchase event. See `lib/capi-identity.ts`.
+
+**CAPI is best-effort**: `sendCapiEvents` never throws and is time-boxed (3s), so a Meta outage can't roll back the Stripe webhook's idempotency claim. If the env isn't configured it no-ops.
+
+**Match quality**: verify events land in Events Manager (Test events tab with `META_CAPI_TEST_EVENT_CODE`, then the live event log). Add a `matio.tv` referrer restriction on the pixel in Events Manager for defence in depth.
+
 ## Service → file map
 
 | Service | Code |
@@ -177,3 +199,4 @@ Existing deployments keep their snapshot of env vars — only the **next** deplo
 | Mux | `lib/mux.ts`, `lib/mux-token.ts` (playback + thumbnail JWT signers), `app/admin/actions.ts:createMuxUpload`, `app/api/webhooks/mux/route.ts`, `app/api/playback-token/route.ts`, `components/admin/upload-widget.tsx`, `components/watch/player.tsx`, `components/watch/episodes-overlay.tsx`, `components/watch/up-next-overlay.tsx`, `components/site/hero-banner.tsx` (mux-player hero preview) |
 | Neon | `db/index.ts`, `db/schema/*.ts`, `drizzle.config.ts`, `drizzle/` |
 | Vercel | platform-only; see [operations.md](./operations.md#deploy) |
+| Meta | `lib/meta-pixel-events.ts`, `lib/meta-capi.ts`, `lib/capi-identity.ts`, `components/site/meta-pixel.tsx`, `components/site/view-content-pixel.tsx`, `components/site/complete-registration-pixel.tsx`, `app/subscribe/{actions.ts,submit-button.tsx,page.tsx}`, `app/api/webhooks/stripe/route.ts`, `proxy.ts` |

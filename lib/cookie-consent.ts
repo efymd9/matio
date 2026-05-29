@@ -80,15 +80,38 @@ export function writeConsentToDocument(c: ConsentRecord): void {
 }
 
 // Clear any cookies we previously set under marketing-category consent.
-// Cookie names hardcoded — lib/attribution.ts is server-only and can't
-// be imported here. Keep in sync if those names change.
+// Cookie names hardcoded — lib/attribution.ts / lib/capi-identity.ts are
+// server-only and can't be imported here. Keep in sync if those names change.
+// `_fbp` / `_fbc` are the Meta Pixel's marketing cookies — `_fbp` is set by
+// fbevents.js scoped to the registrable domain (Domain=.matio.tv), so a
+// path-only deletion (which only matches a HOST-ONLY cookie) won't remove it.
+// We therefore expire each name BOTH host-only and domain-scoped.
 export function clearMarketingCookies(): void {
   if (typeof document === "undefined") return;
-  for (const name of ["attribution_first", "attribution_last"]) {
+  // Registrable domain from the current host (e.g. www.matio.tv → matio.tv).
+  // Naive last-two-labels is correct for a simple TLD like .tv; skipped on
+  // localhost (no dot), where there is no domain-scoped cookie to clear.
+  const labels = window.location.hostname.split(".");
+  const root = labels.length >= 2 ? labels.slice(-2).join(".") : null;
+  for (const name of ["attribution_first", "attribution_last", "_fbp", "_fbc"]) {
     document.cookie = `${name}=; max-age=0; path=/`;
+    if (root) document.cookie = `${name}=; max-age=0; path=/; domain=.${root}`;
   }
 }
 
 // Custom event the SiteFooter dispatches when the user clicks "Cookie
 // preferences" — the banner listens and re-opens.
 export const COOKIE_PREFS_EVENT = "matio:open-cookie-preferences";
+
+// Custom event the banner dispatches when the user makes (or changes) a
+// consent decision. Distinct from COOKIE_PREFS_EVENT ("reopen the banner") —
+// this one carries the new marketing boolean so consent-aware components
+// (the Meta Pixel loader) can start or stop tracking without a full reload.
+export const CONSENT_CHANGED_EVENT = "matio:consent-changed";
+
+export function broadcastConsentChange(marketing: boolean): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(CONSENT_CHANGED_EVENT, { detail: { marketing } }),
+  );
+}

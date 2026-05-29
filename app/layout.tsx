@@ -7,6 +7,7 @@ import { cookies } from "next/headers";
 import { SiteHeader } from "@/components/site/site-header";
 import { SiteFooter } from "@/components/site/site-footer";
 import { CookieBanner } from "@/components/site/cookie-banner";
+import { MetaPixel } from "@/components/site/meta-pixel";
 import { UserMenu } from "@/components/site/user-menu";
 import { CONSENT_COOKIE, parseConsent } from "@/lib/cookie-consent";
 import { LocaleProvider } from "@/lib/i18n/client";
@@ -126,6 +127,11 @@ export default async function RootLayout({
             </div>
             <SiteFooter />
             <CookieBanner initialConsent={initialConsent} />
+            {/* Consent-gated Meta Pixel — only injects fbevents.js after the
+                visitor accepts marketing cookies. Shares the same
+                initialConsent the banner uses so it can fire on first paint
+                for already-consented visitors. */}
+            <MetaPixel initialConsent={initialConsent} />
           </LocaleProvider>
         </body>
       </html>

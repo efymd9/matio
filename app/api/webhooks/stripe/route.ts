@@ -8,7 +8,10 @@ import {
   toFirstColumns,
   toLastColumns,
 } from "@/lib/attribution";
+import { fromCapiMetadata, metadataHasCapiConsent } from "@/lib/capi-identity";
+import { sendCapiEvents } from "@/lib/meta-capi";
 import { getStripe } from "@/lib/stripe";
+import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 import { markUserTrialsConverted } from "@/lib/trial";
 
 // Stripe needs the raw body to verify the signature; DB writes hit postgres-js.
@@ -49,7 +52,7 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
     typeof sub.customer === "string" ? sub.customer : sub.customer.id;
 
   const [user] = await db
-    .select({ id: users.id })
+    .select({ id: users.id, email: users.email })
     .from(users)
     .where(eq(users.stripeCustomerId, customerId))
     .limit(1);
@@ -102,6 +105,20 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
   // attribution lives on subscription_data.metadata, set by startCheckout.
   const attribution = fromStripeMetadata(sub.metadata);
 
+  // Read the prior status BEFORE the upsert so we can fire the Meta Purchase
+  // event exactly once — on the transition INTO an access-granting state.
+  // mirrorSubscription runs on every renewal / invoice.paid / update too, so
+  // firing unconditionally here would double-count subscriptions in Ads
+  // Manager.
+  const [priorRow] = await db
+    .select({ status: subscriptions.status })
+    .from(subscriptions)
+    .where(eq(subscriptions.stripeSubscriptionId, sub.id))
+    .limit(1);
+  const priorWasAccessGranting = priorRow
+    ? (ACCESS_GRANTING_STATUSES as readonly string[]).includes(priorRow.status)
+    : false;
+
   await db
     .insert(subscriptions)
     .values({
@@ -129,6 +146,68 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
         // want a renewal to erase the original conversion attribution.
       },
     });
+
+  // Meta Conversions API: fire Purchase on the transition INTO an
+  // access-granting status. The predicate is derived from the SAME
+  // ACCESS_GRANTING_STATUSES set as priorWasAccessGranting (above) — so a sub
+  // whose first mirrored status is past_due (e.g. an initial payment that
+  // failed then recovered, or a delayed/SCA settlement) still fires exactly
+  // once, instead of being dropped because the later active edge sees an
+  // already-access-granting prior row.
+  //
+  // Fired BEFORE markUserTrialsConverted: that step can throw (transient DB
+  // error), and on Stripe's retry the prior-status read would then observe the
+  // already-committed access-granting row and permanently suppress the
+  // Purchase. Firing first — with only pure code between the upsert commit and
+  // here — closes that window; event_id=sub.id de-dupes at Meta if a retry
+  // ever re-fires.
+  //
+  // Gated on the capi_consent sentinel startCheckout writes only with marketing
+  // consent. Best-effort: sendCapiEvents never throws and the block is
+  // try/caught, so a Meta failure can't roll back the idempotency claim.
+  const becameAccessGranting =
+    !priorWasAccessGranting &&
+    (ACCESS_GRANTING_STATUSES as readonly string[]).includes(mappedStatus);
+  if (becameAccessGranting && metadataHasCapiConsent(sub.metadata)) {
+    try {
+      const identity = fromCapiMetadata(sub.metadata);
+      const amount =
+        typeof item?.price.unit_amount === "number"
+          ? item.price.unit_amount / 100
+          : undefined;
+      const currency = item?.price.currency?.toUpperCase();
+      const result = await sendCapiEvents([
+        {
+          eventName: "Purchase",
+          eventId: sub.id,
+          actionSource: "website",
+          eventSourceUrl: process.env.NEXT_PUBLIC_APP_URL ?? "https://matio.tv",
+          user: {
+            email: user.email,
+            externalId: user.id,
+            fbp: identity.fbp,
+            fbc: identity.fbc,
+            clientIpAddress: identity.ip,
+            clientUserAgent: identity.ua,
+          },
+          customData: {
+            ...(amount !== undefined ? { value: amount } : {}),
+            ...(currency ? { currency } : {}),
+            content_type: "product",
+            content_ids: ["matio-membership"],
+          },
+        },
+      ]);
+      if (!result.ok && !result.skipped) {
+        console.warn("Meta CAPI Purchase failed", {
+          subId: sub.id,
+          error: result.error,
+        });
+      }
+    } catch (err) {
+      console.warn("Meta CAPI Purchase threw", { subId: sub.id, err });
+    }
+  }
 
   // Once the user has an active (or trialing) subscription, flip every trial
   // session they own to converted = true so the playback path stops gating.

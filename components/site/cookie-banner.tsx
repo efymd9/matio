@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import {
   CONSENT_VERSION,
   COOKIE_PREFS_EVENT,
+  broadcastConsentChange,
   clearMarketingCookies,
   writeConsentToDocument,
   type ConsentRecord,
@@ -46,6 +47,8 @@ export function CookieBanner({
       ts: Date.now(),
       v: CONSENT_VERSION,
     });
+    // Tell the Meta Pixel loader it may start now — no reload needed.
+    broadcastConsentChange(true);
     setVisible(false);
   };
 
@@ -59,6 +62,8 @@ export function CookieBanner({
     // Also clear any marketing cookies that may have been set on prior
     // visits before the banner shipped.
     clearMarketingCookies();
+    // Signal the Pixel to revoke consent if it was already loaded this session.
+    broadcastConsentChange(false);
     setVisible(false);
   };
 
