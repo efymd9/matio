@@ -142,6 +142,20 @@ To pull current env into a local file:
 vercel env pull .env.vercel.production
 ```
 
+**Marketing + analytics env vars** (consent-gated Meta Pixel / CAPI + Mux Data — all new):
+
+| Var | Scope | What it powers |
+|---|---|---|
+| `NEXT_PUBLIC_META_PIXEL_ID` | public | Browser Meta Pixel (PageView / ViewContent / Lead / InitiateCheckout / CompleteRegistration). Unset → pixel never injects. |
+| `META_CAPI_ACCESS_TOKEN` | secret | Server-side Conversions API Purchase event from the Stripe webhook. Unset → CAPI no-ops. |
+| `META_CAPI_TEST_EVENT_CODE` | secret (optional) | Routes CAPI events to Events Manager → Test Events for verification. Remove for production traffic. |
+| `META_GRAPH_API_VERSION` | secret (optional) | Graph API version override; defaults to `v21.0`. |
+| `NEXT_PUBLIC_MUX_DATA_ENV_KEY` | public | Enables Mux Data tracking on the watch + hero players (Mux dashboard → environment → Env Key). Unset → players pass `disableTracking`/`disableCookies` and emit no beacons. |
+| `MUX_DATA_API_TOKEN_ID` | secret | `id` half of a Mux access token with **Mux Data: Read** — powers the in-admin "Watch time · Mux Data" panel. |
+| `MUX_DATA_API_TOKEN_SECRET` | secret | `secret` half of the same Mux access token. |
+
+**CAVEAT — `NEXT_PUBLIC_*` are inlined at *build* time.** `NEXT_PUBLIC_META_PIXEL_ID` and `NEXT_PUBLIC_MUX_DATA_ENV_KEY` are baked into the bundle when `vercel --prod` builds. They **must exist in Vercel *before* the build** — set them after a deploy and the feature ships disabled until you redeploy. The secrets (`META_CAPI_ACCESS_TOKEN`, `MUX_DATA_API_TOKEN_*`) are read at runtime, but a redeploy is still needed to propagate them to the functions. Net: set all seven, *then* deploy.
+
 ## End-to-end test recipes
 
 ### Sign up + admin promotion
@@ -220,6 +234,23 @@ The admin form has two image URL fields. Both are optional (a show with neither 
 2. Eight metric cards render with valid numbers (no `NaN`, no division-by-zero).
 3. Daily-signups histogram shows 30 bars (oldest left → today right). Days with zero render as faint stubs.
 4. Top shows list shows up to 10 rows with the highest watched-minutes show normalized to a full red bar. Empty data renders "No watch progress recorded yet."
+
+### Meta Pixel + Conversions API
+
+Everything here gates on `cookie_consent.marketing` — nothing fires until the visitor accepts.
+
+1. Incognito → `/`. The cookie banner shows. With **`NEXT_PUBLIC_META_PIXEL_ID`** set in the build, click **"Accept all"** → `MetaPixel` injects `fbevents.js` and fires `PageView`. Verify in **Events Manager → your pixel → Test Events** (paste the browser into the Test Events "test in browser" field, or watch the live Overview a few minutes later). Browser events to spot-check while clicking through: `PageView` (every page + SPA nav), `ViewContent` on `/shows/<slug>`, `Lead` when a 60s trial token is issued, `InitiateCheckout` on the `/subscribe` submit, `CompleteRegistration` on `/subscribe` (once per user — `localStorage` dedup, so it won't re-fire on a second visit).
+2. Reload after accepting → no second banner, pixel loads from the server-read consent state. Click **"Essential only"** (or "Cookie preferences" in the footer → reject) → `fbq('consent','revoke')` fires and `clearMarketingCookies` drops `_fbp`/`_fbc` (both host-only AND `Domain=.matio.tv`). Confirm in DevTools → Application → Cookies that both are gone.
+3. **Server Purchase (CAPI)**: set **`META_CAPI_TEST_EVENT_CODE`** in prod env + redeploy, then run a real test checkout (accept marketing first so the `capi_consent` sentinel rides into `subscription_data.metadata`). After the Stripe webhook flips the sub into an access-granting status, a `Purchase` appears in **Events Manager → Test Events** (server source, `event_id` = the subscription id). Check **Event Match Quality** — `_fbp`/`_fbc`/hashed email/IP/UA carried from checkout should push it above the "Poor" band. Remove `META_CAPI_TEST_EVENT_CODE` when done so live purchases stop routing to Test Events.
+
+**No-consent sanity check**: with the banner dismissed as "Essential only", confirm `fbevents.js` never loads (Network tab), no `_fbp`/`_fbc` cookies appear, and a test checkout produces **no** server Purchase (the `capi_consent` sentinel is absent from the metadata).
+
+### Watch-time analytics (Mux Data)
+
+1. Build with **`NEXT_PUBLIC_MUX_DATA_ENV_KEY`** set (Mux dashboard → environment → Env Key) and accept marketing cookies. Play an episode on `/watch/<slug>` → `MuxVideo` now beacons (no `disableTracking`). Without the env key *or* without consent the player stays dark — beacons fire only when **both** hold.
+2. Wait the few-minute Mux ingest lag, then check **Mux dashboard → Data → Views** — your view should appear (the home hero is filtered out via `player_name:matio-hero`; watch-page views carry `player_name:matio-watch` + `video_series`/`video_title`).
+3. With **`MUX_DATA_API_TOKEN_ID` / `_SECRET`** (a Mux access token with **Mux Data: Read**) set + redeployed, open `/admin/analytics` → **"Watch time · Mux Data"** panel. It shows real total watch time (Mux returns ms — rendered as h/m), views, unique viewers, avg view length, and a per-show breakdown. Data is server-cached 5 min, so allow that for refreshes.
+4. **Unconfigured / 403 path**: with the API token env vars missing (or lacking Mux Data: Read scope), the panel degrades to a hint instead of erroring — `getMuxData` returns `not_configured`/`error` and the page renders the "configure Mux Data" note. Confirm the rest of `/admin/analytics` still renders.
 
 ### Cancel + resume via Customer Portal
 

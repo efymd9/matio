@@ -252,6 +252,30 @@ On handler exception the claim is `DELETE`'d before returning 500 so Stripe's re
 
 Stripe routes these through different pipelines; ordering between them isn't guaranteed and the gap is often seconds. Handle `checkout.session.completed` (retrieve the subscription, call `mirrorSubscription`) — otherwise the user pays, lands on `/watch` via `success_url`, and gets a 403 because the subscriptions row hasn't been written yet. Subscribe `checkout.session.completed` in the Stripe dashboard webhook config (see [services.md → Stripe webhook setup](./services.md#stripe-subscriptions)).
 
+## Meta Pixel + Conversions API
+
+Browser Pixel + server-side CAPI for the marketing funnel. Everything gates on `cookie_consent.marketing`; the pixel never injects before consent and CAPI fires only when the consent sentinel is present (see `CLAUDE.md → Campaign attribution` / `Cookie consent` for the wider model).
+
+### `NEXT_PUBLIC_*` vars are inlined at BUILD time — set them in Vercel *before* the deploy
+
+`NEXT_PUBLIC_META_PIXEL_ID` and `NEXT_PUBLIC_MUX_DATA_ENV_KEY` are read at build time and inlined into the client bundle. If they aren't present in the Vercel project env **before** the deploy build runs, the feature ships **disabled** — the pixel id is `undefined` in the bundle and no redeploy-free fix exists; you must set the var and **redeploy**. We hit this with both the pixel id and the Mux env key (feature shipped silently dead until a second deploy). Server-only secrets (`META_CAPI_ACCESS_TOKEN`, `MUX_DATA_API_TOKEN_*`) are read at runtime, but still need a redeploy to propagate to the functions.
+
+### `_fbp` / `_fbc` are domain-scoped — deletion needs the `Domain` attribute
+
+`fbevents.js` sets `_fbp` (and we may set `_fbc`) scoped to the registrable domain: `Domain=.matio.tv`. A `document.cookie` expiry that only specifies `path` matches a **host-only** cookie and silently leaves the domain-scoped one intact — the user "withdraws consent" but the cookies live on. `clearMarketingCookies` (`lib/cookie-consent.ts`) clears each marketing cookie **twice**: once host-only and once with `domain=.<root>`. Add both forms for any new marketing cookie.
+
+### Webhooks have no browser context — carry identity via Stripe metadata
+
+The Stripe webhook has no access to the buyer's `_fbp` / `_fbc` cookies, IP, or user-agent — there's no browser request in flight. To send a well-matched server-side `Purchase`, `startCheckout` snapshots the browser identity (`readCapiIdentity()`: `_fbp`/`_fbc` + `x-vercel-forwarded-for` IP + UA) and flattens it into `subscription_data.metadata` under `capi_*` keys, including a `capi_consent="1"` sentinel (written **only** when marketing consent is present). `mirrorSubscription` reads it back via `fromCapiMetadata` and fires CAPI only when `metadataHasCapiConsent(sub.metadata)` — so consent travels with the subscription from the checkout click to the (possibly hours-later, possibly retried) webhook.
+
+### The Purchase transition guard (fire-once, never-suppress, never-throw)
+
+Three traps stacked on the server-side `Purchase` in `app/api/webhooks/stripe/route.ts`:
+
+1. **Derive `becameAccessGranting` from the SAME `ACCESS_GRANTING_STATUSES` set as the prior-status read.** If you hardcode "fire when new status === 'active'" but read prior-state from the broader access-granting set, a subscription whose *first* mirrored status is `past_due` (or `trialing`) never fires Purchase — it transitions straight into an access-granting status the naive check doesn't recognize. Use the set on both sides: `becameAccessGranting = !priorWasAccessGranting && nowIsAccessGranting`.
+2. **Fire the CAPI call BEFORE `markUserTrialsConverted`.** `markUserTrialsConverted` (and the mirrored row) make the prior state look access-granting on Stripe's *retry* of the same event. If a transient DB error aborts the handler after conversion but before the Purchase, the retry sees an already-access-granting prior row, computes `becameAccessGranting = false`, and **permanently suppresses** the Purchase. Order it first.
+3. **`sendCapiEvents` must NEVER throw.** It runs after the `stripe_events` idempotency claim is committed. A throw would bubble up, the handler would 500, and Stripe would retry — but the claim is already held, so the retry short-circuits and the subscription state work never re-runs. `sendCapiEvents` returns `{ ok, skipped?, error? }` and swallows all errors (3s `AbortController` timeout, plain `fetch`); the webhook also wraps the call in its own best-effort try/catch as defence-in-depth.
+
 ## Vercel platform
 
 ### Trusted client IP comes from `x-vercel-forwarded-for`, not leftmost `x-forwarded-for`
@@ -346,6 +370,35 @@ jwt.sign(
 ```
 
 Private key stored base64-encoded to dodge multi-line-PEM-in-env nightmares.
+
+### Mux Data beacons fire by default on player mount — even with no env key
+
+`@mux/mux-video-react` (and `MuxPlayer`) ship Mux Data monitoring **on by default**. Mounting a player with no `envKey` doesn't disable it — the beacons just fire orphaned to `litix.io`. So a pre-consent player mount (e.g. the autoplay home hero) leaks a tracking beacon before the cookie banner is answered, with or without an env key configured.
+
+To truly stop the beacons until marketing consent (and an env key) you must pass **both** flags:
+
+```tsx
+<MuxVideo
+  {...(consent && envKey
+    ? { envKey, metadata: { video_id, video_title, video_series, player_name: "matio-watch" } }
+    : { disableTracking: true, disableCookies: true })}
+/>
+```
+
+`disableTracking` alone still drops the `mux-data` cookie; `disableCookies` alone still beacons. Gate on `useMarketingConsent() && NEXT_PUBLIC_MUX_DATA_ENV_KEY`. This closed the pre-consent leak on both `components/watch/player.tsx` and the home hero (`components/site/hero-banner.tsx`).
+
+### Mux Data API quirks (`lib/mux-data.ts`)
+
+The read-side Data API (`api.mux.com/data/v1`) has several traps:
+
+- **Watch time is in MILLISECONDS.** Divide by 1000 (then 60) before showing minutes/hours.
+- **`/metrics/comparison` totals keys differ from `/overall`.** `/comparison` returns `watch_time / view_count / unique_viewers / total_playing_time`; `/overall` returns `total_watch_time / total_views` and has **no** `unique_viewers`. Don't assume one shape from the other.
+- **Few-minutes data lag.** Fresh views don't show immediately; don't treat the panel as real-time.
+- **A "view" coalesces pause/resume within 60 min.** One sitting with several pauses is a single view, not several.
+- **5 req/s rate limit.** Cache server-side — we use `fetch(..., { next: { revalidate: 300 } })` (5 min).
+- **Auth is HTTP Basic** (token id : secret), and the token needs the **"Mux Data: Read"** permission specifically — a plain video token 401s.
+
+The helper is best-effort: returns `{ status: 'ok' | 'not_configured' | 'error' }` and never throws, so the admin panel degrades to a hint when the token is unset rather than 500-ing the page.
 
 ## media-chrome
 

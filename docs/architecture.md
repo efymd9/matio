@@ -214,9 +214,13 @@ Consumed by: episodes overlay, up-next card, public show-detail episode rows. Al
 
 Rendered as metric cards + a 30-bar histogram + a normalized horizontal bar list + two side-by-side campaign tables (first-touch default, last-touch reconciliation view). Each campaign table merges its three group-by queries in JS on the key `${source}|${medium}|${campaign}`, sorts by MRR DESC then trials DESC, and collapses all-NULL rows into a single `(direct)` bucket so organic traffic stays grouped. No Recharts dep — Tailwind/CSS only.
 
+An **Engagement** section adds completion rate, avg % watched, avg watched-per-viewer, and trial preview depth, plus per-show viewers + completion folded into the top-shows list. These come off the existing `watch_progress` / `trial_sessions` columns and are **approximate** — `position_seconds` is the last-saved resume playhead, not cumulative watch time, so a rewatch or a scrub-back understates it.
+
+A separate **"Watch time · Mux Data"** panel carries the *real* numbers — total watch time, views, unique viewers, avg view, and a per-show breakdown — from `getMuxData()` (see [Mux Data](#marketing--analytics-measurement-meta-pixel--conversions-api--mux-data)). It degrades to a "not configured" hint when the Mux Data API token env vars aren't set, so the rest of the dashboard still renders.
+
 Approximations called out in code comments:
 - Churn = cancellations / (cancellations + still-active). True churn needs a snapshot of "active at start of window," which we don't maintain.
-- Watch time = sum of last-known position; doesn't account for repeat watching.
+- Watch time (engagement section) = sum of last-known position; doesn't account for repeat watching. The Mux Data panel is the authoritative cut.
 - First-touch attribution on users only captures the first authenticated touch where UTM cookies were present (specifically the `/subscribe` page render). A user who signs up via the header on `/` and never visits `/subscribe` stays NULL — they don't appear in conversion attribution because they're not paid users anyway.
 
 ## Campaign attribution
@@ -269,6 +273,62 @@ Storing both costs six extra nullable TEXT columns × three tables. Effectively 
 
 The `(direct)` bucket on the campaign tables collapses **all-NULL** rows — i.e. organic traffic, direct visits, pre-attribution-feature users. A row where only `utm_source` is set (e.g. `?utm_source=twitter` linked from a tweet without a campaign label) keeps its own row keyed on `("twitter", null, null)` — it's not collapsed into direct, because it does carry attribution signal.
 
+## Marketing & analytics measurement (Meta Pixel + Conversions API + Mux Data)
+
+Three measurement channels feed the funnel, all gated on `cookie_consent.marketing`: the **Meta Pixel** (browser-side conversion events), the **Meta Conversions API** (server-side Purchase, fired from the Stripe webhook), and **Mux Data** (player QoE + watch-time analytics, surfaced both in the Mux dashboard and an in-admin panel). No DB migration was needed for any of it — CAPI match-identity rides Stripe metadata, and the in-admin engagement metrics come off existing columns.
+
+### Browser pixel (`components/site/meta-pixel.tsx` + `lib/meta-pixel-events.ts`)
+
+`<MetaPixel>` is mounted in `app/layout.tsx` next to `<CookieBanner>` and is **consent-gated** — it does not inject `fbevents.js` at all until marketing consent is present. On the consent change it grants/revokes Meta's own consent state symmetrically (`fbq('consent', 'grant'|'revoke')`). It fires `PageView` on init and again on every SPA route change (App Router navigations don't reload the page, so the auto-injected snippet would otherwise only count the first view).
+
+`lib/meta-pixel-events.ts` is the thin client wrapper: `trackPixel(event, params?, { eventID }?)` no-ops until `fbq` is loaded, and `onPixelReady(cb)` defers any mount-time event until the pixel is live (so a `ViewContent`/`CompleteRegistration` fired during initial render isn't dropped). It also owns the shared constants — `META_PIXEL_ID`, `MEMBERSHIP_VALUE = 38` / `MEMBERSHIP_CURRENCY = USD`, and `PIXEL_READY_EVENT`.
+
+The five **browser events**:
+
+| Event | Where | Notes |
+|---|---|---|
+| `PageView` | all pages + every SPA nav | fired by `<MetaPixel>` |
+| `ViewContent` | `/shows/[slug]` | `components/site/view-content-pixel.tsx` |
+| `Lead` | 60s trial start | `components/watch/player.tsx`, once per show-preview when a trial-mode token is issued |
+| `InitiateCheckout` | `/subscribe` submit | `app/subscribe/submit-button.tsx` on click |
+| `CompleteRegistration` | `/subscribe` | `components/site/complete-registration-pixel.tsx`, deduped once-per-user via `localStorage` |
+
+### Server-side Purchase via Conversions API (`lib/meta-capi.ts`)
+
+The `Purchase` conversion is fired **server-side from the Stripe webhook**, not from the browser. This is deliberate: the browser moment is unreliable for the money event — the user is bounced through Stripe-hosted Checkout and Clerk redirects, ad-blockers strip `fbevents.js`, and the success-page may never render if the tab is closed during the redirect. The webhook, by contrast, is the same source of truth that flips the subscription to active, so the Purchase fires exactly when (and only when) money actually moved.
+
+`sendCapiEvents(events)` in `lib/meta-capi.ts` (server-only) is a plain `fetch` to `https://graph.facebook.com/<v>/<pixelId>/events`, authed via the access token as a query param, with a 3s `AbortController` timeout. `GRAPH_API_VERSION` defaults to `v21.0` (override `META_GRAPH_API_VERSION`). It **never throws** — it returns `{ ok, skipped?, error? }` and no-ops entirely if the env isn't set. That contract matters: the CAPI call runs inside the Stripe webhook handler, and a thrown error there would roll back the `stripe_events.event_id` idempotency claim and make Stripe retry an event we already processed. A failed Meta send is best-effort and swallowed.
+
+In `app/api/webhooks/stripe/route.ts` the Purchase fires on the **transition into** an access-granting status. `becameAccessGranting` is derived from the *same* `ACCESS_GRANTING_STATUSES` set as the `priorWasAccessGranting` read — so a subscription whose first mirrored status is `past_due` (Stripe mid-retry on the opening invoice) still fires Purchase rather than being silently skipped. The CAPI call is made **before** `markUserTrialsConverted`: if it ran after and a transient DB error hit on Stripe's retry, the prior row could already read as access-granting, permanently suppressing the Purchase. Dedup is `event_id = sub.id`, the user select is widened to include `email`, and the whole thing is wrapped in best-effort try/catch.
+
+### Carrying match-identity to a context-less webhook (`lib/capi-identity.ts`)
+
+A webhook has **no end-user browser context** — no `_fbp`/`_fbc` cookies, no client IP, no user-agent. Meta's match quality depends on exactly those signals, so they're captured at Checkout time and carried forward through Stripe metadata. `lib/capi-identity.ts` (server-only):
+
+- `readCapiIdentity()` reads the `_fbp`/`_fbc` cookies (`FBP_COOKIE`/`FBC_COOKIE`), the client IP (`x-vercel-forwarded-for`), and the user-agent.
+- `toCapiMetadata()` / `fromCapiMetadata()` flatten that identity through Stripe metadata under `capi_*` keys, including a `capi_consent="1"` sentinel; `metadataHasCapiConsent()` checks it.
+- `buildFbc(fbclid, nowMs)` constructs the `_fbc` value from a `?fbclid` param; `hashEmail`/`hashExternalId` (in `lib/meta-capi.ts`) SHA-256 the email + external id Meta requires hashed.
+
+`startCheckout` (`app/subscribe/actions.ts`) merges `toCapiMetadata(readCapiIdentity())` into `subscription_data.metadata`, gated on `hasMarketingConsent` — so the identity (and the `capi_consent` sentinel) is only written with consent. `mirrorSubscription` in the webhook reads it back via `fromCapiMetadata`, and the Purchase only fires when `metadataHasCapiConsent(sub.metadata)` is true. Net effect: CAPI consent is decided at the browser, persisted into Stripe, and honored at the webhook — no consent state needs to survive the redirect on its own.
+
+### Mux Data (player beacons + in-admin API panel)
+
+Two halves. **(1) Player beacons:** `components/watch/player.tsx` (`player_name="matio-watch"`) and `components/site/hero-banner.tsx` (`player_name="matio-hero"`) feed Mux Data via `envKey` on the underlying player, with `metadata` carrying `video_id` / `video_title` / `video_series`. Mux Data fires beacons **by default on player mount even with no env key** (orphaned to litix.io) and pre-consent — so both players pass `disableTracking` + `disableCookies` until `useMarketingConsent()` is true *and* `NEXT_PUBLIC_MUX_DATA_ENV_KEY` is set. That closed the pre-consent leak (including the autoplay home hero). `lib/use-marketing-consent.ts` is the live cookie hook — it tracks `cookie_consent.marketing` via `CONSENT_CHANGED_EVENT` with a lazy `useState` initializer (SSR-safe, no setState-in-effect).
+
+**(2) In-admin panel:** `lib/mux-data.ts` (server-only) `getMuxData(timeframe)` hits the Mux Data API (`api.mux.com/data/v1`, HTTP Basic auth with a "Mux Data: Read" token) for real watch-time. It calls `/metrics/comparison` (totals: `watch_time` / `view_count` / `unique_viewers` / `total_playing_time`, all in **milliseconds**) plus `/metrics/video_startup_time/breakdown?group_by=video_series` for the per-show rows, and excludes the home hero via `filters[]=!player_name:matio-hero`. The fetch is cached server-side 5 minutes (`next.revalidate=300`) — Mux's API is rate-limited at 5 req/s. It's best-effort: returns `{ status: 'ok' | 'not_configured' | 'error' }` so the admin panel degrades to a hint when the token isn't set rather than erroring the page.
+
+### Unified consent model
+
+Everything gates on `cookie_consent.marketing`:
+
+- The **Pixel** never injects `fbevents.js` before consent, and grants/revokes Meta consent symmetrically on change.
+- **CAPI** fires only when the `capi_consent` sentinel is present — and that sentinel is written at Checkout *only* with consent.
+- **Mux Data** passes `disableTracking` + `disableCookies` until consent *and* an env key, so no beacon leaks pre-consent.
+- The **`?fbclid` → `_fbc` derivation** in `proxy.ts` is under the same `hasMarketingConsent` gate as attribution (`applyMarketingCookies`, formerly `applyAttributionCookies`).
+- On **withdrawal**, `clearMarketingCookies` (`lib/cookie-consent.ts`) clears attribution *and* `_fbp`/`_fbc`. The `_fbp`/`_fbc` clears are issued **both host-only and domain-scoped** (`Domain=.<root>`): `fbevents.js` sets `_fbp` scoped to the registrable domain, and a path-only `document.cookie` expiry only matches a host-only cookie, leaving the domain cookie alive.
+
+**Env vars** (all new this session): `NEXT_PUBLIC_META_PIXEL_ID` (public, build-time inlined), `META_CAPI_ACCESS_TOKEN` (secret), optional `META_CAPI_TEST_EVENT_CODE` + `META_GRAPH_API_VERSION`, `NEXT_PUBLIC_MUX_DATA_ENV_KEY` (public, build-time inlined — enables player tracking), and `MUX_DATA_API_TOKEN_ID` / `MUX_DATA_API_TOKEN_SECRET` (secret — powers the in-admin panel). The `NEXT_PUBLIC_*` pair is inlined at **build** time, so it must exist in Vercel *before* the deploy build or the feature ships disabled and needs a redeploy.
+
 ## Cookie consent
 
 `lib/cookie-consent.ts` owns the consent state. Universal module (no `"server-only"`) so the cookie banner client component and `proxy.ts` both read/write the same shape.
@@ -290,6 +350,8 @@ Subsequent visits                 proxy.ts before writing attribution_* cookies:
 ```
 
 Two equally-prominent buttons satisfy ICO / AEPD / CNIL guidance ("reject must be no harder than accept"). The CookieBanner reopens via `window.dispatchEvent(new Event(COOKIE_PREFS_EVENT))` — the SiteFooter has a "Cookie preferences" button that dispatches it.
+
+On accept/reject the banner calls `broadcastConsentChange(marketing)`, which dispatches `CONSENT_CHANGED_EVENT` (both in `lib/cookie-consent.ts`). This is the live wire that lets already-mounted marketing channels react without a reload: the Meta Pixel grants/revokes Meta consent and injects/holds `fbevents.js`, the players flip Mux Data `disableTracking`/`disableCookies` (via the `useMarketingConsent` hook), and a withdrawal triggers `clearMarketingCookies` to drop the attribution + `_fbp`/`_fbc` cookies. CAPI gates on the same `cookie_consent.marketing` state, snapshotted into the `capi_consent` sentinel at Checkout. See [Marketing & analytics measurement](#marketing--analytics-measurement-meta-pixel--conversions-api--mux-data).
 
 Only one non-essential category (`marketing`) so no "Customize" sub-flow. If a second category lands (analytics, prefs), bump `CONSENT_VERSION` so stored consents that didn't cover the new category fall back to "show banner again".
 

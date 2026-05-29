@@ -66,7 +66,9 @@ components/
   ui/                      # shadcn primitives (Base UI under the hood)
   admin/                   # admin-specific (upload widget, status select)
   site/                    # header, footer, cookie-banner, language switcher,
-                           #   posters, hero, logo
+                           #   posters, hero, logo, meta-pixel (consent-gated
+                           #   loader), view-content-pixel,
+                           #   complete-registration-pixel
   watch/                   # player, paywall, playback-status, overlays
                            #   (series-end-overlay's email capture is hidden
                            #   until Resend is wired — server action stays)
@@ -90,6 +92,16 @@ lib/
   attribution.ts           # UTM cookie capture + per-funnel-milestone
                            #   persistence + Stripe metadata flatten/unflatten
                            #   (writes gated on cookie consent in proxy.ts)
+  meta-pixel-events.ts     # client fbq wrapper (trackPixel/onPixelReady) +
+                           #   NEXT_PUBLIC_META_PIXEL_ID
+  meta-capi.ts             # server-only Conversions API client (fetch, no SDK;
+                           #   SHA-256 PII hashing; best-effort, never throws)
+  capi-identity.ts         # server-only _fbp/_fbc/IP/UA capture + Stripe
+                           #   metadata round-trip (capi_* keys + capi_consent)
+  mux-data.ts              # server-only Mux Data API client for the admin
+                           #   watch-time panel (Basic auth, cached 5m)
+  use-marketing-consent.ts # client hook: live cookie_consent.marketing
+                           #   (gates Mux Data on the players)
   i18n/                    # dictionaries.ts + server.ts + client.tsx (optimistic
                            #   LocaleProvider) + actions.ts + shared.ts
   utils.ts                 # cn() from shadcn
