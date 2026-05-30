@@ -51,6 +51,31 @@ export function hasMarketingConsent(raw: string | undefined): boolean {
   return parseConsent(raw)?.marketing === true;
 }
 
+// Countries where opt-in consent for marketing cookies is legally required:
+// the EU/EEA + UK + Switzerland. ISO 3166-1 alpha-2. Everywhere else (the
+// Americas, etc.) we default marketing consent ON and skip the banner — the
+// gating happens in proxy.ts off the Vercel `x-vercel-ip-country` header.
+export const CONSENT_REQUIRED_COUNTRIES = new Set([
+  // EU 27
+  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
+  "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
+  "SI", "ES", "SE",
+  // EEA (non-EU) + UK + Switzerland
+  "IS", "LI", "NO", "GB", "CH",
+]);
+
+// Is an opt-in marketing-consent banner required for this country? Fails
+// CLOSED (treated as required) for missing / empty / malformed geo — a value
+// that isn't a clean ISO-3166-1 alpha-2 code is treated as "unknown", so we
+// never default tracking on for a visitor we can't confidently place.
+export function marketingConsentRequired(
+  country: string | null | undefined,
+): boolean {
+  const c = country?.toUpperCase();
+  if (!c || !/^[A-Z]{2}$/.test(c)) return true;
+  return CONSENT_REQUIRED_COUNTRIES.has(c);
+}
+
 export function serializeConsent(c: ConsentRecord): string {
   return JSON.stringify(c);
 }
