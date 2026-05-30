@@ -154,6 +154,12 @@ function CookiesEn() {
 
       <Section id="manage" title="3. How to manage cookies">
         <p>
+          In the EU, EEA, UK and Switzerland, marketing cookies are set{" "}
+          <strong>only after you accept</strong> them in the banner. Elsewhere
+          (where the law allows) they may be enabled by default &mdash; in
+          either case you can <strong>turn them off at any time</strong>.
+        </p>
+        <p>
           You can refuse or withdraw your consent for non-essential cookies at
           any time through our cookie banner — reopen it whenever you like from
           the &ldquo;Cookie preferences&rdquo; link in the site footer.
@@ -297,6 +303,13 @@ function CookiesEs() {
       </Section>
 
       <Section id="gestionar" title="3. Cómo gestionar las cookies">
+        <p>
+          En la UE, el EEE, el Reino Unido y Suiza, las cookies de marketing se
+          colocan <strong>solo después de que las aceptes</strong> en el banner.
+          En otros lugares (donde la ley lo permite) pueden activarse por
+          defecto; en cualquier caso, puedes{" "}
+          <strong>desactivarlas en cualquier momento</strong>.
+        </p>
         <p>
           Puedes rechazar o retirar tu consentimiento para las cookies no
           esenciales en cualquier momento desde nuestro banner de cookies:
