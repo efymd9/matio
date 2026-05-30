@@ -1,20 +1,28 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
+import { FormSubmitButton } from "@/components/admin/form-submit-button";
 import { UploadWidget } from "@/components/admin/upload-widget";
+import {
+  AdminPageHeader,
+  DangerPanel,
+  EpisodeStatusBadge,
+  Field,
+  Panel,
+} from "@/components/admin/ui";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { muxThumbnailUrl } from "@/lib/mux-token";
 import { deleteEpisode, updateEpisode } from "@/app/admin/actions";
+
+function formatDuration(seconds: number | null): string {
+  if (!seconds) return "—";
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${String(s).padStart(2, "0")}s`;
+}
 
 export default async function EditEpisodePage({
   params,
@@ -46,6 +54,7 @@ export default async function EditEpisodePage({
       durationSeconds: episodes.durationSeconds,
       muxAssetId: episodes.muxAssetId,
       muxPlaybackId: episodes.muxPlaybackId,
+      muxPlaybackPolicy: episodes.muxPlaybackPolicy,
       status: episodes.status,
       introStartSeconds: episodes.introStartSeconds,
       introEndSeconds: episodes.introEndSeconds,
@@ -55,171 +64,204 @@ export default async function EditEpisodePage({
     .limit(1);
   if (!episode) notFound();
 
-  return (
-    <div className="space-y-8">
-      <div>
-        <Link
-          href={`/admin/shows/${show.id}/seasons/${season.id}`}
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← Back to {show.title} — Season {season.number}
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold">
-          Episode {episode.number}: {episode.title}
-        </h1>
-      </div>
+  let previewThumb: string | null = null;
+  if (episode.status === "ready" && episode.muxPlaybackId) {
+    try {
+      previewThumb = muxThumbnailUrl(
+        episode.muxPlaybackId,
+        episode.muxPlaybackPolicy,
+        { width: 640, height: 360 },
+      );
+    } catch {
+      previewThumb = null;
+    }
+  }
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Video</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1 text-sm">
-            <dt className="text-muted-foreground">Status</dt>
-            <dd>
-              <span
-                className={
-                  episode.status === "ready"
-                    ? "text-green-600"
-                    : episode.status === "errored"
-                      ? "text-destructive"
-                      : "text-muted-foreground"
-                }
-              >
-                {episode.muxAssetId ? episode.status : "no video uploaded"}
-              </span>
-            </dd>
-            <dt className="text-muted-foreground">Asset ID</dt>
-            <dd className="font-mono text-xs">{episode.muxAssetId ?? "—"}</dd>
-            <dt className="text-muted-foreground">Playback ID</dt>
-            <dd className="font-mono text-xs">{episode.muxPlaybackId ?? "—"}</dd>
-            <dt className="text-muted-foreground">Duration</dt>
-            <dd>
-              {episode.durationSeconds
-                ? `${Math.floor(episode.durationSeconds / 60)}m ${episode.durationSeconds % 60}s`
-                : "—"}
-            </dd>
-          </dl>
-          <div className="border-t pt-4">
-            <p className="mb-2 text-sm font-medium">
-              {episode.muxAssetId ? "Replace video" : "Upload video"}
-            </p>
+  return (
+    <div className="mx-auto max-w-3xl space-y-7">
+      <AdminPageHeader
+        backHref={`/admin/shows/${show.id}/seasons/${season.id}`}
+        backLabel={`${show.title} · Season ${season.number}`}
+        kicker={`Season ${season.number} · Episode ${episode.number}`}
+        title={episode.title}
+        pills={
+          <EpisodeStatusBadge
+            status={episode.status}
+            hasAsset={!!episode.muxAssetId}
+          />
+        }
+      />
+
+      {/* Video */}
+      <Panel
+        kicker="Video"
+        title={episode.muxAssetId ? "Replace video" : "Upload video"}
+        hint="Files upload directly to Mux. After upload, Mux transcodes and the status flips to Ready automatically."
+      >
+        <div className="space-y-5">
+          {/* Preview frame + metadata */}
+          <div className="grid gap-4 sm:grid-cols-[200px_1fr]">
+            <div className="relative aspect-video overflow-hidden rounded-xl border border-white/10 bg-black/40">
+              {previewThumb ? (
+                /* Preview frame — raw <img>: signed Mux thumbnail URL can't
+                   pass next/image remotePatterns at request time. Decorative
+                   (title + metadata sit alongside as text), so aria-hidden. */
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={previewThumb}
+                  alt=""
+                  aria-hidden
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-center">
+                  <span className="font-mono text-lg font-bold text-white/25">
+                    E{episode.number}
+                  </span>
+                  <span className="text-[11px] text-white/35">
+                    {episode.muxAssetId ? "No preview yet" : "No video"}
+                  </span>
+                </div>
+              )}
+            </div>
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2 self-start text-sm">
+              <MetaRow label="Status">
+                <EpisodeStatusBadge
+                  status={episode.status}
+                  hasAsset={!!episode.muxAssetId}
+                />
+              </MetaRow>
+              <MetaRow label="Duration">
+                <span className="text-white/80">
+                  {formatDuration(episode.durationSeconds)}
+                </span>
+              </MetaRow>
+              <MetaRow label="Asset ID">
+                <span className="break-all font-mono text-[11px] text-white/55">
+                  {episode.muxAssetId ?? "—"}
+                </span>
+              </MetaRow>
+              <MetaRow label="Playback ID">
+                <span className="break-all font-mono text-[11px] text-white/55">
+                  {episode.muxPlaybackId ?? "—"}
+                </span>
+              </MetaRow>
+            </dl>
+          </div>
+
+          <div className="border-t border-white/[0.06] pt-5">
             <UploadWidget episodeId={episode.id} />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Episode details</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form
-            action={updateEpisode.bind(null, episode.id, season.id, show.id)}
-            className="max-w-2xl space-y-4"
-          >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-[120px_1fr]">
-              <div className="space-y-2">
-                <Label htmlFor="number">Number *</Label>
+      {/* Details */}
+      <Panel kicker="Details" title="Episode info">
+        <form
+          action={updateEpisode.bind(null, episode.id, season.id, show.id)}
+          className="space-y-5"
+        >
+          <div className="grid gap-4 sm:grid-cols-[120px_1fr]">
+            <Field label="Number" htmlFor="number" required>
+              <Input
+                id="number"
+                name="number"
+                type="number"
+                min={1}
+                defaultValue={episode.number}
+                required
+                className="text-center"
+              />
+            </Field>
+            <Field label="Title" htmlFor="title" required>
+              <Input
+                id="title"
+                name="title"
+                defaultValue={episode.title}
+                required
+              />
+            </Field>
+          </div>
+          <Field label="Description" htmlFor="description">
+            <Textarea
+              id="description"
+              name="description"
+              defaultValue={episode.description ?? ""}
+              rows={4}
+            />
+          </Field>
+
+          {/* Skip-intro markers */}
+          <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-sm font-semibold text-white">Skip intro</p>
+              <span className="text-[11px] text-white/45">
+                Leave both blank to hide the chip
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <Field label="Start" htmlFor="introStartSeconds" hint="seconds">
                 <Input
-                  id="number"
-                  name="number"
+                  id="introStartSeconds"
+                  name="introStartSeconds"
+                  type="number"
+                  min={0}
+                  step={1}
+                  placeholder="e.g. 5"
+                  defaultValue={episode.introStartSeconds ?? ""}
+                />
+              </Field>
+              <Field label="End" htmlFor="introEndSeconds" hint="seconds">
+                <Input
+                  id="introEndSeconds"
+                  name="introEndSeconds"
                   type="number"
                   min={1}
-                  defaultValue={episode.number}
-                  required
+                  step={1}
+                  placeholder="e.g. 60"
+                  defaultValue={episode.introEndSeconds ?? ""}
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="title">Title *</Label>
-                <Input
-                  id="title"
-                  name="title"
-                  defaultValue={episode.title}
-                  required
-                />
-              </div>
+              </Field>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                name="description"
-                defaultValue={episode.description ?? ""}
-                rows={4}
-              />
-            </div>
-            <div className="space-y-2 border-t border-white/[0.06] pt-4">
-              <div className="flex items-baseline justify-between">
-                <Label className="text-sm font-semibold text-white">
-                  Skip intro
-                </Label>
-                <span className="text-[11px] text-white/45">
-                  Leave both blank to hide the chip
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label
-                    htmlFor="introStartSeconds"
-                    className="text-xs text-white/65"
-                  >
-                    Start (seconds)
-                  </Label>
-                  <Input
-                    id="introStartSeconds"
-                    name="introStartSeconds"
-                    type="number"
-                    min={0}
-                    step={1}
-                    placeholder="e.g. 5"
-                    defaultValue={episode.introStartSeconds ?? ""}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label
-                    htmlFor="introEndSeconds"
-                    className="text-xs text-white/65"
-                  >
-                    End (seconds)
-                  </Label>
-                  <Input
-                    id="introEndSeconds"
-                    name="introEndSeconds"
-                    type="number"
-                    min={1}
-                    step={1}
-                    placeholder="e.g. 60"
-                    defaultValue={episode.introEndSeconds ?? ""}
-                  />
-                </div>
-              </div>
-              <p className="text-[11px] leading-relaxed text-white/50">
-                The player shows a &quot;Skip intro&quot; pill while playback
-                is in this window and seeks to End on click.
-              </p>
-            </div>
-            <div className="flex justify-end">
-              <Button type="submit">Save</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+            <p className="mt-2.5 text-[11px] leading-relaxed text-white/45">
+              The player shows a “Skip intro” pill while playback is in this
+              window and seeks to End on click.
+            </p>
+          </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-destructive">Danger zone</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form
-            action={deleteEpisode.bind(null, episode.id, season.id, show.id)}
+          <div className="flex justify-end">
+            <FormSubmitButton icon="check" pendingLabel="Saving…">
+              Save changes
+            </FormSubmitButton>
+          </div>
+        </form>
+      </Panel>
+
+      {/* Danger zone */}
+      <DangerPanel description="Deleting removes this episode and its video link. This cannot be undone.">
+        <form action={deleteEpisode.bind(null, episode.id, season.id, show.id)}>
+          <ConfirmDeleteButton
+            message={`Delete episode ${episode.number} "${episode.title}"? This cannot be undone.`}
           >
-            <Button variant="destructive" type="submit">
-              Delete this episode
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+            Delete this episode
+          </ConfirmDeleteButton>
+        </form>
+      </DangerPanel>
     </div>
+  );
+}
+
+function MetaRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      <dt className="text-white/45">{label}</dt>
+      <dd className="min-w-0">{children}</dd>
+    </>
   );
 }
