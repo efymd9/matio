@@ -723,3 +723,15 @@ One environment per call. For preview environments, you also need a git branch a
 ### Public assets bypass the trial gate
 
 Reiterating because it's the highest-impact gotcha: existing Mux assets uploaded before the policy switch have `playback_policies: ["public"]`. Mux Player ignores tokens for public IDs — the trial overlay won't kick in for those videos. New uploads use `["signed"]`. Re-upload anything you want to actually gate.
+
+### Geo-aware consent: a few GDPR-covered EU territories aren't in the required list (TODO)
+
+`CONSENT_REQUIRED_COUNTRIES` in `lib/cookie-consent.ts` lists EU27 + IS/LI/NO (EEA) + GB + CH. A handful of **GDPR-covered EU territories have their own ISO-3166-1 alpha-2 codes** and therefore currently fall through to the **default-marketing-ON (no-banner)** path instead of showing the opt-in banner:
+
+- French overseas regions (EU outermost regions — GDPR applies): `GP` Guadeloupe, `MQ` Martinique, `GF` French Guiana, `RE` Réunion, `YT` Mayotte
+- `AX` Åland (part of Finland/EU)
+- Arguably `GI` Gibraltar (UK data-protection regime post-Brexit)
+
+(Canary Islands → `ES` and Azores/Madeira → `PT` are already covered via their parent country code, so no action needed there.)
+
+Traffic from these is negligible, so it's left as-is for now. **Fix when convenient:** add the codes above to the `CONSENT_REQUIRED_COUNTRIES` set in `lib/cookie-consent.ts`, then redeploy. The gate already fails CLOSED for unknown/malformed geo — this is only about territories with a *valid* non-parent ISO code.
