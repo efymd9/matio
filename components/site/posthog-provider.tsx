@@ -70,32 +70,49 @@ export function PostHogProvider({
   useEffect(() => {
     if (!enabled || initializedRef.current || !POSTHOG_KEY) return;
     initializedRef.current = true;
-    void import("posthog-js").then(({ default: posthog }) => {
-      posthog.init(POSTHOG_KEY, {
-        api_host: POSTHOG_HOST,
-        ui_host: "https://eu.posthog.com",
-        person_profiles: "identified_only",
-        autocapture: false,
-        capture_pageview: false, // fired manually below for App-Router routes
-        capture_pageleave: true,
-        enable_heatmaps: true,
-        // Recording is ON (masked). false is posthog-js's default — stated
-        // explicitly to document the deliberate choice (double-negative name).
-        disable_session_recording: false,
-        session_recording: { maskAllInputs: true, maskTextSelector: "*" },
-        loaded: (ph) => {
-          window.posthog = ph as unknown as Window["posthog"];
-          window.__phReady = true;
-          lastPathRef.current = window.location.pathname;
-          ph.capture("$pageview");
-          setReady(true);
-          window.dispatchEvent(new Event(POSTHOG_READY_EVENT));
-        },
+    void import("posthog-js")
+      .then(({ default: posthog }) => {
+        // Consent can be withdrawn while the chunk downloads. If so, DON'T
+        // initialize at all (no cookies, replay, or beacons) and release the
+        // guard so a later re-grant can initialize cleanly.
+        if (!consentRef.current) {
+          initializedRef.current = false;
+          return;
+        }
+        posthog.init(POSTHOG_KEY, {
+          api_host: POSTHOG_HOST,
+          ui_host: "https://eu.posthog.com",
+          person_profiles: "identified_only",
+          autocapture: false,
+          capture_pageview: false, // fired manually below for App-Router routes
+          capture_pageleave: true,
+          enable_heatmaps: true,
+          // Recording is ON (masked). false is posthog-js's default — stated
+          // explicitly to document the deliberate choice (double-negative name).
+          disable_session_recording: false,
+          session_recording: { maskAllInputs: true, maskTextSelector: "*" },
+          loaded: (ph) => {
+            window.posthog = ph as unknown as Window["posthog"];
+            window.__phReady = true;
+            // Withdrawn during init's remote-config fetch: opt out (tears down
+            // the cookies/replay init just established) and emit nothing.
+            if (!consentRef.current) {
+              ph.opt_out_capturing();
+              return;
+            }
+            lastPathRef.current = window.location.pathname;
+            ph.capture("$pageview");
+            setReady(true);
+            window.dispatchEvent(new Event(POSTHOG_READY_EVENT));
+          },
+        });
+      })
+      .catch(() => {
+        // posthog-js failed to load (network/CDN block). Analytics is
+        // best-effort — never fatal. Release the guard so a later enable
+        // change can retry.
+        initializedRef.current = false;
       });
-    }).catch(() => {
-      // posthog-js failed to load (network/CDN block). Analytics is
-      // best-effort — never fatal.
-    });
   }, [enabled]);
 
   // Fire $pageview on client-side route changes. The loaded callback fires the
