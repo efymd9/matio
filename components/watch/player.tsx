@@ -30,6 +30,7 @@ import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { useT } from "@/lib/i18n/client";
 import { trackPixel } from "@/lib/meta-pixel-events";
+import { capturePostHog } from "@/lib/posthog-events";
 import dynamic from "next/dynamic";
 import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
 
@@ -145,6 +146,10 @@ export function Player({
     trackPixel("Lead", {
       content_name: showTitle ?? showSlug,
       content_category: "trial_preview",
+    });
+    capturePostHog("trial_play_started", {
+      show_slug: showSlug,
+      show_title: showTitle ?? showSlug,
     });
   }, [showTitle, showSlug]);
 
