@@ -50,8 +50,13 @@ export function PostHogProvider({
         setEnabled(true);
       } else {
         // Withdrawn after load: stop capturing + drop the identified person.
+        // setEnabled(false) keeps state truthful and prevents a re-init without
+        // consent if the component ever remounts. We deliberately KEEP
+        // initializedRef = true so a later re-grant resumes the already-loaded
+        // SDK via opt_in_capturing() instead of re-running the dynamic import.
         window.posthog?.opt_out_capturing();
         window.posthog?.reset();
+        setEnabled(false);
       }
     };
     window.addEventListener(CONSENT_CHANGED_EVENT, onChange);
@@ -59,7 +64,9 @@ export function PostHogProvider({
   }, []);
 
   // Initialize posthog-js exactly once, after consent. Dynamic import so the
-  // SDK is never in the bundle for non-consenting visitors.
+  // SDK is never in the bundle for non-consenting visitors. posthog-js retains
+  // its state across opt_out/opt_in, so we never re-init on a re-grant —
+  // opt_in_capturing() resumes the already-loaded SDK (see consent handler).
   useEffect(() => {
     if (!enabled || initializedRef.current || !POSTHOG_KEY) return;
     initializedRef.current = true;
@@ -72,6 +79,8 @@ export function PostHogProvider({
         capture_pageview: false, // fired manually below for App-Router routes
         capture_pageleave: true,
         enable_heatmaps: true,
+        // Recording is ON (masked). false is posthog-js's default — stated
+        // explicitly to document the deliberate choice (double-negative name).
         disable_session_recording: false,
         session_recording: { maskAllInputs: true, maskTextSelector: "*" },
         loaded: (ph) => {
@@ -83,6 +92,9 @@ export function PostHogProvider({
           window.dispatchEvent(new Event(POSTHOG_READY_EVENT));
         },
       });
+    }).catch(() => {
+      // posthog-js failed to load (network/CDN block). Analytics is
+      // best-effort — never fatal.
     });
   }, [enabled]);
 
@@ -95,19 +107,21 @@ export function PostHogProvider({
     window.posthog?.capture("$pageview");
   }, [enabled, ready, pathname]);
 
+  // Derived once so the identify effect deps on the email string, not the whole
+  // mutable Clerk user object (which would re-run on any profile change).
+  const email = user?.primaryEmailAddress?.emailAddress ?? null;
   // Stitch the anonymous person to the Clerk user once known; reset on sign-out.
   useEffect(() => {
     if (!enabled || !ready || !consentRef.current) return;
     if (isSignedIn && userId) {
       if (identifiedRef.current === userId) return;
       identifiedRef.current = userId;
-      const email = user?.primaryEmailAddress?.emailAddress;
       window.posthog?.identify(userId, email ? { email } : undefined);
     } else if (isSignedIn === false && identifiedRef.current) {
       identifiedRef.current = null;
       window.posthog?.reset();
     }
-  }, [enabled, ready, isSignedIn, userId, user]);
+  }, [enabled, ready, isSignedIn, userId, email]);
 
   return null;
 }
