@@ -14,7 +14,14 @@ import {
   serializeAttribution,
 } from "@/lib/attribution";
 import { FBC_COOKIE, buildFbc } from "@/lib/capi-identity";
-import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
+import {
+  CONSENT_COOKIE,
+  CONSENT_MAX_AGE_SECONDS,
+  CONSENT_VERSION,
+  marketingConsentRequired,
+  parseConsent,
+  serializeConsent,
+} from "@/lib/cookie-consent";
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
 const isAuthRoute = createRouteMatcher(["/subscribe(.*)"]);
@@ -50,43 +57,78 @@ async function getUserRoleCached(userId: string): Promise<string | null> {
 }
 
 // Returns a NextResponse with marketing cookies set, or null if there's
-// nothing to persist. Two things ride here:
-//   - attribution_first / attribution_last — UTM campaign snapshots.
-//     attribution_first writes only when absent (preserving the original
-//     campaign across re-visits); attribution_last overwrites every time so
-//     the conversion-moment snapshot reflects whatever brought the user back.
-//   - _fbc — derived from a Meta click id (?fbclid=) so an ad clickthrough is
-//     matchable by the Conversions API even if the pixel JS is slow/blocked.
-//     Write-if-absent (first click wins), 90-day life (Meta's _fbc window).
-//
-// All gated on cookie_consent.marketing === true so we don't drop tracking
-// cookies on EU visitors before they've accepted the banner (ePrivacy / PECR /
-// Spain LSSI). The params still flow through the request — they just aren't
-// persisted across requests until consent is given. _fbp is set by the pixel
-// JS itself, never here.
+// nothing to do. Handles:
+//   - GEO-AWARE consent default. An opt-in banner is legally required only in
+//     the EU/EEA/UK/CH (ePrivacy / PECR / Spain LSSI), so there we persist
+//     nothing until the visitor accepts. Everywhere else (the Americas, etc.)
+//     we DEFAULT marketing consent ON: we write the cookie_consent cookie
+//     ourselves AND forward it on the request, so the SAME render hides the
+//     banner and loads the pixel — unless the visitor already made an explicit
+//     choice (incl. opting out via the footer). Geo comes from Vercel's
+//     `x-vercel-ip-country`; unknown geo fails CLOSED (treated as required).
+//   - attribution_first / attribution_last — UTM campaign snapshots
+//     (first: write-if-absent; last: overwrite every landing).
+//   - _fbc — derived from a Meta click id (?fbclid=) for CAPI matching
+//     (write-if-absent, 90-day life). _fbp is set by the pixel JS, never here.
+// Attribution + _fbc are written only when marketing consent is effective
+// (an explicit accept OR the geo default).
 function applyMarketingCookies(req: NextRequest): NextResponse | null {
-  if (!hasMarketingConsent(req.cookies.get(CONSENT_COOKIE)?.value)) return null;
+  const existing = parseConsent(req.cookies.get(CONSENT_COOKIE)?.value);
+  const country = req.headers.get("x-vercel-ip-country");
+  // No prior choice + consent not legally required here → default marketing ON.
+  const autoGrant = !existing && !marketingConsentRequired(country);
+  const marketingOk = existing?.marketing === true || autoGrant;
 
   const incoming = readAttributionFromSearchParams(req.nextUrl.searchParams);
   const hasAttribution = hasAnyField(incoming);
-
   const fbclid = req.nextUrl.searchParams.get("fbclid");
   const needFbc = !!fbclid && !req.cookies.get(FBC_COOKIE);
 
-  if (!hasAttribution && !needFbc) return null;
+  // Nothing to persist: not auto-granting, and either no consent or no params.
+  if (!autoGrant && (!marketingOk || (!hasAttribution && !needFbc))) {
+    return null;
+  }
 
-  const res = NextResponse.next();
   const prod = process.env.NODE_ENV === "production";
 
-  if (hasAttribution) {
+  let res: NextResponse;
+  if (autoGrant) {
+    // Persist the default-on consent AND forward it on the request so the
+    // layout's cookies() sees it on THIS request — banner hidden + pixel
+    // rendered on the very first page, not the next one.
+    const record = serializeConsent({
+      necessary: true,
+      marketing: true,
+      ts: Date.now(),
+      v: CONSENT_VERSION,
+    });
+    const headers = new Headers(req.headers);
+    const cookieHeader = headers.get("cookie");
+    headers.set(
+      "cookie",
+      (cookieHeader ? `${cookieHeader}; ` : "") +
+        `${CONSENT_COOKIE}=${encodeURIComponent(record)}`,
+    );
+    res = NextResponse.next({ request: { headers } });
+    res.cookies.set(CONSENT_COOKIE, record, {
+      maxAge: CONSENT_MAX_AGE_SECONDS,
+      sameSite: "lax",
+      path: "/",
+      secure: prod,
+    });
+  } else {
+    res = NextResponse.next();
+  }
+
+  if (marketingOk && hasAttribution) {
     const payload = serializeAttribution(incoming);
     if (!req.cookies.get(ATTRIBUTION_FIRST_COOKIE)) {
       res.cookies.set(ATTRIBUTION_FIRST_COOKIE, payload, {
         maxAge: ATTRIBUTION_FIRST_MAX_AGE,
         sameSite: "lax",
+        // Not httpOnly: client-side analytics may read these; non-sensitive
+        // UTM params the browser was already sending in the URL.
         path: "/",
-        // Not httpOnly: client-side analytics may read these; the values are
-        // non-sensitive UTM params the browser was already sending in the URL.
         secure: prod,
       });
     }
@@ -98,13 +140,13 @@ function applyMarketingCookies(req: NextRequest): NextResponse | null {
     });
   }
 
-  if (needFbc && fbclid) {
+  if (marketingOk && needFbc && fbclid) {
     res.cookies.set(FBC_COOKIE, buildFbc(fbclid, Date.now()), {
       maxAge: ATTRIBUTION_FIRST_MAX_AGE,
       sameSite: "lax",
-      path: "/",
       // Not httpOnly: the Meta Pixel reads _fbc client-side to attach to
       // browser events, and CAPI reads it server-side via cookies().
+      path: "/",
       secure: prod,
     });
   }
@@ -144,7 +186,7 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/((?!_next|ingest|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
   ],
 };
