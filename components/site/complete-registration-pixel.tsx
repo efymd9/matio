@@ -2,34 +2,58 @@
 
 import { useEffect } from "react";
 import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
+import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 
-// Fires CompleteRegistration once per user. Rendered on /subscribe, which new
-// users hit immediately after Clerk sign-up (forceRedirectUrl), so it lands
-// close to the actual registration. Browser-side rather than from the Clerk
-// webhook because that webhook has no browser context (no fbp/fbc) and no
-// consent signal — here both are available, and onPixelReady keeps it
-// inherently consent-gated (it never fires without a loaded pixel).
-//
-// De-dupe is a localStorage flag keyed by user id, set only AFTER the event
-// actually fires, so a not-yet-loaded pixel doesn't burn the flag.
+// Fires CompleteRegistration (Meta) + signup_completed (PostHog) once per user.
+// Rendered on /subscribe, which new users hit immediately after Clerk sign-up
+// (forceRedirectUrl), so it lands close to the actual registration. Both are
+// browser-side and inherently consent-gated (their ready-deferral never fires
+// without a loaded SDK). De-dupe via a localStorage flag keyed by user id, set
+// only AFTER each event actually fires so a not-yet-loaded SDK doesn't burn it.
 export function CompleteRegistrationPixel({ userId }: { userId: string }) {
   useEffect(() => {
     if (!userId) return;
-    const key = `matio:fb:creg:${userId}`;
+
+    const fbKey = `matio:fb:creg:${userId}`;
+    let fbDone = false;
     try {
-      if (localStorage.getItem(key)) return;
+      fbDone = !!localStorage.getItem(fbKey);
     } catch {
-      // Storage blocked (private mode): fall through and fire anyway; Meta
-      // de-dupes CompleteRegistration loosely.
+      // Storage blocked (private mode): fall through and fire anyway.
     }
-    return onPixelReady(() => {
-      trackPixel("CompleteRegistration");
-      try {
-        localStorage.setItem(key, "1");
-      } catch {
-        // ignore storage write failures
-      }
-    });
+    const offPixel = fbDone
+      ? () => {}
+      : onPixelReady(() => {
+          trackPixel("CompleteRegistration");
+          try {
+            localStorage.setItem(fbKey, "1");
+          } catch {
+            // ignore storage write failures
+          }
+        });
+
+    const phKey = `matio:ph:signup:${userId}`;
+    let phDone = false;
+    try {
+      phDone = !!localStorage.getItem(phKey);
+    } catch {
+      // Storage blocked: fire anyway; PostHog funnels count first occurrence.
+    }
+    const offPostHog = phDone
+      ? () => {}
+      : onPostHogReady(() => {
+          capturePostHog("signup_completed");
+          try {
+            localStorage.setItem(phKey, "1");
+          } catch {
+            // ignore storage write failures
+          }
+        });
+
+    return () => {
+      offPixel();
+      offPostHog();
+    };
   }, [userId]);
   return null;
 }
