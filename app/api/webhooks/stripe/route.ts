@@ -10,6 +10,7 @@ import {
 } from "@/lib/attribution";
 import { fromCapiMetadata, metadataHasCapiConsent } from "@/lib/capi-identity";
 import { sendCapiEvents } from "@/lib/meta-capi";
+import { captureServerEvent } from "@/lib/posthog-server";
 import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 import { markUserTrialsConverted } from "@/lib/trial";
@@ -169,13 +170,13 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
     !priorWasAccessGranting &&
     (ACCESS_GRANTING_STATUSES as readonly string[]).includes(mappedStatus);
   if (becameAccessGranting && metadataHasCapiConsent(sub.metadata)) {
+    const amount =
+      typeof item?.price.unit_amount === "number"
+        ? item.price.unit_amount / 100
+        : undefined;
+    const currency = item?.price.currency?.toUpperCase();
     try {
       const identity = fromCapiMetadata(sub.metadata);
-      const amount =
-        typeof item?.price.unit_amount === "number"
-          ? item.price.unit_amount / 100
-          : undefined;
-      const currency = item?.price.currency?.toUpperCase();
       const result = await sendCapiEvents([
         {
           eventName: "Purchase",
@@ -206,6 +207,31 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
       }
     } catch (err) {
       console.warn("Meta CAPI Purchase threw", { subId: sub.id, err });
+    }
+
+    // PostHog bottom-of-funnel conversion. Same transition guard + capi_consent
+    // gate as the CAPI Purchase, so it fires exactly once and honors consent.
+    // distinctId = Clerk user id, which the browser already identify()'d — so
+    // this server event stitches onto the same person. Best-effort: never
+    // throws, can't roll back the webhook idempotency claim.
+    try {
+      const result = await captureServerEvent({
+        distinctId: user.id,
+        event: "subscribe_succeeded",
+        properties: {
+          ...(amount !== undefined ? { value: amount } : {}),
+          ...(currency ? { currency } : {}),
+          plan,
+        },
+      });
+      if (!result.ok && !result.skipped) {
+        console.warn("PostHog subscribe_succeeded failed", {
+          subId: sub.id,
+          error: result.error,
+        });
+      }
+    } catch (err) {
+      console.warn("PostHog subscribe_succeeded threw", { subId: sub.id, err });
     }
   }
 
