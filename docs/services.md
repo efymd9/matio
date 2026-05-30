@@ -194,6 +194,35 @@ Existing deployments keep their snapshot of env vars — only the **next** deplo
 
 **Match quality**: verify events land in Events Manager (Test events tab with `META_CAPI_TEST_EVENT_CODE`, then the live event log). Add a `matio.tv` referrer restriction on the pixel in Events Manager for defence in depth.
 
+## PostHog (funnel analytics)
+
+**Used for**: consent-gated product analytics — identifying where visitors drop
+out of the sign-up funnel, which ad campaigns convert best, and session
+replay / heatmaps for qualitative debugging.
+
+**Setup**: create a project in the **EU** region at [app.posthog.com](https://app.posthog.com).
+Enable **Session replay** and **Heatmaps** in Project settings. See
+[docs/posthog-funnel.md](./posthog-funnel.md) for the complete funnel setup
+recipe and event list.
+
+**Env vars**:
+
+| Name | Notes |
+|---|---|
+| `NEXT_PUBLIC_POSTHOG_KEY` | Project API key (`phc_…`). **Public** — safe in the browser bundle. Also read server-side by `posthog-node` in `lib/posthog-server.ts`. |
+| `NEXT_PUBLIC_POSTHOG_HOST` | Set to `/ingest` so the client proxies through the Next.js rewrite and bypasses ad blockers. |
+| `POSTHOG_HOST` | `https://eu.i.posthog.com` — the direct EU ingestion endpoint used by the server-side `posthog-node` client (no proxy needed server-side). |
+
+Leave all three blank to keep PostHog entirely off — both the client provider and the server client no-op when `NEXT_PUBLIC_POSTHOG_KEY` is unset.
+
+**`NEXT_PUBLIC_*` vars are build-time** — set them in Vercel *before* deploying, same as `NEXT_PUBLIC_META_PIXEL_ID`. Missing at build → PostHog ships disabled and needs a redeploy after adding the key.
+
+**Events**: browser events (`lib/posthog-events.ts`): `$pageview` (every route change), `show_viewed`, `trial_play_started`, `paywall_shown`, `signup_cta_clicked`, `signup_completed`, `checkout_started`. Server event (`lib/posthog-server.ts` → `posthog-node` `captureImmediate`): `subscribe_succeeded` — fired from the Stripe webhook on the transition into an access-granting status, under the same consent guard as CAPI (`metadataHasCapiConsent`).
+
+**Consent gate**: `components/site/posthog-provider.tsx` mirrors the Meta Pixel pattern — PostHog is not loaded at all until `cookie_consent.marketing === true`. On consent revoke: `opt_out_capturing()` + `reset()`. Ingestion is reverse-proxied through `/ingest` (Next.js rewrite in `next.config.ts`). The `/ingest` path is excluded from the `proxy.ts` Clerk matcher so Clerk doesn't intercept analytics events.
+
+**Session replay + heatmaps**: enabled with `maskAllInputs: true` and `maskTextSelector: "*"` so no PII is recorded in replays.
+
 ## Service → file map
 
 | Service | Code |
@@ -204,3 +233,4 @@ Existing deployments keep their snapshot of env vars — only the **next** deplo
 | Neon | `db/index.ts`, `db/schema/*.ts`, `drizzle.config.ts`, `drizzle/` |
 | Vercel | platform-only; see [operations.md](./operations.md#deploy) |
 | Meta | `lib/meta-pixel-events.ts`, `lib/meta-capi.ts`, `lib/capi-identity.ts`, `components/site/meta-pixel.tsx`, `components/site/view-content-pixel.tsx`, `components/site/complete-registration-pixel.tsx`, `app/subscribe/{actions.ts,submit-button.tsx,page.tsx}`, `app/api/webhooks/stripe/route.ts`, `proxy.ts` |
+| PostHog | `components/site/posthog-provider.tsx`, `lib/posthog-events.ts`, `lib/posthog-server.ts`, `app/api/webhooks/stripe/route.ts`, `next.config.ts` (rewrite), `proxy.ts` (matcher exclusion) |

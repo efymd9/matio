@@ -3,6 +3,7 @@
 // Dobrovolskii, sole trader t/a Matio, UK). No DPO appointed (not required
 // under Art. 37). Supervisory authorities named inline: AEPD (ES) / ICO (UK).
 // Sole trader, so "business address" not "registered office".
+// PostHog disclosure added 2026-05-30.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDict } from "@/lib/i18n/server";
@@ -90,9 +91,10 @@ function PrivacyEn() {
             campaign URL we record the source / medium / campaign in two cookies
             and may attach the snapshot to your account at checkout for revenue
             attribution. If you accept marketing cookies, we also run the Meta
-            Pixel and Meta Conversions API for advertising measurement: this
-            shares a hashed (SHA-256) email address, your IP address and
-            conversion events (page views, sign-ups, subscriptions) with Meta.
+            Pixel and Meta Conversions API for advertising measurement (sharing a
+            hashed email address, IP address and conversion events with Meta) and
+            PostHog for product analytics (funnel and engagement events, masked
+            session replays, processed in the EU).
             See the <Link href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</Link>.
           </li>
           <li>
@@ -135,7 +137,8 @@ function PrivacyEn() {
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_first</code>{" "}
             and{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_last</code>{" "}
-            cookies and, where enabled, the Meta Pixel and Meta Conversions API.
+            cookies and, where enabled, the Meta Pixel, Meta Conversions API,
+            and PostHog (product-analytics funnel measurement).
             Lawful basis: <em>consent</em> — these run only after you accept
             marketing cookies in the banner, and stop if you withdraw consent.
           </li>
@@ -178,6 +181,15 @@ function PrivacyEn() {
             email address, IP address and conversion events so Meta can
             attribute and optimise our ad campaigns. US transfers covered by
             SCCs.
+          </li>
+          <li>
+            <strong>PostHog Inc.</strong> (US, EU Cloud region for our project)
+            — product analytics. Our PostHog project is hosted on PostHog&rsquo;s
+            EU Cloud (servers in the European Union), so behavioral and usage
+            data stays in the EU. Only engaged after you accept marketing cookies.
+            We send funnel events (page views, feature interactions, sign-up
+            steps) and masked session replays. SCCs cover any onward transfers to
+            PostHog&rsquo;s US infrastructure.
           </li>
         </ul>
         <p>
@@ -336,9 +348,10 @@ function PrivacyEs() {
             dos cookies y podemos vincular la instantánea a tu cuenta al pagar
             para atribución de ingresos. Si aceptas las cookies de marketing,
             además usamos el Meta Pixel y la API de Conversiones de Meta para
-            medición publicitaria: esto comparte con Meta un correo electrónico
-            cifrado (hash SHA-256), tu dirección IP y eventos de conversión
-            (visitas de página, registros, suscripciones). Consulta la{" "}
+            medición publicitaria (compartiendo un correo electrónico cifrado,
+            dirección IP y eventos de conversión con Meta) y PostHog para
+            analítica de producto (eventos de embudo y de uso, grabaciones de
+            sesión enmascaradas, procesados en la UE). Consulta la{" "}
             <Link href="/cookies" className="underline underline-offset-2 hover:text-white">
               Política de cookies
             </Link>
@@ -386,8 +399,9 @@ function PrivacyEs() {
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_first</code>{" "}
             y{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_last</code>{" "}
-            y, cuando está activado, el Meta Pixel y la API de Conversiones de
-            Meta. Base jurídica: <em>consentimiento</em>: solo se ejecutan tras
+            y, cuando está activado, el Meta Pixel, la API de Conversiones de
+            Meta y PostHog (analítica de embudo de producto).
+            Base jurídica: <em>consentimiento</em>: solo se ejecutan tras
             aceptar las cookies de marketing en el banner y se detienen si
             retiras el consentimiento.
           </li>
@@ -432,6 +446,17 @@ function PrivacyEs() {
             correo electrónico cifrado (hash SHA-256), la dirección IP y eventos
             de conversión para que Meta pueda atribuir y optimizar nuestras
             campañas. Transferencias a EE. UU. amparadas por CCT.
+          </li>
+          <li>
+            <strong>PostHog Inc.</strong> (EE. UU., región EU Cloud para
+            nuestro proyecto) — analítica de producto. Nuestro proyecto de
+            PostHog está alojado en PostHog Cloud EU (servidores en la Unión
+            Europea), por lo que los datos de comportamiento y uso permanecen
+            en la UE. Solo se utiliza tras aceptar las cookies de marketing.
+            Enviamos eventos de embudo (visitas de página, interacciones,
+            pasos del registro) y grabaciones de sesión enmascaradas.
+            Las CCT cubren cualquier transferencia posterior a la infraestructura
+            de EE. UU. de PostHog.
           </li>
         </ul>
         <p>

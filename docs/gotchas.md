@@ -276,6 +276,40 @@ Three traps stacked on the server-side `Purchase` in `app/api/webhooks/stripe/ro
 2. **Fire the CAPI call BEFORE `markUserTrialsConverted`.** `markUserTrialsConverted` (and the mirrored row) make the prior state look access-granting on Stripe's *retry* of the same event. If a transient DB error aborts the handler after conversion but before the Purchase, the retry sees an already-access-granting prior row, computes `becameAccessGranting = false`, and **permanently suppresses** the Purchase. Order it first.
 3. **`sendCapiEvents` must NEVER throw.** It runs after the `stripe_events` idempotency claim is committed. A throw would bubble up, the handler would 500, and Stripe would retry — but the claim is already held, so the retry short-circuits and the subscription state work never re-runs. `sendCapiEvents` returns `{ ok, skipped?, error? }` and swallows all errors (3s `AbortController` timeout, plain `fetch`); the webhook also wraps the call in its own best-effort try/catch as defence-in-depth.
 
+## PostHog
+
+### `proxy.ts` runs BEFORE `next.config.ts` rewrites — exclude `/ingest` from the matcher
+
+The Clerk middleware (`proxy.ts`) runs at the Vercel edge **before** Next.js processes URL rewrites defined in `next.config.ts`. The `/ingest` → `https://eu.i.posthog.com` rewrite is invisible to `proxy.ts`, so without an explicit exclusion the middleware intercepts every `POST /ingest/...` analytics beacon as an unauthenticated request and either redirects it or returns 401/307. This silently drops all PostHog events in production without any console error.
+
+Fix: add `/ingest(.*)` to the negative lookahead in the `proxy.ts` matcher (or wrap the Clerk gate in a condition that short-circuits for that prefix) before adding the rewrite. Any new path you proxy through `next.config.ts` has the same issue — check the matcher first.
+
+### `posthog-node` in serverless must use `captureImmediate`, not `capture`
+
+`posthog-node`'s default `capture()` method queues the event and flushes on a timer or when `shutdown()` is called. In a Vercel Function (or any serverless runtime), the process freezes the instant the response is sent — the timer never fires and `shutdown()` is never called, so queued events are silently discarded.
+
+Use `captureImmediate` (sends the event inline, awaitable) for any server-side PostHog call in a serverless context:
+
+```ts
+await posthog.captureImmediate({ distinctId, event, properties });
+```
+
+If you switch to a long-running Node server (e.g. `pnpm dev` or a persistent container) the default `capture` + `shutdown()` pattern works fine — but in production on Vercel, `captureImmediate` is the only safe option.
+
+### App Router `$pageview` must be fired manually — the default fires only on full page loads
+
+`posthog-js` auto-fires `$pageview` once on init, triggered by a `DOMContentLoaded` event. App Router navigations don't reload the page — they're client-side route transitions — so subsequent navigations never emit `$pageview` unless you fire it yourself.
+
+Set `capture_pageview: false` in the PostHog `init` options and manually call `posthog.capture('$pageview')` in a `usePathname` effect (or `useEffect` on `pathname + searchParams`). The `components/site/posthog-provider.tsx` handles this — don't add a second listener or you'll double-count the initial page load.
+
+```ts
+// in posthog-provider.tsx
+posthog.init(key, { capture_pageview: false, ... });
+
+// then in a useEffect watching pathname:
+posthog.capture('$pageview');
+```
+
 ## Vercel platform
 
 ### Trusted client IP comes from `x-vercel-forwarded-for`, not leftmost `x-forwarded-for`

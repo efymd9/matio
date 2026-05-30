@@ -317,6 +317,17 @@ Two halves. **(1) Player beacons:** `components/watch/player.tsx` (`player_name=
 
 **(2) In-admin panel:** `lib/mux-data.ts` (server-only) `getMuxData(timeframe)` hits the Mux Data API (`api.mux.com/data/v1`, HTTP Basic auth with a "Mux Data: Read" token) for real watch-time. It calls `/metrics/comparison` (totals: `watch_time` / `view_count` / `unique_viewers` / `total_playing_time`, all in **milliseconds**) plus `/metrics/video_startup_time/breakdown?group_by=video_series` for the per-show rows, and excludes the home hero via `filters[]=!player_name:matio-hero`. The fetch is cached server-side 5 minutes (`next.revalidate=300`) — Mux's API is rate-limited at 5 req/s. It's best-effort: returns `{ status: 'ok' | 'not_configured' | 'error' }` so the admin panel degrades to a hint when the token isn't set rather than erroring the page.
 
+### Funnel analytics (PostHog)
+
+**Additive to Meta Pixel/CAPI** — PostHog gives first-party funnel visibility (where visitors drop, which campaigns convert) without depending on Meta's match quality or ad-blocker interference.
+
+- **Consent-gated provider** (`components/site/posthog-provider.tsx`): mirrors the Meta Pixel pattern. Uses `next/dynamic` (dynamic import, no SSR) so the `posthog-js` bundle (~100KB) stays out of the initial HTML. PostHog does not load at all until `cookie_consent.marketing === true`. On consent revoke: `opt_out_capturing()` + `reset()`.
+- **Autocapture OFF**. We fire a curated named event set (`lib/posthog-events.ts`): `$pageview` on every App Router route change (the provider handles this — posthog-js's default only fires on full page loads so `capture_pageview: false` is set and we fire manually), `show_viewed`, `trial_play_started`, `paywall_shown`, `signup_cta_clicked`, `signup_completed`, `checkout_started`.
+- **`/ingest` reverse proxy** (`next.config.ts` rewrite) routes browser events through the Next.js origin to bypass ad blockers. The path is excluded from the `proxy.ts` Clerk matcher (Clerk runs before Next.js rewrites — without the exclusion it intercepts analytics POSTs as unauthenticated requests).
+- **Server-side `subscribe_succeeded`** (`lib/posthog-server.ts`, `posthog-node` client): fired from the Stripe webhook on the transition into an access-granting status, under the same `metadataHasCapiConsent` guard as CAPI. Uses `captureImmediate` (not the default batched `capture`) because serverless functions freeze immediately after the response — a queued event would be silently lost. Keyed to the Clerk user id so it stitches to the browser session.
+- **Masked session replay + heatmaps**: `maskAllInputs: true`, `maskTextSelector: "*"`. Enabled in PostHog project settings; no PII recorded in replays.
+- **EU Cloud**: PostHog project hosted in the EU region (`eu.i.posthog.com`). `POSTHOG_HOST` (server) points there directly; `NEXT_PUBLIC_POSTHOG_HOST=/ingest` routes browser events via the rewrite. Env vars: `NEXT_PUBLIC_POSTHOG_KEY` (public, build-time inlined — same caveats as `NEXT_PUBLIC_META_PIXEL_ID`), `NEXT_PUBLIC_POSTHOG_HOST`, `POSTHOG_HOST`. All three absent → PostHog fully off, no exceptions.
+
 ### Unified consent model
 
 Everything gates on `cookie_consent.marketing`:
@@ -326,8 +337,9 @@ Everything gates on `cookie_consent.marketing`:
 - **Mux Data** passes `disableTracking` + `disableCookies` until consent *and* an env key, so no beacon leaks pre-consent.
 - The **`?fbclid` → `_fbc` derivation** in `proxy.ts` is under the same `hasMarketingConsent` gate as attribution (`applyMarketingCookies`, formerly `applyAttributionCookies`).
 - On **withdrawal**, `clearMarketingCookies` (`lib/cookie-consent.ts`) clears attribution *and* `_fbp`/`_fbc`. The `_fbp`/`_fbc` clears are issued **both host-only and domain-scoped** (`Domain=.<root>`): `fbevents.js` sets `_fbp` scoped to the registrable domain, and a path-only `document.cookie` expiry only matches a host-only cookie, leaving the domain cookie alive.
+- **PostHog** (`components/site/posthog-provider.tsx`) does not load at all pre-consent. On withdrawal, `opt_out_capturing()` + `reset()` are called.
 
-**Env vars** (all new this session): `NEXT_PUBLIC_META_PIXEL_ID` (public, build-time inlined), `META_CAPI_ACCESS_TOKEN` (secret), optional `META_CAPI_TEST_EVENT_CODE` + `META_GRAPH_API_VERSION`, `NEXT_PUBLIC_MUX_DATA_ENV_KEY` (public, build-time inlined — enables player tracking), and `MUX_DATA_API_TOKEN_ID` / `MUX_DATA_API_TOKEN_SECRET` (secret — powers the in-admin panel). The `NEXT_PUBLIC_*` pair is inlined at **build** time, so it must exist in Vercel *before* the deploy build or the feature ships disabled and needs a redeploy.
+**Env vars**: `NEXT_PUBLIC_META_PIXEL_ID` (public, build-time inlined), `META_CAPI_ACCESS_TOKEN` (secret), optional `META_CAPI_TEST_EVENT_CODE` + `META_GRAPH_API_VERSION`, `NEXT_PUBLIC_MUX_DATA_ENV_KEY` (public, build-time inlined — enables player tracking), `MUX_DATA_API_TOKEN_ID` / `MUX_DATA_API_TOKEN_SECRET` (secret — powers the in-admin panel), `NEXT_PUBLIC_POSTHOG_KEY` (public, build-time inlined), `NEXT_PUBLIC_POSTHOG_HOST=/ingest`, `POSTHOG_HOST=https://eu.i.posthog.com`. All `NEXT_PUBLIC_*` vars are inlined at **build** time — they must exist in Vercel before the deploy build or the feature ships disabled and needs a redeploy.
 
 ## Cookie consent
 

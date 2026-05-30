@@ -1,8 +1,9 @@
 // DRAFT pending legal-counsel review. Describes the cookies the site sets
-// (Clerk + Stripe + attribution + Meta Pixel). The attribution_first /
-// attribution_last / _fbp / _fbc marketing cookies are gated on
+// (Clerk + Stripe + attribution + Meta Pixel + PostHog). The attribution_first /
+// attribution_last / _fbp / _fbc / ph_* marketing cookies are gated on
 // cookie_consent.marketing via proxy.ts + the consent banner. Contact details
-// filled 2026-05-27; Meta Pixel + Conversions API disclosure added 2026-05-29.
+// filled 2026-05-27; Meta Pixel + Conversions API disclosure added 2026-05-29;
+// PostHog disclosure added 2026-05-30.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDict } from "@/lib/i18n/server";
@@ -133,6 +134,13 @@ function CookiesEn() {
               expiry: "Up to 1 year",
               category: "Marketing",
             },
+            {
+              name: "ph_* (PostHog)",
+              purpose:
+                "Set by PostHog, our product-analytics tool, to identify your browser session and measure how visitors move through the site (funnel analytics, page views, feature interactions). Session replays and heatmaps are also recorded with all inputs and text masked. Only set after you accept marketing cookies.",
+              expiry: "Up to 1 year",
+              category: "Marketing",
+            },
           ]}
         />
         <p>
@@ -148,7 +156,12 @@ function CookiesEn() {
           playback quality and watch time via <strong>Mux Data</strong>; like
           the Pixel, this runs <strong>only after you accept marketing
           cookies</strong> and sets a viewer identifier so we can count unique
-          viewers.
+          viewers. We also use <strong>PostHog</strong> (EU Cloud) for
+          product analytics &mdash; measuring which steps of the sign-up
+          funnel visitors reach and where they drop off. PostHog loads{" "}
+          <strong>only after you accept marketing cookies</strong>, with
+          autocapture disabled, session replay fully masked, and data
+          processed on servers in the European Union (PostHog Cloud EU).
         </p>
       </Section>
 
@@ -276,6 +289,13 @@ function CookiesEs() {
               expiry: "Hasta 1 año",
               category: "Marketing",
             },
+            {
+              name: "ph_* (PostHog)",
+              purpose:
+                "La coloca PostHog, nuestra herramienta de analítica de producto, para identificar tu sesión en el navegador y medir cómo los visitantes avanzan por el sitio (análisis de embudo, vistas de página, interacciones). Las sesiones también se graban con todos los campos e textos enmascarados. Solo se coloca tras aceptar las cookies de marketing.",
+              expiry: "Hasta 1 año",
+              category: "Marketing",
+            },
           ]}
         />
         <p>
@@ -292,7 +312,13 @@ function CookiesEs() {
           visionado mediante <strong>Mux Data</strong>; al igual que el Pixel,
           esto se ejecuta <strong>solo tras aceptar las cookies de
           marketing</strong> y coloca un identificador de espectador para contar
-          espectadores únicos.
+          espectadores únicos. También usamos <strong>PostHog</strong> (EU
+          Cloud) para analítica de producto, midiendo qué pasos del embudo de
+          registro alcanzan los visitantes y dónde abandonan. PostHog solo se
+          carga <strong>tras aceptar las cookies de marketing</strong>, con la
+          captura automática desactivada, las grabaciones de sesión completamente
+          enmascaradas y los datos procesados en servidores de la Unión Europea
+          (PostHog Cloud EU).
         </p>
       </Section>
 
