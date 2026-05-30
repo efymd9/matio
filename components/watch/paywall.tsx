@@ -1,10 +1,12 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
+import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 
 // Trial-end prompt. The conversion path is:
 //   trial ends → "Sign up to keep watching" → Clerk sign-up modal
@@ -30,6 +32,12 @@ export function Paywall({
   showTitle?: string;
 }) {
   const t = useT();
+
+  useEffect(() => {
+    return onPostHogReady(() => {
+      capturePostHog("paywall_shown", { show_slug: showSlug });
+    });
+  }, [showSlug]);
 
   const params = new URLSearchParams({ show: showSlug });
   if (resumeSeconds && resumeSeconds > 0) {
@@ -91,6 +99,9 @@ export function Paywall({
               >
                 <button
                   type="button"
+                  onClick={() =>
+                    capturePostHog("signup_cta_clicked", { auth: "signed_out" })
+                  }
                   className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98]"
                 >
                   <Icon name="play" size={14} color="#ffffff" />
@@ -101,6 +112,9 @@ export function Paywall({
             <Show when="signed-in">
               <Link
                 href={subscribeHref}
+                onClick={() =>
+                  capturePostHog("signup_cta_clicked", { auth: "signed_in" })
+                }
                 className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98]"
               >
                 <Icon name="play" size={14} color="#ffffff" />
