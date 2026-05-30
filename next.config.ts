@@ -1,12 +1,27 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // PostHog recommends posting analytics through a same-origin path so ad
+  // blockers don't drop ingestion and the SDK's cookies stay first-party.
+  // Middleware (proxy.ts) runs BEFORE these rewrites, so /ingest is excluded
+  // from the proxy matcher (see proxy.ts) to skip Clerk auth on every beacon.
+  skipTrailingSlashRedirect: true,
+  async rewrites() {
+    return [
+      {
+        source: "/ingest/static/:path*",
+        destination: "https://eu-assets.i.posthog.com/static/:path*",
+      },
+      {
+        source: "/ingest/:path*",
+        destination: "https://eu.i.posthog.com/:path*",
+      },
+    ];
+  },
   images: {
     // Mux image service hosts every poster + thumbnail. Anything not
     // listed here falls through to raw <img>.
-    remotePatterns: [
-      { protocol: "https", hostname: "image.mux.com" },
-    ],
+    remotePatterns: [{ protocol: "https", hostname: "image.mux.com" }],
   },
   experimental: {
     // Tree-shake barrel imports so importing one symbol from these
