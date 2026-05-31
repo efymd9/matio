@@ -66,6 +66,7 @@ export type AnalyticsFilters = {
   granularityChoice: GranularityChoice; // as selected (for the control)
   show: string; // "all" | slug
   channel: string; // "all" | source value | DIRECT_BUCKET
+  campaign: string; // "all" | campaign value | DIRECT_BUCKET
   attribution: AttributionModel;
   status: StatusScope;
   customFrom: string | null; // YYYY-MM-DD echo for the date inputs
@@ -166,6 +167,7 @@ export function parseFilters(sp: RawParams, now: Date): AnalyticsFilters {
     granularityChoice: granChoice,
     show: one(sp.show) || "all",
     channel: one(sp.channel) || "all",
+    campaign: one(sp.campaign) || "all",
     attribution,
     status,
     customFrom: customFromRaw,
@@ -227,6 +229,15 @@ function channelCond(col: AnyColumn, channel: string): SQL | undefined {
   if (channel === "all") return undefined;
   if (channel === DIRECT_BUCKET) return isNull(col);
   return eq(col, channel);
+}
+
+// Campaign (utm_campaign) predicate — same shape as channelCond, for the
+// campaign column of any of the three tables. "all" → no filter, DIRECT_BUCKET
+// → IS NULL (organic), otherwise exact match.
+function campaignCond(col: AnyColumn, campaign: string): SQL | undefined {
+  if (campaign === "all") return undefined;
+  if (campaign === DIRECT_BUCKET) return isNull(col);
+  return eq(col, campaign);
 }
 
 // date_trunc bucket label, formatted to a stable UTC string that mirrors the
@@ -409,11 +420,16 @@ export async function loadDashboard(f: AnalyticsFilters) {
 
   // Predicate builders ------------------------------------------------------
   const tSrc = trialSource(f.attribution);
+  const tCmp =
+    f.attribution === "first"
+      ? trialSessions.attributionFirstCampaign
+      : trialSessions.attributionLastCampaign;
   const trialConds = (from: Date, to: Date): SQL[] => {
     const c: (SQL | undefined)[] = [
       gte(trialSessions.startedAt, from),
       lte(trialSessions.startedAt, to),
       channelCond(tSrc, f.channel),
+      campaignCond(tCmp, f.campaign),
       showId ? eq(trialSessions.showId, showId) : undefined,
     ];
     return c.filter((x): x is SQL => Boolean(x));
@@ -422,11 +438,16 @@ export async function loadDashboard(f: AnalyticsFilters) {
     f.attribution === "first"
       ? users.attributionFirstSource
       : users.attributionLastSource;
+  const uCmp =
+    f.attribution === "first"
+      ? users.attributionFirstCampaign
+      : users.attributionLastCampaign;
   const userConds = (from: Date, to: Date): SQL[] => {
     const c: (SQL | undefined)[] = [
       gte(users.createdAt, from),
       lte(users.createdAt, to),
       channelCond(uSrc, f.channel),
+      campaignCond(uCmp, f.campaign),
     ];
     return c.filter((x): x is SQL => Boolean(x));
   };
@@ -434,15 +455,26 @@ export async function loadDashboard(f: AnalyticsFilters) {
     f.attribution === "first"
       ? subscriptions.attributionFirstSource
       : subscriptions.attributionLastSource;
-  // New subscriptions (createdAt) in a window, scoped by channel.
+  const sCmp =
+    f.attribution === "first"
+      ? subscriptions.attributionFirstCampaign
+      : subscriptions.attributionLastCampaign;
+  // New subscriptions (createdAt) in a window, scoped by channel + campaign.
   const newSubConds = (from: Date, to: Date): SQL[] => {
     const c: (SQL | undefined)[] = [
       gte(subscriptions.createdAt, from),
       lte(subscriptions.createdAt, to),
       channelCond(sSrc, f.channel),
+      campaignCond(sCmp, f.campaign),
     ];
     return c.filter((x): x is SQL => Boolean(x));
   };
+  // Subscription-snapshot attribution filter (channel + campaign). Reused by the
+  // active / serviced / status-mix / cancellation snapshot queries below.
+  const subAttrConds: SQL[] = [
+    channelCond(sSrc, f.channel),
+    campaignCond(sCmp, f.campaign),
+  ].filter((x): x is SQL => Boolean(x));
 
   const tT = trialTriple(f.attribution);
   const uT = userTriple(f.attribution);
@@ -489,6 +521,7 @@ export async function loadDashboard(f: AnalyticsFilters) {
     campSubs,
     // dropdown options
     channelRows,
+    campaignRows,
     // mux
     muxResult,
   ] = await Promise.all([
@@ -552,7 +585,7 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .where(
         and(
           eq(subscriptions.status, "active"),
-          channelCond(sSrc, f.channel),
+          ...subAttrConds,
         ),
       ),
     db
@@ -561,13 +594,13 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .where(
         and(
           sql`${subscriptions.status} IN ('active','trialing','past_due')`,
-          channelCond(sSrc, f.channel),
+          ...subAttrConds,
         ),
       ),
     db
       .select({ status: subscriptions.status, n: count() })
       .from(subscriptions)
-      .where(channelCond(sSrc, f.channel) ?? sql`true`)
+      .where(and(...subAttrConds) ?? sql`true`)
       .groupBy(subscriptions.status),
     db
       .select({ n: count() })
@@ -577,7 +610,7 @@ export async function loadDashboard(f: AnalyticsFilters) {
           eq(subscriptions.status, "canceled"),
           gte(subscriptions.updatedAt, f.from),
           lte(subscriptions.updatedAt, f.to),
-          channelCond(sSrc, f.channel),
+          ...subAttrConds,
         ),
       ),
     db.select({ n: count() }).from(users),
@@ -683,6 +716,11 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .selectDistinct({ source: tSrc })
       .from(trialSessions)
       .where(sql`${tSrc} IS NOT NULL`),
+    // ---- campaign dropdown options (distinct campaigns, all-time) ----
+    db
+      .selectDistinct({ campaign: tCmp })
+      .from(trialSessions)
+      .where(sql`${tCmp} IS NOT NULL`),
     // ---- mux ----
     getMuxData(muxTf.timeframe),
   ]);
@@ -727,12 +765,21 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .sort(),
   ];
 
+  const campaignOptions = [
+    DIRECT_BUCKET,
+    ...campaignRows
+      .map((r) => r.campaign)
+      .filter((s): s is string => Boolean(s))
+      .sort(),
+  ];
+
   const muxClampedNote = muxTf.clamped;
 
   return {
     filters: f,
     showsList,
     channelOptions,
+    campaignOptions,
     // KPIs (flow metrics carry prev for deltas; snapshots do not)
     kpis: {
       signups: { value: Number(signupsCur[0].n), prev: Number(signupsPrev[0].n) },

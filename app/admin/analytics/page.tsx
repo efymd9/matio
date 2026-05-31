@@ -44,6 +44,8 @@ export default async function AnalyticsPage({
       ? null
       : (d.showsList.find((s) => s.slug === filters.show)?.title ?? filters.show);
   const channelLabel = filters.channel === "all" ? null : filters.channel;
+  const campaignLabel =
+    filters.campaign === "all" ? null : filters.campaign;
 
   // Sparklines from the time series (period-scoped flow metrics).
   const sparkTrials = d.series.map((p) => p.trials);
@@ -65,6 +67,7 @@ export default async function AnalyticsPage({
             {rangeLabel}
             {showLabel ? ` · ${showLabel}` : ""}
             {channelLabel ? ` · ${channelLabel}` : ""}
+            {campaignLabel ? ` · ${campaignLabel}` : ""}
             {` · ${filters.attribution}-touch`}
           </p>
         </div>
@@ -75,6 +78,7 @@ export default async function AnalyticsPage({
         filters={filters}
         shows={d.showsList.map((s) => ({ slug: s.slug, title: s.title }))}
         channels={d.channelOptions}
+        campaigns={d.campaignOptions}
       />
 
       {/* KPI row */}

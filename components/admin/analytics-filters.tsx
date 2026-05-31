@@ -32,10 +32,12 @@ export function AnalyticsFilters({
   filters,
   shows,
   channels,
+  campaigns,
 }: {
   filters: AnalyticsFilters;
   shows: { slug: string; title: string }[];
   channels: string[];
+  campaigns: string[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -167,6 +169,26 @@ export function AnalyticsFilters({
             >
               <option value="all">All channels</option>
               {channels.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </Labeled>
+
+          {/* Campaign */}
+          <Labeled label="Campaign">
+            <select
+              value={filters.campaign}
+              onChange={(e) =>
+                patch({
+                  campaign: e.target.value === "all" ? null : e.target.value,
+                })
+              }
+              className={select}
+            >
+              <option value="all">All campaigns</option>
+              {campaigns.map((c) => (
                 <option key={c} value={c}>
                   {c}
                 </option>
