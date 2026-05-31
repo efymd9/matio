@@ -17,6 +17,20 @@ const EXCLUDE_HERO_FILTER = "!player_name:matio-hero";
 
 export type MuxTimeframe = "24:hours" | "7:days" | "30:days";
 
+// Mux Data only exposes these fixed windows. Map an arbitrary day-span (from the
+// dashboard's range filter) to the nearest covering one. `clamped` is true when
+// the requested window is WIDER than Mux's 30-day max — the panel surfaces that
+// so a 90d/all/custom range doesn't silently look like only-30d of traffic.
+export function muxTimeframeForDays(days: number): {
+  timeframe: MuxTimeframe;
+  clamped: boolean;
+} {
+  if (days <= 1) return { timeframe: "24:hours", clamped: false };
+  if (days <= 7) return { timeframe: "7:days", clamped: false };
+  if (days <= 30) return { timeframe: "30:days", clamped: false };
+  return { timeframe: "30:days", clamped: true };
+}
+
 export type MuxWatchSummary = {
   watchTimeMs: number;
   playingTimeMs: number;
@@ -28,6 +42,10 @@ export type MuxShowRow = { show: string; views: number; watchTimeMs: number };
 
 export type MuxDataResult =
   | { status: "ok"; summary: MuxWatchSummary; byShow: MuxShowRow[] }
+  // 200 OK but Mux returned no totals row / zero views — genuinely no traffic
+  // yet, distinct from a parse failure masquerading as zeros. The panel shows a
+  // friendly "no views recorded" rather than a misleading 0.0h tile grid.
+  | { status: "no_data" }
   | { status: "not_configured" }
   | { status: "error"; message: string };
 
@@ -115,6 +133,17 @@ export async function getMuxData(
           views: Number(r.views ?? 0),
           watchTimeMs: Number(r.total_watch_time ?? 0),
         }));
+    }
+
+    // No totals row, or zero everywhere with no per-show breakdown → genuinely
+    // no traffic in this window. Distinct no_data state so the panel doesn't
+    // render a grid of misleading zeros that look like a parse failure.
+    const emptySummary =
+      summary.views === 0 &&
+      summary.watchTimeMs === 0 &&
+      summary.uniqueViewers === 0;
+    if (!totals || (emptySummary && byShow.length === 0)) {
+      return { status: "no_data" };
     }
 
     return { status: "ok", summary, byShow };
