@@ -13,6 +13,7 @@ import {
   POSTHOG_KEY,
   POSTHOG_READY_EVENT,
 } from "@/lib/posthog-events";
+import { normalizeUtm } from "@/lib/utm";
 
 // Consent-gated PostHog loader. posthog-js is dynamically imported ONLY after
 // the visitor accepts marketing cookies (same gate proxy.ts uses for
@@ -91,6 +92,23 @@ export function PostHogProvider({
           // explicitly to document the deliberate choice (double-negative name).
           disable_session_recording: false,
           session_recording: { maskAllInputs: true, maskTextSelector: "*" },
+          // Normalize the auto-captured UTM values before any event is sent, so
+          // a stray char (e.g. a leaked ">" from a malformed ad link) or case
+          // drift can't fragment a campaign. Mirrors the app's attribution
+          // clean() + the PostHog funnel breakdown. Mutates ONLY the utm_*
+          // values (never deletes reserved keys) and always returns the event.
+          before_send: (event) => {
+            const props = event?.properties;
+            if (props) {
+              for (const k of ["utm_campaign", "utm_source", "utm_medium"]) {
+                if (typeof props[k] === "string") {
+                  const n = normalizeUtm(props[k]);
+                  if (n) props[k] = n;
+                }
+              }
+            }
+            return event;
+          },
           loaded: (ph) => {
             window.posthog = ph as unknown as Window["posthog"];
             window.__phReady = true;

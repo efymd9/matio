@@ -1,5 +1,6 @@
 import "server-only";
 import type { NextRequest } from "next/server";
+import { normalizeUtm } from "@/lib/utm";
 
 // Per-campaign attribution. Captured from UTM query params on landing,
 // persisted at each funnel milestone (trial_sessions on first play, users
@@ -49,12 +50,15 @@ export const EMPTY_ATTRIBUTION: AttributionPayload = {
 };
 
 function clean(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.length > FIELD_MAX_LEN
-    ? trimmed.slice(0, FIELD_MAX_LEN)
-    : trimmed;
+  // normalizeUtm lowercases + strips non-[a-z0-9_-] so a stray char or case
+  // drift can't fragment a campaign across the attribution columns / Stripe
+  // metadata (matches the PostHog funnel breakdown). FIELD_MAX_LEN still caps
+  // pathological ad-network URLs that dump JSON blobs into utm_*.
+  const normalized = normalizeUtm(value);
+  if (!normalized) return null;
+  return normalized.length > FIELD_MAX_LEN
+    ? normalized.slice(0, FIELD_MAX_LEN)
+    : normalized;
 }
 
 export function hasAnyField(p: AttributionPayload): boolean {
