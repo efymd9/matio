@@ -40,19 +40,23 @@ for the design rationale.
 
 ## Build the funnel
 
-In PostHog → Product analytics → New insight → **Funnel**. Steps in order:
+In PostHog → Product analytics → New insight → **Funnel**. **Ads link directly to
+the show player** (`/watch/[showSlug]`), so the ad funnel starts there — NOT the
+homepage. Steps in order:
 
-1. Pageview where Path = `/`
-2. Pageview where Path matches `/shows/.*`
-3. `trial_play_started`
-4. `paywall_shown`
-5. `signup_cta_clicked`
-6. `signup_completed`
-7. Pageview where Path = `/subscribe`
-8. `checkout_started`
-9. `subscribe_succeeded`
+1. Pageview where Path contains `/watch/`  ← ad landing (the player)
+2. `trial_play_started`
+3. `paywall_shown`
+4. `signup_cta_clicked`
+5. Pageview where Path contains `/subscribe`
+6. `checkout_started`
+7. `subscribe_succeeded`
 
-Set the conversion window to ~7 days (Matio's funnel is delayed-conversion).
+Set the conversion window to ~14 days (Matio's funnel is delayed-conversion).
+
+> The **"Ads funnel"** dashboard (3 insights: overall, by `utm_source`, by
+> `utm_campaign`) is already built in PostHog EU via the PostHog MCP. For
+> organic/browse traffic, build a separate funnel starting at `/` → `/shows/*`.
 Add a **Breakdown** by `utm_source` (and a second saved copy by `utm_campaign`)
 to see which campaign leaks at which step. Save both onto a new **"Ads funnel"**
 dashboard.
