@@ -4,7 +4,23 @@
 // place — individual call sites just call trackPixel() without re-checking
 // consent themselves.
 
+// Primary pixel — also the one the server-side Conversions API (lib/meta-capi.ts)
+// sends Purchase to, since CAPI needs a per-pixel access token.
 export const META_PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID ?? "";
+
+// Every browser pixel to initialize: the primary above + any extras listed
+// comma-separated in NEXT_PUBLIC_META_PIXEL_IDS. fbq('track', …) with no pixel
+// argument fires to ALL init'd pixels, so every call site hits every pixel with
+// no further changes. NOTE: extra pixels are BROWSER-ONLY — the server-side
+// CAPI Purchase still goes only to META_PIXEL_ID unless an extra pixel is given
+// its own CAPI access token.
+export const META_PIXEL_IDS: string[] = Array.from(
+  new Set(
+    [META_PIXEL_ID, ...(process.env.NEXT_PUBLIC_META_PIXEL_IDS ?? "").split(",")]
+      .map((id) => id.trim())
+      .filter(Boolean),
+  ),
+);
 
 // Set by the base snippet once fbq('init') + the first PageView have run.
 // Used by onPixelReady() so mount-time events (ViewContent, registration)

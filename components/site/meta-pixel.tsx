@@ -8,7 +8,7 @@ import {
   readConsentFromDocument,
   type ConsentRecord,
 } from "@/lib/cookie-consent";
-import { META_PIXEL_ID } from "@/lib/meta-pixel-events";
+import { META_PIXEL_IDS } from "@/lib/meta-pixel-events";
 
 // Consent-gated Meta Pixel loader. The fbevents.js base code is injected ONLY
 // after the visitor accepts marketing cookies (ePrivacy/PECR/AEPD/CNIL), which
@@ -75,7 +75,13 @@ export function MetaPixel({
     window.fbq?.("track", "PageView");
   }, [enabled, pathname]);
 
-  if (!enabled || !META_PIXEL_ID) return null;
+  if (!enabled || META_PIXEL_IDS.length === 0) return null;
+
+  // One fbq('init', …) per pixel. The single fbq('track', 'PageView') after
+  // them fires to all init'd pixels (as do all trackPixel() call sites).
+  const initCalls = META_PIXEL_IDS.map((id) => `fbq('init', '${id}');`).join(
+    "\n",
+  );
 
   return (
     <>
@@ -88,20 +94,23 @@ n.queue=[];t=b.createElement(e);t.async=!0;
 t.src=v;s=b.getElementsByTagName(e)[0];
 s.parentNode.insertBefore(t,s)}(window, document,'script',
 'https://connect.facebook.net/en_US/fbevents.js');
-fbq('init', '${META_PIXEL_ID}');
+${initCalls}
 fbq('track', 'PageView');
 window.__mfbqReady=true;
 window.dispatchEvent(new Event('mfbq:ready'));`}
       </Script>
       <noscript>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          height="1"
-          width="1"
-          style={{ display: "none" }}
-          alt=""
-          src={`https://www.facebook.com/tr?id=${META_PIXEL_ID}&ev=PageView&noscript=1`}
-        />
+        {META_PIXEL_IDS.map((id) => (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={id}
+            height="1"
+            width="1"
+            style={{ display: "none" }}
+            alt=""
+            src={`https://www.facebook.com/tr?id=${id}&ev=PageView&noscript=1`}
+          />
+        ))}
       </noscript>
     </>
   );
