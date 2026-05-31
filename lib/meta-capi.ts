@@ -21,23 +21,42 @@ type MetaClient = {
 };
 
 declare global {
-  var __metaCapiClient: MetaClient | undefined;
+  var __metaCapiClients: MetaClient[] | undefined;
 }
 
-function getMetaCapi(): MetaClient | null {
-  if (globalThis.__metaCapiClient) return globalThis.__metaCapiClient;
-  const pixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID;
-  const accessToken = process.env.META_CAPI_ACCESS_TOKEN;
-  if (!pixelId || !accessToken) return null;
-  const client: MetaClient = {
+function makeClient(pixelId: string, accessToken: string): MetaClient {
+  return {
     pixelId,
     accessToken,
     // Only set while testing in the Events Manager "Test events" tab.
     testEventCode: process.env.META_CAPI_TEST_EVENT_CODE || undefined,
     endpoint: `https://graph.facebook.com/${GRAPH_API_VERSION}/${pixelId}/events`,
   };
-  globalThis.__metaCapiClient = client;
-  return client;
+}
+
+// Every CAPI target: the primary pixel (NEXT_PUBLIC_META_PIXEL_ID +
+// META_CAPI_ACCESS_TOKEN) plus each extra browser pixel in
+// NEXT_PUBLIC_META_PIXEL_IDS that has a matching server token
+// META_CAPI_ACCESS_TOKEN_{n} (2-based, by position in that list). An extra
+// pixel WITHOUT its own token stays browser-only. Empty list → no-op (skipped).
+function getMetaCapiClients(): MetaClient[] {
+  if (globalThis.__metaCapiClients) return globalThis.__metaCapiClients;
+  const clients: MetaClient[] = [];
+  const primaryId = process.env.NEXT_PUBLIC_META_PIXEL_ID;
+  const primaryToken = process.env.META_CAPI_ACCESS_TOKEN;
+  if (primaryId && primaryToken) {
+    clients.push(makeClient(primaryId, primaryToken));
+  }
+  const extras = (process.env.NEXT_PUBLIC_META_PIXEL_IDS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  extras.forEach((id, i) => {
+    const token = process.env[`META_CAPI_ACCESS_TOKEN_${i + 2}`];
+    if (token) clients.push(makeClient(id, token));
+  });
+  globalThis.__metaCapiClients = clients;
+  return clients;
 }
 
 function sha256(value: string): string {
@@ -93,15 +112,17 @@ function buildUserData(u: CapiUserData): Record<string, unknown> {
   return out;
 }
 
-// Fire one or more CAPI events. NEVER throws — returns a result the caller can
-// log. `skipped` means CAPI isn't configured (local dev / no token). Bounded
-// by CAPI_TIMEOUT_MS.
+// Fire one or more CAPI events to EVERY configured pixel. NEVER throws —
+// returns a result the caller can log. `skipped` means no CAPI target is
+// configured (local dev / no token). Each pixel POST is bounded by
+// CAPI_TIMEOUT_MS and they run in parallel, so total time stays ~3s regardless
+// of pixel count.
 export async function sendCapiEvents(
   events: CapiEvent[],
   eventTimeSeconds?: number,
 ): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
-  const client = getMetaCapi();
-  if (!client) return { ok: false, skipped: true };
+  const clients = getMetaCapiClients();
+  if (clients.length === 0) return { ok: false, skipped: true };
   if (events.length === 0) return { ok: true };
 
   const eventTime = eventTimeSeconds ?? Math.floor(Date.now() / 1000);
@@ -120,6 +141,21 @@ export async function sendCapiEvents(
     return event;
   });
 
+  const results = await Promise.all(
+    clients.map((client) => postToClient(client, data)),
+  );
+  const errors = results
+    .map((r) => r.error)
+    .filter((e): e is string => Boolean(e));
+  return errors.length > 0 ? { ok: false, error: errors.join("; ") } : { ok: true };
+}
+
+// POST the shared event payload to ONE pixel. The same event_id per pixel is
+// correct — Meta de-dupes per pixel, and each pixel is a separate asset.
+async function postToClient(
+  client: MetaClient,
+  data: Record<string, unknown>[],
+): Promise<{ ok: boolean; error?: string }> {
   const body: Record<string, unknown> = { data };
   if (client.testEventCode) body.test_event_code = client.testEventCode;
 
@@ -147,13 +183,18 @@ export async function sendCapiEvents(
       } catch {
         // ignore body read failures
       }
-      return { ok: false, error: `Meta CAPI ${res.status}: ${detail}` };
+      return {
+        ok: false,
+        error: `Meta CAPI ${client.pixelId} ${res.status}: ${detail}`,
+      };
     }
     return { ok: true };
   } catch (err) {
     return {
       ok: false,
-      error: err instanceof Error ? err.message : "Meta CAPI request failed",
+      error: `Meta CAPI ${client.pixelId}: ${
+        err instanceof Error ? err.message : "request failed"
+      }`,
     };
   } finally {
     if (timer) clearTimeout(timer);
