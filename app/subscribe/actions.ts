@@ -10,9 +10,19 @@ import {
   readAttributionCookies,
   toStripeMetadata,
 } from "@/lib/attribution";
-import { readCapiIdentity, toCapiMetadata } from "@/lib/capi-identity";
+import {
+  type CapiIdentity,
+  readCapiIdentity,
+  toCapiMetadata,
+} from "@/lib/capi-identity";
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 import { getDict } from "@/lib/i18n/server";
+import { sendCapiEvents } from "@/lib/meta-capi";
+import { MEMBERSHIP_CURRENCY, MEMBERSHIP_VALUE } from "@/lib/meta-pixel-events";
+import {
+  captureServerEvent,
+  toPosthogConsentMetadata,
+} from "@/lib/posthog-server";
 import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 
@@ -148,9 +158,27 @@ export async function startCheckout(formData: FormData) {
   // event. Like attribution, it is written on the subscription at creation and
   // never overwritten on renewal.
   const consentRaw = (await cookies()).get(CONSENT_COOKIE)?.value;
-  const capiMetadata = hasMarketingConsent(consentRaw)
-    ? toCapiMetadata(await readCapiIdentity())
-    : {};
+  const marketingOk = hasMarketingConsent(consentRaw);
+
+  // Capture the Meta CAPI identity once — used both for the Purchase webhook
+  // (round-tripped via capiMetadata) and for the InitiateCheckout event fired
+  // below. Wrapped so a capture failure can't block checkout.
+  let capiIdentity: CapiIdentity | null = null;
+  let capiMetadata: Record<string, string> = {};
+  if (marketingOk) {
+    try {
+      capiIdentity = await readCapiIdentity();
+      capiMetadata = toCapiMetadata(capiIdentity);
+    } catch (err) {
+      console.warn("startCheckout: CAPI identity capture failed", { err });
+    }
+  }
+
+  // First-party-analytics consent sentinel — written from the marketing-consent
+  // flag alone (NOT derived from the CAPI identity above), so the webhook's
+  // PostHog subscribe_succeeded fires independently of the Meta capi_consent
+  // gate. See lib/posthog-server.ts.
+  const analyticsMetadata = marketingOk ? toPosthogConsentMetadata() : {};
 
   // Locale drives both the Stripe-hosted page language and the
   // language of the withdrawal-waiver acceptance text below.
@@ -164,7 +192,12 @@ export async function startCheckout(formData: FormData) {
       success_url: successUrl,
       cancel_url: cancelUrl,
       subscription_data: {
-        metadata: { userId, ...attributionMetadata, ...capiMetadata },
+        metadata: {
+          userId,
+          ...attributionMetadata,
+          ...capiMetadata,
+          ...analyticsMetadata,
+        },
       },
       // Stripe Tax — collect billing address, compute VAT/sales tax, and
       // persist the address back to the Customer so renewals invoice
@@ -191,5 +224,54 @@ export async function startCheckout(formData: FormData) {
   );
 
   if (!session.url) throw new Error("Stripe did not return a session URL");
+
+  // Fire the checkout-intent signals SERVER-SIDE, before the redirect to
+  // Stripe. The browser previously fired these in the submit button's onClick,
+  // but the immediate cross-origin navigation raced (and usually dropped) the
+  // in-flight beacons — checkout_started never reached PostHog. Here we await
+  // delivery (both clients are 3s-bounded and degrade to a no-op when
+  // unconfigured) so the events actually land before we navigate away. Gated on
+  // marketing consent. Meta dedups InitiateCheckout on event_id=session.id if
+  // Stripe idempotency replays the same session. Both are best-effort: a
+  // failure is logged but never blocks the redirect to checkout.
+  if (marketingOk) {
+    await Promise.all([
+      sendCapiEvents([
+        {
+          eventName: "InitiateCheckout",
+          eventId: session.id,
+          actionSource: "website",
+          eventSourceUrl: `${origin}/subscribe`,
+          user: {
+            email: user.email,
+            externalId: userId,
+            fbp: capiIdentity?.fbp,
+            fbc: capiIdentity?.fbc,
+            clientIpAddress: capiIdentity?.ip,
+            clientUserAgent: capiIdentity?.ua,
+          },
+          customData: {
+            value: MEMBERSHIP_VALUE,
+            currency: MEMBERSHIP_CURRENCY,
+            content_type: "product",
+            content_ids: ["matio-membership"],
+          },
+        },
+      ]).catch((err) => {
+        console.warn("startCheckout: CAPI InitiateCheckout threw", { err });
+      }),
+      captureServerEvent({
+        distinctId: userId,
+        event: "checkout_started",
+        properties: {
+          value: MEMBERSHIP_VALUE,
+          currency: MEMBERSHIP_CURRENCY,
+        },
+      }).catch((err) => {
+        console.warn("startCheckout: PostHog checkout_started threw", { err });
+      }),
+    ]);
+  }
+
   redirect(session.url);
 }

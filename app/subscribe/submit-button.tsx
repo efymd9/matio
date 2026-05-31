@@ -3,12 +3,6 @@
 import { useFormStatus } from "react-dom";
 import { Icon } from "@/components/site/icon";
 import { useT } from "@/lib/i18n/client";
-import {
-  MEMBERSHIP_CURRENCY,
-  MEMBERSHIP_VALUE,
-  trackPixel,
-} from "@/lib/meta-pixel-events";
-import { capturePostHog } from "@/lib/posthog-events";
 
 // Lives in its own client component so the parent /subscribe page stays a
 // pure server component. useFormStatus reads the wrapping form's pending
@@ -19,6 +13,12 @@ import { capturePostHog } from "@/lib/posthog-events";
 // message, disable the button (with cursor-wait), and dim it slightly.
 // The press feedback (active:scale-[0.98]) fires on every click and gives
 // the button the tactile feel the design lacks otherwise.
+//
+// The checkout-intent signals (Meta InitiateCheckout + PostHog
+// checkout_started) are fired SERVER-SIDE in the startCheckout action, before
+// its redirect to Stripe. Firing them here in onClick raced (and usually lost)
+// the in-flight beacon against the immediate cross-origin navigation —
+// checkout_started never reached PostHog. See app/subscribe/actions.ts.
 export function SubmitButton() {
   const { pending } = useFormStatus();
   const t = useT();
@@ -28,23 +28,6 @@ export function SubmitButton() {
       disabled={pending}
       aria-disabled={pending}
       aria-busy={pending}
-      onClick={() => {
-        // Fire on click — the server action below ends in a server-side
-        // redirect to Stripe, so there's no browser context after submit.
-        // No-op without marketing consent (fbq isn't loaded). The matching
-        // server-side conversion signal is the Purchase event from the
-        // Stripe webhook, carrying the identity captured in startCheckout.
-        trackPixel("InitiateCheckout", {
-          value: MEMBERSHIP_VALUE,
-          currency: MEMBERSHIP_CURRENCY,
-          content_type: "product",
-          content_ids: ["matio-membership"],
-        });
-        capturePostHog("checkout_started", {
-          value: MEMBERSHIP_VALUE,
-          currency: MEMBERSHIP_CURRENCY,
-        });
-      }}
       className="group relative inline-flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.8)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.98] disabled:cursor-wait disabled:opacity-90"
     >
       {pending ? (

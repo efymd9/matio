@@ -10,7 +10,10 @@ import {
 } from "@/lib/attribution";
 import { fromCapiMetadata, metadataHasCapiConsent } from "@/lib/capi-identity";
 import { sendCapiEvents } from "@/lib/meta-capi";
-import { captureServerEvent } from "@/lib/posthog-server";
+import {
+  captureServerEvent,
+  metadataHasPosthogConsent,
+} from "@/lib/posthog-server";
 import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 import { markUserTrialsConverted } from "@/lib/trial";
@@ -169,69 +172,81 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
   const becameAccessGranting =
     !priorWasAccessGranting &&
     (ACCESS_GRANTING_STATUSES as readonly string[]).includes(mappedStatus);
-  if (becameAccessGranting && metadataHasCapiConsent(sub.metadata)) {
+  if (becameAccessGranting) {
     const amount =
       typeof item?.price.unit_amount === "number"
         ? item.price.unit_amount / 100
         : undefined;
     const currency = item?.price.currency?.toUpperCase();
-    try {
-      const identity = fromCapiMetadata(sub.metadata);
-      const result = await sendCapiEvents([
-        {
-          eventName: "Purchase",
-          eventId: sub.id,
-          actionSource: "website",
-          eventSourceUrl: process.env.NEXT_PUBLIC_APP_URL ?? "https://matio.tv",
-          user: {
-            email: user.email,
-            externalId: user.id,
-            fbp: identity.fbp,
-            fbc: identity.fbc,
-            clientIpAddress: identity.ip,
-            clientUserAgent: identity.ua,
+
+    // Meta CAPI Purchase — gated on the Meta capi_consent sentinel.
+    if (metadataHasCapiConsent(sub.metadata)) {
+      try {
+        const identity = fromCapiMetadata(sub.metadata);
+        const result = await sendCapiEvents([
+          {
+            eventName: "Purchase",
+            eventId: sub.id,
+            actionSource: "website",
+            eventSourceUrl:
+              process.env.NEXT_PUBLIC_APP_URL ?? "https://matio.tv",
+            user: {
+              email: user.email,
+              externalId: user.id,
+              fbp: identity.fbp,
+              fbc: identity.fbc,
+              clientIpAddress: identity.ip,
+              clientUserAgent: identity.ua,
+            },
+            customData: {
+              ...(amount !== undefined ? { value: amount } : {}),
+              ...(currency ? { currency } : {}),
+              content_type: "product",
+              content_ids: ["matio-membership"],
+            },
           },
-          customData: {
-            ...(amount !== undefined ? { value: amount } : {}),
-            ...(currency ? { currency } : {}),
-            content_type: "product",
-            content_ids: ["matio-membership"],
-          },
-        },
-      ]);
-      if (!result.ok && !result.skipped) {
-        console.warn("Meta CAPI Purchase failed", {
-          subId: sub.id,
-          error: result.error,
-        });
+        ]);
+        if (!result.ok && !result.skipped) {
+          console.warn("Meta CAPI Purchase failed", {
+            subId: sub.id,
+            error: result.error,
+          });
+        }
+      } catch (err) {
+        console.warn("Meta CAPI Purchase threw", { subId: sub.id, err });
       }
-    } catch (err) {
-      console.warn("Meta CAPI Purchase threw", { subId: sub.id, err });
     }
 
-    // PostHog bottom-of-funnel conversion. Same transition guard + capi_consent
-    // gate as the CAPI Purchase, so it fires exactly once and honors consent.
-    // distinctId = Clerk user id, which the browser already identify()'d — so
-    // this server event stitches onto the same person. Best-effort: never
-    // throws, can't roll back the webhook idempotency claim.
-    try {
-      const result = await captureServerEvent({
-        distinctId: user.id,
-        event: "subscribe_succeeded",
-        properties: {
-          ...(amount !== undefined ? { value: amount } : {}),
-          ...(currency ? { currency } : {}),
-          plan,
-        },
-      });
-      if (!result.ok && !result.skipped) {
-        console.warn("PostHog subscribe_succeeded failed", {
+    // PostHog bottom-of-funnel conversion. Gated on its OWN ph_consent sentinel
+    // (NOT capi_consent) so a CAPI-identity capture failure — which would drop
+    // capi_consent — can't also blind the first-party funnel. Same transition
+    // guard so it still fires exactly once. distinctId = Clerk user id, which
+    // the browser already identify()'d — so this server event stitches onto the
+    // same person. Best-effort: never throws, can't roll back the webhook
+    // idempotency claim.
+    if (metadataHasPosthogConsent(sub.metadata)) {
+      try {
+        const result = await captureServerEvent({
+          distinctId: user.id,
+          event: "subscribe_succeeded",
+          properties: {
+            ...(amount !== undefined ? { value: amount } : {}),
+            ...(currency ? { currency } : {}),
+            plan,
+          },
+        });
+        if (!result.ok && !result.skipped) {
+          console.warn("PostHog subscribe_succeeded failed", {
+            subId: sub.id,
+            error: result.error,
+          });
+        }
+      } catch (err) {
+        console.warn("PostHog subscribe_succeeded threw", {
           subId: sub.id,
-          error: result.error,
+          err,
         });
       }
-    } catch (err) {
-      console.warn("PostHog subscribe_succeeded threw", { subId: sub.id, err });
     }
   }
 
