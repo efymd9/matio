@@ -13,15 +13,21 @@ export const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST ?? "/ingest";
 // show_viewed, signup_completed) don't fire into a not-yet-loaded SDK.
 export const POSTHOG_READY_EVENT = "matio:ph-ready";
 
-// Curated funnel events. Page-level steps (/, /shows/*, /subscribe) come from
-// $pageview path filters, not named events.
+// Curated CLIENT funnel events. Page-level steps (/, /shows/*, /subscribe) come
+// from $pageview path filters, not named events.
+//
+// `checkout_started` is intentionally NOT here: it is fired SERVER-SIDE from
+// startCheckout (it raced the Stripe redirect when fired from the browser).
+// Keeping it out of this client union makes any accidental browser
+// capturePostHog("checkout_started") a compile error, so it can't double-fire
+// against the server event. The server path uses captureServerEvent (untyped
+// event string). `subscribe_succeeded` is likewise server-only.
 export type FunnelEvent =
   | "show_viewed"
   | "trial_play_started"
   | "paywall_shown"
   | "signup_cta_clicked"
-  | "signup_completed"
-  | "checkout_started";
+  | "signup_completed";
 
 // Minimal surface we use. The provider assigns the real posthog-js instance
 // (which is structurally compatible) to window.posthog after init.

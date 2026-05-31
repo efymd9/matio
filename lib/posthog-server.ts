@@ -32,6 +32,30 @@ function getPostHogServer(): PostHog | null {
   return client;
 }
 
+// First-party-analytics consent sentinel, round-tripped through Stripe
+// subscription metadata (a flat string KV) so the context-less webhook can
+// decide whether to fire the PostHog subscribe_succeeded conversion. Distinct
+// from Meta's capi_consent (lib/capi-identity.ts): startCheckout writes this one
+// from the raw marketing-consent flag alone, so a CAPI-identity capture failure
+// — which would drop capi_consent — can't also blind the first-party funnel.
+// Same value as capi_consent today under the single marketing-consent flag;
+// decoupled deliberately (and future-proof for an analytics-only consent tier).
+const PH_CONSENT_KEY = "ph_consent";
+
+// Written into subscription_data.metadata by startCheckout when marketing
+// consent is present.
+export function toPosthogConsentMetadata(): Record<string, string> {
+  return { [PH_CONSENT_KEY]: "1" };
+}
+
+// True when the ph_consent sentinel is present and "1". The webhook fires
+// subscribe_succeeded only when this is true.
+export function metadataHasPosthogConsent(
+  metadata: Record<string, string | undefined> | null | undefined,
+): boolean {
+  return (metadata ?? {})[PH_CONSENT_KEY] === "1";
+}
+
 // Fire one server-side event. NEVER throws — returns a result the caller can
 // log. `skipped` means PostHog isn't configured (local dev / no key). The
 // captureImmediate call is bounded by requestTimeout.

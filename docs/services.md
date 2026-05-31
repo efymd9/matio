@@ -179,8 +179,10 @@ Existing deployments keep their snapshot of env vars — only the **next** deplo
 **Setup**: Business Manager → Events Manager → Data Sources → your pixel. The Pixel ID is public; the Conversions API access token (Events Manager → Settings → Conversions API → *Generate access token*) is a secret.
 
 **Env vars**:
-- `NEXT_PUBLIC_META_PIXEL_ID` — pixel id (public; ships in client JS and is also read server-side for CAPI).
-- `META_CAPI_ACCESS_TOKEN` — Conversions API token (**secret**, never `NEXT_PUBLIC`, never logged).
+- `NEXT_PUBLIC_META_PIXEL_ID` — primary pixel id (public; ships in client JS and is also read server-side for CAPI).
+- `NEXT_PUBLIC_META_PIXEL_IDS` — optional; comma-separated **extra** browser pixel ids (public). `lib/meta-pixel-events.ts` exports `META_PIXEL_IDS` = primary + extras; `components/site/meta-pixel.tsx` runs one `fbq('init', …)` per id and renders one `<noscript>` img per id. `fbq('track', …)` is called with no pixel arg, so **every event fires to every pixel** — every call site hits all of them. Still consent-gated. Use this to mirror events into a second Business Manager / ad account without touching call sites.
+- `META_CAPI_ACCESS_TOKEN` — Conversions API token for the **primary** pixel (**secret**, never `NEXT_PUBLIC`, never logged).
+- `META_CAPI_ACCESS_TOKEN_{n}` — optional; the CAPI token for the **Nth extra** pixel, **2-based by position** in `NEXT_PUBLIC_META_PIXEL_IDS` (so `META_CAPI_ACCESS_TOKEN_2` is the first extra pixel, `_3` the second, …). `sendCapiEvents` fans the server-side event out in parallel to the primary pixel plus every extra pixel that has its own token; an extra pixel **without** a token stays browser-only (no server Purchase). Same never-throws / 3s-bounded contract; the Stripe webhook is unchanged. **Secret**, never `NEXT_PUBLIC`, never logged.
 - `META_CAPI_TEST_EVENT_CODE` — optional; only while testing in the Events Manager "Test events" tab.
 - `META_GRAPH_API_VERSION` — optional; defaults to `v21.0` in `lib/meta-capi.ts`. Bump when Meta deprecates the version.
 
@@ -222,6 +224,8 @@ Leave all three blank to keep PostHog entirely off — both the client provider 
 **Consent gate**: `components/site/posthog-provider.tsx` mirrors the Meta Pixel pattern — PostHog is not loaded at all until `cookie_consent.marketing === true`. On consent revoke: `opt_out_capturing()` + `reset()`. Ingestion is reverse-proxied through `/ingest` (Next.js rewrite in `next.config.ts`). The `/ingest` path is excluded from the `proxy.ts` Clerk matcher so Clerk doesn't intercept analytics events.
 
 **Session replay + heatmaps**: enabled with `maskAllInputs: true` and `maskTextSelector: "*"` so no PII is recorded in replays.
+
+**UTM normalization**: `components/site/posthog-provider.tsx` adds a `before_send` hook to `posthog.init` that runs `normalizeUtm` (`lib/utm.ts` — trim + lowercase + strip every char outside `[a-z0-9_-]`) over the auto-captured `utm_campaign` / `utm_source` / `utm_medium` on every event (and thus the derived `$initial_utm_*` person props). This mirrors the app-side normalization (`lib/attribution.ts` `clean()`, which feeds the same value into the attribution cookies, the `attribution_*` columns, and Stripe metadata) so the app and PostHog group campaigns identically. Forward-only — to fix PostHog **history**, the funnel-breakdown insights use the matching HogQL expression `replaceRegexpAll(lower(trim(properties.utm_campaign)), '[^a-z0-9_-]', '')`. Numeric Meta `{{campaign.id}}` values pass through unchanged. WHY: case drift (`TikTok` vs `tiktok`), encoded spaces, and stray junk fragment `utm_campaign` across otherwise-identical campaigns.
 
 ## Service → file map
 

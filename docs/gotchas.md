@@ -276,6 +276,29 @@ Three traps stacked on the server-side `Purchase` in `app/api/webhooks/stripe/ro
 2. **Fire the CAPI call BEFORE `markUserTrialsConverted`.** `markUserTrialsConverted` (and the mirrored row) make the prior state look access-granting on Stripe's *retry* of the same event. If a transient DB error aborts the handler after conversion but before the Purchase, the retry sees an already-access-granting prior row, computes `becameAccessGranting = false`, and **permanently suppresses** the Purchase. Order it first.
 3. **`sendCapiEvents` must NEVER throw.** It runs after the `stripe_events` idempotency claim is committed. A throw would bubble up, the handler would 500, and Stripe would retry — but the claim is already held, so the retry short-circuits and the subscription state work never re-runs. `sendCapiEvents` returns `{ ok, skipped?, error? }` and swallows all errors (3s `AbortController` timeout, plain `fetch`); the webhook also wraps the call in its own best-effort try/catch as defence-in-depth.
 
+### Meta `{{campaign.name}}` and malformed links fragment `utm_campaign` in analytics
+
+Letting Meta fill `utm_campaign={{campaign.name}}` (or hand-pasting ad links) splinters a single campaign into many rows in the attribution tables and PostHog funnel breakdowns: case drift (`TikTok` vs `tiktok`), encoded spaces (`my%20campaign`), and stray junk (a leaked `>` turned `campaign_1` into `campaign_1>`) all read as distinct campaigns. The fix is `normalizeUtm(value)` in `lib/utm.ts` (trim → lowercase → strip every char outside `[a-z0-9_-]`, keeping the 100-char cap), applied in **two** places so app + PostHog group identically:
+
+- `lib/attribution.ts` `clean()` runs every UTM value through it before it lands in `attribution_first`/`attribution_last` cookies, the `users`/`trial_sessions`/`subscriptions` `attribution_*` columns, and Stripe metadata. App-side normalization is **forward-only** — it can't retroactively fix rows already written with the raw value.
+- `components/site/posthog-provider.tsx` adds a `before_send` hook to `posthog.init` that normalizes the auto-captured `utm_campaign`/`utm_source`/`utm_medium` on every event (and thus the derived `$initial_utm_*` person props).
+
+PostHog *history* (pre-hook events) is repaired only by the matching HogQL breakdown expression — keep these in sync:
+
+```sql
+replaceRegexpAll(lower(trim(properties.utm_campaign)), '[^a-z0-9_-]', '')
+```
+
+Numeric Meta `{{campaign.id}}` values pass through unchanged (stable but opaque 18-digit numbers). Best practice when authoring ad links: land on `/watch/[slug]` (or `/shows/[slug]`), put UTMs in Meta's "URL Parameters" field, and use a **static lowercase `utm_campaign` slug — never `{{campaign.name}}`** (`utm_source={{site_source_name}}`, `utm_medium=paid_social`, `utm_content={{ad.id}}`).
+
+### Multiple browser pixels: `NEXT_PUBLIC_META_PIXEL_IDS`
+
+`lib/meta-pixel-events.ts` exports `META_PIXEL_IDS` = the primary `NEXT_PUBLIC_META_PIXEL_ID` plus any extras from the comma-separated `NEXT_PUBLIC_META_PIXEL_IDS`. `components/site/meta-pixel.tsx` inits **all** of them (one `fbq('init', …)` each) and renders one `<noscript>` img per pixel; calling `fbq('track', …)` with **no pixel-id argument fires to every initialized pixel**, so each existing call site hits all pixels with no per-site change. Still fully consent-gated (only injects after `cookie_consent.marketing === true`).
+
+### Multi-pixel server CAPI: one access token per pixel, by position
+
+`lib/meta-capi.ts` `sendCapiEvents` fans out to **every pixel that has its own token**, in parallel: the primary (`NEXT_PUBLIC_META_PIXEL_ID` + `META_CAPI_ACCESS_TOKEN`) plus each extra pixel in `NEXT_PUBLIC_META_PIXEL_IDS` paired with `META_CAPI_ACCESS_TOKEN_{n}` (2-based, matched **by position** — the first extra pixel uses `META_CAPI_ACCESS_TOKEN_2`, etc.). Same signature / never-throws / `skipped` / 3s-bounded contract as before; the Stripe webhook is unchanged. An extra pixel **without** a paired token stays browser-only (no server-side `Purchase`). New secrets: `META_CAPI_ACCESS_TOKEN_2` (and `_3`, … as pixels are added).
+
 ## PostHog
 
 ### `proxy.ts` runs BEFORE `next.config.ts` rewrites — exclude `/ingest` from the matcher
