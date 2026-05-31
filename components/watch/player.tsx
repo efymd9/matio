@@ -29,7 +29,6 @@ import {
 import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { useT } from "@/lib/i18n/client";
-import { trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog } from "@/lib/posthog-events";
 import dynamic from "next/dynamic";
 import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
@@ -136,17 +135,15 @@ export function Player({
   const [currentEpisodeId, setCurrentEpisodeId] = useState(initialEpisodeId);
   const [overlay, setOverlay] = useState<OverlayKind>("none");
   const [locked, setLocked] = useState(false);
-  // Meta Pixel Lead fires once per show-preview session, not per episode — the
-  // ref lives here in the outer shell so swapping episodes mid-trial doesn't
-  // re-fire it. No-op without marketing consent (fbq isn't loaded).
-  const trialLeadFiredRef = useRef(false);
+  // trial_play_started (PostHog) fires once per show-preview session, not per
+  // episode — the ref lives in the outer shell so swapping episodes mid-trial
+  // doesn't re-fire it. No-op without marketing consent (PostHog isn't loaded).
+  // The Meta Pixel Lead used to fire here too; it now fires on signup
+  // completion instead (components/site/complete-registration-pixel.tsx).
+  const trialStartFiredRef = useRef(false);
   const onTrialStart = useCallback(() => {
-    if (trialLeadFiredRef.current) return;
-    trialLeadFiredRef.current = true;
-    trackPixel("Lead", {
-      content_name: showTitle ?? showSlug,
-      content_category: "trial_preview",
-    });
+    if (trialStartFiredRef.current) return;
+    trialStartFiredRef.current = true;
     capturePostHog("trial_play_started", {
       show_slug: showSlug,
       show_title: showTitle ?? showSlug,
@@ -327,7 +324,8 @@ function EpisodePlayback({
           setToken(data.token);
           setExpiresAt(Date.now() + data.expiresIn * 1000);
           // Trial-mode token issued → a 60s preview just started. Fire the
-          // Meta Pixel Lead (deduped to once per show-preview by the shell).
+          // trial_play_started funnel event (deduped to once per show-preview
+          // by the shell). The Meta Lead now fires on signup completion.
           if (data.mode === "trial") onTrialStart();
         } catch {
           if (!cancelled) setEndState("unavailable");

@@ -187,7 +187,7 @@ Existing deployments keep their snapshot of env vars — only the **next** deplo
 - `META_GRAPH_API_VERSION` — optional; defaults to `v21.0` in `lib/meta-capi.ts`. Bump when Meta deprecates the version.
 
 **Events**:
-- Browser (`lib/meta-pixel-events.ts` → `fbq`): `PageView` (all pages + SPA route changes), `ViewContent` (`/shows/[slug]`), `Lead` (60s trial-preview start), `InitiateCheckout` (`/subscribe` submit), `CompleteRegistration` (first authenticated `/subscribe`, deduped per-user via localStorage).
+- Browser (`lib/meta-pixel-events.ts` → `fbq`): `PageView` (all pages + SPA route changes), `ViewContent` (`/shows/[slug]`), `InitiateCheckout` (`/subscribe` submit), `Lead` + `CompleteRegistration` (signup completion — first authenticated `/subscribe`, fired together and deduped per-user via a single localStorage flag; signup is our "Lead", not the trial preview).
 - Server CAPI (`lib/meta-capi.ts`): `Purchase` — fired from the Stripe webhook on the *transition into* an access-granting status (guards against renewal double-counts), `event_id = sub.id` for de-dup, with hashed email + external_id and the `_fbp`/`_fbc`/IP/UA captured at checkout.
 
 **Identity plumbing**: `_fbp`/`_fbc` are set by the browser pixel; `_fbc` is also derived from `?fbclid` in `proxy.ts` (consent-gated). At checkout, `startCheckout` snapshots `_fbp`/`_fbc`/IP/UA into Stripe `subscription_data.metadata` (the `capi_*` keys, incl. a `capi_consent` sentinel) — the same channel UTM attribution uses — so the context-less webhook can match the Purchase event. See `lib/capi-identity.ts`.

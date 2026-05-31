@@ -293,9 +293,8 @@ The five **browser events**:
 |---|---|---|
 | `PageView` | all pages + every SPA nav | fired by `<MetaPixel>` |
 | `ViewContent` | `/shows/[slug]` | `components/site/view-content-pixel.tsx` |
-| `Lead` | 60s trial start | `components/watch/player.tsx`, once per show-preview when a trial-mode token is issued |
 | `InitiateCheckout` | `/subscribe` submit | `app/subscribe/submit-button.tsx` on click |
-| `CompleteRegistration` | `/subscribe` | `components/site/complete-registration-pixel.tsx`, deduped once-per-user via `localStorage` |
+| `Lead` + `CompleteRegistration` | `/subscribe` (signup completion) | both in `components/site/complete-registration-pixel.tsx`, fired together and deduped once-per-user via one `localStorage` flag. Signup is our "Lead" (a stronger intent signal than the trial preview, which no longer fires a Lead) |
 
 ### Server-side Purchase via Conversions API (`lib/meta-capi.ts`)
 

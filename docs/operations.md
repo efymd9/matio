@@ -146,7 +146,7 @@ vercel env pull .env.vercel.production
 
 | Var | Scope | What it powers |
 |---|---|---|
-| `NEXT_PUBLIC_META_PIXEL_ID` | public | Browser Meta Pixel (PageView / ViewContent / Lead / InitiateCheckout / CompleteRegistration). Unset → pixel never injects. |
+| `NEXT_PUBLIC_META_PIXEL_ID` | public | Browser Meta Pixel (PageView / ViewContent / InitiateCheckout / Lead + CompleteRegistration). Unset → pixel never injects. |
 | `META_CAPI_ACCESS_TOKEN` | secret | Server-side Conversions API Purchase event from the Stripe webhook. Unset → CAPI no-ops. |
 | `META_CAPI_TEST_EVENT_CODE` | secret (optional) | Routes CAPI events to Events Manager → Test Events for verification. Remove for production traffic. |
 | `META_GRAPH_API_VERSION` | secret (optional) | Graph API version override; defaults to `v21.0`. |
@@ -239,7 +239,7 @@ The admin form has two image URL fields. Both are optional (a show with neither 
 
 Everything here gates on `cookie_consent.marketing` — nothing fires until the visitor accepts.
 
-1. Incognito → `/`. The cookie banner shows. With **`NEXT_PUBLIC_META_PIXEL_ID`** set in the build, click **"Accept all"** → `MetaPixel` injects `fbevents.js` and fires `PageView`. Verify in **Events Manager → your pixel → Test Events** (paste the browser into the Test Events "test in browser" field, or watch the live Overview a few minutes later). Browser events to spot-check while clicking through: `PageView` (every page + SPA nav), `ViewContent` on `/shows/<slug>`, `Lead` when a 60s trial token is issued, `InitiateCheckout` on the `/subscribe` submit, `CompleteRegistration` on `/subscribe` (once per user — `localStorage` dedup, so it won't re-fire on a second visit).
+1. Incognito → `/`. The cookie banner shows. With **`NEXT_PUBLIC_META_PIXEL_ID`** set in the build, click **"Accept all"** → `MetaPixel` injects `fbevents.js` and fires `PageView`. Verify in **Events Manager → your pixel → Test Events** (paste the browser into the Test Events "test in browser" field, or watch the live Overview a few minutes later). Browser events to spot-check while clicking through: `PageView` (every page + SPA nav), `ViewContent` on `/shows/<slug>`, `InitiateCheckout` on the `/subscribe` submit, and `Lead` + `CompleteRegistration` together on `/subscribe` when a new user lands there post-signup (once per user — they share one `localStorage` dedup flag, so neither re-fires on a second visit). Note: the 60s trial preview no longer fires a `Lead` — signup completion is our Lead.
 2. Reload after accepting → no second banner, pixel loads from the server-read consent state. Click **"Essential only"** (or "Cookie preferences" in the footer → reject) → `fbq('consent','revoke')` fires and `clearMarketingCookies` drops `_fbp`/`_fbc` (both host-only AND `Domain=.matio.tv`). Confirm in DevTools → Application → Cookies that both are gone.
 3. **Server Purchase (CAPI)**: set **`META_CAPI_TEST_EVENT_CODE`** in prod env + redeploy, then run a real test checkout (accept marketing first so the `capi_consent` sentinel rides into `subscription_data.metadata`). After the Stripe webhook flips the sub into an access-granting status, a `Purchase` appears in **Events Manager → Test Events** (server source, `event_id` = the subscription id). Check **Event Match Quality** — `_fbp`/`_fbc`/hashed email/IP/UA carried from checkout should push it above the "Poor" band. Remove `META_CAPI_TEST_EVENT_CODE` when done so live purchases stop routing to Test Events.
 
