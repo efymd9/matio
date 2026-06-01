@@ -502,7 +502,13 @@ function EpisodePlayback({
   }, [current.id, mode]);
 
   // Seek to resume position once the player has metadata for the episode.
+  // This is the server-provided resume and applies only on the initial episode
+  // load. A subscriber token-refresh remount also re-runs this effect (deps
+  // include token), but its playhead is owned by resumeAfterRefreshRef in
+  // onLoadedMetadata — skip here when that restore is pending so we don't yank a
+  // mid-playback viewer back toward the original resume point.
   useEffect(() => {
+    if (resumeAfterRefreshRef.current != null) return;
     if (!token || !resumeSeconds || resumeSeconds <= 0) return;
     const el = videoRef.current;
     if (!el) return;
