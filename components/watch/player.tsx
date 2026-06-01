@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import MuxVideo from "@mux/mux-video-react";
 import { useMarketingConsent } from "@/lib/use-marketing-consent";
 
@@ -257,6 +258,12 @@ function EpisodePlayback({
   const [token, setToken] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [endState, setEndState] = useState<EndState | null>(null);
+  // Trial play-gate: don't fetch a token (which mints the trial row and
+  // starts the 60s clock) until the user actually presses play. Subscribers
+  // skip the gate — their session has no trial clock to protect. Before this
+  // the clock started on player mount (≈ page load), so a user who lingered
+  // burned the whole preview before ever pressing play.
+  const [started, setStarted] = useState(mode === "subscriber");
   // Bumped by retry() — included in the token-fetch effect's deps so the
   // fetch reruns without unmounting the inner playback component (which
   // would also tear down the MediaController and any captured renditions).
@@ -286,14 +293,18 @@ function EpisodePlayback({
 
   const episodeLabel = `S${current.seasonNumber}·E${current.number}`;
 
-  // Fetch playback token. Inner is keyed on current.id, so this runs
-  // exactly once per episode-mount; per-episode state starts at its
+  // Fetch playback token. Gated on `started`, so a trial user only mints a
+  // token (and starts the 60s clock) once they press play — the poster
+  // play-gate below sets it. Subscribers init started=true and fetch on
+  // mount. Inner is keyed on current.id, so this runs once per episode-mount
+  // once started; per-episode state starts at its
   // initial value (no setState resets at the top of the effect body).
   // Branches on response status so that a 429 / 5xx / parse failure
   // doesn't get framed as a "preview ended" paywall. AbortController
   // cancels the in-flight fetch on episode swap so a slow response
   // can't race the new episode's fetch.
   useEffect(() => {
+    if (!started) return;
     const hasAbort = typeof AbortController !== "undefined";
     const abort = hasAbort ? new AbortController() : null;
     let cancelled = false;
@@ -339,22 +350,46 @@ function EpisodePlayback({
       cancelled = true;
       abort?.abort();
     };
-  }, [current.id, fetchKey, onTrialStart]);
+  }, [current.id, fetchKey, onTrialStart, started]);
 
-  // Token refresh BEFORE expiry (60s lead). Refreshing exactly at expiry
-  // raced segment fetches that ran a hair late — Mux validates `exp` on
-  // each segment, so a stale token meant a 403 mid-playback. The lead
-  // window lets the new token install while the old one still works.
+  // Token lifecycle after the first successful fetch:
   //
-  // 4xx (paywall/rate-limit) is terminal — surfaces the matching
-  // end-state and stops retrying. 5xx and network errors retry with
-  // exponential backoff (3 attempts) before falling through to the
-  // unavailable end-state. We deliberately do NOT pause the video on
-  // failure — the user's existing token may still have time on it.
+  //  - Subscriber tokens (1h TTL) auto-refresh REFRESH_LEAD_MS before
+  //    expiry. Refreshing exactly at expiry raced segment fetches that ran
+  //    a hair late — Mux validates `exp` per-segment, so a stale token meant
+  //    a 403 mid-playback. The lead window lets the new token install while
+  //    the old one still works. 4xx (paywall/rate-limit) is terminal; 5xx
+  //    and network errors retry with exponential backoff (3 attempts) before
+  //    the unavailable end-state. We never pause on failure — the existing
+  //    token may still have time on it.
+  //
+  //  - Trial tokens (60s TTL) are NOT refreshed. The lead window (60s) is the
+  //    entire TTL, so the old `wait = expiresAt - now - lead` collapsed to ~0:
+  //    the refresh fired immediately, set a new expiresAt ~60s out, and — since
+  //    expiresAt is a dep — re-armed and fired again every network round-trip,
+  //    a tight loop that re-minted the token hundreds of times per preview
+  //    (and, because @mux/mux-video-react only re-derives its src on a
+  //    playbackId change, the refreshed token never even reached the player).
+  //    A trial preview is meant to end at the paywall, so we just schedule a
+  //    single transition to it at the token's expiry.
   useEffect(() => {
     if (!expiresAt) return;
     const REFRESH_LEAD_MS = 60_000;
-    const wait = Math.max(0, expiresAt - Date.now() - REFRESH_LEAD_MS);
+    const remaining = expiresAt - Date.now();
+
+    // Short-lived token => trial. Don't refresh; end the preview at expiry.
+    // (Subscriber refreshes always re-arm with a fresh ~1h expiresAt, so they
+    // never fall into this branch.)
+    if (remaining <= REFRESH_LEAD_MS + 5_000) {
+      if (mode !== "trial") return;
+      const endTimer = setTimeout(
+        () => setEndState("paywall"),
+        Math.max(0, remaining),
+      );
+      return () => clearTimeout(endTimer);
+    }
+
+    const wait = remaining - REFRESH_LEAD_MS;
     const hasAbort = typeof AbortController !== "undefined";
     const abort = hasAbort ? new AbortController() : null;
     let cancelled = false;
@@ -405,7 +440,7 @@ function EpisodePlayback({
       abort?.abort();
       clearTimeout(timer);
     };
-  }, [expiresAt, current.id]);
+  }, [expiresAt, current.id, mode]);
 
   // Save progress every 10s while playing AND visible. On tab hide
   // (visibilitychange/pagehide) we flush a final save immediately —
@@ -526,6 +561,53 @@ function EpisodePlayback({
     return <PlaybackUnavailable showSlug={showSlug} onRetry={retry} />;
   }
 
+  // Trial play-gate. Until the user presses play we render a poster with a
+  // play affordance and DON'T fetch a token — so the 60s trial clock starts
+  // on play, not on page load. Subscribers init started=true and never see
+  // this. Tapping anywhere on the surface starts the preview.
+  if (!started) {
+    return (
+      <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black">
+        {current.thumbnailUrl ? (
+          <Image
+            src={current.thumbnailUrl}
+            alt=""
+            fill
+            sizes="100vw"
+            className="object-cover opacity-40"
+            priority
+          />
+        ) : null}
+        <span
+          aria-hidden
+          className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/55"
+        />
+        <button
+          type="button"
+          onClick={() => setStarted(true)}
+          aria-label={t.player.playPauseAria}
+          className="group absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 text-white"
+        >
+          <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full border border-white/20 bg-white/15 backdrop-blur-xl transition-transform duration-150 group-hover:scale-105">
+            <span className="-mr-1 inline-flex">
+              <Icon name="play" size={32} />
+            </span>
+          </span>
+          <span className="text-xs font-semibold uppercase tracking-[0.3em] text-white/80">
+            {t.player.playPreview}
+          </span>
+        </button>
+        <Link
+          href={`/shows/${showSlug}`}
+          aria-label={t.player.backToShowAria}
+          className="absolute left-5 top-5 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition-colors hover:bg-black/70 sm:left-8"
+        >
+          <Icon name="back" size={18} />
+        </Link>
+      </div>
+    );
+  }
+
   if (!token) {
     return (
       <div className="flex aspect-video w-full items-center justify-center bg-black">
@@ -598,6 +680,11 @@ function EpisodePlayback({
         // surface; the fullscreen button still hands off to the system
         // player on demand.
         playsInline
+        // Trial mode only: the token was just fetched in direct response to
+        // the user tapping the poster play-gate, so autoplay continues that
+        // gesture (falling back to the visible play button if a browser
+        // blocks unmuted autoplay). Subscribers keep manual play.
+        autoPlay={mode === "trial"}
         envKey={muxDataEnabled ? MUX_DATA_ENV_KEY : undefined}
         disableTracking={!muxDataEnabled}
         disableCookies={!muxDataEnabled}

@@ -112,6 +112,7 @@ export const es = {
     episodesBtn: "Episodios",
     upNextBtn: "A continuación",
     qualityAria: "Calidad de vídeo",
+    playPreview: "Ver 60 s gratis",
     fullscreenAria: "Pantalla completa",
   },
   episodesOverlay: {
@@ -351,6 +352,7 @@ export const en: Dict = {
     episodesBtn: "Episodes",
     upNextBtn: "Up Next",
     qualityAria: "Video quality",
+    playPreview: "Watch 60s free",
     fullscreenAria: "Toggle fullscreen",
   },
   episodesOverlay: {
