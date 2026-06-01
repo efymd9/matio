@@ -1,8 +1,8 @@
 import "server-only";
 import crypto from "node:crypto";
 import { auth } from "@clerk/nextjs/server";
-import { and, count, eq, gt, isNull } from "drizzle-orm";
-import { cookies } from "next/headers";
+import { and, count, eq, gt, isNull, or } from "drizzle-orm";
+import { cookies, headers } from "next/headers";
 import { db } from "@/db";
 import { trialSessions, users, type TrialSession } from "@/db/schema";
 import {
@@ -140,14 +140,17 @@ export function hashClientIp(ip: string): string {
 // fall back to a constant. That puts all un-identifiable requests into
 // a single shared bucket — fail-closed under abuse (3 trials per show
 // total for the whole anonymous pool), painless for local development.
-export function getClientIp(req: { headers: Headers }): string {
+export function getClientIp(req: {
+  headers: { get(name: string): string | null };
+}): string {
   const vercelIp = req.headers.get("x-vercel-forwarded-for")?.trim();
   if (vercelIp) return vercelIp;
   return "unknown";
 }
 
-// Called from pages that the user lands on after Clerk sign-up. Attaches any
-// unlinked trial_sessions rows that share the user's cookie to their user id.
+// Called from pages that the user lands on after Clerk sign-up. Attaches
+// unlinked trial_sessions rows to their user id — matched by the trial_session
+// cookie and, as a fallback, by recent IP-hash bucket (see the inline note).
 //
 // Race guard: trial_sessions.user_id has an FK to users.id. If this runs
 // before the Clerk user.created webhook has mirrored the user into our
@@ -156,12 +159,14 @@ export function getClientIp(req: { headers: Headers }): string {
 // yet, skip — the Stripe webhook's markUserTrialsConverted is keyed on
 // userId too, so callers that need the link should call
 // getOrSyncCurrentUser() before this helper to guarantee the mirror.
+// Bounds how far back the IP-hash linkage fallback will claim anonymous trial
+// rows for a freshly signed-up user — keeps a shared-NAT neighbour's older
+// previews out of scope.
+const LINK_IP_WINDOW_MS = 6 * 60 * 60 * 1000;
+
 export async function linkTrialSessionsToCurrentUser(): Promise<void> {
   const { userId } = await auth();
   if (!userId) return;
-
-  const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
-  if (!sessionToken) return;
 
   const [mirror] = await db
     .select({ id: users.id })
@@ -170,15 +175,40 @@ export async function linkTrialSessionsToCurrentUser(): Promise<void> {
     .limit(1);
   if (!mirror) return;
 
+  // Primary match: the trial_session cookie. Fallback: any RECENT unlinked row
+  // from the same IP-hash bucket. Ad webviews (Meta/TikTok) frequently silo or
+  // drop cookies, so one human mints many trial rows under different tokens —
+  // cookie-only linking caught just the single live token (one signed-up ad
+  // user had 39 orphaned rows). The IP fallback is coarser (a shared NAT could
+  // attach a neighbour's anonymous preview), hence the LINK_IP_WINDOW_MS bound;
+  // and these columns are analytics-only (playback gating never reads them), so
+  // minor over-attribution is acceptable.
+  const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
+  const matchers = [];
+  if (sessionToken) {
+    matchers.push(eq(trialSessions.sessionToken, sessionToken));
+  }
+  try {
+    const ip = getClientIp({ headers: await headers() });
+    // "unknown" is the shared fallback bucket for un-identifiable requests —
+    // never link on it or we'd claim every anonymous trial at once.
+    if (ip !== "unknown") {
+      matchers.push(
+        and(
+          eq(trialSessions.ipHash, hashClientIp(ip)),
+          gt(trialSessions.startedAt, new Date(Date.now() - LINK_IP_WINDOW_MS)),
+        ),
+      );
+    }
+  } catch {
+    // No request-scoped headers (called outside a request) — cookie-only.
+  }
+  if (matchers.length === 0) return;
+
   await db
     .update(trialSessions)
     .set({ userId })
-    .where(
-      and(
-        eq(trialSessions.sessionToken, sessionToken),
-        isNull(trialSessions.userId),
-      ),
-    );
+    .where(and(or(...matchers), isNull(trialSessions.userId)));
 }
 
 // Called from the Stripe webhook when a user's subscription becomes active.

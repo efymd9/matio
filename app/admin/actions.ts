@@ -165,7 +165,9 @@ export async function softDeleteShow(id: string) {
 
   await db
     .update(shows)
-    .set({ deletedAt: new Date() })
+    // Clear status alongside deletedAt so a soft-deleted show is never left as
+    // status='published' — keeps the catalog / analytics filters unambiguous.
+    .set({ deletedAt: new Date(), status: "draft" })
     .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
 
   revalidatePath("/");

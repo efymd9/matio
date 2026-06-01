@@ -28,9 +28,23 @@ const SUBSCRIBER_TTL = 60 * 60; // 1h
 const TRIAL_TTL_CAP = TRIAL_DURATION_SECONDS;
 const NO_CACHE = { "Cache-Control": "private, no-store" } as const;
 
+// Structured, greppable log so token volume + outcome (esp. a trial 403/429
+// spike that would flag a client refresh-loop regression) is queryable in
+// Vercel runtime logs — the route was previously silent on success, which is
+// why the original refresh-loop bug was invisible to monitoring.
+function logToken(fields: {
+  result: number;
+  mode: "subscriber" | "trial" | "none";
+  showId?: string;
+  episodeId?: string | null;
+}) {
+  console.info(`[playback-token] ${JSON.stringify(fields)}`);
+}
+
 export async function GET(req: NextRequest) {
   const episodeId = req.nextUrl.searchParams.get("episode_id");
   if (!episodeId) {
+    logToken({ result: 400, mode: "none" });
     return NextResponse.json(
       { error: "Missing episode_id" },
       { status: 400, headers: NO_CACHE },
@@ -61,6 +75,7 @@ export async function GET(req: NextRequest) {
     .limit(1);
 
   if (!row || !row.playbackId) {
+    logToken({ result: 404, mode: "none", episodeId });
     return NextResponse.json(
       { error: "Episode not found or not ready" },
       { status: 404, headers: NO_CACHE },
@@ -76,6 +91,7 @@ export async function GET(req: NextRequest) {
   const { userId } = await auth();
   if (userId && (await hasActiveSubscription(userId))) {
     const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
+    logToken({ result: 200, mode: "subscriber", showId: row.showId, episodeId });
     return NextResponse.json({
       token,
       expiresIn: SUBSCRIBER_TTL,
@@ -107,6 +123,7 @@ export async function GET(req: NextRequest) {
     if (remaining > 0) {
       const ttl = Math.min(remaining, TRIAL_TTL_CAP);
       const token = signMuxPlaybackToken(row.playbackId, ttl);
+      logToken({ result: 200, mode: "trial", showId: row.showId, episodeId });
       return NextResponse.json({
         token,
         expiresIn: ttl,
@@ -115,6 +132,7 @@ export async function GET(req: NextRequest) {
     }
     // Expired row exists — don't issue a new trial for this show on the
     // same cookie. User must subscribe.
+    logToken({ result: 403, mode: "trial", showId: row.showId, episodeId });
     return NextResponse.json({ error: "Not authorized" }, { status: 403, headers: NO_CACHE });
   }
 
@@ -141,6 +159,7 @@ export async function GET(req: NextRequest) {
       // Generic body — don't confirm to an adversary that they hit a
       // per-network bucket (signal to rotate IPs / proxies); the client
       // identifies the case by status code, not text.
+      logToken({ result: 429, mode: "trial", showId: row.showId, episodeId });
       return NextResponse.json(
         { error: "Too many requests" },
         {
@@ -157,6 +176,7 @@ export async function GET(req: NextRequest) {
   );
   const ttl = Math.min(Math.max(remaining, 0), TRIAL_TTL_CAP);
   const token = signMuxPlaybackToken(row.playbackId, ttl);
+  logToken({ result: 200, mode: "trial", showId: row.showId, episodeId });
   const res = NextResponse.json({ token, expiresIn: ttl, mode: "trial" }, { headers: NO_CACHE });
   if (!existingToken) {
     res.cookies.set(TRIAL_COOKIE, sessionToken, {

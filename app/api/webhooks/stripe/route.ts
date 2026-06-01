@@ -233,6 +233,17 @@ async function mirrorSubscription(sub: Stripe.Subscription) {
             ...(amount !== undefined ? { value: amount } : {}),
             ...(currency ? { currency } : {}),
             plan,
+            // First-touch UTM (mirrored from Stripe metadata) so bottom-of-funnel
+            // conversion is sliceable by campaign without person props.
+            ...(attribution.first.source
+              ? { utm_source: attribution.first.source }
+              : {}),
+            ...(attribution.first.medium
+              ? { utm_medium: attribution.first.medium }
+              : {}),
+            ...(attribution.first.campaign
+              ? { utm_campaign: attribution.first.campaign }
+              : {}),
           },
         });
         if (!result.ok && !result.skipped) {

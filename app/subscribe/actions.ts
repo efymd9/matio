@@ -266,6 +266,17 @@ export async function startCheckout(formData: FormData) {
         properties: {
           value: MEMBERSHIP_VALUE,
           currency: MEMBERSHIP_CURRENCY,
+          // First-touch UTM so the conversion funnel can break down by campaign
+          // (already normalized + source-aliased by attribution.ts).
+          ...(attribution.first.source
+            ? { utm_source: attribution.first.source }
+            : {}),
+          ...(attribution.first.medium
+            ? { utm_medium: attribution.first.medium }
+            : {}),
+          ...(attribution.first.campaign
+            ? { utm_campaign: attribution.first.campaign }
+            : {}),
         },
       }).catch((err) => {
         console.warn("startCheckout: PostHog checkout_started threw", { err });

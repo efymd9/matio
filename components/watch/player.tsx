@@ -290,6 +290,17 @@ function EpisodePlayback({
   // hiccup on cellular is normal noise; we only surrender the slot to
   // PlaybackUnavailable when 3 errors land inside a 10s window.
   const errorTimesRef = useRef<number[]>([]);
+  // Subscriber token-refresh remounts <MuxVideo> (keyed on token) because the
+  // wrapper only rebuilds its HLS src on a playbackId change, never on a
+  // tokens-only change — so a refreshed token can't reach hls.js otherwise.
+  // Capture playhead + play-state before the swap and restore them on the new
+  // element's loadedmetadata so the remount is seamless. Trial tokens are never
+  // refreshed, so this only fires for subscribers (~once an hour).
+  const resumeAfterRefreshRef = useRef<number | null>(null);
+  const wasPlayingRef = useRef(false);
+  // first_frame fires once per episode mount when playback actually starts, so
+  // we can tell "play attempted but never rendered" from "actually played".
+  const firstFrameFiredRef = useRef(false);
 
   const episodeLabel = `S${current.seasonNumber}·E${current.number}`;
 
@@ -416,6 +427,16 @@ function EpisodePlayback({
               typeof data.token === "string" &&
               typeof data.expiresIn === "number"
             ) {
+              // Capture playhead + play-state before the token swap remounts
+              // <MuxVideo> (key={token}); restored on its loadedmetadata. The
+              // old token is still valid here (we're REFRESH_LEAD_MS ahead of
+              // expiry), so playback keeps running until React commits the
+              // new element.
+              const el = videoRef.current;
+              if (el) {
+                resumeAfterRefreshRef.current = el.currentTime;
+                wasPlayingRef.current = !el.paused;
+              }
               setToken(data.token);
               setExpiresAt(Date.now() + data.expiresIn * 1000);
               return;
@@ -542,6 +563,16 @@ function EpisodePlayback({
     return () => el.removeEventListener("timeupdate", update);
   }, [current.introStartSeconds, current.introEndSeconds, token]);
 
+  // Emit playback_failed once when we surrender to the infra-error overlay
+  // (5xx / decode / network / parse) — distinct from the expected paywall and
+  // rate-limit end-states. Lets us measure real player-failure rate vs ordinary
+  // bounce. No-op without marketing consent (PostHog not loaded).
+  useEffect(() => {
+    if (endState === "unavailable") {
+      capturePostHog("playback_failed", { show_slug: showSlug, mode });
+    }
+  }, [endState, showSlug, mode]);
+
   if (endState === "paywall") {
     return (
       <Paywall
@@ -584,7 +615,13 @@ function EpisodePlayback({
         />
         <button
           type="button"
-          onClick={() => setStarted(true)}
+          onClick={() => {
+            capturePostHog("play_attempted", {
+              show_slug: showSlug,
+              show_title: showTitle ?? showSlug,
+            });
+            setStarted(true);
+          }}
           aria-label={t.player.playPauseAria}
           className="group absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 text-white"
         >
@@ -669,6 +706,11 @@ function EpisodePlayback({
       className="group/player relative isolate"
     >
       <MuxVideo
+        // Keyed on the token so a subscriber token refresh remounts the element
+        // (the wrapper ignores tokens-only changes); playhead/play-state are
+        // restored in onLoadedMetadata. Trial tokens never refresh, so this is
+        // stable for the whole trial preview.
+        key={token}
         ref={videoRef}
         slot="media"
         playbackId={current.playbackId}
@@ -703,6 +745,24 @@ function EpisodePlayback({
           if (v.videoWidth > 0 && v.videoHeight > 0) {
             setAspectRatio(v.videoWidth / v.videoHeight);
           }
+          // Restore playhead/play-state after a token-refresh remount (mirrors
+          // Mux's own in-place re-init). resumeSeconds (server resume) is
+          // handled by a separate effect and only on the initial episode load,
+          // so the two never collide.
+          const resumeAt = resumeAfterRefreshRef.current;
+          if (resumeAt != null) {
+            resumeAfterRefreshRef.current = null;
+            if (resumeAt > (v.currentTime ?? 0)) v.currentTime = resumeAt;
+            if (wasPlayingRef.current) void v.play().catch(() => {});
+          }
+        }}
+        onPlaying={() => {
+          // First real playback frame for this episode mount. Fires once even
+          // across a token-refresh remount (the guard ref lives on the outer
+          // component). No-op without marketing consent (PostHog not loaded).
+          if (firstFrameFiredRef.current) return;
+          firstFrameFiredRef.current = true;
+          capturePostHog("first_frame", { show_slug: showSlug, mode });
         }}
         onError={(e) => {
           // HTMLMediaElement exposes MediaError on the element after an

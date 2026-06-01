@@ -13,7 +13,7 @@ import {
   POSTHOG_KEY,
   POSTHOG_READY_EVENT,
 } from "@/lib/posthog-events";
-import { normalizeUtm } from "@/lib/utm";
+import { normalizeUtm, normalizeUtmSource } from "@/lib/utm";
 
 // Consent-gated PostHog loader. posthog-js is dynamically imported ONLY after
 // the visitor accepts marketing cookies (same gate proxy.ts uses for
@@ -83,7 +83,12 @@ export function PostHogProvider({
         posthog.init(POSTHOG_KEY, {
           api_host: POSTHOG_HOST,
           ui_host: "https://eu.posthog.com",
-          person_profiles: "identified_only",
+          // "always" (not "identified_only") so PostHog writes the native
+          // $initial_utm_* person props (via $set_once on the first event of an
+          // anonymous lander) — the first-touch attribution our delayed-
+          // conversion funnel needs for ad ROAS. identified_only never created
+          // the profile pre-signup, so $initial_utm_* stayed permanently None.
+          person_profiles: "always",
           autocapture: false,
           capture_pageview: false, // fired manually below for App-Router routes
           capture_pageleave: true,
@@ -102,7 +107,13 @@ export function PostHogProvider({
             if (props) {
               for (const k of ["utm_campaign", "utm_source", "utm_medium"]) {
                 if (typeof props[k] === "string") {
-                  const n = normalizeUtm(props[k]);
+                  // utm_source also gets platform-alias canonicalization
+                  // (facebook/meta→fb, instagram→ig) to match the app's
+                  // attribution columns; medium/campaign keep plain normalize.
+                  const n =
+                    k === "utm_source"
+                      ? normalizeUtmSource(props[k])
+                      : normalizeUtm(props[k]);
                   if (n) props[k] = n;
                 }
               }

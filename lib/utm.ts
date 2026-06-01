@@ -19,3 +19,22 @@ export function normalizeUtm(
   const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
   return normalized || undefined;
 }
+
+// Canonical utm_SOURCE aliases — collapse the spelling variants the same ad
+// platform emits depending on placement/URL template ("facebook"/"meta" → "fb",
+// "instagram" → "ig") so source reporting doesn't fragment. Applied ONLY to
+// utm_source: medium ("paid" vs "paid_social") and campaign (a campaign could
+// legitimately be named "facebook") must keep their raw normalized value.
+const UTM_SOURCE_ALIASES: Record<string, string> = {
+  facebook: "fb",
+  meta: "fb",
+  instagram: "ig",
+};
+
+export function normalizeUtmSource(
+  value: string | null | undefined,
+): string | undefined {
+  const normalized = normalizeUtm(value);
+  if (!normalized) return undefined;
+  return UTM_SOURCE_ALIASES[normalized] ?? normalized;
+}

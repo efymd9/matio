@@ -15,7 +15,19 @@ import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 // inherently consent-gated (their ready-deferral never fires without a loaded
 // SDK). De-dupe via a localStorage flag keyed by user id, set only AFTER the
 // events actually fire so a not-yet-loaded SDK doesn't burn it.
-export function CompleteRegistrationPixel({ userId }: { userId: string }) {
+export function CompleteRegistrationPixel({
+  userId,
+  utm,
+}: {
+  userId: string;
+  // First-touch UTM (server-resolved from the attribution_first cookie on
+  // /subscribe) so signup_completed carries campaign attribution — by signup
+  // time the URL has no utm_* params, so posthog-js can't auto-attach them.
+  utm?: Record<string, string>;
+}) {
+  // Re-running on a utm change is safe: the cleanup below detaches the prior
+  // ready-listeners before re-registering, so signup_completed still fires at
+  // most once (also guarded by the phKey localStorage flag).
   useEffect(() => {
     if (!userId) return;
 
@@ -50,7 +62,7 @@ export function CompleteRegistrationPixel({ userId }: { userId: string }) {
     const offPostHog = phDone
       ? () => {}
       : onPostHogReady(() => {
-          capturePostHog("signup_completed");
+          capturePostHog("signup_completed", utm);
           try {
             localStorage.setItem(phKey, "1");
           } catch {
@@ -62,6 +74,6 @@ export function CompleteRegistrationPixel({ userId }: { userId: string }) {
       offPixel();
       offPostHog();
     };
-  }, [userId]);
+  }, [userId, utm]);
   return null;
 }

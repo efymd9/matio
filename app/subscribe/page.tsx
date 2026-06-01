@@ -7,7 +7,7 @@ import { MatioLogo } from "@/components/site/matio-logo";
 import { Icon } from "@/components/site/icon";
 import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
 import { getOrSyncCurrentUser } from "@/lib/admin";
-import { applyUserAttribution } from "@/lib/attribution";
+import { applyUserAttribution, readAttributionCookies } from "@/lib/attribution";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
@@ -58,11 +58,20 @@ export default async function SubscribePage({
 
   const { show, resume } = await searchParams;
 
+  // First-touch UTM for signup_completed. The event fires on this UTM-less URL
+  // (Clerk redirected here post-signup), so posthog-js can't auto-attach the
+  // campaign — we hand it the server-resolved attribution_first cookie.
+  const { first: firstTouch } = await readAttributionCookies();
+  const signupUtm: Record<string, string> = {};
+  if (firstTouch.source) signupUtm.utm_source = firstTouch.source;
+  if (firstTouch.medium) signupUtm.utm_medium = firstTouch.medium;
+  if (firstTouch.campaign) signupUtm.utm_campaign = firstTouch.campaign;
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-background pb-16 pt-28 sm:pt-32">
       {/* Meta Pixel CompleteRegistration — fires once per user (new signups
           land here right after Clerk sign-up). Renders nothing. */}
-      <CompleteRegistrationPixel userId={userId} />
+      <CompleteRegistrationPixel userId={userId} utm={signupUtm} />
       {/* Soft radial accent behind the content */}
       <div
         className="pointer-events-none absolute inset-0 opacity-40"

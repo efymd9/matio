@@ -1,6 +1,6 @@
 import "server-only";
 import type { NextRequest } from "next/server";
-import { normalizeUtm } from "@/lib/utm";
+import { normalizeUtm, normalizeUtmSource } from "@/lib/utm";
 
 // Per-campaign attribution. Captured from UTM query params on landing,
 // persisted at each funnel milestone (trial_sessions on first play, users
@@ -61,6 +61,17 @@ function clean(value: string | null | undefined): string | null {
     : normalized;
 }
 
+// Same as clean() but canonicalizes the value as a utm_SOURCE (facebook/meta →
+// fb, instagram → ig) so platform spelling variants don't fragment source
+// reporting. Source-only — medium and campaign keep clean().
+function cleanSource(value: string | null | undefined): string | null {
+  const normalized = normalizeUtmSource(value);
+  if (!normalized) return null;
+  return normalized.length > FIELD_MAX_LEN
+    ? normalized.slice(0, FIELD_MAX_LEN)
+    : normalized;
+}
+
 export function hasAnyField(p: AttributionPayload): boolean {
   return p.source !== null || p.medium !== null || p.campaign !== null;
 }
@@ -69,7 +80,7 @@ export function readAttributionFromSearchParams(
   params: URLSearchParams,
 ): AttributionPayload {
   return {
-    source: clean(params.get("utm_source")),
+    source: cleanSource(params.get("utm_source")),
     medium: clean(params.get("utm_medium")),
     campaign: clean(params.get("utm_campaign")),
   };
@@ -92,7 +103,7 @@ export function parseAttributionCookie(
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     return {
-      source: clean(typeof parsed.s === "string" ? parsed.s : null),
+      source: cleanSource(typeof parsed.s === "string" ? parsed.s : null),
       medium: clean(typeof parsed.m === "string" ? parsed.m : null),
       campaign: clean(typeof parsed.c === "string" ? parsed.c : null),
     };
@@ -181,12 +192,12 @@ export function fromStripeMetadata(
   const m = meta ?? {};
   return {
     first: {
-      source: clean(m[STRIPE_METADATA_KEYS.firstSource]),
+      source: cleanSource(m[STRIPE_METADATA_KEYS.firstSource]),
       medium: clean(m[STRIPE_METADATA_KEYS.firstMedium]),
       campaign: clean(m[STRIPE_METADATA_KEYS.firstCampaign]),
     },
     last: {
-      source: clean(m[STRIPE_METADATA_KEYS.lastSource]),
+      source: cleanSource(m[STRIPE_METADATA_KEYS.lastSource]),
       medium: clean(m[STRIPE_METADATA_KEYS.lastMedium]),
       campaign: clean(m[STRIPE_METADATA_KEYS.lastCampaign]),
     },

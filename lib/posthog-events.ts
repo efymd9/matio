@@ -27,7 +27,15 @@ export type FunnelEvent =
   | "trial_play_started"
   | "paywall_shown"
   | "signup_cta_clicked"
-  | "signup_completed";
+  | "signup_completed"
+  // Player-health diagnostics (fired from components/watch/player.tsx) so we
+  // can split "never played" vs "<10s bounce" vs "player failed to start":
+  //   play_attempted  — user tapped the trial poster play-gate
+  //   first_frame     — playback actually started (video `playing` event), once
+  //   playback_failed — surrendered to the PlaybackUnavailable infra overlay
+  | "play_attempted"
+  | "first_frame"
+  | "playback_failed";
 
 // Minimal surface we use. The provider assigns the real posthog-js instance
 // (which is structurally compatible) to window.posthog after init.
