@@ -26,6 +26,13 @@ export type FunnelEvent =
   | "show_viewed"
   | "trial_play_started"
   | "paywall_shown"
+  // Episode-gated free tier (gated shows only):
+  //   free_episode_started   — token issued mode:"free", once per episode mount
+  //   member_episode_started — token issued mode:"member", once per episode mount
+  //   signup_wall_shown      — SignupWall overlay mounted
+  | "free_episode_started"
+  | "member_episode_started"
+  | "signup_wall_shown"
   | "signup_cta_clicked"
   | "signup_completed"
   // Player-health diagnostics (fired from components/watch/player.tsx) so we
