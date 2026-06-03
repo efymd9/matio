@@ -7,6 +7,11 @@ import crypto from "node:crypto";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { readAttributionCookiesFromRequest } from "@/lib/attribution";
+import {
+  getOrderedReadyEpisodeIds,
+  getShowGating,
+  tierForPosition,
+} from "@/lib/episode-access";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
@@ -17,6 +22,7 @@ import {
   getClientIp,
   hashClientIp,
   mintTrialSession,
+  stampSignupWall,
 } from "@/lib/trial";
 
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
@@ -34,7 +40,7 @@ const NO_CACHE = { "Cache-Control": "private, no-store" } as const;
 // why the original refresh-loop bug was invisible to monitoring.
 function logToken(fields: {
   result: number;
-  mode: "subscriber" | "trial" | "none";
+  mode: "subscriber" | "trial" | "free" | "member" | "none";
   showId?: string;
   episodeId?: string | null;
 }) {
@@ -60,6 +66,8 @@ export async function GET(req: NextRequest) {
     .select({
       playbackId: episodes.muxPlaybackId,
       showId: seasons.showId,
+      freeEpisodes: shows.freeEpisodes,
+      memberEpisodes: shows.memberEpisodes,
     })
     .from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
@@ -97,6 +105,114 @@ export async function GET(req: NextRequest) {
       expiresIn: SUBSCRIBER_TTL,
       mode: "subscriber",
     }, { headers: NO_CACHE });
+  }
+
+  // Episode-gated show (free_episodes + member_episodes > 0): positional
+  // tier enforcement replaces the 60s trial entirely for this show. The
+  // episode's 1-based position in the ready ordering decides who may play:
+  // free → anyone, member → any signed-in user, beyond → subscribers only
+  // (subscribers already returned above). Gated 403s carry a machine-
+  // readable `reason` so the player can route to the right wall; legacy
+  // trial 403s below stay reason-less.
+  const gating = getShowGating(row);
+  if (gating.gated) {
+    const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
+    const position = orderedIds.indexOf(episodeId) + 1;
+    // position 0 = not found in the ready ordering. The gate above already
+    // verified ready+published, so this is a vanishing race (episode went
+    // un-ready between queries) — fail toward the most restrictive tier.
+    const tier =
+      position === 0 ? "subscriber" : tierForPosition(position, gating);
+
+    const cookieStore = await cookies();
+    const existingToken = cookieStore.get(TRIAL_COOKIE)?.value;
+
+    if (tier === "free") {
+      // Funnel tracking row (kind='episodes') — minted on the first free
+      // play for this (cookie, show), carrying the attribution snapshot and
+      // IP hash exactly like the legacy trial. STRICTLY best-effort: a rate
+      // limit (or any DB hiccup) degrades tracking, never playback — free
+      // content must not 429.
+      const sessionToken = existingToken ?? crypto.randomUUID();
+      let setCookie = false;
+      try {
+        const existing = existingToken
+          ? await findTrialSession(existingToken, row.showId)
+          : null;
+        if (!existing) {
+          await mintTrialSession({
+            sessionToken,
+            showId: row.showId,
+            ipHash: hashClientIp(getClientIp(req)),
+            attribution: readAttributionCookiesFromRequest(req),
+            kind: "episodes",
+          });
+          setCookie = !existingToken;
+        }
+      } catch {
+        // TrialRateLimitError or transient DB failure — tracking skipped.
+      }
+      const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
+      logToken({ result: 200, mode: "free", showId: row.showId, episodeId });
+      const res = NextResponse.json(
+        { token, expiresIn: SUBSCRIBER_TTL, mode: "free" },
+        { headers: NO_CACHE },
+      );
+      if (setCookie) {
+        res.cookies.set(TRIAL_COOKIE, sessionToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          path: "/",
+          maxAge: ONE_YEAR_SECONDS,
+        });
+      }
+      return res;
+    }
+
+    if (tier === "member") {
+      if (userId) {
+        const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
+        logToken({
+          result: 200,
+          mode: "member",
+          showId: row.showId,
+          episodeId,
+        });
+        return NextResponse.json(
+          { token, expiresIn: SUBSCRIBER_TTL, mode: "member" },
+          { headers: NO_CACHE },
+        );
+      }
+      // Anonymous request for a member episode → sign-up wall. Stamp the
+      // funnel timestamp on the session's row when one exists (deep-link
+      // path; the end-of-tier path stamps via markSignupWallShown).
+      if (existingToken) {
+        try {
+          await stampSignupWall(existingToken, row.showId);
+        } catch {
+          // analytics-only — never block the response
+        }
+      }
+      logToken({ result: 403, mode: "free", showId: row.showId, episodeId });
+      return NextResponse.json(
+        { error: "Not authorized", reason: "signup_required" },
+        { status: 403, headers: NO_CACHE },
+      );
+    }
+
+    // tier === "subscriber" and the requester isn't one (subscribers
+    // returned earlier) — applies to anonymous and signed-in members alike.
+    logToken({
+      result: 403,
+      mode: userId ? "member" : "free",
+      showId: row.showId,
+      episodeId,
+    });
+    return NextResponse.json(
+      { error: "Not authorized", reason: "subscribe_required" },
+      { status: 403, headers: NO_CACHE },
+    );
   }
 
   // Trial path. Note we intentionally do NOT special-case trial.converted —
