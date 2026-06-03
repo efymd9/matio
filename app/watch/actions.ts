@@ -1,7 +1,7 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
 import {
@@ -13,7 +13,12 @@ import {
   watchProgress,
 } from "@/db/schema";
 import { hasActiveSubscription } from "@/lib/subscription-access";
-import { TRIAL_COOKIE } from "@/lib/trial";
+import {
+  getOrderedReadyEpisodeIds,
+  getShowGating,
+  tierForPosition,
+} from "@/lib/episode-access";
+import { TRIAL_COOKIE, stampSignupWall } from "@/lib/trial";
 
 // Hard ceiling on position values that can be written. The longest
 // imaginable single episode is ~3-4h; 24h is a generous bound that
@@ -35,23 +40,19 @@ export async function saveWatchProgress(
   const { userId } = await auth();
   if (!userId) return;
 
-  // Ownership gate: only access-granting subscribers may write
-  // watch_progress. Without this, any signed-in user could call the
-  // action with any episode UUID and poison their own row — or use
-  // error/no-error differentiation to enumerate episode UUIDs (since
-  // watchProgress has an FK to episodes.id). Mirrors the watch page
-  // and playback-token route gates.
-  if (!(await hasActiveSubscription(userId))) return;
-
   const clamped = clampPositionSeconds(positionSeconds);
   if (clamped === null) return;
 
   // Verify the episode is actually playable: status='ready', on a
-  // published, non-deleted show. The FK alone (episodeId → episodes.id)
-  // would allow drafts and soft-deleted catalog entries to leak into
-  // the resume queue.
+  // published, non-deleted show — and fetch the show's gating config in
+  // the same query for the tier check below.
   const [ep] = await db
-    .select({ id: episodes.id })
+    .select({
+      id: episodes.id,
+      showId: seasons.showId,
+      freeEpisodes: shows.freeEpisodes,
+      memberEpisodes: shows.memberEpisodes,
+    })
     .from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
     .innerJoin(shows, eq(seasons.showId, shows.id))
@@ -65,6 +66,19 @@ export async function saveWatchProgress(
     )
     .limit(1);
   if (!ep) return;
+
+  // Ownership gate: subscribers may write progress on anything; signed-in
+  // non-subscribers only on gated shows, and only for episodes inside
+  // their tier (free + member positions). Mirrors the token route's gate
+  // so progress rows can't be written for content the user can't play.
+  if (!(await hasActiveSubscription(userId))) {
+    const gating = getShowGating(ep);
+    if (!gating.gated) return;
+    const orderedIds = await getOrderedReadyEpisodeIds(ep.showId);
+    const position = orderedIds.indexOf(episodeId) + 1;
+    if (position === 0) return;
+    if (tierForPosition(position, gating) === "subscriber") return;
+  }
 
   await db
     .insert(watchProgress)
@@ -103,7 +117,11 @@ export async function saveTrialPosition(
   // (or a forged form post on the cookie) from writing positions
   // against drafts or unpublished assets.
   const [row] = await db
-    .select({ showId: seasons.showId })
+    .select({
+      showId: seasons.showId,
+      freeEpisodes: shows.freeEpisodes,
+      memberEpisodes: shows.memberEpisodes,
+    })
     .from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
     .innerJoin(shows, eq(seasons.showId, shows.id))
@@ -122,6 +140,32 @@ export async function saveTrialPosition(
   // write. An attacker with any old/expired cookie can in principle
   // dirty their own trial position, but the clamp above bounds the
   // damage, and the row is rate-limit / ip-hash gated at creation.
+
+  // Gated shows additionally track funnel depth (furthest 1-based position
+  // started) and the anonymous resume target. GREATEST() keeps the depth
+  // monotonic — re-watching episode 2 after reaching 7 must not regress
+  // the funnel. Legacy 60s previews keep the plain position write.
+  const gating = getShowGating(row);
+  if (gating.gated) {
+    const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
+    const position = orderedIds.indexOf(episodeId) + 1;
+    if (position === 0) return;
+    await db
+      .update(trialSessions)
+      .set({
+        lastPositionSeconds: clamped,
+        lastEpisodeId: episodeId,
+        furthestEpisodeNumber: sql`GREATEST(${trialSessions.furthestEpisodeNumber}, ${position})`,
+      })
+      .where(
+        and(
+          eq(trialSessions.sessionToken, sessionToken),
+          eq(trialSessions.showId, row.showId),
+        ),
+      );
+    return;
+  }
+
   await db
     .update(trialSessions)
     .set({ lastPositionSeconds: clamped })
@@ -205,4 +249,21 @@ export async function subscribeToShowReminder(input: {
     });
 
   return { ok: true };
+}
+
+// Stamps signup_wall_at on the caller's session row for a show — fired by
+// the SignupWall overlay on mount. This covers the end-of-free-tier path
+// (episode 10 finishes → wall renders without any token request); the
+// deep-link path is stamped server-side by the token route's 403. Write-
+// once semantics live in stampSignupWall. Analytics-only: scoped to the
+// caller's own cookie, no information returned.
+export async function markSignupWallShown(showId: string) {
+  const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
+  if (!sessionToken) return;
+  if (typeof showId !== "string" || showId.length === 0) return;
+  try {
+    await stampSignupWall(sessionToken, showId);
+  } catch {
+    // best-effort
+  }
 }
