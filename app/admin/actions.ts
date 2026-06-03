@@ -1,5 +1,6 @@
 "use server";
 
+import { del } from "@vercel/blob";
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
@@ -21,6 +22,36 @@ import { getMux } from "@/lib/mux";
 // unstable_cache sets its own TTL, "default" is the no-op pick.
 function bustCatalog() {
   revalidateTag(CATALOG_TAG, "default");
+}
+
+// Vercel Blob public host — admin-uploaded poster/hero artwork lives here.
+// Legacy /shows/*.png (same-origin) and any external URL are NOT on it.
+const BLOB_HOST_RE = /\.public\.blob\.vercel-storage\.com$/;
+
+// When artwork is replaced or cleared, delete the previous Blob object so it
+// doesn't linger and bill forever — uploads use addRandomSuffix, so a new
+// upload never overwrites the old one and they'd otherwise accumulate. Only
+// touches our own Blob host; best-effort and never throws, so a Blob outage
+// or an unprovisioned store can't fail the save. (Uploads the admin started
+// but never saved can't be reached this way — accept those, or reconcile
+// later with a list() job.)
+async function deleteOrphanedBlob(
+  oldUrl: string | null,
+  newUrl: string | null,
+) {
+  if (!oldUrl || oldUrl === newUrl) return;
+  let host: string;
+  try {
+    host = new URL(oldUrl).hostname;
+  } catch {
+    return; // relative/legacy path — not a Blob object we own
+  }
+  if (!BLOB_HOST_RE.test(host)) return;
+  try {
+    await del(oldUrl);
+  } catch {
+    // Orphan cleanup is best-effort — never block the save on it.
+  }
 }
 
 function str(formData: FormData, key: string): string {
@@ -99,20 +130,40 @@ export async function updateShow(id: string, formData: FormData) {
 
   const status = str(formData, "status") === "published" ? "published" : "draft";
 
+  const posterImageUrl = str(formData, "posterImageUrl") || null;
+  const heroImageUrl = str(formData, "heroImageUrl") || null;
+
+  // Snapshot the current artwork so we can clean up any Blob object that's
+  // being replaced or cleared by this edit (see deleteOrphanedBlob).
+  const [prev] = await db
+    .select({
+      posterImageUrl: shows.posterImageUrl,
+      heroImageUrl: shows.heroImageUrl,
+    })
+    .from(shows)
+    .where(and(eq(shows.id, id), isNull(shows.deletedAt)))
+    .limit(1);
+
   await db
     .update(shows)
     .set({
       title,
       slug,
       description: str(formData, "description") || null,
-      posterImageUrl: str(formData, "posterImageUrl") || null,
-      heroImageUrl: str(formData, "heroImageUrl") || null,
+      posterImageUrl,
+      heroImageUrl,
       genre: parseGenre(formData),
       status,
       justReleased: checkbox(formData, "justReleased"),
       popularNow: checkbox(formData, "popularNow"),
     })
     .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
+
+  // After the row is safely updated, drop any now-unreferenced Blob artwork.
+  if (prev) {
+    await deleteOrphanedBlob(prev.posterImageUrl, posterImageUrl);
+    await deleteOrphanedBlob(prev.heroImageUrl, heroImageUrl);
+  }
 
   revalidatePath("/");
   bustCatalog();

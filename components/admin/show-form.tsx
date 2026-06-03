@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Icon } from "@/components/site/icon";
+import { ImageUploadField } from "@/components/admin/image-upload-field";
 import { StatusSelect } from "@/components/admin/status-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -116,22 +117,28 @@ export function ShowForm({
       <Panel
         kicker="Artwork"
         title="Poster & hero"
-        hint="Paste a URL — the preview shows the exact crop the site will render."
+        hint="Drop a file to upload — the preview shows the exact crop the site will render."
       >
         <div className="grid gap-6 sm:grid-cols-2">
-          <ArtworkField
+          <ImageUploadField
             label="Poster"
             name="posterImageUrl"
             value={poster}
-            onChange={setPoster}
+            onChange={(v) => {
+              setPoster(v);
+              setDirty(true);
+            }}
             ratio="poster"
             hint="Portrait 2:3 · 1024×1536. Catalog cards + OG fallback."
           />
-          <ArtworkField
+          <ImageUploadField
             label="Hero"
             name="heroImageUrl"
             value={hero}
-            onChange={setHero}
+            onChange={(v) => {
+              setHero(v);
+              setDirty(true);
+            }}
             ratio="hero"
             hint="Wide ≈21:9 · 2560×1080, no baked title. Detail page + home hero. Keep subjects in the centre 60%."
           />
@@ -221,79 +228,6 @@ function Field({
       </Label>
       {children}
       {hint ? <p className="text-[11px] text-white/40">{hint}</p> : null}
-    </div>
-  );
-}
-
-// Deliberately a raw <img>, not next/image: the URL is admin-entered and
-// arbitrary (any host), so it can't pass through next/image's
-// remotePatterns allowlist. This is an auth-gated, low-traffic preview —
-// raw img is the correct tool. The public surfaces still use next/image.
-function ArtworkField({
-  label,
-  name,
-  value,
-  onChange,
-  ratio,
-  hint,
-}: {
-  label: string;
-  name: string;
-  value: string;
-  onChange: (v: string) => void;
-  ratio: "poster" | "hero";
-  hint: string;
-}) {
-  const [broken, setBroken] = useState(false);
-  const trimmed = value.trim();
-
-  return (
-    <div className="space-y-2.5">
-      <Field label={label} htmlFor={name} hint={hint}>
-        <Input
-          id={name}
-          name={name}
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            setBroken(false);
-          }}
-          placeholder="/shows/my-show-poster.png"
-          className="font-mono text-xs"
-        />
-      </Field>
-      <div
-        className={`relative overflow-hidden rounded-xl border border-white/10 bg-black/40 ${
-          ratio === "poster"
-            ? "aspect-[2/3] w-full max-w-[200px]"
-            : "aspect-video w-full"
-        }`}
-      >
-        {trimmed && !broken ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={trimmed}
-            alt={`${label} preview`}
-            className="absolute inset-0 h-full w-full object-cover"
-            onError={() => setBroken(true)}
-          />
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-center">
-            <Icon
-              name={broken ? "close" : "info"}
-              size={16}
-              color={broken ? "#ff7d7d" : "#ffffff60"}
-            />
-            <span className="px-3 text-[11px] text-white/35">
-              {broken ? "Couldn’t load this URL" : "Live preview"}
-            </span>
-          </div>
-        )}
-        {/* Aspect-ratio label chip, so it's obvious which crop this is */}
-        <span className="absolute right-2 top-2 rounded-[3px] bg-black/60 px-1.5 py-0.5 font-mono text-[9px] text-white/70 backdrop-blur-md">
-          {ratio === "poster" ? "2:3" : "≈21:9"}
-        </span>
-      </div>
     </div>
   );
 }

@@ -27,6 +27,7 @@
     "@mux/mux-player-react": "^3.13.0",
     "@mux/mux-video-react": "^0.31.0",
     "@mux/upchunk": "^3.5.0",
+    "@vercel/blob": "^2.4.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",

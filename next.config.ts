@@ -19,9 +19,14 @@ const nextConfig: NextConfig = {
     ];
   },
   images: {
-    // Mux image service hosts every poster + thumbnail. Anything not
-    // listed here falls through to raw <img>.
-    remotePatterns: [{ protocol: "https", hostname: "image.mux.com" }],
+    // Mux image service hosts every video thumbnail; Vercel Blob hosts admin-
+    // uploaded show artwork (poster + hero). Anything not listed here falls
+    // through to raw <img>. The Blob host is `<storeId>.public.blob.vercel-
+    // storage.com`, so a single-level wildcard covers any store.
+    remotePatterns: [
+      { protocol: "https", hostname: "image.mux.com" },
+      { protocol: "https", hostname: "*.public.blob.vercel-storage.com" },
+    ],
   },
   experimental: {
     // Tree-shake barrel imports so importing one symbol from these
