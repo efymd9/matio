@@ -2,11 +2,13 @@ import "server-only";
 import {
   and,
   type AnyColumn,
+  asc,
   count,
   countDistinct,
   desc,
   eq,
   gte,
+  inArray,
   isNull,
   lte,
   sql,
@@ -830,4 +832,204 @@ export async function loadDashboard(f: AnalyticsFilters) {
     muxClamped: muxClampedNote,
     statusScope: statusSet,
   };
+}
+
+// ---- episode-gated funnel (per gated show) ---------------------------------
+
+export type EpisodeFunnel = {
+  showSlug: string;
+  showTitle: string;
+  freeCount: number;
+  memberCount: number;
+  // Stages (counts of kind='episodes' sessions started in range, except
+  // member stages which count linked users):
+  started: number;        // 1. sessions that started a free episode
+  wallHit: number;        // 2. signup_wall_at set OR furthest >= freeCount
+  signedUp: number;       // 3. stage-2 sessions linked to a user
+  memberWatchers: number; // 4. linked users with progress on any member ep
+  paywallHit: number;     // 5. linked users who completed the last member ep
+  subscribed: number;     // 6. sessions marked converted
+  // Free-tier depth distribution: sessions whose furthest position reached
+  // at least N, for N = 1..freeCount (cumulative, monotonically falling).
+  depth: { label: string; n: number }[];
+  // Per-member-episode reach among linked funnel users.
+  memberEpisodes: { label: string; viewers: number; completed: number }[];
+};
+
+// One funnel per gated show (free_episodes + member_episodes > 0), scoped to
+// the dashboard's date range via trial_sessions.started_at and respecting the
+// show filter. Computed from our own tables — no consent blind spot (PostHog
+// only sees consenting browsers; these rows exist for every viewer).
+export async function loadEpisodeFunnels(
+  f: AnalyticsFilters,
+): Promise<EpisodeFunnel[]> {
+  const gatedShows = await db
+    .select({
+      id: shows.id,
+      slug: shows.slug,
+      title: shows.title,
+      freeEpisodes: shows.freeEpisodes,
+      memberEpisodes: shows.memberEpisodes,
+    })
+    .from(shows)
+    .where(
+      and(
+        isNull(shows.deletedAt),
+        sql`${shows.freeEpisodes} + ${shows.memberEpisodes} > 0`,
+      ),
+    )
+    .orderBy(shows.title);
+
+  const scoped =
+    f.show === "all"
+      ? gatedShows
+      : gatedShows.filter((s) => s.slug === f.show);
+  if (scoped.length === 0) return [];
+
+  const out: EpisodeFunnel[] = [];
+  // Sequential per show is fine — gated shows are a handful at most, and
+  // each iteration already parallelizes its own queries.
+  for (const s of scoped) {
+    const freeCount = Math.max(0, s.freeEpisodes);
+    const memberCount = Math.max(0, s.memberEpisodes);
+
+    const sessionConds: SQL[] = [
+      eq(trialSessions.showId, s.id),
+      eq(trialSessions.kind, "episodes"),
+      gte(trialSessions.startedAt, f.from),
+      lte(trialSessions.startedAt, f.to),
+    ];
+    // Users this funnel produced — sessions in range that got linked on
+    // signup. Reused as a subquery by every member-tier stage.
+    const linkedUsers = db
+      .select({ userId: trialSessions.userId })
+      .from(trialSessions)
+      .where(and(...sessionConds, sql`${trialSessions.userId} IS NOT NULL`));
+
+    // Ready ordering with display fields — positions must match
+    // lib/episode-access.ts (season number, then episode number).
+    const orderedEps = await db
+      .select({
+        id: episodes.id,
+        title: episodes.title,
+        number: episodes.number,
+        seasonNumber: seasons.number,
+      })
+      .from(episodes)
+      .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+      .where(and(eq(seasons.showId, s.id), eq(episodes.status, "ready")))
+      .orderBy(asc(seasons.number), asc(episodes.number));
+    const memberEps = orderedEps.slice(freeCount, freeCount + memberCount);
+    const memberEpIds = memberEps.map((e) => e.id);
+    const lastMemberEp = memberEps.length > 0 ? memberEps[memberEps.length - 1] : null;
+
+    const [aggRows, depthRows, perEpisodeRows, memberWatchersRows, paywallRows] =
+      await Promise.all([
+        db
+          .select({
+            started: count(),
+            wallHit: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.signupWallAt} IS NOT NULL OR ${trialSessions.furthestEpisodeNumber} >= ${freeCount})::int`,
+            signedUp: sql<number>`COUNT(*) FILTER (WHERE (${trialSessions.signupWallAt} IS NOT NULL OR ${trialSessions.furthestEpisodeNumber} >= ${freeCount}) AND ${trialSessions.userId} IS NOT NULL)::int`,
+            subscribed: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.converted})::int`,
+          })
+          .from(trialSessions)
+          .where(and(...sessionConds)),
+        db
+          .select({
+            furthest: trialSessions.furthestEpisodeNumber,
+            n: count(),
+          })
+          .from(trialSessions)
+          .where(and(...sessionConds))
+          .groupBy(trialSessions.furthestEpisodeNumber),
+        memberEpIds.length > 0
+          ? db
+              .select({
+                episodeId: watchProgress.episodeId,
+                viewers: sql<number>`COUNT(DISTINCT ${watchProgress.userId})::int`,
+                completed: sql<number>`COUNT(*) FILTER (WHERE ${watchProgress.completed})::int`,
+              })
+              .from(watchProgress)
+              .where(
+                and(
+                  inArray(watchProgress.episodeId, memberEpIds),
+                  inArray(watchProgress.userId, linkedUsers),
+                ),
+              )
+              .groupBy(watchProgress.episodeId)
+          : Promise.resolve(
+              [] as { episodeId: string; viewers: number; completed: number }[],
+            ),
+        memberEpIds.length > 0
+          ? db
+              .select({
+                n: sql<number>`COUNT(DISTINCT ${watchProgress.userId})::int`,
+              })
+              .from(watchProgress)
+              .where(
+                and(
+                  inArray(watchProgress.episodeId, memberEpIds),
+                  inArray(watchProgress.userId, linkedUsers),
+                ),
+              )
+          : Promise.resolve([{ n: 0 }] as { n: number }[]),
+        lastMemberEp
+          ? db
+              .select({
+                n: sql<number>`COUNT(DISTINCT ${watchProgress.userId})::int`,
+              })
+              .from(watchProgress)
+              .where(
+                and(
+                  eq(watchProgress.episodeId, lastMemberEp.id),
+                  eq(watchProgress.completed, true),
+                  inArray(watchProgress.userId, linkedUsers),
+                ),
+              )
+          : Promise.resolve([{ n: 0 }] as { n: number }[]),
+      ]);
+
+    // Cumulative depth: sessions whose furthest position >= N.
+    const depthCounts = depthRows.map((r) => ({
+      furthest: Number(r.furthest),
+      n: Number(r.n),
+    }));
+    const depth = Array.from({ length: freeCount }, (_, i) => {
+      const pos = i + 1;
+      const reached = depthCounts.reduce(
+        (acc, r) => (r.furthest >= pos ? acc + r.n : acc),
+        0,
+      );
+      return { label: `E${pos}`, n: reached };
+    });
+
+    const perEpisode = new Map(
+      perEpisodeRows.map((r) => [r.episodeId, r]),
+    );
+    const memberEpisodes = memberEps.map((e) => {
+      const r = perEpisode.get(e.id);
+      return {
+        label: `S${e.seasonNumber}·E${e.number} ${e.title}`,
+        viewers: r ? Number(r.viewers) : 0,
+        completed: r ? Number(r.completed) : 0,
+      };
+    });
+
+    const agg = aggRows[0];
+    out.push({
+      showSlug: s.slug,
+      showTitle: s.title,
+      freeCount,
+      memberCount,
+      started: Number(agg.started),
+      wallHit: Number(agg.wallHit),
+      signedUp: Number(agg.signedUp),
+      memberWatchers: Number(memberWatchersRows[0]?.n ?? 0),
+      paywallHit: Number(paywallRows[0]?.n ?? 0),
+      subscribed: Number(agg.subscribed),
+      depth,
+      memberEpisodes,
+    });
+  }
+  return out;
 }

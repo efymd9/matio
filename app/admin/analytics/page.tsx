@@ -1,6 +1,7 @@
 import {
   campaignLabel,
   loadDashboard,
+  loadEpisodeFunnels,
   parseFilters,
 } from "@/lib/admin-analytics";
 import { AnalyticsFilters } from "@/components/admin/analytics-filters";
@@ -35,7 +36,10 @@ export default async function AnalyticsPage({
 }) {
   const sp = await searchParams;
   const filters = parseFilters(sp, new Date());
-  const d = await loadDashboard(filters);
+  const [d, episodeFunnels] = await Promise.all([
+    loadDashboard(filters),
+    loadEpisodeFunnels(filters),
+  ]);
   const k = d.kpis;
 
   const rangeLabel = RANGE_LABEL[filters.preset] ?? "selected range";
@@ -170,6 +174,84 @@ export default async function AnalyticsPage({
           />
         </Section>
       </div>
+
+      {/* Episode-gated funnels (one card per gated show) */}
+      {episodeFunnels.map((ef) => (
+        <Section
+          key={ef.showSlug}
+          title={`Episode funnel · ${ef.showTitle}`}
+          hint={`${ef.freeCount} free + ${ef.memberCount} member episodes · ${rangeLabel}`}
+        >
+          <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+            <div>
+              <FunnelChart
+                steps={[
+                  {
+                    label: "Started watching free",
+                    value: ef.started,
+                    hint: "Anonymous sessions that played a free episode in range",
+                  },
+                  {
+                    label: "Hit sign-up wall",
+                    value: ef.wallHit,
+                    hint: "Wall shown, or reached the end of the free tier",
+                  },
+                  {
+                    label: "Signed up",
+                    value: ef.signedUp,
+                    hint: "Wall-stage sessions linked to a user account",
+                  },
+                  {
+                    label: "Watched member episodes",
+                    value: ef.memberWatchers,
+                    hint: "Linked users with progress on any member episode",
+                  },
+                  {
+                    label: "Hit subscription paywall",
+                    value: ef.paywallHit,
+                    hint: "Linked users who completed the last member episode",
+                  },
+                  {
+                    label: "Subscribed",
+                    value: ef.subscribed,
+                    hint: "Funnel sessions marked converted by the Stripe webhook",
+                  },
+                ]}
+              />
+              {ef.memberEpisodes.length > 0 ? (
+                <div className="mt-5">
+                  <p className="mb-2 text-[10px] uppercase tracking-[0.08em] text-white/45">
+                    Member episodes · linked users
+                  </p>
+                  <BarList
+                    items={ef.memberEpisodes.map((m) => ({
+                      label: m.label,
+                      value: m.viewers,
+                      sub: `${m.completed} completed`,
+                    }))}
+                    format={(n) =>
+                      `${n.toLocaleString()} viewer${n === 1 ? "" : "s"}`
+                    }
+                    emptyLabel="No member-episode views yet."
+                  />
+                </div>
+              ) : null}
+            </div>
+            <div>
+              <p className="mb-2 text-[10px] uppercase tracking-[0.08em] text-white/45">
+                Free-tier depth · sessions reaching episode N
+              </p>
+              <Histogram bars={ef.depth} />
+              <p className="mt-3 text-[10px] leading-relaxed text-white/35">
+                Depth is the furthest episode position a session started
+                (write-monotonic), not completion. Sign-up linking uses the
+                trial cookie with an IP-bucket fallback, so &ldquo;signed
+                up&rdquo; can slightly over-attribute on shared networks.
+              </p>
+            </div>
+          </div>
+        </Section>
+      ))}
 
       {/* Time series */}
       <Section
