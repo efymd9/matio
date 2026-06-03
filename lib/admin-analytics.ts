@@ -9,6 +9,7 @@ import {
   eq,
   gte,
   inArray,
+  isNotNull,
   isNull,
   lte,
   sql,
@@ -904,7 +905,7 @@ export async function loadEpisodeFunnels(
     const linkedUsers = db
       .select({ userId: trialSessions.userId })
       .from(trialSessions)
-      .where(and(...sessionConds, sql`${trialSessions.userId} IS NOT NULL`));
+      .where(and(...sessionConds, isNotNull(trialSessions.userId)));
 
     // Ready ordering with display fields — positions must match
     // lib/episode-access.ts (season number, then episode number).
@@ -921,7 +922,7 @@ export async function loadEpisodeFunnels(
       .orderBy(asc(seasons.number), asc(episodes.number));
     const memberEps = orderedEps.slice(freeCount, freeCount + memberCount);
     const memberEpIds = memberEps.map((e) => e.id);
-    const lastMemberEp = memberEps.length > 0 ? memberEps[memberEps.length - 1] : null;
+    const lastMemberEp = memberEps.at(-1) ?? null;
 
     const [aggRows, depthRows, perEpisodeRows, memberWatchersRows, paywallRows] =
       await Promise.all([
