@@ -26,6 +26,7 @@ export function Paywall({
   episodeLabel,
   showTitle,
   variant = "trial",
+  episodeId,
 }: {
   showSlug: string;
   resumeSeconds?: number;
@@ -35,6 +36,11 @@ export function Paywall({
   // unchanged). "tier" — episode-gated show, member tier exhausted or a
   // subscriber-only episode was requested.
   variant?: "trial" | "tier";
+  // Episode to return to after checkout — carried through /subscribe into
+  // the Stripe success_url so the new subscriber resumes where the wall
+  // interrupted them. Without it, ?resume= seeks episode 1 of the show to
+  // another episode's playhead.
+  episodeId?: string;
 }) {
   const t = useT();
 
@@ -48,6 +54,7 @@ export function Paywall({
   }, [showSlug, variant]);
 
   const params = new URLSearchParams({ show: showSlug });
+  if (episodeId) params.set("ep", episodeId);
   if (resumeSeconds && resumeSeconds > 0) {
     params.set("resume", String(resumeSeconds));
   }

@@ -676,6 +676,7 @@ function EpisodePlayback({
     return (
       <Paywall
         showSlug={showSlug}
+        episodeId={current.id}
         resumeSeconds={lastSaved || undefined}
         showTitle={showTitle}
         episodeLabel={episodeLabel}

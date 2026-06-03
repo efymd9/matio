@@ -4,7 +4,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { shows, subscriptions, users } from "@/db/schema";
+import { episodes, seasons, shows, subscriptions, users } from "@/db/schema";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import {
   readAttributionCookies,
@@ -93,6 +93,7 @@ export async function startCheckout(formData: FormData) {
   // can drop them back into playback after Stripe Checkout.
   const showSlugRaw = formData.get("show");
   const resume = formData.get("resume");
+  const epRaw = formData.get("ep");
 
   // Validate the slug against an actual published show before letting it
   // shape any redirect URL. Without this, formData.show is attacker-
@@ -116,18 +117,48 @@ export async function startCheckout(formData: FormData) {
     if (match) showSlug = match.slug;
   }
 
+  // Validate the return episode the same way as the slug — it's attacker-
+  // controlled input that flows into the Stripe success/cancel URLs. Only a
+  // ready episode belonging to the validated show passes; anything else is
+  // silently dropped (the success URL then falls back to the show's start).
+  let episodeId: string | null = null;
+  if (
+    showSlug &&
+    typeof epRaw === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      epRaw,
+    )
+  ) {
+    const [epMatch] = await db
+      .select({ id: episodes.id })
+      .from(episodes)
+      .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+      .innerJoin(shows, eq(seasons.showId, shows.id))
+      .where(
+        and(
+          eq(episodes.id, epRaw),
+          eq(episodes.status, "ready"),
+          eq(shows.slug, showSlug),
+        ),
+      )
+      .limit(1);
+    if (epMatch) episodeId = epMatch.id;
+  }
+
   // No /account page anymore — Stripe Checkout success lands back on the
   // catalog. If the user came from a watch flow, the override below sends
   // them straight back into playback.
   let successUrl = `${origin}/?welcome=1`;
   if (showSlug) {
     const watchParams = new URLSearchParams();
+    if (episodeId) watchParams.set("ep", episodeId);
     if (typeof resume === "string" && resume) watchParams.set("resume", resume);
     const qs = watchParams.toString();
     successUrl = `${origin}/watch/${encodeURIComponent(showSlug)}${qs ? `?${qs}` : ""}`;
   }
   const cancelParams = new URLSearchParams();
   if (showSlug) cancelParams.set("show", showSlug);
+  if (episodeId) cancelParams.set("ep", episodeId);
   if (typeof resume === "string" && resume) cancelParams.set("resume", resume);
   const cancelQs = cancelParams.toString();
   const cancelUrl = `${origin}/subscribe${cancelQs ? `?${cancelQs}` : ""}`;

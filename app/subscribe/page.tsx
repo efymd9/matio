@@ -18,7 +18,7 @@ import { SubmitButton } from "./submit-button";
 export default async function SubscribePage({
   searchParams,
 }: {
-  searchParams: Promise<{ show?: string; resume?: string }>;
+  searchParams: Promise<{ show?: string; resume?: string; ep?: string }>;
 }) {
   // Sync the user mirror before anything that touches FKs against users.id.
   // On a fresh signup the Clerk user.created webhook can lag behind the
@@ -56,7 +56,7 @@ export default async function SubscribePage({
     return <AlreadySubscribed sub={existing} t={t} />;
   }
 
-  const { show, resume } = await searchParams;
+  const { show, resume, ep } = await searchParams;
 
   // First-touch UTM for signup_completed. The event fires on this UTM-less URL
   // (Clerk redirected here post-signup), so posthog-js can't auto-attach the
@@ -103,6 +103,7 @@ export default async function SubscribePage({
         <form action={startCheckout} className="mt-10 space-y-6">
           {show && <input type="hidden" name="show" value={show} />}
           {resume && <input type="hidden" name="resume" value={resume} />}
+          {ep && <input type="hidden" name="ep" value={ep} />}
 
           <MembershipCard
             title={t.subscribe.monthly}
