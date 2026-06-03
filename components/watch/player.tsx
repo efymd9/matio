@@ -57,6 +57,10 @@ const SeriesEndOverlay = dynamic(
   () => import("./series-end-overlay").then((m) => m.SeriesEndOverlay),
   { ssr: false },
 );
+const SignupWall = dynamic(
+  () => import("./signup-wall").then((m) => m.SignupWall),
+  { ssr: false },
+);
 
 export type PlayerEpisode = {
   id: string;
@@ -72,9 +76,26 @@ export type PlayerEpisode = {
   // provisioned yet or when minting fails — overlays fall back to a
   // tone-gradient placeholder.
   thumbnailUrl: string | null;
+  // Access tier on episode-gated shows; "free" everywhere on legacy shows.
+  tier: EpisodeTier;
 };
 
-type Mode = "subscriber" | "trial";
+// Tier of an episode on an episode-gated show, as computed server-side by
+// lib/episode-access.ts (which is server-only and can't be imported here —
+// this is the structural client-side mirror). Legacy shows pass "free" for
+// every episode so nothing ever renders locked.
+export type EpisodeTier = "free" | "member" | "subscriber";
+
+export type Mode = "subscriber" | "trial" | "free" | "member";
+
+// Whether `mode` may play an episode of `tier`. Subscriber and legacy-trial
+// modes never lock (trial gating is the 60s clock, not position).
+export function isEpisodeLocked(tier: EpisodeTier, mode: Mode): boolean {
+  if (mode === "subscriber" || mode === "trial") return false;
+  if (mode === "member") return tier === "subscriber";
+  return tier !== "free"; // mode === "free"
+}
+
 type OverlayKind = "none" | "episodes" | "upnext" | "seriesEnd";
 
 // End-states for the player. Distinct from a transient error: once we
@@ -94,11 +115,22 @@ const SUPPORTS_ASPECT_RATIO =
   typeof CSS.supports === "function" &&
   CSS.supports("aspect-ratio", "16 / 9");
 
-type EndState = "paywall" | "rateLimited" | "unavailable";
+type EndState = "paywall" | "signupWall" | "rateLimited" | "unavailable";
 
-function classifyTokenStatus(status: number): EndState {
-  if (status === 403) return "paywall";
-  if (status === 429) return "rateLimited";
+// 403s on gated shows carry a reason ("signup_required" /
+// "subscribe_required"); legacy trial 403s have none and keep mapping to
+// the trial paywall. Body parse failures fall back the same way.
+async function classifyTokenFailure(r: Response): Promise<EndState> {
+  if (r.status === 429) return "rateLimited";
+  if (r.status === 403) {
+    try {
+      const body = (await r.json()) as { reason?: unknown };
+      if (body.reason === "signup_required") return "signupWall";
+    } catch {
+      // fall through
+    }
+    return "paywall";
+  }
   return "unavailable";
 }
 
@@ -263,7 +295,9 @@ function EpisodePlayback({
   // skip the gate — their session has no trial clock to protect. Before this
   // the clock started on player mount (≈ page load), so a user who lingered
   // burned the whole preview before ever pressing play.
-  const [started, setStarted] = useState(mode === "subscriber");
+  const [started, setStarted] = useState(
+    mode === "subscriber" || mode === "member",
+  );
   // Bumped by retry() — included in the token-fetch effect's deps so the
   // fetch reruns without unmounting the inner playback component (which
   // would also tear down the MediaController and any captured renditions).
@@ -304,6 +338,20 @@ function EpisodePlayback({
 
   const episodeLabel = `S${current.seasonNumber}·E${current.number}`;
 
+  // 1-based position of the current episode in the playable ordering —
+  // matches the server's position semantics for funnel events.
+  const currentPosition = episodes.findIndex((e) => e.id === current.id) + 1;
+  // Whether the current episode is above this viewer's tier. All wall
+  // triggers (deep link, episodes-overlay tap, auto-advance into a locked
+  // episode) funnel through here: swapping to a locked episode remounts
+  // this component, which renders the wall full-surface instead of
+  // fetching a token.
+  const currentLocked = isEpisodeLocked(current.tier, mode);
+  const firstMemberEpisode = episodes.find((e) => e.tier === "member") ?? null;
+  const memberCount = episodes.filter((e) => e.tier === "member").length;
+  // free/member episode-start funnel events fire once per episode mount.
+  const tierStartFiredRef = useRef(false);
+
   // Fetch playback token. Gated on `started`, so a trial user only mints a
   // token (and starts the 60s clock) once they press play — the poster
   // play-gate below sets it. Subscribers init started=true and fetch on
@@ -315,7 +363,7 @@ function EpisodePlayback({
   // cancels the in-flight fetch on episode swap so a slow response
   // can't race the new episode's fetch.
   useEffect(() => {
-    if (!started) return;
+    if (!started || currentLocked) return;
     const hasAbort = typeof AbortController !== "undefined";
     const abort = hasAbort ? new AbortController() : null;
     let cancelled = false;
@@ -326,7 +374,7 @@ function EpisodePlayback({
       .then(async (r) => {
         if (cancelled) return;
         if (!r.ok) {
-          setEndState(classifyTokenStatus(r.status));
+          setEndState(await classifyTokenFailure(r));
           return;
         }
         try {
@@ -349,6 +397,18 @@ function EpisodePlayback({
           // trial_play_started funnel event (deduped to once per show-preview
           // by the shell). The Meta Lead now fires on signup completion.
           if (data.mode === "trial") onTrialStart();
+          if (
+            (data.mode === "free" || data.mode === "member") &&
+            !tierStartFiredRef.current
+          ) {
+            tierStartFiredRef.current = true;
+            capturePostHog(
+              data.mode === "free"
+                ? "free_episode_started"
+                : "member_episode_started",
+              { show_slug: showSlug, episode_number: currentPosition },
+            );
+          }
         } catch {
           if (!cancelled) setEndState("unavailable");
         }
@@ -361,7 +421,15 @@ function EpisodePlayback({
       cancelled = true;
       abort?.abort();
     };
-  }, [current.id, fetchKey, onTrialStart, started]);
+  }, [
+    current.id,
+    fetchKey,
+    onTrialStart,
+    started,
+    currentLocked,
+    showSlug,
+    currentPosition,
+  ]);
 
   // Token lifecycle after the first successful fetch:
   //
@@ -445,7 +513,7 @@ function EpisodePlayback({
             return;
           }
           if (r.status >= 400 && r.status < 500) {
-            setEndState(classifyTokenStatus(r.status));
+            setEndState(await classifyTokenFailure(r));
             return;
           }
           // 5xx — fall through to retry.
@@ -476,7 +544,7 @@ function EpisodePlayback({
       if (t > 0 && t !== lastSavedRef.current) {
         lastSavedRef.current = t;
         setLastSaved(t);
-        if (mode === "trial") {
+        if (mode === "trial" || mode === "free") {
           void saveTrialPosition(current.id, t).catch(() => {});
         } else {
           void saveWatchProgress(current.id, t, false).catch(() => {});
@@ -579,13 +647,39 @@ function EpisodePlayback({
     }
   }, [endState, showSlug, mode]);
 
-  if (endState === "paywall") {
+  // Wall renders. Lock-based (currentLocked) covers deep links, overlay
+  // taps, and auto-advance; endState covers server 403s and natural
+  // end-of-tier transitions. Both resolve to the same two surfaces.
+  const signupWallTarget = currentLocked
+    ? current
+    : (firstMemberEpisode ?? current);
+  if (
+    endState === "signupWall" ||
+    (currentLocked && mode === "free" && current.tier === "member")
+  ) {
+    return (
+      <SignupWall
+        showSlug={showSlug}
+        showId={showId}
+        showTitle={showTitle}
+        episodeLabel={`S${signupWallTarget.seasonNumber}·E${signupWallTarget.number}`}
+        targetEpisodeId={signupWallTarget.id}
+        episodeNumber={
+          episodes.findIndex((e) => e.id === signupWallTarget.id) + 1
+        }
+        memberCount={memberCount}
+      />
+    );
+  }
+
+  if (endState === "paywall" || currentLocked) {
     return (
       <Paywall
         showSlug={showSlug}
         resumeSeconds={lastSaved || undefined}
         showTitle={showTitle}
         episodeLabel={episodeLabel}
+        variant={mode === "free" || mode === "member" ? "tier" : "trial"}
       />
     );
   }
@@ -637,7 +731,7 @@ function EpisodePlayback({
             </span>
           </span>
           <span className="text-xs font-semibold uppercase tracking-[0.3em] text-white/80">
-            {t.player.playPreview}
+            {mode === "free" ? t.player.playFreeEpisode : t.player.playPreview}
           </span>
         </button>
         <Link
@@ -732,7 +826,7 @@ function EpisodePlayback({
         // the user tapping the poster play-gate, so autoplay continues that
         // gesture (falling back to the visible play button if a browser
         // blocks unmuted autoplay). Subscribers keep manual play.
-        autoPlay={mode === "trial"}
+        autoPlay={mode === "trial" || mode === "free"}
         envKey={muxDataEnabled ? MUX_DATA_ENV_KEY : undefined}
         disableTracking={!muxDataEnabled}
         disableCookies={!muxDataEnabled}
@@ -799,14 +893,22 @@ function EpisodePlayback({
           const el = videoRef.current;
           if (el) {
             const t = Math.floor(el.duration ?? 0);
-            if (mode === "trial") {
+            if (mode === "trial" || mode === "free") {
               void saveTrialPosition(current.id, t).catch(() => {});
             } else {
               void saveWatchProgress(current.id, t, true).catch(() => {});
             }
           }
           if (next) {
-            onOverlayChange("upnext");
+            if (isEpisodeLocked(next.tier, mode)) {
+              // Auto-advance into the locked episode: the swap remounts the
+              // inner player which renders the right wall full-surface, and
+              // ?ep=<locked id> lands in the URL so the post-signup redirect
+              // resumes exactly there. No up-next countdown into a wall.
+              onSwap(next.id);
+            } else {
+              onOverlayChange("upnext");
+            }
           } else if (mode === "subscriber") {
             // Last episode of the show finished. Subscribers see the
             // "next episode in production" reminder sheet. Trial users
@@ -815,6 +917,14 @@ function EpisodePlayback({
             // freak edge case — say a 30s teaser — doesn't dump a paid
             // surface on a free preview.
             onOverlayChange("seriesEnd");
+          } else if (mode === "member") {
+            // End of the member tier and nothing beyond is published yet —
+            // this IS the subscription paywall moment for members.
+            setEndState("paywall");
+          } else if (mode === "free") {
+            // free_episodes covers every ready episode (member tier empty
+            // until more publish) — still pitch the account.
+            setEndState("signupWall");
           }
         }}
         className="h-full w-full"
@@ -1065,6 +1175,7 @@ function EpisodePlayback({
           episodes={episodes}
           currentEpisodeId={current.id}
           showSlug={showSlug}
+          mode={mode}
           onSelect={onSwap}
           onClose={() => onOverlayChange("none")}
         />

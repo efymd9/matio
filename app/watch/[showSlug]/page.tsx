@@ -13,10 +13,19 @@ import {
 } from "@/db/schema";
 import { Player, type PlayerEpisode } from "@/components/watch/player";
 import { WatchShell } from "@/components/watch/watch-shell";
+import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
+import { getOrSyncCurrentUser } from "@/lib/admin";
+import { readAttributionCookies } from "@/lib/attribution";
+import { getShowGating, tierForPosition } from "@/lib/episode-access";
 import { hasActiveSubscription } from "@/lib/subscription-access";
-import { TRIAL_COOKIE, findTrialSession, isTrialActive } from "@/lib/trial";
+import {
+  TRIAL_COOKIE,
+  findTrialSession,
+  isTrialActive,
+  linkTrialSessionsToCurrentUser,
+} from "@/lib/trial";
 
 export default async function WatchPage({
   params,
@@ -90,6 +99,13 @@ export default async function WatchPage({
     return sa - sb || a.number - b.number;
   });
 
+  // Tier gating is positional: an episode's 1-based position in `ordered`
+  // (all ready episodes, pre-playbackId-filter) drives its tier — the same
+  // ordering getOrderedReadyEpisodeIds builds in the token route, so the
+  // page's locks and the server's enforcement agree.
+  const gating = getShowGating(show);
+  const positionById = new Map(ordered.map((e, i) => [e.id, i + 1]));
+
   const playable: PlayerEpisode[] = ordered
     .filter((e) => !!e.muxPlaybackId)
     .map((e) => {
@@ -114,6 +130,9 @@ export default async function WatchPage({
         introStartSeconds: e.introStartSeconds,
         introEndSeconds: e.introEndSeconds,
         thumbnailUrl,
+        tier: gating.gated
+          ? tierForPosition(positionById.get(e.id)!, gating)
+          : ("free" as const),
       };
     });
 
@@ -149,7 +168,7 @@ export default async function WatchPage({
   // For subscribers, look up per-episode watch progress so a refresh / new
   // tab resumes where they left off without relying on URL ?resume=.
   let resumeFromProgress: number | null = null;
-  if (userId && isSubscriber) {
+  if (userId && (isSubscriber || gating.gated)) {
     const [wp] = await db
       .select({ positionSeconds: watchProgress.positionSeconds })
       .from(watchProgress)
@@ -178,6 +197,83 @@ export default async function WatchPage({
           episodes={playable}
           initialEpisodeId={initial.id}
           resumeSeconds={queryResume ?? resumeFromProgress}
+          userEmail={userEmail}
+        />
+      </WatchShell>
+    );
+  }
+
+  // Episode-gated show: positional tiers instead of the 60s clock. No
+  // expired-trial redirect here — gated sessions never expire; the walls
+  // are positional and rendered by the player.
+  if (gating.gated) {
+    if (userId) {
+      // Members (signed-in non-subscribers). Freshly signed-up users land
+      // here straight from the wall's redirect, so do what /subscribe does:
+      // sync the Clerk mirror first (the user.created webhook may lag),
+      // then link their anonymous session rows — funnel stage 4 depends on
+      // this link existing.
+      await getOrSyncCurrentUser();
+      await linkTrialSessionsToCurrentUser();
+
+      // Signup-completion events (Meta Lead/CompleteRegistration + PostHog
+      // signup_completed) historically fired on /subscribe; this flow
+      // returns users here instead. Same deduped component + same
+      // localStorage flag → no double-fires for users who saw /subscribe.
+      const { first: firstTouch } = await readAttributionCookies();
+      const signupUtm: Record<string, string> = {};
+      if (firstTouch.source) signupUtm.utm_source = firstTouch.source;
+      if (firstTouch.medium) signupUtm.utm_medium = firstTouch.medium;
+      if (firstTouch.campaign) signupUtm.utm_campaign = firstTouch.campaign;
+
+      return (
+        <WatchShell>
+          <CompleteRegistrationPixel userId={userId} utm={signupUtm} />
+          <Player
+            mode="member"
+            showId={show.id}
+            showSlug={show.slug}
+            showTitle={show.title}
+            episodes={playable}
+            initialEpisodeId={initial.id}
+            resumeSeconds={queryResume ?? resumeFromProgress}
+            userEmail={userEmail}
+          />
+        </WatchShell>
+      );
+    }
+
+    // Anonymous viewer: free tier. Resume from the session row — last
+    // episode watched (when no explicit ?ep= deep link) at its last
+    // position.
+    const freeSessionToken =
+      (await cookies()).get(TRIAL_COOKIE)?.value ?? null;
+    const freeSession = freeSessionToken
+      ? await findTrialSession(freeSessionToken, show.id)
+      : null;
+
+    let freeInitial = initial;
+    if (!epParam && freeSession?.lastEpisodeId) {
+      const last = playable.find((e) => e.id === freeSession.lastEpisodeId);
+      if (last) freeInitial = last;
+    }
+    const freeResume =
+      freeSession &&
+      freeSession.lastEpisodeId === freeInitial.id &&
+      freeSession.lastPositionSeconds > 0
+        ? freeSession.lastPositionSeconds
+        : null;
+
+    return (
+      <WatchShell>
+        <Player
+          mode="free"
+          showId={show.id}
+          showSlug={show.slug}
+          showTitle={show.title}
+          episodes={playable}
+          initialEpisodeId={freeInitial.id}
+          resumeSeconds={queryResume ?? freeResume}
           userEmail={userEmail}
         />
       </WatchShell>

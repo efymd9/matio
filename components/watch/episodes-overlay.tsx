@@ -13,7 +13,7 @@ const getServerSnapshot = () => false;
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 import { Icon } from "@/components/site/icon";
 import { useT } from "@/lib/i18n/client";
-import type { PlayerEpisode } from "./player";
+import { isEpisodeLocked, type Mode, type PlayerEpisode } from "./player";
 
 // Episode picker over the player. Rendered via portal to document.body so
 // it lives OUTSIDE the <media-controller> tree — media-chrome's controller
@@ -23,12 +23,14 @@ export function EpisodesOverlay({
   episodes,
   currentEpisodeId,
   showSlug,
+  mode,
   onSelect,
   onClose,
 }: {
   episodes: PlayerEpisode[];
   currentEpisodeId: string;
   showSlug: string;
+  mode: Mode;
   onSelect: (episodeId: string) => void;
   onClose: () => void;
 }) {
@@ -133,6 +135,7 @@ export function EpisodesOverlay({
                 <ul className="space-y-2">
                   {eps.map((ep) => {
                     const isCurrent = ep.id === currentEpisodeId;
+                    const locked = isEpisodeLocked(ep.tier, mode);
                     const minutes = ep.durationSeconds
                       ? Math.floor(ep.durationSeconds / 60)
                       : null;
@@ -180,7 +183,13 @@ export function EpisodesOverlay({
                             <div className="absolute inset-0 flex items-center justify-center">
                               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60 backdrop-blur-md">
                                 <Icon
-                                  name={isCurrent ? "pause" : "play"}
+                                  name={
+                                    locked
+                                      ? "lock"
+                                      : isCurrent
+                                        ? "pause"
+                                        : "play"
+                                  }
                                   size={12}
                                   color="#ffffff"
                                 />
@@ -200,7 +209,21 @@ export function EpisodesOverlay({
                                 {ep.number}. {ep.title}
                               </h4>
                               <span className="shrink-0 font-mono text-[11px] text-white/55">
-                                {minutes ? t.episodesOverlay.minutes(minutes) : ""}
+                                {locked ? (
+                                  <span
+                                    aria-label={t.episodesOverlay.lockedAria}
+                                    className="inline-flex items-center gap-1 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-white/70"
+                                  >
+                                    <Icon name="lock" size={10} />
+                                    {ep.tier === "member"
+                                      ? t.episodesOverlay.lockedSignup
+                                      : t.episodesOverlay.lockedSubscribe}
+                                  </span>
+                                ) : minutes ? (
+                                  t.episodesOverlay.minutes(minutes)
+                                ) : (
+                                  ""
+                                )}
                               </span>
                             </div>
                             {ep.description ? (
