@@ -48,7 +48,10 @@ export const trialSessions = pgTable(
     // row (shows with free_episodes > 0). Explicit discriminator (not derived
     // from the show's current config) so the two funnel populations stay
     // separable even if a show's gating is later turned on/off.
-    kind: text("kind").notNull().default("preview"),
+    kind: text("kind")
+      .$type<"preview" | "episodes">()
+      .notNull()
+      .default("preview"),
     // Deepest 1-based episode POSITION started on this session (ordering as
     // in lib/episode-access.ts) — powers the funnel depth distribution.
     // Always 0 for kind='preview'.
