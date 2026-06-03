@@ -149,8 +149,14 @@ export async function GET(req: NextRequest) {
           });
           setCookie = !existingToken;
         }
-      } catch {
-        // TrialRateLimitError or transient DB failure — tracking skipped.
+      } catch (err) {
+        // TrialRateLimitError or transient DB failure — tracking skipped,
+        // playback unaffected. Warn on the unexpected case so a systemic DB
+        // failure can't silently zero the funnel (rate limits are normal
+        // abuse-control noise, not failures).
+        if (!(err instanceof TrialRateLimitError)) {
+          console.warn(`[playback-token] free-tier tracking skipped: ${err}`);
+        }
       }
       const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
       logToken({ result: 200, mode: "free", showId: row.showId, episodeId });
@@ -190,8 +196,9 @@ export async function GET(req: NextRequest) {
       if (existingToken) {
         try {
           await stampSignupWall(existingToken, row.showId);
-        } catch {
+        } catch (err) {
           // analytics-only — never block the response
+          console.warn(`[playback-token] signup-wall stamp skipped: ${err}`);
         }
       }
       logToken({ result: 403, mode: "free", showId: row.showId, episodeId });
