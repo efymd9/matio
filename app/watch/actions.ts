@@ -149,7 +149,10 @@ export async function saveTrialPosition(
   if (gating.gated) {
     const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
     const position = orderedIds.indexOf(episodeId) + 1;
-    if (position === 0) return;
+    // Anonymous viewers can only legitimately play free-tier episodes (the
+    // token route 403s everything above), so refuse depth writes beyond the
+    // free tier — a forged action call must not inflate funnel depth.
+    if (position === 0 || position > gating.freeCount) return;
     await db
       .update(trialSessions)
       .set({
