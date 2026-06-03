@@ -8,6 +8,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import { episodes } from "./episodes";
 import { shows } from "./shows";
 import { users } from "./users";
 
@@ -43,6 +44,24 @@ export const trialSessions = pgTable(
     attributionLastSource: text("attribution_last_source"),
     attributionLastMedium: text("attribution_last_medium"),
     attributionLastCampaign: text("attribution_last_campaign"),
+    // 'preview' = legacy 60s-trial row; 'episodes' = episode-gated free-tier
+    // row (shows with free_episodes > 0). Explicit discriminator (not derived
+    // from the show's current config) so the two funnel populations stay
+    // separable even if a show's gating is later turned on/off.
+    kind: text("kind").notNull().default("preview"),
+    // Deepest 1-based episode POSITION started on this session (ordering as
+    // in lib/episode-access.ts) — powers the funnel depth distribution.
+    // Always 0 for kind='preview'.
+    furthestEpisodeNumber: integer("furthest_episode_number")
+      .notNull()
+      .default(0),
+    // Last episode watched — anonymous resume target on gated shows.
+    lastEpisodeId: uuid("last_episode_id").references(() => episodes.id, {
+      onDelete: "set null",
+    }),
+    // First time this session hit the sign-up wall (end of free tier or a
+    // deep link to a member episode). Stage 3 of the episode funnel.
+    signupWallAt: timestamp("signup_wall_at", { withTimezone: true }),
   },
   (t) => [
     unique("trial_sessions_session_token_show_id_unique").on(
