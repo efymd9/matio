@@ -61,16 +61,21 @@ export async function findTrialSession(
 // from contexts without a request (scripts, internal callbacks) still
 // work. Persisted to attribution_{first,last}_{source,medium,campaign}
 // columns; null entries leave the columns null.
+// Optional kind='episodes' marks episode-gated free-tier rows (expiresAt becomes a startedAt sentinel).
 export async function mintTrialSession({
   sessionToken,
   showId,
   ipHash,
   attribution,
+  kind = "preview",
 }: {
   sessionToken: string;
   showId: string;
   ipHash: string;
   attribution?: { first: AttributionPayload; last: AttributionPayload };
+  // 'preview' = legacy 60s trial; 'episodes' = episode-gated free tier
+  // (expiresAt becomes a startedAt sentinel — gated shows never read it).
+  kind?: "preview" | "episodes";
 }): Promise<TrialSession> {
   const since = new Date(Date.now() - RATELIMIT_WINDOW_MS);
   const [{ value }] = await db
@@ -87,7 +92,10 @@ export async function mintTrialSession({
     throw new TrialRateLimitError();
   }
 
-  const expiresAt = new Date(Date.now() + TRIAL_DURATION_SECONDS * 1000);
+  const expiresAt =
+    kind === "episodes"
+      ? new Date()
+      : new Date(Date.now() + TRIAL_DURATION_SECONDS * 1000);
   const first = attribution?.first ?? EMPTY_ATTRIBUTION;
   const last = attribution?.last ?? EMPTY_ATTRIBUTION;
   const inserted = await db
@@ -97,6 +105,7 @@ export async function mintTrialSession({
       showId,
       expiresAt,
       ipHash,
+      kind,
       ...toFirstColumns(first),
       ...toLastColumns(last),
     })
@@ -240,5 +249,26 @@ export function isTrialActive(trial: TrialSession): boolean {
 export function trialRemainingSeconds(trial: TrialSession): number {
   const remaining = Math.floor((trial.expiresAt.getTime() - Date.now()) / 1000);
   return Math.max(0, remaining);
+}
+
+// Records the first time a session hit the sign-up wall on a gated show
+// (stage 3 of the episode funnel). Write-once via the IS NULL guard so a
+// repeat visit doesn't move the timestamp. Called from the token route
+// (anonymous deep link to a member episode) and from the wall overlay's
+// mount action (end-of-free-tier path, which never hits the token route).
+export async function stampSignupWall(
+  sessionToken: string,
+  showId: string,
+): Promise<void> {
+  await db
+    .update(trialSessions)
+    .set({ signupWallAt: new Date() })
+    .where(
+      and(
+        eq(trialSessions.sessionToken, sessionToken),
+        eq(trialSessions.showId, showId),
+        isNull(trialSessions.signupWallAt),
+      ),
+    );
 }
 
