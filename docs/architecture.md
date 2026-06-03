@@ -194,6 +194,32 @@ Plus a `muxThumbnailUrl(playbackId, policy, opts)` helper that builds `https://i
 
 Consumed by: episodes overlay, up-next card, public show-detail episode rows. All pre-computed server-side in the route handlers / page components.
 
+## Show artwork pipeline (Vercel Blob)
+
+Poster + hero images are admin-uploaded to **Vercel Blob**, mirroring the Mux video pipeline's client-direct philosophy:
+
+```
+drag-and-drop (image-upload-field.tsx)
+  → POST /api/admin/upload-image          ← only a token request, not the file
+      handleUpload → onBeforeGenerateToken:
+        getCurrentAdmin() gate (throws → 4xx)
+        pathname pinned to shows/(poster|hero)-*
+        allowedContentTypes: png/jpeg/webp/avif/gif, ≤15 MB
+        addRandomSuffix (never overwrites)
+  → browser streams file straight to Blob  ← bytes bypass our functions
+  → upload() resolves with the public URL
+  → URL written into posterImageUrl/heroImageUrl form state
+  → createShow / updateShow persists it (plain text column, as before)
+```
+
+**Why client-direct**: Vercel functions cap request bodies (~4.5 MB) — a 2560×1080 hero PNG can exceed that. Identical reasoning to the Mux/upchunk video path. The route only ever handles a small JSON token exchange.
+
+**Why the pathname is validated server-side**: `handleUpload` embeds the *client-supplied* pathname verbatim into the token it mints — the `onBeforeGenerateToken` return options can't constrain it, so the route checks `^shows/(poster|hero)-…` itself or an admin-session caller could mint tokens for arbitrary store paths.
+
+**Orphan cleanup**: `addRandomSuffix` means a replacement upload never overwrites the old object, so `updateShow` snapshots the previous URLs and best-effort `del()`s any that changed — only when the old value is on `*.public.blob.vercel-storage.com` (legacy same-origin `/shows/*.png` and external URLs are untouched), never throwing (a Blob outage can't fail the save). Uploads completed but never saved do orphan — accepted; reconcile with `list()` if it ever matters.
+
+**Rendering**: stored values are ordinary URLs. Public surfaces render them via `next/image` (hero banner, show detail) — the Blob host is allowlisted in `remotePatterns` — or via raw `<img>` (catalog `Poster`, Safari aspect-ratio quirk). Same-origin legacy paths keep working; an arbitrary external host would throw in `next/image`, which is why the admin field's copy steers to upload-or-same-origin.
+
 ## Admin mutations
 
 - **Delete confirmations**: all destructive admin actions (soft-delete show, delete season) use `components/admin/confirm-delete-button.tsx` — a client-side `<Button variant="destructive">` that calls `window.confirm(message)` before allowing the form submit. Prevents one-click data loss in the admin panel.
@@ -373,6 +399,43 @@ Two equally-prominent buttons satisfy ICO / AEPD / CNIL guidance ("reject must b
 On accept/reject the banner calls `broadcastConsentChange(marketing)`, which dispatches `CONSENT_CHANGED_EVENT` (both in `lib/cookie-consent.ts`). This is the live wire that lets already-mounted marketing channels react without a reload: the Meta Pixel grants/revokes Meta consent and injects/holds `fbevents.js`, the players flip Mux Data `disableTracking`/`disableCookies` (via the `useMarketingConsent` hook), and a withdrawal triggers `clearMarketingCookies` to drop the attribution + `_fbp`/`_fbc` cookies. CAPI gates on the same `cookie_consent.marketing` state, snapshotted into the `capi_consent` sentinel at Checkout. See [Marketing & analytics measurement](#marketing--analytics-measurement-meta-pixel--conversions-api--mux-data).
 
 Only one non-essential category (`marketing`) so no "Customize" sub-flow. If a second category lands (analytics, prefs), bump `CONSENT_VERSION` so stored consents that didn't cover the new category fall back to "show banner again".
+
+## Locale resolution (i18n)
+
+`lib/i18n/server.ts:getLocale()` resolves the UI language once per request (wrapped in React `cache()` so layout `generateMetadata` + `RootLayout` + every page's `getDict()` share one resolution instead of re-parsing per RSC segment):
+
+```
+locale cookie present + valid ──────────────► that locale  (explicit choice
+   │ absent                                    always wins; written ONLY by
+   ▼                                           the language switcher)
+Accept-Language header
+   │
+   ├─ missing/empty ───────────────────────► es (DEFAULT_LOCALE — crawlers:
+   │                                           Googlebot crawls from US IPs
+   │                                           with NO Accept-Language, so
+   │                                           the indexed language never
+   │                                           changed when detection shipped;
+   │                                           geo deliberately NOT consulted)
+   ├─ names es/en (q-values, base-subtag   ─► highest-q supported language
+   │   match: es-419→es, en-GB→en)
+   └─ exists but matches neither           ─► x-vercel-ip-country tiebreak:
+       (fr-FR, de, pt-BR, bare *)             ES_AFFINITY_COUNTRIES → es
+                                              (Hispanophone + BR/PT — a
+                                              pt-only browser reads Spanish
+                                              far better than English),
+                                              other valid country → en,
+                                              unknown/localhost → es
+```
+
+The negotiation itself lives in `lib/i18n/negotiate.ts` — pure + universal (no `next/headers`), so the same matching rules serve `getLocale()`, the `global-error.tsx` boundary (which can't reach the failed layout's `LocaleProvider` and falls back cookie → `navigator.languages` → es), and `pnpm test:locale` (`scripts/test-locale-negotiation.ts`, ~47 assertions covering RFC 9110 q-values, q=0 exclusion, wildcard, hostile multi-KB headers, and the full ladder).
+
+Detection **persists nothing** — no cookie, no storage. It re-derives per request, so a user who changes their browser language self-heals on the next visit, and there is no ePrivacy/consent question (consent gates storage/access *on the device*; reading a header the browser already sent is neither — same posture as the no-storage `x-vercel-ip-country` read, worth knowing before "fixing" it by adding a cookie). The explicit switcher choice writes the `locale` cookie (1y), which short-circuits detection entirely.
+
+Parser hardening: entry cap bounds work on hostile multi-KB headers, malformed q-values degrade to 1, and the whole negotiation is wrapped in try/catch → `DEFAULT_LOCALE` — a throw inside `getLocale()` would white-screen every page via `global-error`.
+
+Cache-safety notes: every public route is already dynamic (each calls `getDict()` → `cookies()`), so `headers()` inside `getLocale()` changes the rendering mode of nothing, and Next's framework `Cache-Control: private, no-store` on dynamic HTML overrides the `vercel.json` `public, max-age=31536000` rule for `/shows/(.*)` (verified live — that rule only bites on true static assets like the legacy same-origin poster PNGs), so per-header variation cannot be cache-poisoned. `getLocale()` must never be called inside an `unstable_cache` / `use cache` scope (`headers()` throws there); no current caller does.
+
+PostHog events carry `locale` + `locale_source: "chosen" | "detected"` as super-properties (registered in `posthog-provider.tsx` before the first `$pageview`), so funnels can segment es vs en and measure how often detection gets overridden.
 
 ## Catalog cache
 

@@ -13,7 +13,23 @@ import {
   POSTHOG_KEY,
   POSTHOG_READY_EVENT,
 } from "@/lib/posthog-events";
+import { useLocale } from "@/lib/i18n/client";
+import { LOCALE_COOKIE_NAME } from "@/lib/i18n/shared";
 import { normalizeUtm, normalizeUtmSource } from "@/lib/utm";
+
+// Super-property payload: which language the UI is in, and whether that's
+// the visitor's explicit pick (locale cookie present — written only by the
+// language switcher) or server-side Accept-Language/geo detection
+// (lib/i18n/negotiate.ts). Lets funnels segment es vs en and measure how
+// often detection gets overridden.
+function localeProps(locale: string): Record<string, unknown> {
+  const chosen =
+    typeof document !== "undefined" &&
+    document.cookie
+      .split(";")
+      .some((c) => c.trim().startsWith(`${LOCALE_COOKIE_NAME}=`));
+  return { locale, locale_source: chosen ? "chosen" : "detected" };
+}
 
 // Consent-gated PostHog loader. posthog-js is dynamically imported ONLY after
 // the visitor accepts marketing cookies (same gate proxy.ts uses for
@@ -30,10 +46,20 @@ export function PostHogProvider({
   const pathname = usePathname();
   const { isSignedIn, userId } = useAuth();
   const { user } = useUser();
+  const locale = useLocale();
 
   const [enabled, setEnabled] = useState(initialConsent?.marketing === true);
   const [ready, setReady] = useState(false);
   const consentRef = useRef(initialConsent?.marketing === true);
+  // Ref mirror so the init effect's `loaded` callback (deps: [enabled])
+  // registers the CURRENT locale before the first $pageview, not the one
+  // closed over when consent flipped. Synced in an effect (not during
+  // render — react-hooks/refs); declared before the init effect so it
+  // commits first, and `loaded` itself fires async long after.
+  const localeRef = useRef(locale);
+  useEffect(() => {
+    localeRef.current = locale;
+  }, [locale]);
   const initializedRef = useRef(false);
   const lastPathRef = useRef<string | null>(null);
   const identifiedRef = useRef<string | null>(null);
@@ -130,6 +156,9 @@ export function PostHogProvider({
               return;
             }
             lastPathRef.current = window.location.pathname;
+            // Attach the language super-props before the first event so even
+            // the initial $pageview is segmentable by locale.
+            ph.register(localeProps(localeRef.current));
             ph.capture("$pageview");
             setReady(true);
             window.dispatchEvent(new Event(POSTHOG_READY_EVENT));
@@ -143,6 +172,14 @@ export function PostHogProvider({
         initializedRef.current = false;
       });
   }, [enabled]);
+
+  // Keep the language super-props current when the user flips the switcher
+  // (the optimistic LocaleProvider re-renders us with the new locale, and the
+  // cookie it just wrote flips locale_source to "chosen").
+  useEffect(() => {
+    if (!enabled || !ready || !consentRef.current) return;
+    window.posthog?.register(localeProps(locale));
+  }, [enabled, ready, locale]);
 
   // Fire $pageview on client-side route changes. The loaded callback fires the
   // first one and records its path; we only fire for genuinely new paths after.
@@ -166,6 +203,11 @@ export function PostHogProvider({
     } else if (isSignedIn === false && identifiedRef.current) {
       identifiedRef.current = null;
       window.posthog?.reset();
+      // reset() clears SUPER PROPERTIES too — re-attach the language props
+      // (ref keeps `locale` out of this effect's deps; its sync effect is
+      // declared earlier, so it's current by the time we run) or every
+      // post-logout anonymous event loses its locale segmentation.
+      window.posthog?.register(localeProps(localeRef.current));
     }
   }, [enabled, ready, isSignedIn, userId, email]);
 

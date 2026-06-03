@@ -13,7 +13,7 @@ Netflix-inspired UX. 60-second anonymous trial per (browser session, show).
 - Tailwind v4 + shadcn (built on Base UI, not Radix)
 - Resend (email — not yet wired)
 - Meta Pixel + Conversions API (advertising measurement — consent-gated, no SDK)
-- Vercel (hosting)
+- Vercel (hosting) + Vercel Blob (admin-uploaded show artwork — poster/hero)
 
 ## Deeper docs
 
@@ -22,7 +22,7 @@ Always check these before changing integrations or guessing API shapes:
 - [docs/architecture.md](./docs/architecture.md) — system diagram, data model, trial & playback pipelines, route protection model, *why* each decision was made
 - [docs/services.md](./docs/services.md) — per-service setup (Clerk / Stripe / Mux / Neon / Vercel) and required env vars
 - [docs/operations.md](./docs/operations.md) — pnpm scripts, migrations, deploy commands, end-to-end test recipes
-- [docs/gotchas.md](./docs/gotchas.md) — **read this before touching webhooks or Mux** — version-specific traps for Next 16, Clerk 7, Stripe SDK 22 (API 2024+), Mux 14, shadcn/Base UI, Drizzle 0.45, tsx scripts
+- [docs/gotchas.md](./docs/gotchas.md) — **read this before touching webhooks or Mux** — version-specific traps for Next 16, Clerk 7, Stripe SDK 22 (API 2024+), Mux 14, Vercel Blob, shadcn/Base UI, Drizzle 0.45, tsx scripts
 
 `PROJECT.md` is the original product spec — useful for build phases and product intent. Where it conflicts with this file or `docs/`, the latter wins.
 
@@ -36,10 +36,10 @@ Always check these before changing integrations or guessing API shapes:
 - Server actions for mutations, route handlers for webhooks and token issuance.
 - shadcn components live in `components/ui/`. Custom components in `components/`.
 - Drizzle schemas in `db/schema/*.ts`, one file per logical domain.
-- Env vars: Clerk = `CLERK_*`, Stripe = `STRIPE_*`, Mux = `MUX_*`, Meta = `META_*` / `META_CAPI_ACCESS_TOKEN_{n}` / `NEXT_PUBLIC_META_PIXEL_ID` / `NEXT_PUBLIC_META_PIXEL_IDS`, PostHog = `POSTHOG_*` / `NEXT_PUBLIC_POSTHOG_*`. Never log secrets.
+- Env vars: Clerk = `CLERK_*`, Stripe = `STRIPE_*`, Mux = `MUX_*`, Meta = `META_*` / `META_CAPI_ACCESS_TOKEN_{n}` / `NEXT_PUBLIC_META_PIXEL_ID` / `NEXT_PUBLIC_META_PIXEL_IDS`, PostHog = `POSTHOG_*` / `NEXT_PUBLIC_POSTHOG_*`, Vercel Blob = `BLOB_READ_WRITE_TOKEN`. Never log secrets.
 - Webhook route handlers declare `export const runtime = "nodejs";` (raw body + DB).
 - Server-only modules use `import "server-only";` so they can't leak into a client bundle.
-- All images go through `next/image`. Mux thumbnails are routed via `images.remotePatterns: [{ hostname: 'image.mux.com' }]` in `next.config.ts`. Use `fill` + `sizes` for absolutely-positioned cover images; raw `<img>` is reserved for cases where the Safari < 16.4 `aspect-ratio` quirk requires pinning the img's own intrinsic ratio (see `components/site/poster.tsx`).
+- All images go through `next/image`. `images.remotePatterns` in `next.config.ts` allowlists `image.mux.com` (Mux thumbnails) and `*.public.blob.vercel-storage.com` (Blob-hosted poster/hero artwork) — any other host throws at render on the public pages. Use `fill` + `sizes` for absolutely-positioned cover images; raw `<img>` is reserved for cases where the Safari < 16.4 `aspect-ratio` quirk requires pinning the img's own intrinsic ratio (see `components/site/poster.tsx`) and for admin-only previews of arbitrary URLs.
 - The hero `MuxPlayer` on `/` is `next/dynamic({ ssr: false })` — keep it that way. A static import pulls ~350KB gzipped (player + media-chrome + hls) into every cold home-page visit.
 
 ## File structure
@@ -52,6 +52,9 @@ app/
     cookies/               # /cookies — bilingual cookie policy (filled; counsel review pending)
   admin/                   # /admin — admin role required (proxy-gated, DB check)
   api/
+    admin/
+      upload-image/        # /api/admin/upload-image — Vercel Blob client-upload
+                           #   token issuer (admin-gated; poster/hero artwork)
     billing-portal/        # /api/billing-portal — 302 to Stripe Customer Portal
     playback-token/        # /api/playback-token — Mux JWT issuer
     webhooks/
@@ -64,7 +67,8 @@ app/
   watch/[showSlug]/        # /watch/<slug> — public, trial-aware
 components/
   ui/                      # shadcn primitives (Base UI under the hood)
-  admin/                   # admin-specific (upload widget, status select)
+  admin/                   # admin-specific (video upload widget, image-upload-
+                           #   field for poster/hero artwork, status select)
   site/                    # header, footer, cookie-banner, language switcher,
                            #   posters, hero, logo, meta-pixel (consent-gated
                            #   loader), view-content-pixel,
@@ -108,7 +112,9 @@ lib/
   posthog-server.ts        # server-only posthog-node client (captureImmediate
                            #   for subscribe_succeeded in the Stripe webhook)
   i18n/                    # dictionaries.ts + server.ts + client.tsx (optimistic
-                           #   LocaleProvider) + actions.ts + shared.ts
+                           #   LocaleProvider) + actions.ts + shared.ts +
+                           #   negotiate.ts (pure Accept-Language/geo locale
+                           #   detection — see "Locale detection" rule)
   utm.ts                   # normalizeUtm() — shared UTM canonicalization
                            #   (trim+lowercase+strip; universal, app + PostHog)
   utils.ts                 # cn() from shadcn
@@ -120,6 +126,7 @@ scripts/
   stripe-setup.ts          # pnpm stripe:setup — single "Matio Membership" $38/mo
                            #   product+price. Archives stale prices on amount mismatch.
   check-subscription-dupes.ts # pnpm db:check-sub-dupes — pre-flight for 0008
+  test-locale-negotiation.ts # pnpm test:locale — unit tests for lib/i18n/negotiate.ts
 ```
 
 ## Key business rules
@@ -136,8 +143,10 @@ scripts/
 - **Billing portal**: `/api/billing-portal` is the single entry point — it does auth + customer lookup + Stripe billingPortal session + 302 in one server hop. The Clerk user menu's "Manage subscription" item links straight to it; no `/account` page exists.
 - **Admin role**: set via DB column `users.role`, never via Clerk metadata alone. `proxy.ts` does the lookup on every `/admin/*` request via a module-scoped 5-second cache; `requireAdmin()` does it again inside actions (cache-free) for belt-and-braces.
 - **Auth gating**: `proxy.ts` sends unauth'd `/subscribe(.*)` requests to Clerk's **sign-up** page (not sign-in) — most paywall conversions are first-time users; Clerk's sign-up page still links to sign-in for the minority case. Admin routes keep `redirectToSignIn` since admins already have accounts.
-- **Clerk UI locale**: `ClerkProvider` in `app/layout.tsx` receives the `@clerk/localizations` bundle matching the site locale (`esES` default, `enUS` when switched). Sign-in/sign-up modals, UserButton menu, and form validation copy all follow the site language; the switch propagates to Clerk on the next `router.refresh` tick after the optimistic site flip.
+- **Locale detection (preferred language)**: `getLocale()` (`lib/i18n/server.ts`, React-`cache()`d per request) resolves: `locale` cookie (explicit switcher choice — always wins) → `Accept-Language` negotiation → `x-vercel-ip-country` tiebreak → `es`. The pure matching rules live in `lib/i18n/negotiate.ts` (universal — also used by `global-error.tsx`'s `navigator.languages` fallback and `pnpm test:locale`). Detection **persists nothing** (no cookie → no consent question, self-heals when the browser language changes). Two deliberate asymmetries: (1) a *missing* `Accept-Language` (Googlebot sends none, crawling from US IPs) skips geo and returns `es`, so the indexed language never changed when detection shipped; (2) geo only breaks ties for headers that match neither es nor en — `ES_AFFINITY_COUNTRIES` (Hispanophone + BR/PT) → es, other valid countries → en. PostHog gets `locale` + `locale_source: chosen|detected` super-props for funnel segmentation. Never call `getLocale()` inside `unstable_cache`/`use cache` (`headers()` throws there). See [architecture → Locale resolution](./docs/architecture.md#locale-resolution-i18n).
+- **Clerk UI locale**: `ClerkProvider` in `app/layout.tsx` receives the `@clerk/localizations` bundle matching the site locale (`esES` or `enUS` per the resolved locale — detected or switched). Sign-in/sign-up modals, UserButton menu, and form validation copy all follow the site language; the switch propagates to Clerk on the next `router.refresh` tick after the optimistic site flip.
 - **Mux re-upload safety**: `createMuxUpload` only creates the upload URL — it does NOT clear the episode's playback fields. The clearing happens in `markEpisodeReprocessing`, which the upload widget calls from upchunk's `success` event. A cancelled mid-upload no longer permanently breaks the episode (Mux's webhook refuses to overwrite a different existing `asset_id`).
+- **Show artwork (poster/hero)**: drag-and-drop in the show form uploads **client-direct to Vercel Blob** — `components/admin/image-upload-field.tsx` calls `upload()` from `@vercel/blob/client`, which gets a scoped token from `/api/admin/upload-image` (`handleUpload`; admin-gated via `getCurrentAdmin()`, image content-types only, ≤15 MB, pathname pinned to `shows/(poster|hero)-*`, `addRandomSuffix` so nothing is ever overwritten). The file bytes never touch our functions (same philosophy as the Mux/upchunk video path — sidesteps the ~4.5 MB body limit). The returned URL lands in the existing `posterImageUrl`/`heroImageUrl` form fields, so `createShow`/`updateShow` persist it unchanged; `updateShow` best-effort `del()`s the previous Blob object when artwork is replaced/cleared (scoped to our Blob host — legacy same-origin `/shows/*.png` values are left alone and still work). The URL input remains as a fallback for same-origin paths; arbitrary external hosts will throw in `next/image` on the public pages (not in the `remotePatterns` allowlist).
 - Playback always goes through `/api/playback-token` → signed Mux JWT. Subscriber TTL: 1 hour (auto-refreshed). Trial TTL: `min(remaining, TRIAL_DURATION_SECONDS)`.
 - **Campaign attribution**: `proxy.ts` reads `?utm_source / utm_medium / utm_campaign` on every non-admin request and writes two cookies — `attribution_first` (90d, write-if-absent) and `attribution_last` (30d, overwrite). Helpers in `lib/attribution.ts`. **Both writes are gated on `hasMarketingConsent(cookie_consent)`** — without consent the UTM params still flow through the request but aren't persisted to cookies, so we never drop tracking on EU visitors before they've accepted the banner. The cookies are snapshotted at each funnel milestone: `trial_sessions.attribution_*` (six cols) on first play via `mintTrialSession`, `users.attribution_*` on `/subscribe` render via `applyUserAttribution`, and `subscriptions.attribution_*` at Stripe Checkout creation via `subscription_data.metadata` → webhook `mirrorSubscription`. Subscription attribution is **never overwritten on conflict** (renewals would otherwise erase the original conversion campaign months later, when no UTM cookies are present). `clean()` runs every UTM value through `normalizeUtm` (`lib/utm.ts` — trim + lowercase + strip every char outside `[a-z0-9_-]`, keeping the 100-char cap) before persisting, so case drift / encoded spaces / stray junk don't fragment campaigns (numeric Meta `{{campaign.id}}` values pass through unchanged). Admin analytics renders two side-by-side per-campaign tables — first-touch is the default and the right cut for "is this awareness channel working?" since Matio's funnel is delayed-conversion; last-touch is the comparison view for reconciling with Meta/Google dashboards.
 - **Meta Pixel + Conversions API**: consent-gated advertising measurement. The browser pixel (`components/site/meta-pixel.tsx`) only injects `fbevents.js` after `cookie_consent.marketing === true`; the banner's accept/reject broadcasts `CONSENT_CHANGED_EVENT` so it loads/halts without a reload. **Multiple browser pixels** are supported: `META_PIXEL_IDS` (`lib/meta-pixel-events.ts`) = primary `NEXT_PUBLIC_META_PIXEL_ID` + comma-separated extras from `NEXT_PUBLIC_META_PIXEL_IDS`; `meta-pixel.tsx` runs one `fbq('init',…)` + one `<noscript>` img per pixel, and every `fbq('track',…)` (no pixel arg) fires to all of them, so each call site hits every pixel. Browser events (`lib/meta-pixel-events.ts` → `fbq`): `PageView`, `ViewContent` (`/shows/[slug]`), `InitiateCheckout` (`/subscribe` submit), `Lead` + `CompleteRegistration` (signup completion — first authed `/subscribe`, fired together and deduped once-per-user on a single localStorage flag; signup is our "Lead", a stronger intent signal than the trial preview, which no longer fires a Lead). Server-side CAPI (`lib/meta-capi.ts`, plain `fetch` to graph.facebook.com — **no SDK**) fires **`Purchase`** from the Stripe webhook on the *transition into* an access-granting status only (guards renewal double-counts), `event_id=sub.id`, with SHA-256 email/external_id + the `_fbp`/`_fbc`/IP/UA captured at checkout. Those match params ride through Stripe `subscription_data.metadata` (`capi_*` keys + a `capi_consent` sentinel) exactly like UTM attribution — set in `startCheckout`, read back in `mirrorSubscription`, written on INSERT only. `_fbc` is also derived from `?fbclid` in `proxy.ts` under the same consent gate. CAPI is best-effort (never throws, 3s-bounded) so a Meta outage can't roll back the webhook idempotency claim. `sendCapiEvents` **fans out to every pixel that has its own token**, in parallel: primary (`NEXT_PUBLIC_META_PIXEL_ID` + `META_CAPI_ACCESS_TOKEN`) plus each extra in `NEXT_PUBLIC_META_PIXEL_IDS` paired with `META_CAPI_ACCESS_TOKEN_{n}` (2-based, by position) — same never-throws/3s-bounded contract, webhook unchanged. Extra pixels **without** a token stay browser-only. Env: `NEXT_PUBLIC_META_PIXEL_ID` + `NEXT_PUBLIC_META_PIXEL_IDS` (public), `META_CAPI_ACCESS_TOKEN` + `META_CAPI_ACCESS_TOKEN_{n}` (secret), optional `META_CAPI_TEST_EVENT_CODE` / `META_GRAPH_API_VERSION`. No DB migration — match params are carried in Stripe metadata, not new columns.
@@ -172,4 +181,6 @@ scripts/
 - **Stripe is in LIVE mode** (`sk_live_…`) as of 2026-05-27. Single product (`prod_UatJzLBiTYS8pS` "Matio Membership"), single price (`price_1TbhWlCGXbzphNyzoAGW3wXM` — $38/mo USD, `tax_behavior=exclusive`). Webhook endpoint `we_1Tbdh2CGXbzphNyzsw1zWSZf` at `https://matio.tv/api/webhooks/stripe` (apex, not www — Stripe doesn't follow redirects). Stripe Tax `status=active`, head office GB, but **collects $0 until a tax registration is added** (none yet) — checkout already collects the billing address so tax will switch on automatically once registered. ToS + Privacy URLs set in Public Details (powers the Checkout withdrawal-waiver checkbox). Customer Portal default config has `subscription_cancel.enabled=true, mode=at_period_end`. **Full purchase verified end-to-end 2026-05-28** (checkout → 3 webhooks 200 → active row → playback-token 200 → cancel).
 - **Clerk is in production instance** with custom domain (`clerk.matio.tv`, `accounts.matio.tv`). DNS CNAMEs are all live (`accounts`, `clerk`, `clk._domainkey`, `clk2._domainkey`, `clkmail`). Webhook URL: `https://matio.tv/api/webhooks/clerk` (apex — needs verifying / updating from www in Clerk dashboard if not yet on apex).
 - **Mux**: webhook URL also should be on apex — `https://matio.tv/api/webhooks/mux`. Add referrer restriction on the signing key (`matio.tv`) in Mux dashboard for defence in depth on the hero preview JWT.
+- **Mux is on the FREE plan — hard cap of 10 assets account-wide.** Hit 10/10 on 2026-06-03: every `uploads.create` 400s (`"Free plan is limited to 10 assets, you cannot create direct uploads while exceeding this limit"`) and the admin upload widget shows the masked generic server-action error. Of the 10, four belong to soft-deleted shows + one is an orphan with no episode row — deletable in the Mux dashboard for headroom — but the real fix is upgrading the plan (add a payment method). See [gotchas → Mux](./docs/gotchas.md#mux-sdk-14).
+- **Vercel Blob**: store `matio-blob` in **Frankfurt** (co-located with fra1 functions; chosen over iad1), **Public** access (required — `next/image` fetches by bare URL), connected to the project so `BLOB_READ_WRITE_TOKEN` is set on all environments. Store host `waoyoctqyyvecbhm.public.blob.vercel-storage.com` (matched by the `*.public.blob.vercel-storage.com` remotePattern). Round-trip (put → public fetch → del) verified 2026-06-03.
 - GitHub auto-deploy is NOT wired (Vercel account ≠ GitHub repo owner). Push via `vercel --prod --yes` from CLI. `git push origin main` is for source-of-truth backup; it does not trigger a deploy.
