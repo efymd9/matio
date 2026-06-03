@@ -113,6 +113,7 @@ export const es = {
     upNextBtn: "A continuación",
     qualityAria: "Calidad de vídeo",
     playPreview: "Ver 60 s gratis",
+    playFreeEpisode: "Ver gratis",
     fullscreenAria: "Pantalla completa",
   },
   episodesOverlay: {
@@ -123,6 +124,9 @@ export const es = {
     minutes: (m: number) => `${m} min`,
     count: (n: number) =>
       n === 1 ? `${n} episodio` : `${n} episodios`,
+    lockedSignup: "Crea una cuenta",
+    lockedSubscribe: "Suscríbete",
+    lockedAria: "Episodio bloqueado",
   },
   upNextOverlay: {
     label: "A continuación",
@@ -159,6 +163,23 @@ export const es = {
     continuingToCheckout: "Yendo al pago…",
     continueSubscribe: "Continuar · Suscribirse",
     cancelAnytimeFromAccount: "Cancela cuando quieras desde tu cuenta.",
+    allFreeWatched: "Episodios gratis completados",
+    subscribeBody:
+      "Suscríbete para ver todo el catálogo y los próximos episodios.",
+  },
+  signupWall: {
+    kicker: "Continúa gratis",
+    freeComplete: "Episodios gratis vistos",
+    headlineFallback: "Tu historia",
+    body: (n: number) =>
+      n === 1
+        ? `Crea una cuenta gratis y desbloquea ${n} episodio más al instante.`
+        : `Crea una cuenta gratis y desbloquea ${n} episodios más al instante.`,
+    bodyNoCount: "Crea una cuenta gratis para seguir viendo.",
+    signUpCta: "Crear cuenta gratis",
+    alreadyMember: "¿Ya tienes cuenta?",
+    signInLink: "Inicia sesión",
+    noCardNeeded: "Sin tarjeta. Solo un email.",
   },
   subscribe: {
     membershipKicker: "Membresía",
@@ -353,6 +374,7 @@ export const en: Dict = {
     upNextBtn: "Up Next",
     qualityAria: "Video quality",
     playPreview: "Watch 60s free",
+    playFreeEpisode: "Watch free",
     fullscreenAria: "Toggle fullscreen",
   },
   episodesOverlay: {
@@ -363,6 +385,9 @@ export const en: Dict = {
     minutes: (m: number) => `${m} min`,
     count: (n: number) =>
       n === 1 ? `${n} episode` : `${n} episodes`,
+    lockedSignup: "Create account",
+    lockedSubscribe: "Subscribe",
+    lockedAria: "Locked episode",
   },
   upNextOverlay: {
     label: "Up next",
@@ -399,6 +424,23 @@ export const en: Dict = {
     continuingToCheckout: "Continuing to checkout…",
     continueSubscribe: "Continue · Subscribe",
     cancelAnytimeFromAccount: "Cancel anytime from your account.",
+    allFreeWatched: "Free episodes complete",
+    subscribeBody:
+      "Subscribe to watch the full catalog and every upcoming episode.",
+  },
+  signupWall: {
+    kicker: "Keep watching free",
+    freeComplete: "Free episodes watched",
+    headlineFallback: "Your story",
+    body: (n: number) =>
+      n === 1
+        ? `Create a free account and instantly unlock ${n} more episode.`
+        : `Create a free account and instantly unlock ${n} more episodes.`,
+    bodyNoCount: "Create a free account to keep watching.",
+    signUpCta: "Create free account",
+    alreadyMember: "Already have an account?",
+    signInLink: "Sign in",
+    noCardNeeded: "No card needed. Just an email.",
   },
   subscribe: {
     membershipKicker: "Membership",
