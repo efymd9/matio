@@ -15,6 +15,7 @@
     "db:check-sub-dupes": "tsx scripts/check-subscription-dupes.ts",
     "promote-to-admin": "tsx scripts/promote-to-admin.ts",
     "stripe:setup": "tsx scripts/stripe-setup.ts",
+    "test:locale": "tsx scripts/test-locale-negotiation.ts",
     "backfill:mux-policy": "tsx scripts/backfill-mux-policy.ts",
     "seed:fake-shows": "tsx scripts/seed-fake-shows.ts"
   },
