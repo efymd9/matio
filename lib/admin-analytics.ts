@@ -12,6 +12,7 @@ import {
   isNotNull,
   isNull,
   lte,
+  ne,
   sql,
   type SQL,
 } from "drizzle-orm";
@@ -864,21 +865,19 @@ export type EpisodeFunnel = {
 export async function loadEpisodeFunnels(
   f: AnalyticsFilters,
 ): Promise<EpisodeFunnel[]> {
-  const gatedShows = await db
-    .select({
-      id: shows.id,
-      slug: shows.slug,
-      title: shows.title,
-      freeEpisodes: shows.freeEpisodes,
-      memberEpisodes: shows.memberEpisodes,
-    })
-    .from(shows)
+  // Tier-gated shows = at least one READY episode below the subscriber
+  // tier (set-query mirror of showHasTierGating).
+  const gatedShowIds = db
+    .selectDistinct({ showId: seasons.showId })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
     .where(
-      and(
-        isNull(shows.deletedAt),
-        sql`${shows.freeEpisodes} + ${shows.memberEpisodes} > 0`,
-      ),
-    )
+      and(eq(episodes.status, "ready"), ne(episodes.access, "subscriber")),
+    );
+  const gatedShows = await db
+    .select({ id: shows.id, slug: shows.slug, title: shows.title })
+    .from(shows)
+    .where(and(isNull(shows.deletedAt), inArray(shows.id, gatedShowIds)))
     .orderBy(shows.title);
 
   const scoped =
@@ -891,9 +890,6 @@ export async function loadEpisodeFunnels(
   // Sequential per show is fine — gated shows are a handful at most, and
   // each iteration already parallelizes its own queries.
   for (const s of scoped) {
-    const freeCount = Math.max(0, s.freeEpisodes);
-    const memberCount = Math.max(0, s.memberEpisodes);
-
     const sessionConds: SQL[] = [
       eq(trialSessions.showId, s.id),
       eq(trialSessions.kind, "episodes"),
@@ -915,22 +911,44 @@ export async function loadEpisodeFunnels(
         title: episodes.title,
         number: episodes.number,
         seasonNumber: seasons.number,
+        access: episodes.access,
       })
       .from(episodes)
       .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
       .where(and(eq(seasons.showId, s.id), eq(episodes.status, "ready")))
       .orderBy(asc(seasons.number), asc(episodes.number));
-    const memberEps = orderedEps.slice(freeCount, freeCount + memberCount);
+
+    // Sets come from each episode's own access value; positions stay
+    // 1-based in the ready ordering (the funnel depth metric is
+    // positional). Free sets may be non-contiguous — the wall threshold is
+    // the LAST free episode's position: a viewer who started it has seen
+    // everything the free tier offers.
+    const freePositions = orderedEps
+      .map((e, i) => (e.access === "free" ? i + 1 : 0))
+      .filter((p) => p > 0);
+    const freeCount = freePositions.length;
+    const lastFreePos =
+      freePositions.length > 0 ? freePositions[freePositions.length - 1] : 0;
+    const memberEps = orderedEps.filter((e) => e.access === "member");
+    const memberCount = memberEps.length;
     const memberEpIds = memberEps.map((e) => e.id);
     const lastMemberEp = memberEps.at(-1) ?? null;
+
+    // Wall-hit: explicit stamp, or positional depth reaching the last free
+    // episode. With an empty free set there is no positional threshold —
+    // only the stamp counts.
+    const wallCond =
+      lastFreePos > 0
+        ? sql`(${trialSessions.signupWallAt} IS NOT NULL OR ${trialSessions.furthestEpisodeNumber} >= ${lastFreePos})`
+        : sql`${trialSessions.signupWallAt} IS NOT NULL`;
 
     const [aggRows, depthRows, perEpisodeRows, memberWatchersRows, paywallRows] =
       await Promise.all([
         db
           .select({
             started: count(),
-            wallHit: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.signupWallAt} IS NOT NULL OR ${trialSessions.furthestEpisodeNumber} >= ${freeCount})::int`,
-            signedUp: sql<number>`COUNT(*) FILTER (WHERE (${trialSessions.signupWallAt} IS NOT NULL OR ${trialSessions.furthestEpisodeNumber} >= ${freeCount}) AND ${trialSessions.userId} IS NOT NULL)::int`,
+            wallHit: sql<number>`COUNT(*) FILTER (WHERE ${wallCond})::int`,
+            signedUp: sql<number>`COUNT(*) FILTER (WHERE ${wallCond} AND ${trialSessions.userId} IS NOT NULL)::int`,
             subscribed: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.converted})::int`,
           })
           .from(trialSessions)
@@ -995,7 +1013,7 @@ export async function loadEpisodeFunnels(
       furthest: Number(r.furthest),
       n: Number(r.n),
     }));
-    const depth = Array.from({ length: freeCount }, (_, i) => {
+    const depth = Array.from({ length: lastFreePos }, (_, i) => {
       const pos = i + 1;
       const reached = depthCounts.reduce(
         (acc, r) => (r.furthest >= pos ? acc + r.n : acc),
