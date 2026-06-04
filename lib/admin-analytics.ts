@@ -858,8 +858,9 @@ export type EpisodeFunnel = {
   memberEpisodes: { label: string; viewers: number; completed: number }[];
 };
 
-// One funnel per gated show (free_episodes + member_episodes > 0), scoped to
-// the dashboard's date range via trial_sessions.started_at and respecting the
+// One funnel per tier-gated show (≥1 ready episode below the subscriber
+// tier), scoped to the dashboard's date range via trial_sessions.started_at
+// and respecting the
 // show filter. Computed from our own tables — no consent blind spot (PostHog
 // only sees consenting browsers; these rows exist for every viewer).
 export async function loadEpisodeFunnels(
