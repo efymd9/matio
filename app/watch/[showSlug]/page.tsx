@@ -18,7 +18,6 @@ import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import { readAttributionCookies } from "@/lib/attribution";
-import { getShowGating, tierForPosition } from "@/lib/episode-access";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
   TRIAL_COOKIE,
@@ -74,6 +73,7 @@ export default async function WatchPage({
       muxPlaybackId: episodes.muxPlaybackId,
       muxPlaybackPolicy: episodes.muxPlaybackPolicy,
       status: episodes.status,
+      access: episodes.access,
       introStartSeconds: episodes.introStartSeconds,
       introEndSeconds: episodes.introEndSeconds,
     })
@@ -99,12 +99,10 @@ export default async function WatchPage({
     return sa - sb || a.number - b.number;
   });
 
-  // Tier gating is positional: an episode's 1-based position in `ordered`
-  // (all ready episodes, pre-playbackId-filter) drives its tier — the same
-  // ordering getOrderedReadyEpisodeIds builds in the token route, so the
-  // page's locks and the server's enforcement agree.
-  const gating = getShowGating(show);
-  const positionById = new Map(ordered.map((e, i) => [e.id, i + 1]));
+  // Tier-gated iff any ready episode is open below the subscriber tier
+  // (mirrors showHasTierGating in lib/episode-access.ts). All-subscriber
+  // shows keep the legacy 60s-trial flow below.
+  const gated = ordered.some((e) => e.access !== "subscriber");
 
   const playable: PlayerEpisode[] = ordered
     .filter((e) => !!e.muxPlaybackId)
@@ -130,9 +128,7 @@ export default async function WatchPage({
         introStartSeconds: e.introStartSeconds,
         introEndSeconds: e.introEndSeconds,
         thumbnailUrl,
-        tier: gating.gated
-          ? tierForPosition(positionById.get(e.id)!, gating)
-          : ("free" as const),
+        tier: e.access,
       };
     });
 
@@ -168,7 +164,7 @@ export default async function WatchPage({
   // For subscribers, look up per-episode watch progress so a refresh / new
   // tab resumes where they left off without relying on URL ?resume=.
   let resumeFromProgress: number | null = null;
-  if (userId && (isSubscriber || gating.gated)) {
+  if (userId && (isSubscriber || gated)) {
     const [wp] = await db
       .select({ positionSeconds: watchProgress.positionSeconds })
       .from(watchProgress)
@@ -206,7 +202,7 @@ export default async function WatchPage({
   // Episode-gated show: positional tiers instead of the 60s clock. No
   // expired-trial redirect here — gated sessions never expire; the walls
   // are positional and rendered by the player.
-  if (gating.gated) {
+  if (gated) {
     if (userId) {
       // Members (signed-in non-subscribers). Freshly signed-up users land
       // here straight from the wall's redirect, so do what /subscribe does:
