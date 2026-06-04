@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons } from "@/db/schema";
 
@@ -53,4 +53,24 @@ export async function getOrderedReadyEpisodeIds(
     .where(and(eq(seasons.showId, showId), eq(episodes.status, "ready")))
     .orderBy(asc(seasons.number), asc(episodes.number));
   return rows.map((r) => r.id);
+}
+
+// A show is tier-gated iff at least one READY episode is open below the
+// subscriber tier. Gated shows use per-episode walls; shows where every
+// ready episode is subscriber-only keep the legacy 60-second preview.
+// One indexed probe — limit 1, not a count.
+export async function showHasTierGating(showId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: episodes.id })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .where(
+      and(
+        eq(seasons.showId, showId),
+        eq(episodes.status, "ready"),
+        ne(episodes.access, "subscriber"),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
 }
