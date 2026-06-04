@@ -20,8 +20,6 @@ export type ShowFormValues = {
   status: "draft" | "published";
   justReleased: boolean;
   popularNow: boolean;
-  freeEpisodes: string;
-  memberEpisodes: string;
 };
 
 export const EMPTY_SHOW_FORM: ShowFormValues = {
@@ -34,8 +32,6 @@ export const EMPTY_SHOW_FORM: ShowFormValues = {
   status: "draft",
   justReleased: false,
   popularNow: false,
-  freeEpisodes: "0",
-  memberEpisodes: "0",
 };
 
 // Unified create/edit form. Shared by /admin/shows/new and the details
@@ -176,45 +172,6 @@ export function ShowForm({
               />
             </div>
           </div>
-        </div>
-      </Panel>
-
-      <Panel
-        kicker="Free preview"
-        title="Episode-gated free tier"
-        hint="0 / 0 keeps the default 60-second preview. Setting Free episodes switches this show to episode gating: the first N episodes play in full for everyone, the next M need a (free) account, everything beyond needs a subscription."
-      >
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field
-            label="Free episodes"
-            htmlFor="freeEpisodes"
-            hint="First N episodes — anyone can watch, no account."
-          >
-            <Input
-              id="freeEpisodes"
-              name="freeEpisodes"
-              type="number"
-              min={0}
-              step={1}
-              inputMode="numeric"
-              defaultValue={defaultValues.freeEpisodes}
-            />
-          </Field>
-          <Field
-            label="Member episodes"
-            htmlFor="memberEpisodes"
-            hint="Next M episodes — any signed-in user, no subscription."
-          >
-            <Input
-              id="memberEpisodes"
-              name="memberEpisodes"
-              type="number"
-              min={0}
-              step={1}
-              inputMode="numeric"
-              defaultValue={defaultValues.memberEpisodes}
-            />
-          </Field>
         </div>
       </Panel>
 

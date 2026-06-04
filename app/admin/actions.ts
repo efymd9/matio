@@ -68,14 +68,6 @@ function num(formData: FormData, key: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Episode-gating counts: blank/invalid → 0; floats truncated; negatives
-// rejected to 0. Admin-only surface, so friendly coercion over erroring.
-function gatingCount(formData: FormData, key: string): number {
-  const n = num(formData, key);
-  if (n === null || n < 0) return 0;
-  return Math.floor(n);
-}
-
 function parseGenre(formData: FormData): string[] {
   const raw = str(formData, "genre");
   if (!raw) return [];
@@ -117,8 +109,6 @@ export async function createShow(formData: FormData) {
     status,
     justReleased: checkbox(formData, "justReleased"),
     popularNow: checkbox(formData, "popularNow"),
-    freeEpisodes: gatingCount(formData, "freeEpisodes"),
-    memberEpisodes: gatingCount(formData, "memberEpisodes"),
   };
 
   const [created] = await db.insert(shows).values(values).returning({ id: shows.id });
@@ -168,8 +158,6 @@ export async function updateShow(id: string, formData: FormData) {
       status,
       justReleased: checkbox(formData, "justReleased"),
       popularNow: checkbox(formData, "popularNow"),
-      freeEpisodes: gatingCount(formData, "freeEpisodes"),
-      memberEpisodes: gatingCount(formData, "memberEpisodes"),
     })
     .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
 

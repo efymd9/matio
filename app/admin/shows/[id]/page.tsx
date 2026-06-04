@@ -88,8 +88,6 @@ export default async function EditShowPage({
           status: show.status,
           justReleased: show.justReleased,
           popularNow: show.popularNow,
-          freeEpisodes: String(show.freeEpisodes),
-          memberEpisodes: String(show.memberEpisodes),
         }}
       />
 
