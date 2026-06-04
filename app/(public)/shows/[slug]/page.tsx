@@ -301,10 +301,15 @@ function EpisodeRow({
     ? Math.floor(ep.durationSeconds / 60)
     : null;
 
+  // Deep-link the specific episode. Without ?ep= every row landed on the
+  // watch page's default start (last-watched or episode 1) — the row's
+  // episode was never passed. Locked episodes still link: the player
+  // renders the matching wall (sign-up / subscribe) for them, which is
+  // the designed conversion path.
   return (
     <li>
       <Link
-        href={playable ? `/watch/${showSlug}` : "#"}
+        href={playable ? `/watch/${showSlug}?ep=${ep.id}` : "#"}
         aria-disabled={!playable}
         tabIndex={playable ? 0 : -1}
         className={`group flex items-start gap-4 rounded-lg p-3 transition-colors ${
