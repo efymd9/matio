@@ -3,42 +3,14 @@ import { and, asc, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons } from "@/db/schema";
 
-// Episode-gated free tier (microdrama model). An episode's tier comes from
-// its 1-based POSITION in the show's ready-episode ordering — ready episodes
-// ordered by (season number, episode number); the same ordering the watch
-// page builds for its `playable` list. Tiers are computed live at request
-// time in every enforcement site (token route, watch page, progress
-// actions) — never stored — so publishing/unpublishing episodes
-// self-corrects everywhere on the next request.
+// Per-episode access control. An episode's tier IS its `access` column
+// (free | member | subscriber — admin-set, default subscriber). A show is
+// tier-gated iff any ready episode sits below the subscriber tier
+// (showHasTierGating); all-subscriber shows keep the legacy 60-second
+// preview. Positions in the ready ordering (getOrderedReadyEpisodeIds)
+// remain the funnel's depth metric.
 
 export type EpisodeTier = "free" | "member" | "subscriber";
-
-export type ShowGating = {
-  gated: boolean;
-  freeCount: number;
-  memberCount: number;
-};
-
-// Negative values can't be entered through the admin form, but clamp anyway
-// so a hand-edited row can't produce a nonsense tier split.
-export function getShowGating(show: {
-  freeEpisodes: number;
-  memberEpisodes: number;
-}): ShowGating {
-  const freeCount = Math.max(0, show.freeEpisodes);
-  const memberCount = Math.max(0, show.memberEpisodes);
-  return { gated: freeCount + memberCount > 0, freeCount, memberCount };
-}
-
-export function tierForPosition(
-  position: number,
-  gating: ShowGating,
-): EpisodeTier {
-  if (!gating.gated) return "subscriber";
-  if (position <= gating.freeCount) return "free";
-  if (position <= gating.freeCount + gating.memberCount) return "member";
-  return "subscriber";
-}
 
 // Ordered ready-episode ids for a show; position = array index + 1. The
 // caller is responsible for show-level checks (published, not deleted) —
