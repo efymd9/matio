@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
-  integer,
   pgEnum,
   pgTable,
   text,
@@ -30,14 +29,6 @@ export const shows = pgTable("shows", {
   // section don't appear on / but are still reachable via /shows/[slug].
   justReleased: boolean("just_released").notNull().default(false),
   popularNow: boolean("popular_now").notNull().default(false),
-  // Episode-gated free tier (microdrama model). Positions are 1-based within
-  // the show's READY episodes ordered by (season number, episode number):
-  //   position <= free_episodes                      → playable by anyone
-  //   position <= free_episodes + member_episodes    → any signed-in user
-  //   beyond                                         → subscribers only
-  // Both 0 (the default) → the legacy 60-second preview trial applies.
-  freeEpisodes: integer("free_episodes").notNull().default(0),
-  memberEpisodes: integer("member_episodes").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
