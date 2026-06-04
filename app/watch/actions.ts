@@ -15,8 +15,7 @@ import {
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
   getOrderedReadyEpisodeIds,
-  getShowGating,
-  tierForPosition,
+  showHasTierGating,
 } from "@/lib/episode-access";
 import { TRIAL_COOKIE, stampSignupWall } from "@/lib/trial";
 
@@ -50,8 +49,7 @@ export async function saveWatchProgress(
     .select({
       id: episodes.id,
       showId: seasons.showId,
-      freeEpisodes: shows.freeEpisodes,
-      memberEpisodes: shows.memberEpisodes,
+      access: episodes.access,
     })
     .from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
@@ -68,16 +66,13 @@ export async function saveWatchProgress(
   if (!ep) return;
 
   // Ownership gate: subscribers may write progress on anything; signed-in
-  // non-subscribers only on gated shows, and only for episodes inside
-  // their tier (free + member positions). Mirrors the token route's gate
-  // so progress rows can't be written for content the user can't play.
+  // non-subscribers only on episodes open to them (free or member tier).
+  // All-subscriber (legacy 60s-trial) shows have no such episodes, so
+  // non-subscribers are rejected there exactly as before. Mirrors the token
+  // route's gate so progress rows can't be written for content the user
+  // can't play.
   if (!(await hasActiveSubscription(userId))) {
-    const gating = getShowGating(ep);
-    if (!gating.gated) return;
-    const orderedIds = await getOrderedReadyEpisodeIds(ep.showId);
-    const position = orderedIds.indexOf(episodeId) + 1;
-    if (position === 0) return;
-    if (tierForPosition(position, gating) === "subscriber") return;
+    if (ep.access === "subscriber") return;
   }
 
   await db
@@ -119,8 +114,7 @@ export async function saveTrialPosition(
   const [row] = await db
     .select({
       showId: seasons.showId,
-      freeEpisodes: shows.freeEpisodes,
-      memberEpisodes: shows.memberEpisodes,
+      access: episodes.access,
     })
     .from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
@@ -141,18 +135,19 @@ export async function saveTrialPosition(
   // dirty their own trial position, but the clamp above bounds the
   // damage, and the row is rate-limit / ip-hash gated at creation.
 
-  // Gated shows additionally track funnel depth (furthest 1-based position
-  // started) and the anonymous resume target. GREATEST() keeps the depth
-  // monotonic — re-watching episode 2 after reaching 7 must not regress
-  // the funnel. Legacy 60s previews keep the plain position write.
-  const gating = getShowGating(row);
-  if (gating.gated) {
+  // Per-episode access decides the write shape:
+  //  - free: full tracking (resume target + monotonic positional depth) —
+  //    the only tier an anonymous viewer can legitimately play on a gated
+  //    show; the position-0 guard keeps a vanished-episode race out.
+  //  - member: never legitimately playable anonymously — a forged action
+  //    call must not pollute the funnel row.
+  //  - subscriber: on legacy 60s-preview shows (no tier-gated episode) keep
+  //    the plain position write; on gated shows it's not anonymously
+  //    playable, so no write.
+  if (row.access === "free") {
     const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
     const position = orderedIds.indexOf(episodeId) + 1;
-    // Anonymous viewers can only legitimately play free-tier episodes (the
-    // token route 403s everything above), so refuse depth writes beyond the
-    // free tier — a forged action call must not inflate funnel depth.
-    if (position === 0 || position > gating.freeCount) return;
+    if (position === 0) return;
     await db
       .update(trialSessions)
       .set({
@@ -168,6 +163,8 @@ export async function saveTrialPosition(
       );
     return;
   }
+  if (row.access === "member") return;
+  if (await showHasTierGating(row.showId)) return;
 
   await db
     .update(trialSessions)
