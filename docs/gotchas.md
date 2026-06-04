@@ -667,6 +667,23 @@ updatedAt: timestamp("...").notNull().defaultNow().$onUpdate(() => new Date()),
 
 After editing `db/schema/*.ts`, run `pnpm db:generate` — it writes a migration AND a JSON snapshot under `drizzle/meta/`. Forgetting `db:generate` means subsequent `db:migrate` doesn't see your changes.
 
+### DROP COLUMN order: deploy FIRST, then migrate (the mirror of ADD)
+
+`db.select().from(table)` with no column list is NOT `SELECT *` — Drizzle compiles
+an **explicit column list from the schema baked into the build**. So a running
+deployment "references" every column in its schema even where the code never reads
+the field. Dropping a column while a build whose schema still contains it is live
+500s every full-row select on that table the instant the migration lands
+(2026-06-04: dropping `shows.free_episodes/member_episodes` before the
+schema-removed build was READY took down `/`, `/watch/*`, `/shows/*` for ~2-4
+minutes — only explicit-column queries like the token route survived).
+
+Safe orders, by migration type:
+- **ADD column (with default / nullable):** migrate first, deploy second — old
+  builds are blind to new columns.
+- **DROP column / rename:** deploy the schema-removed build first, wait READY,
+  THEN `db:migrate` the drop. Never push code + drop in the same release window.
+
 ## i18n / locale switching
 
 ### Optimistic locale state, not just context
