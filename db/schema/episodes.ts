@@ -15,6 +15,20 @@ export const episodeStatus = pgEnum("episode_status", [
   "errored",
 ]);
 
+// Who can watch this episode. Replaces the show-level positional counts
+// (free_episodes/member_episodes — dropped post-deploy by migration 0015):
+//   free       — anyone, anonymous included, full episode
+//   member     — any signed-in user (sign-up wall for anonymous)
+//   subscriber — active subscription required (the default: new uploads
+//                are paid until the admin deliberately opens them)
+// A show with ≥1 ready non-subscriber episode is "tier-gated"; a show whose
+// ready episodes are ALL subscriber-only keeps the legacy 60s preview.
+export const episodeAccess = pgEnum("episode_access", [
+  "free",
+  "member",
+  "subscriber",
+]);
+
 export const episodes = pgTable(
   "episodes",
   {
@@ -38,6 +52,7 @@ export const episodes = pgTable(
     // Tells the hero/player whether they need a Mux JWT.
     muxPlaybackPolicy: text("mux_playback_policy"),
     status: episodeStatus("status").notNull().default("processing"),
+    access: episodeAccess("access").notNull().default("subscriber"),
     releasedAt: timestamp("released_at", { withTimezone: true }),
   },
   (t) => [unique("episodes_season_id_number_unique").on(t.seasonId, t.number)],
@@ -45,3 +60,4 @@ export const episodes = pgTable(
 
 export type Episode = typeof episodes.$inferSelect;
 export type NewEpisode = typeof episodes.$inferInsert;
+export type EpisodeAccess = (typeof episodeAccess.enumValues)[number];
