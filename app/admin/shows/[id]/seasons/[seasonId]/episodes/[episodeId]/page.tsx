@@ -14,6 +14,7 @@ import {
 } from "@/components/admin/ui";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { AccessFormSelect } from "@/components/admin/access-select";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { deleteEpisode, updateEpisode } from "@/app/admin/actions";
 
@@ -56,6 +57,7 @@ export default async function EditEpisodePage({
       muxPlaybackId: episodes.muxPlaybackId,
       muxPlaybackPolicy: episodes.muxPlaybackPolicy,
       status: episodes.status,
+      access: episodes.access,
       introStartSeconds: episodes.introStartSeconds,
       introEndSeconds: episodes.introEndSeconds,
     })
@@ -189,6 +191,13 @@ export default async function EditEpisodePage({
               defaultValue={episode.description ?? ""}
               rows={4}
             />
+          </Field>
+
+          <Field
+            label="Who can watch"
+            hint="Free — anyone, no account. Members — any signed-in user. Subscribers — paid members only."
+          >
+            <AccessFormSelect name="access" defaultValue={episode.access} />
           </Field>
 
           {/* Skip-intro markers */}

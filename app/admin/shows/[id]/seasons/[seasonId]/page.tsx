@@ -13,6 +13,7 @@ import {
 } from "@/components/admin/ui";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { EpisodeAccessSelect } from "@/components/admin/access-select";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { createEpisode, deleteEpisode } from "@/app/admin/actions";
 
@@ -44,6 +45,7 @@ export default async function SeasonPage({
       title: episodes.title,
       description: episodes.description,
       status: episodes.status,
+      access: episodes.access,
       muxAssetId: episodes.muxAssetId,
       muxPlaybackId: episodes.muxPlaybackId,
       muxPlaybackPolicy: episodes.muxPlaybackPolicy,
@@ -146,6 +148,12 @@ export default async function SeasonPage({
                   </div>
 
                   <div className="relative z-10 flex shrink-0 items-center gap-2">
+                    <EpisodeAccessSelect
+                      episodeId={episode.id}
+                      seasonId={season.id}
+                      showId={show.id}
+                      value={episode.access}
+                    />
                     <Link
                       href={editHref}
                       className="inline-flex h-8 items-center rounded-md border border-white/15 px-3 text-xs font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"

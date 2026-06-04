@@ -6,9 +6,11 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import {
+  episodeAccess,
   episodes,
   seasons,
   shows,
+  type EpisodeAccess,
   type NewShow,
 } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin";
@@ -344,6 +346,14 @@ export async function updateEpisode(
   const introEndFinal =
     introStart !== null && introEnd !== null ? introEnd : null;
 
+  // Per-episode access tier — the form's AccessFormSelect always submits
+  // one of the enum values; anything else is a forged post.
+  const accessRaw = str(formData, "access");
+  if (!(episodeAccess.enumValues as readonly string[]).includes(accessRaw)) {
+    throw new Error("Invalid access tier");
+  }
+  const access = accessRaw as EpisodeAccess;
+
   // Verify (episode, season, show) chain before mutating, same as the
   // delete path. The route only renders this form for matching ids, but
   // the server can't trust that.
@@ -367,6 +377,7 @@ export async function updateEpisode(
       title,
       description: str(formData, "description") || null,
       number,
+      access,
       introStartSeconds: introStartFinal,
       introEndSeconds: introEndFinal,
     })
@@ -374,6 +385,41 @@ export async function updateEpisode(
 
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}/episodes/${id}`);
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
+}
+
+// Instant per-episode access change from the season page's row select.
+// Validated against the enum (the client passes a string), chain-verified
+// like deleteEpisode so crafted calls can't reach across shows.
+export async function updateEpisodeAccess(
+  episodeId: string,
+  seasonId: string,
+  showId: string,
+  access: EpisodeAccess,
+) {
+  await requireAdmin();
+  if (!episodeAccess.enumValues.includes(access)) {
+    throw new Error("Invalid access tier");
+  }
+  const [chain] = await db
+    .select({ id: episodes.id })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .where(
+      and(
+        eq(episodes.id, episodeId),
+        eq(episodes.seasonId, seasonId),
+        eq(seasons.showId, showId),
+      ),
+    )
+    .limit(1);
+  if (!chain) throw new Error("Episode not in this season/show");
+
+  await db.update(episodes).set({ access }).where(eq(episodes.id, episodeId));
+
+  revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
+  revalidatePath(
+    `/admin/shows/${showId}/seasons/${seasonId}/episodes/${episodeId}`,
+  );
 }
 
 export async function deleteEpisode(
