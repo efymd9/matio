@@ -7,11 +7,7 @@ import crypto from "node:crypto";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { readAttributionCookiesFromRequest } from "@/lib/attribution";
-import {
-  getOrderedReadyEpisodeIds,
-  getShowGating,
-  tierForPosition,
-} from "@/lib/episode-access";
+import { showHasTierGating } from "@/lib/episode-access";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
@@ -66,8 +62,7 @@ export async function GET(req: NextRequest) {
     .select({
       playbackId: episodes.muxPlaybackId,
       showId: seasons.showId,
-      freeEpisodes: shows.freeEpisodes,
-      memberEpisodes: shows.memberEpisodes,
+      access: episodes.access,
     })
     .from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
@@ -107,109 +102,104 @@ export async function GET(req: NextRequest) {
     }, { headers: NO_CACHE });
   }
 
-  // Episode-gated show (free_episodes + member_episodes > 0): positional
-  // tier enforcement replaces the 60s trial entirely for this show. The
-  // episode's 1-based position in the ready ordering decides who may play:
-  // free → anyone, member → any signed-in user, beyond → subscribers only
-  // (subscribers already returned above). Gated 403s carry a machine-
-  // readable `reason` so the player can route to the right wall; legacy
-  // trial 403s below stay reason-less.
-  const gating = getShowGating(row);
-  if (gating.gated) {
-    const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
-    const position = orderedIds.indexOf(episodeId) + 1;
-    // position 0 = not found in the ready ordering. The gate above already
-    // verified ready+published, so this is a vanishing race (episode went
-    // un-ready between queries) — fail toward the most restrictive tier.
-    const tier =
-      position === 0 ? "subscriber" : tierForPosition(position, gating);
-
+  // Per-episode access control: the episode's own `access` value decides
+  // who may play it — free → anyone, member → any signed-in user,
+  // subscriber → active subscription (subscribers already returned above).
+  // A free or member episode implies a tier-gated show, so those paths need
+  // no show-level lookup; only subscriber-tier episodes probe the show to
+  // pick between the paywall (gated show) and the legacy 60s trial below.
+  // Gated 403s carry a machine-readable `reason`; legacy 403s stay
+  // reason-less.
+  if (row.access === "free") {
+    // Funnel tracking row (kind='episodes') — minted on the first free
+    // play for this (cookie, show), carrying the attribution snapshot and
+    // IP hash exactly like the legacy trial. STRICTLY best-effort: a rate
+    // limit (or any DB hiccup) degrades tracking, never playback — free
+    // content must not 429.
     const cookieStore = await cookies();
     const existingToken = cookieStore.get(TRIAL_COOKIE)?.value;
-
-    if (tier === "free") {
-      // Funnel tracking row (kind='episodes') — minted on the first free
-      // play for this (cookie, show), carrying the attribution snapshot and
-      // IP hash exactly like the legacy trial. STRICTLY best-effort: a rate
-      // limit (or any DB hiccup) degrades tracking, never playback — free
-      // content must not 429.
-      const sessionToken = existingToken ?? crypto.randomUUID();
-      let setCookie = false;
-      try {
-        const existing = existingToken
-          ? await findTrialSession(existingToken, row.showId)
-          : null;
-        if (!existing) {
-          await mintTrialSession({
-            sessionToken,
-            showId: row.showId,
-            ipHash: hashClientIp(getClientIp(req)),
-            attribution: readAttributionCookiesFromRequest(req),
-            kind: "episodes",
-          });
-          setCookie = !existingToken;
-        }
-      } catch (err) {
-        // TrialRateLimitError or transient DB failure — tracking skipped,
-        // playback unaffected. Warn on the unexpected case so a systemic DB
-        // failure can't silently zero the funnel (rate limits are normal
-        // abuse-control noise, not failures).
-        if (!(err instanceof TrialRateLimitError)) {
-          console.warn(`[playback-token] free-tier tracking skipped: ${err}`);
-        }
+    const sessionToken = existingToken ?? crypto.randomUUID();
+    let setCookie = false;
+    try {
+      const existing = existingToken
+        ? await findTrialSession(existingToken, row.showId)
+        : null;
+      if (!existing) {
+        await mintTrialSession({
+          sessionToken,
+          showId: row.showId,
+          ipHash: hashClientIp(getClientIp(req)),
+          attribution: readAttributionCookiesFromRequest(req),
+          kind: "episodes",
+        });
+        setCookie = !existingToken;
       }
+    } catch (err) {
+      // TrialRateLimitError or transient DB failure — tracking skipped,
+      // playback unaffected. Warn on the unexpected case so a systemic DB
+      // failure can't silently zero the funnel (rate limits are normal
+      // abuse-control noise, not failures).
+      if (!(err instanceof TrialRateLimitError)) {
+        console.warn(`[playback-token] free-tier tracking skipped: ${err}`);
+      }
+    }
+    const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
+    logToken({ result: 200, mode: "free", showId: row.showId, episodeId });
+    const res = NextResponse.json(
+      { token, expiresIn: SUBSCRIBER_TTL, mode: "free" },
+      { headers: NO_CACHE },
+    );
+    if (setCookie) {
+      res.cookies.set(TRIAL_COOKIE, sessionToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: ONE_YEAR_SECONDS,
+      });
+    }
+    return res;
+  }
+
+  if (row.access === "member") {
+    if (userId) {
       const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
-      logToken({ result: 200, mode: "free", showId: row.showId, episodeId });
-      const res = NextResponse.json(
-        { token, expiresIn: SUBSCRIBER_TTL, mode: "free" },
+      logToken({
+        result: 200,
+        mode: "member",
+        showId: row.showId,
+        episodeId,
+      });
+      return NextResponse.json(
+        { token, expiresIn: SUBSCRIBER_TTL, mode: "member" },
         { headers: NO_CACHE },
       );
-      if (setCookie) {
-        res.cookies.set(TRIAL_COOKIE, sessionToken, {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
-          path: "/",
-          maxAge: ONE_YEAR_SECONDS,
-        });
-      }
-      return res;
     }
-
-    if (tier === "member") {
-      if (userId) {
-        const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
-        logToken({
-          result: 200,
-          mode: "member",
-          showId: row.showId,
-          episodeId,
-        });
-        return NextResponse.json(
-          { token, expiresIn: SUBSCRIBER_TTL, mode: "member" },
-          { headers: NO_CACHE },
-        );
+    // Anonymous request for a member episode → sign-up wall. Stamp the
+    // funnel timestamp on the session's row when one exists (deep-link
+    // path; the end-of-tier path stamps via markSignupWallShown).
+    const cookieStore = await cookies();
+    const existingToken = cookieStore.get(TRIAL_COOKIE)?.value;
+    if (existingToken) {
+      try {
+        await stampSignupWall(existingToken, row.showId);
+      } catch (err) {
+        // analytics-only — never block the response
+        console.warn(`[playback-token] signup-wall stamp skipped: ${err}`);
       }
-      // Anonymous request for a member episode → sign-up wall. Stamp the
-      // funnel timestamp on the session's row when one exists (deep-link
-      // path; the end-of-tier path stamps via markSignupWallShown).
-      if (existingToken) {
-        try {
-          await stampSignupWall(existingToken, row.showId);
-        } catch (err) {
-          // analytics-only — never block the response
-          console.warn(`[playback-token] signup-wall stamp skipped: ${err}`);
-        }
-      }
-      logToken({ result: 403, mode: "free", showId: row.showId, episodeId });
-      return NextResponse.json(
-        { error: "Not authorized", reason: "signup_required" },
-        { status: 403, headers: NO_CACHE },
-      );
     }
+    logToken({ result: 403, mode: "free", showId: row.showId, episodeId });
+    return NextResponse.json(
+      { error: "Not authorized", reason: "signup_required" },
+      { status: 403, headers: NO_CACHE },
+    );
+  }
 
-    // tier === "subscriber" and the requester isn't one (subscribers
-    // returned earlier) — applies to anonymous and signed-in members alike.
+  // access === "subscriber" and the requester isn't one (subscribers
+  // returned earlier). On a tier-gated show this is the subscription
+  // paywall; on an all-subscriber (legacy) show, fall through to the
+  // 60-second trial path below.
+  if (await showHasTierGating(row.showId)) {
     logToken({
       result: 403,
       mode: userId ? "member" : "free",
