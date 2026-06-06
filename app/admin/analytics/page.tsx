@@ -1,9 +1,12 @@
+import { Suspense } from "react";
 import {
   campaignLabel,
   loadDashboard,
   loadEpisodeFunnels,
   parseFilters,
+  type AnalyticsFilters as Filters,
 } from "@/lib/admin-analytics";
+import { getMuxData, muxTimeframeForDays } from "@/lib/mux-data";
 import { AnalyticsFilters } from "@/components/admin/analytics-filters";
 import { TimeSeriesChart } from "@/components/admin/time-series-chart";
 import {
@@ -13,6 +16,8 @@ import {
   Histogram,
   KpiTile,
 } from "@/components/admin/charts";
+import { getAdminDict } from "@/lib/i18n/admin-server";
+import type { AdminDict } from "@/lib/i18n/admin-dictionaries";
 
 // Reading searchParams forces dynamic rendering — the dashboard always reflects
 // the live DB + current filter URL.
@@ -20,13 +25,26 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-const RANGE_LABEL: Record<string, string> = {
-  "24h": "last 24 hours",
-  "7d": "last 7 days",
-  "30d": "last 30 days",
-  "90d": "last 90 days",
-  all: "all time",
-  custom: "custom range",
+// Range preset → analytics dict key. Keys stay at module scope; the labels are
+// resolved at render time from the admin dictionary.
+const RANGE_LABEL_KEY: Record<
+  string,
+  keyof Pick<
+    AdminDict["analytics"],
+    | "rangeLast24Hours"
+    | "rangeLast7Days"
+    | "rangeLast30Days"
+    | "rangeLast90Days"
+    | "rangeAllTime"
+    | "rangeCustom"
+  >
+> = {
+  "24h": "rangeLast24Hours",
+  "7d": "rangeLast7Days",
+  "30d": "rangeLast30Days",
+  "90d": "rangeLast90Days",
+  all: "rangeAllTime",
+  custom: "rangeCustom",
 };
 
 export default async function AnalyticsPage({
@@ -34,6 +52,8 @@ export default async function AnalyticsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
+  const { t } = await getAdminDict();
+  const ta = t.analytics;
   const sp = await searchParams;
   const filters = parseFilters(sp, new Date());
   const [d, episodeFunnels] = await Promise.all([
@@ -42,7 +62,10 @@ export default async function AnalyticsPage({
   ]);
   const k = d.kpis;
 
-  const rangeLabel = RANGE_LABEL[filters.preset] ?? "selected range";
+  const rangeKey = RANGE_LABEL_KEY[filters.preset];
+  const rangeLabel = rangeKey ? ta[rangeKey] : ta.rangeSelected;
+  const touchLabel =
+    filters.attribution === "first" ? ta.touchFirst : ta.touchLast;
   const showLabel =
     filters.show === "all"
       ? null
@@ -62,17 +85,23 @@ export default async function AnalyticsPage({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
-            Analytics
+            {ta.eyebrow}
           </p>
           <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-white">
-            Dashboard
+            {ta.heading}
           </h1>
           <p className="mt-1 text-sm text-white/55">
             {rangeLabel}
+            {/* Resolved absolute window so a bookmarked relative-range URL
+                shows its actual dates; skipped for all-time (the 2020 floor
+                is an implementation detail, not a data boundary). */}
+            {filters.preset !== "all"
+              ? ` (${filters.from.toISOString().slice(0, 10)} → ${filters.to.toISOString().slice(0, 10)})`
+              : ""}
             {showLabel ? ` · ${showLabel}` : ""}
             {channelLabel ? ` · ${channelLabel}` : ""}
             {campaignLabel ? ` · ${campaignLabel}` : ""}
-            {` · ${filters.attribution}-touch`}
+            {` · ${touchLabel}`}
           </p>
         </div>
       </div>
@@ -88,7 +117,7 @@ export default async function AnalyticsPage({
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
         <KpiTile
-          label="Signups"
+          label={ta.kpiSignups}
           value={k.signups.value.toLocaleString()}
           current={k.signups.value}
           prev={k.signups.prev}
@@ -96,7 +125,7 @@ export default async function AnalyticsPage({
           sub={rangeLabel}
         />
         <KpiTile
-          label="Trial previews"
+          label={ta.kpiTrialPreviews}
           value={k.trialPreviews.value.toLocaleString()}
           current={k.trialPreviews.value}
           prev={k.trialPreviews.prev}
@@ -104,25 +133,25 @@ export default async function AnalyticsPage({
           sub={rangeLabel}
         />
         <KpiTile
-          label="Conversions"
+          label={ta.kpiConversions}
           value={k.conversions.value.toLocaleString()}
           current={k.conversions.value}
           prev={k.conversions.prev}
           spark={sparkConversions}
-          sub="trials → paid"
+          sub={ta.kpiConversionsSub}
         />
         <KpiTile
-          label="Trial → paid"
+          label={ta.kpiTrialToPaid}
           value={`${k.conversionRate.toFixed(1)}%`}
-          sub={`${k.conversionConverted}/${k.conversionStarted} sessions`}
+          sub={ta.kpiSessionsSub(k.conversionConverted, k.conversionStarted)}
         />
         <KpiTile
-          label="MRR"
+          label={ta.kpiMrr}
           value={`$${k.mrr.toLocaleString()}`}
-          sub={`${k.activeSubs} active${k.servicedSubs !== k.activeSubs ? ` · ${k.servicedSubs} serviced` : ""}`}
+          sub={`${ta.kpiActiveSub(k.activeSubs)}${k.servicedSubs !== k.activeSubs ? ` · ${ta.kpiServicedSub(k.servicedSubs)}` : ""}`}
         />
         <KpiTile
-          label="New subs"
+          label={ta.kpiNewSubs}
           value={k.newSubs.value.toLocaleString()}
           current={k.newSubs.value}
           prev={k.newSubs.prev}
@@ -133,45 +162,55 @@ export default async function AnalyticsPage({
       {/* Funnel + status mix */}
       <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
         <Section
-          title="Acquisition funnel"
-          hint="trial preview → engaged → near paywall → converted"
+          title={ta.sectionAcquisitionFunnel}
+          hint={ta.sectionAcquisitionFunnelHint}
         >
           <FunnelChart
             steps={[
               {
-                label: "Trial previews started",
+                label: ta.funnelPreviewsStarted,
                 value: d.funnel.previews,
-                hint: "Distinct (session, show) trial rows in range",
+                hint: ta.funnelPreviewsStartedHint,
               },
               {
-                label: "Played (>0s)",
+                label: ta.funnelPlayed,
                 value: d.funnel.played,
-                hint: "Trials that recorded any playhead",
+                hint: ta.funnelPlayedHint,
               },
               {
-                label: "Reached paywall (~55s+)",
+                label: ta.funnelReachedPaywall,
                 value: d.funnel.nearCap,
-                hint: "Got near the 60s preview cap",
+                hint: ta.funnelReachedPaywallHint,
               },
               {
-                label: "Converted to paid",
+                label: ta.funnelConverted,
                 value: d.funnel.converted,
-                hint: "Trial sessions now marked converted",
+                hint: ta.funnelConvertedHint,
               },
             ]}
           />
           <p className="mt-4 text-[10px] leading-relaxed text-white/35">
-            Trial depth is the last-saved resume playhead per session, not
-            cumulative watch time — &ldquo;played&rdquo; undercounts very short
-            previews that never ticked a save. Avg depth {d.funnel.avgDepth}s of
-            the 60s cap.
+            {ta.funnelDepthNote(d.funnel.avgDepth)}
           </p>
         </Section>
 
-        <Section title="Subscriptions" hint={`mix · ${filterScopeLabel(filters.status)}`}>
+        <Section
+          title={ta.sectionSubscriptions}
+          hint={ta.sectionSubscriptionsHintMix(filterScopeLabel(filters.status, ta))}
+        >
           <Donut
             segments={d.statusMix.map((s) => ({ label: s.status, value: s.n }))}
           />
+          <div className="mt-4">
+            <KpiTile
+              label={ta.kpiCancellations}
+              value={k.cancellations.value.toLocaleString()}
+              current={k.cancellations.value}
+              prev={k.cancellations.prev}
+              goodWhenDown
+              sub={ta.kpiCancellationsSub(rangeLabel)}
+            />
+          </div>
         </Section>
       </div>
 
@@ -179,74 +218,69 @@ export default async function AnalyticsPage({
       {episodeFunnels.map((ef) => (
         <Section
           key={ef.showSlug}
-          title={`Episode funnel · ${ef.showTitle}`}
-          hint={`${ef.freeCount} free + ${ef.memberCount} member episodes · ${rangeLabel}`}
+          title={ta.episodeFunnelTitle(ef.showTitle)}
+          hint={ta.episodeFunnelHint(ef.freeCount, ef.memberCount, rangeLabel)}
         >
           <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
             <div>
               <FunnelChart
                 steps={[
                   {
-                    label: "Started watching free",
+                    label: ta.efStarted,
                     value: ef.started,
-                    hint: "Anonymous sessions that played a free episode in range",
+                    hint: ta.efStartedHint,
                   },
                   {
-                    label: "Hit sign-up wall",
+                    label: ta.efWallHit,
                     value: ef.wallHit,
-                    hint: "Wall shown, or reached the end of the free tier",
+                    hint: ta.efWallHitHint,
                   },
                   {
-                    label: "Signed up",
+                    label: ta.efSignedUp,
                     value: ef.signedUp,
-                    hint: "Wall-stage sessions linked to a user account",
+                    hint: ta.efSignedUpHint,
                   },
                   {
-                    label: "Watched member episodes",
+                    label: ta.efMemberWatchers,
                     value: ef.memberWatchers,
-                    hint: "Linked users with progress on any member episode",
+                    hint: ta.efMemberWatchersHint,
                   },
                   {
-                    label: "Hit subscription paywall",
+                    label: ta.efPaywallHit,
                     value: ef.paywallHit,
-                    hint: "Linked users who completed the last member episode",
+                    hint: ta.efPaywallHitHint,
                   },
                   {
-                    label: "Subscribed",
+                    label: ta.efSubscribed,
                     value: ef.subscribed,
-                    hint: "Funnel sessions marked converted by the Stripe webhook",
+                    hint: ta.efSubscribedHint,
                   },
                 ]}
               />
               {ef.memberEpisodes.length > 0 ? (
                 <div className="mt-5">
                   <p className="mb-2 text-[10px] uppercase tracking-[0.08em] text-white/45">
-                    Member episodes · linked users
+                    {ta.efMemberEpisodesLabel}
                   </p>
                   <BarList
                     items={ef.memberEpisodes.map((m) => ({
                       label: m.label,
                       value: m.viewers,
-                      sub: `${m.completed} completed`,
+                      sub: ta.efCompleted(m.completed),
                     }))}
-                    format={(n) =>
-                      `${n.toLocaleString()} viewer${n === 1 ? "" : "s"}`
-                    }
-                    emptyLabel="No member-episode views yet."
+                    format={(n) => ta.efViewers(n)}
+                    emptyLabel={ta.efNoMemberViews}
                   />
                 </div>
               ) : null}
             </div>
             <div>
               <p className="mb-2 text-[10px] uppercase tracking-[0.08em] text-white/45">
-                Free-tier depth · sessions reaching episode N
+                {ta.efDepthLabel}
               </p>
               <Histogram bars={ef.depth} />
               <p className="mt-3 text-[10px] leading-relaxed text-white/35">
-                Depth is the furthest episode position a session started
-                (write-monotonic), not completion. Sign-up linking uses the
-                trial cookie with an IP-bucket fallback, so &ldquo;signed
-                up&rdquo; can slightly over-attribute on shared networks.
+                {ta.efDepthNote}
               </p>
             </div>
           </div>
@@ -255,28 +289,28 @@ export default async function AnalyticsPage({
 
       {/* Time series */}
       <Section
-        title="Trend"
-        hint={`${rangeLabel} · ${filters.granularity}`}
+        title={ta.sectionTrend}
+        hint={`${rangeLabel} · ${ta.granularityToken(filters.granularity)}`}
       >
         <TimeSeriesChart series={d.series} granularity={filters.granularity} />
       </Section>
 
       {/* Campaign table */}
       <Section
-        title={`Channels & campaigns · ${filters.attribution}-touch`}
+        title={ta.sectionChannelsCampaigns(touchLabel)}
         hint={
           filters.attribution === "first"
-            ? "which channel opened the relationship"
-            : "what ad platforms attribute the conversion to"
+            ? ta.sectionChannelsCampaignsHintFirst
+            : ta.sectionChannelsCampaignsHintLast
         }
       >
-        <CampaignTable rows={d.campaign} />
+        <CampaignTable rows={d.campaign} t={t} />
       </Section>
 
       {/* Trial preview depth */}
       <Section
-        title="Trial preview depth"
-        hint="how far into the 60s preview viewers get"
+        title={ta.sectionTrialPreviewDepth}
+        hint={ta.sectionTrialPreviewDepthHint}
       >
         <Histogram bars={d.depthHistogram} />
       </Section>
@@ -284,107 +318,141 @@ export default async function AnalyticsPage({
       {/* Engagement + Top shows */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Section
-          title="Subscriber engagement"
-          hint="watch_progress · subscriber-only"
+          title={ta.sectionSubscriberEngagement}
+          hint={ta.sectionSubscriberEngagementHint}
         >
           <div className="grid grid-cols-2 gap-3">
             <KpiTile
-              label="Completion rate"
+              label={ta.kpiCompletionRate}
               value={`${d.engagement.completionRate.toFixed(0)}%`}
-              sub={`${d.engagement.completedRows}/${d.engagement.watchRows} finished`}
+              sub={ta.kpiCompletionRateSub(
+                d.engagement.completedRows,
+                d.engagement.watchRows,
+              )}
               approx
             />
             <KpiTile
-              label="Avg % watched"
+              label={ta.kpiAvgPctWatched}
               value={`${d.engagement.avgPctWatched.toFixed(0)}%`}
-              sub={`n=${d.engagement.watchRows}`}
+              sub={ta.kpiSampleSize(d.engagement.watchRows)}
               approx
             />
             <KpiTile
-              label="Avg / viewer"
-              value={`${d.engagement.avgMinPerViewer} min`}
-              sub={`${d.engagement.distinctViewers} viewer${d.engagement.distinctViewers === 1 ? "" : "s"}`}
+              label={ta.kpiAvgPerViewer}
+              value={ta.minutes(d.engagement.avgMinPerViewer)}
+              sub={ta.kpiViewersCount(d.engagement.distinctViewers)}
               approx
             />
             <KpiTile
-              label="Watch rows"
+              label={ta.kpiWatchRows}
               value={d.engagement.watchRows.toLocaleString()}
-              sub="subscriber resume points"
+              sub={ta.kpiWatchRowsSub}
             />
           </div>
           <p className="mt-3 text-[10px] leading-relaxed text-white/35">
-            Approximate — resume playhead per (subscriber, episode), not
-            cumulative minutes. Real watch-time is in the Mux panel below.
+            {ta.engagementApproxNote}
           </p>
         </Section>
 
         <Section
-          title="Top shows"
-          hint="subscriber watch time (resume-position proxy)"
+          title={ta.sectionTopShows}
+          hint={ta.sectionTopShowsHint}
         >
           <BarList
             items={d.topShows.map((s) => ({
               label: s.title,
               href: `/shows/${s.slug}`,
               value: s.seconds,
-              sub: `${s.viewers} viewer${s.viewers === 1 ? "" : "s"} · ${
-                s.plays > 0 ? Math.round((s.completed / s.plays) * 100) : 0
-              }%`,
+              sub: ta.topShowsRowSub(
+                s.viewers,
+                s.plays > 0 ? Math.round((s.completed / s.plays) * 100) : 0,
+              ),
             }))}
-            format={(sec) => `${Math.round(sec / 60).toLocaleString()} min`}
-            emptyLabel="No subscriber watch progress recorded yet."
+            format={(sec) => ta.minutes(Math.round(sec / 60).toLocaleString())}
+            emptyLabel={ta.topShowsEmpty}
           />
         </Section>
       </div>
 
-      {/* Mux real watch time */}
-      <Section
-        title="Watch time · Mux Data"
-        hint={`real playback · ${muxWindowLabel(d.muxTimeframe)} · hero excluded`}
+      {/* Mux real watch time — its own Suspense island: the Mux Data API is
+          an external HTTP call (3.5s-bounded in lib/mux-data.ts) and must
+          never gate the DB-backed sections above, which stream immediately. */}
+      <Suspense
+        fallback={
+          <Section title={ta.sectionWatchTimeMux}>
+            <div className="h-28 animate-pulse rounded-lg bg-white/[0.04]" />
+          </Section>
+        }
       >
-        {d.muxClamped ? (
-          <p className="mb-3 rounded-lg border border-[#f5c451]/25 bg-[#f5c451]/[0.06] px-3 py-2 text-[11px] text-[#f5c451]">
-            Mux Data caps at a 30-day window — showing the last 30 days even
-            though the dashboard range is wider.
-          </p>
-        ) : null}
-        {d.mux.status === "not_configured" ? (
-          <p className="py-6 text-center text-sm leading-relaxed text-white/55">
-            Not connected. Add a Mux access token with{" "}
-            <span className="font-mono text-white/70">Mux Data: Read</span> as{" "}
-            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
-              MUX_DATA_API_TOKEN_ID
-            </code>{" "}
-            /{" "}
-            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
-              MUX_DATA_API_TOKEN_SECRET
-            </code>
-            .
-          </p>
-        ) : d.mux.status === "no_data" ? (
-          <p className="py-6 text-center text-sm text-white/55">
-            Connected — no views recorded in this window yet. Mux Data appears a
-            few minutes after consenting viewers watch.
-          </p>
-        ) : d.mux.status === "error" ? (
-          <p className="py-6 text-center text-sm text-white/55">
-            {d.mux.message}
-          </p>
-        ) : (
-          <MuxPanel summary={d.mux.summary} byShow={d.mux.byShow} />
-        )}
-      </Section>
+        <MuxDataSection filters={filters} />
+      </Suspense>
     </div>
+  );
+}
+
+// Async server component so the external Mux Data fetch streams in behind
+// the rest of the dashboard (see the Suspense boundary at the call site).
+async function MuxDataSection({ filters }: { filters: Filters }) {
+  const { t } = await getAdminDict();
+  const ta = t.analytics;
+  const muxTf = muxTimeframeForDays(
+    (filters.to.getTime() - filters.from.getTime()) / (24 * 60 * 60 * 1000),
+  );
+  const mux = await getMuxData(muxTf.timeframe);
+  return (
+    <Section
+      title={ta.sectionWatchTimeMux}
+      hint={ta.sectionWatchTimeMuxHint(muxWindowLabel(muxTf.timeframe, ta))}
+    >
+      {muxTf.clamped ? (
+        <p className="mb-3 rounded-lg border border-[#f5c451]/25 bg-[#f5c451]/[0.06] px-3 py-2 text-[11px] text-[#f5c451]">
+          {ta.muxClampedNotice}
+        </p>
+      ) : null}
+      {mux.status === "not_configured" ? (
+        <p className="py-6 text-center text-sm leading-relaxed text-white/55">
+          {ta.muxNotConnectedPrefix}{" "}
+          <span className="font-mono text-white/70">Mux Data: Read</span>{" "}
+          {ta.muxNotConnectedAs}{" "}
+          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
+            MUX_DATA_API_TOKEN_ID
+          </code>{" "}
+          /{" "}
+          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
+            MUX_DATA_API_TOKEN_SECRET
+          </code>
+          .
+        </p>
+      ) : mux.status === "no_data" ? (
+        <p className="py-6 text-center text-sm text-white/55">
+          {ta.muxNoData}
+        </p>
+      ) : mux.status === "error" ? (
+        <div className="py-6 text-center">
+          <p className="text-sm text-white/55">{ta.muxError}</p>
+          {/* Raw detail for diagnostics (token-permission hints, HTTP codes)
+              — deliberately small; the headline above is the localized copy. */}
+          <p className="mt-1 font-mono text-[10px] text-white/30">
+            {mux.message}
+          </p>
+        </div>
+      ) : (
+        <MuxPanel summary={mux.summary} byShow={mux.byShow} t={t} />
+      )}
+    </Section>
   );
 }
 
 function MuxPanel({
   summary,
   byShow,
+  t,
 }: {
   summary: { watchTimeMs: number; views: number; uniqueViewers: number };
   byShow: { show: string; views: number; watchTimeMs: number }[];
+  t: AdminDict;
 }) {
+  const ta = t.analytics;
   const hours = summary.watchTimeMs / 3_600_000;
   const avgViewMin =
     summary.views > 0 ? summary.watchTimeMs / summary.views / 60_000 : 0;
@@ -392,19 +460,19 @@ function MuxPanel({
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <KpiTile
-          label="Total watch time"
-          value={`${hours.toFixed(1)} h`}
-          sub={`${Math.round(summary.watchTimeMs / 60_000).toLocaleString()} min`}
+          label={ta.kpiTotalWatchTime}
+          value={ta.hours(hours.toFixed(1))}
+          sub={ta.minutes(Math.round(summary.watchTimeMs / 60_000).toLocaleString())}
         />
-        <KpiTile label="Views" value={summary.views.toLocaleString()} />
+        <KpiTile label={ta.kpiViews} value={summary.views.toLocaleString()} />
         <KpiTile
-          label="Unique viewers"
+          label={ta.kpiUniqueViewers}
           value={summary.uniqueViewers.toLocaleString()}
         />
         <KpiTile
-          label="Avg view"
-          value={`${avgViewMin.toFixed(1)} min`}
-          sub="per view"
+          label={ta.kpiAvgView}
+          value={ta.minutes(avgViewMin.toFixed(1))}
+          sub={ta.kpiAvgViewSub}
         />
       </div>
       {byShow.length > 0 ? (
@@ -412,9 +480,9 @@ function MuxPanel({
           items={byShow.slice(0, 10).map((s) => ({
             label: s.show,
             value: s.watchTimeMs,
-            sub: `${s.views.toLocaleString()} view${s.views === 1 ? "" : "s"}`,
+            sub: ta.muxByShowViews(s.views),
           }))}
-          format={(ms) => `${Math.round(ms / 60_000).toLocaleString()} min`}
+          format={(ms) => ta.minutes(Math.round(ms / 60_000).toLocaleString())}
         />
       ) : null}
     </div>
@@ -423,22 +491,25 @@ function MuxPanel({
 
 function CampaignTable({
   rows,
+  t,
 }: {
   rows: {
     source: string | null;
     medium: string | null;
     campaign: string | null;
     trials: number;
+    walled: number;
     signups: number;
     activeSubs: number;
     mrr: number;
   }[];
+  t: AdminDict;
 }) {
+  const ta = t.analytics;
   if (rows.length === 0) {
     return (
       <p className="py-6 text-center text-sm text-white/55">
-        No campaign data in this range. Tag landing URLs with utm_source /
-        utm_medium / utm_campaign to attribute.
+        {ta.campaignTableEmpty}
       </p>
     );
   }
@@ -447,13 +518,36 @@ function CampaignTable({
       <table className="w-full min-w-[680px] border-collapse text-sm">
         <thead>
           <tr className="text-[10px] uppercase tracking-[0.08em] text-white/45">
-            <th className="px-5 py-2 text-left font-semibold">Campaign</th>
-            <th className="px-3 py-2 text-left font-semibold">Source / medium</th>
-            <th className="px-3 py-2 text-right font-semibold">Trials</th>
-            <th className="px-3 py-2 text-right font-semibold">Signups</th>
-            <th className="px-3 py-2 text-right font-semibold">Subs</th>
-            <th className="px-3 py-2 text-right font-semibold">Trial→sub</th>
-            <th className="px-5 py-2 text-right font-semibold">MRR</th>
+            <th className="px-5 py-2 text-left font-semibold">
+              {ta.tableColCampaign}
+            </th>
+            <th className="px-3 py-2 text-left font-semibold">
+              {ta.tableColSourceMedium}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tableColTrials}
+            </th>
+            <th
+              className="px-3 py-2 text-right font-semibold"
+              title={ta.tableColWallTitle}
+            >
+              {ta.tableColWall}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tableColSignups}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tableColSubs}
+            </th>
+            <th
+              className="px-3 py-2 text-right font-semibold"
+              title={ta.tableColTrialToSubTitle}
+            >
+              {ta.tableColTrialToSub}
+            </th>
+            <th className="px-5 py-2 text-right font-semibold">
+              {ta.tableColMrr}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -485,6 +579,11 @@ function CampaignTable({
                 <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
                   {r.trials.toLocaleString()}
                 </td>
+                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
+                  {r.trials > 0
+                    ? `${Math.round((r.walled / r.trials) * 100)}%`
+                    : "—"}
+                </td>
                 <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
                   {r.signups.toLocaleString()}
                 </td>
@@ -502,6 +601,9 @@ function CampaignTable({
           })}
         </tbody>
       </table>
+      <p className="mt-3 px-5 text-[10px] leading-relaxed text-white/35">
+        {ta.campaignSessionsNote}
+      </p>
     </div>
   );
 }
@@ -528,14 +630,20 @@ function Section({
   );
 }
 
-function filterScopeLabel(status: string): string {
-  if (status === "active") return "active only";
-  if (status === "all") return "all statuses";
-  return "all statuses shown";
+function filterScopeLabel(
+  status: string,
+  ta: AdminDict["analytics"],
+): string {
+  if (status === "active") return ta.scopeActiveOnly;
+  if (status === "all") return ta.scopeAllStatuses;
+  // Default 'ag' scope: the donut now genuinely filters to access-granting
+  // statuses, so the label must say so — "all statuses shown" here would
+  // hide the canceled slice while claiming completeness.
+  return ta.scopeAccessGranting;
 }
 
-function muxWindowLabel(tf: string): string {
-  if (tf === "24:hours") return "last 24 hours";
-  if (tf === "7:days") return "last 7 days";
-  return "last 30 days";
+function muxWindowLabel(tf: string, ta: AdminDict["analytics"]): string {
+  if (tf === "24:hours") return ta.rangeLast24Hours;
+  if (tf === "7:days") return ta.rangeLast7Days;
+  return ta.rangeLast30Days;
 }

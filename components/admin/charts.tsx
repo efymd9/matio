@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { getAdminDict } from "@/lib/i18n/admin-server";
+
 // Static, dependency-free chart primitives for the admin analytics dashboard.
 // SVG + Tailwind, theme-matched (accent #ff3d3d). Server components — no client
 // JS — using native `title` tooltips. The one interactive chart (metric switch)
@@ -15,7 +17,7 @@ function fmtPct(n: number): string {
 
 // ---- KPI tile with period-over-period delta + optional sparkline -----------
 
-export function KpiTile({
+export async function KpiTile({
   label,
   value,
   sub,
@@ -35,6 +37,7 @@ export function KpiTile({
   approx?: boolean;
   goodWhenDown?: boolean;
 }) {
+  const { t } = await getAdminDict();
   const showDelta = current !== undefined && prev !== undefined;
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.04] p-4">
@@ -44,9 +47,9 @@ export function KpiTile({
           {approx ? (
             <span
               className="ml-1 rounded bg-white/10 px-1 py-0.5 text-[8px] font-bold text-white/50"
-              title="Approximate — derived from last-saved playhead, not cumulative watch time"
+              title={t.charts.approxTooltip}
             >
-              APPROX
+              {t.charts.approxBadge}
             </span>
           ) : null}
         </p>
@@ -66,7 +69,7 @@ export function KpiTile({
 }
 
 // Delta chip rendered when a previous-period value is available.
-export function DeltaChip({
+export async function DeltaChip({
   current,
   prev,
   goodWhenDown,
@@ -75,12 +78,15 @@ export function DeltaChip({
   prev: number;
   goodWhenDown?: boolean;
 }) {
+  const { t } = await getAdminDict();
   if (prev === 0 && current === 0) {
-    return <span className="text-[11px] text-white/35">no change</span>;
+    return <span className="text-[11px] text-white/35">{t.charts.noChange}</span>;
   }
   if (prev === 0) {
     return (
-      <span className="text-[11px] font-semibold text-[#7fd87a]">new</span>
+      <span className="text-[11px] font-semibold text-[#7fd87a]">
+        {t.charts.newDelta}
+      </span>
     );
   }
   const delta = ((current - prev) / prev) * 100;
@@ -91,7 +97,7 @@ export function DeltaChip({
     <span
       className="inline-flex items-center gap-0.5 text-[11px] font-semibold"
       style={{ color }}
-      title={`vs previous period (${prev})`}
+      title={t.charts.vsPreviousPeriod(prev)}
     >
       {delta === 0 ? "" : up ? "▲" : "▼"} {fmtPct(delta)}
     </span>
@@ -129,17 +135,22 @@ export type BarItem = {
   href?: string;
 };
 
-export function BarList({
+export async function BarList({
   items,
   format,
-  emptyLabel = "No data yet.",
+  emptyLabel,
 }: {
   items: BarItem[];
   format: (n: number) => string;
   emptyLabel?: string;
 }) {
+  const { t } = await getAdminDict();
   if (items.length === 0) {
-    return <p className="py-6 text-center text-sm text-white/55">{emptyLabel}</p>;
+    return (
+      <p className="py-6 text-center text-sm text-white/55">
+        {emptyLabel ?? t.charts.noDataYet}
+      </p>
+    );
   }
   const max = Math.max(...items.map((i) => i.value), 1);
   return (
@@ -182,15 +193,23 @@ export function BarList({
 
 export type FunnelStep = { label: string; value: number; hint?: string };
 
-export function FunnelChart({ steps }: { steps: FunnelStep[] }) {
+export async function FunnelChart({ steps }: { steps: FunnelStep[] }) {
+  const { t } = await getAdminDict();
   const top = steps[0]?.value ?? 0;
   return (
     <div className="space-y-1.5">
       {steps.map((s, i) => {
-        const ofTop = top > 0 ? (s.value / top) * 100 : 0;
+        // Clamped at 100: the steps aren't always strictly nested (e.g. a
+        // converted session that never hit ≥55s), and a >100% bar reads as
+        // a rendering bug rather than a population quirk.
+        const ofTop = top > 0 ? Math.min(100, (s.value / top) * 100) : 0;
         const prev = i > 0 ? steps[i - 1].value : null;
         const stepPct =
-          prev && prev > 0 ? (s.value / prev) * 100 : i === 0 ? 100 : 0;
+          prev && prev > 0
+            ? Math.min(100, (s.value / prev) * 100)
+            : i === 0
+              ? 100
+              : 0;
         return (
           <div key={s.label}>
             <div className="flex items-baseline justify-between gap-3 text-xs">
@@ -198,7 +217,9 @@ export function FunnelChart({ steps }: { steps: FunnelStep[] }) {
               <span className="font-mono text-white/55">
                 {s.value.toLocaleString()}
                 {i > 0 ? (
-                  <span className="ml-2 text-white/35">{fmtPct(stepPct)} of prev</span>
+                  <span className="ml-2 text-white/35">
+                    {t.charts.ofPrev(fmtPct(stepPct))}
+                  </span>
                 ) : null}
               </span>
             </div>
@@ -268,14 +289,19 @@ const STATUS_COLORS: Record<string, string> = {
   canceled: "#9ca3af",
 };
 
-export function Donut({
+export async function Donut({
   segments,
 }: {
   segments: { label: string; value: number }[];
 }) {
+  const { t } = await getAdminDict();
   const total = segments.reduce((a, s) => a + s.value, 0);
   if (total === 0) {
-    return <p className="py-6 text-center text-sm text-white/55">No subscriptions yet.</p>;
+    return (
+      <p className="py-6 text-center text-sm text-white/55">
+        {t.charts.noSubscriptionsYet}
+      </p>
+    );
   }
   const r = 42;
   const c = 2 * Math.PI * r;
@@ -316,7 +342,7 @@ export function Donut({
           {total}
         </text>
         <text x="55" y="66" textAnchor="middle" className="fill-white/45 text-[8px]">
-          subs
+          {t.charts.subs}
         </text>
       </svg>
       <ul className="space-y-1.5 text-xs">

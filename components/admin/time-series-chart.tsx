@@ -2,18 +2,29 @@
 
 import { useState } from "react";
 import type { SeriesPoint } from "@/lib/admin-analytics";
+import { useAdminT } from "@/lib/i18n/admin-client";
+import type { AdminDict } from "@/lib/i18n/admin-dictionaries";
 
 // Interactive time-series: one metric at a time, switchable. SVG bars + area
 // guide line, native-title tooltips. Client component only for the metric
 // toggle — the data is computed server-side and passed in.
 
-type MetricKey = "signups" | "trials" | "conversions" | "newSubs";
+type MetricKey = "signups" | "trials" | "free" | "conversions" | "newSubs";
 
-const METRICS: { key: MetricKey; label: string }[] = [
-  { key: "trials", label: "Trials" },
-  { key: "signups", label: "Signups" },
-  { key: "conversions", label: "Conversions" },
-  { key: "newSubs", label: "New subs" },
+// Only the string-valued keys of the timeSeriesChart namespace (excludes the
+// `total`/`peak` interpolation functions) so the resolved label is a string.
+type MetricLabelKey = {
+  [K in keyof AdminDict["timeSeriesChart"]]: AdminDict["timeSeriesChart"][K] extends string
+    ? K
+    : never;
+}[keyof AdminDict["timeSeriesChart"]];
+
+const METRICS: { key: MetricKey; labelKey: MetricLabelKey }[] = [
+  { key: "trials", labelKey: "metricTrials" },
+  { key: "free", labelKey: "metricFree" },
+  { key: "signups", labelKey: "metricSignups" },
+  { key: "conversions", labelKey: "metricConversions" },
+  { key: "newSubs", labelKey: "metricNewSubs" },
 ];
 
 function fmtBucket(key: string, gran: string): string {
@@ -31,6 +42,7 @@ export function TimeSeriesChart({
   series: SeriesPoint[];
   granularity: string;
 }) {
+  const t = useAdminT();
   const [metric, setMetric] = useState<MetricKey>("trials");
   const values = series.map((p) => p[metric]);
   const max = Math.max(...values, 1);
@@ -51,18 +63,18 @@ export function TimeSeriesChart({
                   : "text-white/55 hover:text-white"
               }`}
             >
-              {m.label}
+              {t.timeSeriesChart[m.labelKey]}
             </button>
           ))}
         </div>
         <span className="font-mono text-[11px] text-white/45">
-          {total.toLocaleString()} total
+          {t.timeSeriesChart.total(total.toLocaleString())}
         </span>
       </div>
 
       {series.length === 0 ? (
         <p className="py-10 text-center text-sm text-white/55">
-          No data in this range.
+          {t.timeSeriesChart.noData}
         </p>
       ) : (
         <>
@@ -91,7 +103,7 @@ export function TimeSeriesChart({
           </div>
           <div className="mt-2 flex justify-between font-mono text-[10px] text-white/35">
             <span>{fmtBucket(series[0].key, granularity)}</span>
-            <span>peak {max.toLocaleString()}</span>
+            <span>{t.timeSeriesChart.peak(max.toLocaleString())}</span>
             <span>{fmtBucket(series[series.length - 1].key, granularity)}</span>
           </div>
         </>

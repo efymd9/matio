@@ -17,7 +17,11 @@ import {
   getOrderedReadyEpisodeIds,
   showHasTierGating,
 } from "@/lib/episode-access";
-import { TRIAL_COOKIE, stampSignupWall } from "@/lib/trial";
+import {
+  TRIAL_COOKIE,
+  TRIAL_DURATION_SECONDS,
+  stampSignupWall,
+} from "@/lib/trial";
 
 // Hard ceiling on position values that can be written. The longest
 // imaginable single episode is ~3-4h; 24h is a generous bound that
@@ -166,9 +170,16 @@ export async function saveTrialPosition(
   if (row.access === "member") return;
   if (await showHasTierGating(row.showId)) return;
 
+  // Legacy 60s-preview row (kind='preview'). Cap the stored position at the
+  // trial duration: buffered segments keep playing past token expiry and
+  // seeks can land anywhere in the episode, so the raw playhead routinely
+  // exceeds 60s — which inflated every depth metric on /admin/analytics.
+  // A capped value reads as "watched the full preview".
   await db
     .update(trialSessions)
-    .set({ lastPositionSeconds: clamped })
+    .set({
+      lastPositionSeconds: Math.min(clamped, TRIAL_DURATION_SECONDS),
+    })
     .where(
       and(
         eq(trialSessions.sessionToken, sessionToken),

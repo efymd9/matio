@@ -26,11 +26,6 @@ import {
   users,
   watchProgress,
 } from "@/db/schema";
-import {
-  getMuxData,
-  muxTimeframeForDays,
-  type MuxDataResult,
-} from "@/lib/mux-data";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 
 // ---------------------------------------------------------------------------
@@ -51,6 +46,18 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // Lower bound for the "all-time" range. Predates the project; min(createdAt)
 // would be exact but this is simpler and the fill loop is capped regardless.
 const ALL_TIME_FLOOR = new Date("2020-01-01T00:00:00.000Z");
+// Ceiling on time-series bucket count. parseFilters coarsens the granularity
+// until the range fits — without this, hourly × all-time generated tens of
+// thousands of buckets and the fill loop's guard silently truncated the chart
+// to its OLDEST 2000 buckets (an empty 2020 axis; real data never rendered).
+const MAX_SERIES_BUCKETS = 750;
+const BUCKET_APPROX_MS: Record<Granularity, number> = {
+  hour: 60 * 60 * 1000,
+  day: DAY_MS,
+  week: 7 * DAY_MS,
+  month: 30 * DAY_MS, // approximation only — used for the bucket-count cap
+};
+const COARSER_ORDER: Granularity[] = ["hour", "day", "week", "month"];
 
 export type RangePreset = "24h" | "7d" | "30d" | "90d" | "all" | "custom";
 export type Granularity = "hour" | "day" | "week" | "month";
@@ -154,8 +161,18 @@ export function parseFilters(sp: RawParams, now: Date): AnalyticsFilters {
     const GRANS: readonly string[] = ["auto", "hour", "day", "week", "month"];
     return GRANS.includes(g ?? "") ? (g as GranularityChoice) : "auto";
   })();
-  const granularity =
+  // Resolve, then coerce to the bucket cap: an explicit fine granularity over
+  // a huge range is coarsened step by step until it charts. The resolved
+  // value is echoed in the Trend hint, so the override is visible.
+  let granularity =
     granChoice === "auto" ? autoGranularity(from, to) : granChoice;
+  while (
+    granularity !== "month" &&
+    (to.getTime() - from.getTime()) / BUCKET_APPROX_MS[granularity] >
+      MAX_SERIES_BUCKETS
+  ) {
+    granularity = COARSER_ORDER[COARSER_ORDER.indexOf(granularity) + 1];
+  }
 
   const attribution: AttributionModel = one(sp.attr) === "last" ? "last" : "first";
   const status = ((): StatusScope =>
@@ -294,13 +311,15 @@ export type SeriesPoint = {
   key: string;
   signups: number;
   trials: number;
+  free: number;
   conversions: number;
   newSubs: number;
 };
 
 // Generate every bucket between from..to and merge the per-metric SQL rows so
-// the chart always renders a continuous axis. Capped so a pathological
-// hour-granularity-over-years range can't spin forever.
+// the chart always renders a continuous axis. parseFilters' granularity
+// coercion (MAX_SERIES_BUCKETS) keeps any valid filter combination well under
+// the loop guard — the guard is a pure backstop, not load-bearing.
 function fillSeries(
   from: Date,
   to: Date,
@@ -317,6 +336,7 @@ function fillSeries(
       key,
       signups: maps.signups.get(key) ?? 0,
       trials: maps.trials.get(key) ?? 0,
+      free: maps.free.get(key) ?? 0,
       conversions: maps.conversions.get(key) ?? 0,
       newSubs: maps.newSubs.get(key) ?? 0,
     });
@@ -355,6 +375,7 @@ export type CampaignRow = {
   medium: string | null;
   campaign: string | null;
   trials: number;
+  walled: number;
   signups: number;
   activeSubs: number;
   mrr: number;
@@ -365,6 +386,9 @@ type TripleRow = {
   medium: string | null;
   campaign: string | null;
   n: number;
+  // Sessions that reached a decision wall (preview paywall ≥55s, or the
+  // free tier's sign-up wall). Only set on the trials rows.
+  walled?: number;
 };
 
 function mergeCampaignRows(
@@ -381,12 +405,16 @@ function mergeCampaignRows(
     const key = campaignKey(source, medium, campaign);
     let row = map.get(key);
     if (!row) {
-      row = { source, medium, campaign, trials: 0, signups: 0, activeSubs: 0, mrr: 0 };
+      row = { source, medium, campaign, trials: 0, walled: 0, signups: 0, activeSubs: 0, mrr: 0 };
       map.set(key, row);
     }
     return row;
   };
-  for (const r of trialsRows) upsert(r.source, r.medium, r.campaign).trials += Number(r.n);
+  for (const r of trialsRows) {
+    const row = upsert(r.source, r.medium, r.campaign);
+    row.trials += Number(r.n);
+    row.walled += Number(r.walled ?? 0);
+  }
   for (const r of signupsRows) upsert(r.source, r.medium, r.campaign).signups += Number(r.n);
   for (const r of subsRows) {
     const row = upsert(r.source, r.medium, r.campaign);
@@ -415,11 +443,13 @@ export async function loadDashboard(f: AnalyticsFilters) {
     f.show !== "all" ? showsList.find((s) => s.slug === f.show) : undefined;
   const showId = selectedShow?.id;
 
-  const statusSet: string[] | null =
+  // Applied to the status-mix donut below (the only chart the "Subs" filter
+  // scopes — the active/serviced KPI snapshots are definitionally fixed).
+  const statusSet =
     f.status === "active"
-      ? ["active"]
+      ? (["active"] as const)
       : f.status === "ag"
-        ? [...ACCESS_GRANTING_STATUSES]
+        ? ACCESS_GRANTING_STATUSES
         : null; // all
 
   // Predicate builders ------------------------------------------------------
@@ -428,8 +458,17 @@ export async function loadDashboard(f: AnalyticsFilters) {
     f.attribution === "first"
       ? trialSessions.attributionFirstCampaign
       : trialSessions.attributionLastCampaign;
-  const trialConds = (from: Date, to: Date): SQL[] => {
+  // kind: 'preview' = 60s-trailer rows only, 'episodes' = free-tier rows
+  // only, undefined = all anonymous sessions. The preview funnel / depth
+  // metrics MUST scope to 'preview' — free-tier rows legitimately exceed the
+  // 60s cap and were silently inflating every trial metric.
+  const trialConds = (
+    from: Date,
+    to: Date,
+    kind?: "preview" | "episodes",
+  ): SQL[] => {
     const c: (SQL | undefined)[] = [
+      kind ? eq(trialSessions.kind, kind) : undefined,
       gte(trialSessions.startedAt, from),
       lte(trialSessions.startedAt, to),
       channelCond(tSrc, f.channel),
@@ -487,10 +526,6 @@ export async function loadDashboard(f: AnalyticsFilters) {
   // engagement / watch_progress show filter (join to shows)
   const wpShowCond = showId ? eq(seasons.showId, showId) : undefined;
 
-  const muxTf = muxTimeframeForDays(
-    (f.to.getTime() - f.from.getTime()) / DAY_MS,
-  );
-
   const [
     // headline (current)
     signupsCur,
@@ -507,10 +542,11 @@ export async function loadDashboard(f: AnalyticsFilters) {
     servicedSubsRow,
     statusMixRows,
     cancellationsRow,
-    totalUsersRow,
+    cancellationsPrevRow,
     // time series
     seriesSignups,
     seriesTrials,
+    seriesFree,
     seriesConversions,
     seriesNewSubs,
     // depth histogram
@@ -526,23 +562,26 @@ export async function loadDashboard(f: AnalyticsFilters) {
     // dropdown options
     channelRows,
     campaignRows,
-    // mux
-    muxResult,
   ] = await Promise.all([
     // signups current
     db.select({ n: count() }).from(users).where(and(...userConds(f.from, f.to))),
-    // trial funnel (row-based previews) current
+    // trial funnel (row-based 60s previews) current. kind='preview' only —
+    // free-tier rows aren't 60s-capped and would flood every step. avgDepth
+    // LEASTs at 60: ~10% of preview rows exceed the cap (seek / buffered
+    // playback past token expiry) and were inflating the average.
     db
       .select({
         previews: count(),
         played: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.lastPositionSeconds} > 0)::int`,
         nearCap: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.lastPositionSeconds} >= 55)::int`,
         convertedPreviews: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.converted})::int`,
-        avgDepth: sql<number>`COALESCE(AVG(${trialSessions.lastPositionSeconds}), 0)`,
+        avgDepth: sql<number>`COALESCE(AVG(LEAST(${trialSessions.lastPositionSeconds}, 60)), 0)`,
       })
       .from(trialSessions)
-      .where(and(...trialConds(f.from, f.to))),
-    // conversion cohort (distinct session) current — P6 fix
+      .where(and(...trialConds(f.from, f.to, "preview"))),
+    // conversion cohort (distinct session) current — P6 fix. All kinds:
+    // free-tier sessions convert through the signup wall, previews through
+    // the paywall; both are real session→paid conversions.
     db
       .select({
         started: countDistinct(trialSessions.sessionToken),
@@ -566,7 +605,7 @@ export async function loadDashboard(f: AnalyticsFilters) {
       ? db
           .select({ n: count() })
           .from(trialSessions)
-          .where(and(...trialConds(f.prevFrom, f.prevTo)))
+          .where(and(...trialConds(f.prevFrom, f.prevTo, "preview")))
       : Promise.resolve([{ n: 0 }]),
     f.prevFrom && f.prevTo
       ? db
@@ -601,10 +640,18 @@ export async function loadDashboard(f: AnalyticsFilters) {
           ...subAttrConds,
         ),
       ),
+    // status mix donut — the one place the "Subs" filter scopes.
     db
       .select({ status: subscriptions.status, n: count() })
       .from(subscriptions)
-      .where(and(...subAttrConds) ?? sql`true`)
+      .where(
+        and(
+          ...(statusSet
+            ? [inArray(subscriptions.status, [...statusSet])]
+            : []),
+          ...subAttrConds,
+        ) ?? sql`true`,
+      )
       .groupBy(subscriptions.status),
     db
       .select({ n: count() })
@@ -617,7 +664,19 @@ export async function loadDashboard(f: AnalyticsFilters) {
           ...subAttrConds,
         ),
       ),
-    db.select({ n: count() }).from(users),
+    f.prevFrom && f.prevTo
+      ? db
+          .select({ n: count() })
+          .from(subscriptions)
+          .where(
+            and(
+              eq(subscriptions.status, "canceled"),
+              gte(subscriptions.updatedAt, f.prevFrom),
+              lte(subscriptions.updatedAt, f.prevTo),
+              ...subAttrConds,
+            ),
+          )
+      : Promise.resolve([{ n: 0 }]),
     // ---- time series ----
     db
       .select({ bucket: bucketExpr(users.createdAt, f.granularity), n: count() })
@@ -630,7 +689,15 @@ export async function loadDashboard(f: AnalyticsFilters) {
         n: count(),
       })
       .from(trialSessions)
-      .where(and(...trialConds(f.from, f.to)))
+      .where(and(...trialConds(f.from, f.to, "preview")))
+      .groupBy(bucketExpr(trialSessions.startedAt, f.granularity)),
+    db
+      .select({
+        bucket: bucketExpr(trialSessions.startedAt, f.granularity),
+        n: count(),
+      })
+      .from(trialSessions)
+      .where(and(...trialConds(f.from, f.to, "episodes")))
       .groupBy(bucketExpr(trialSessions.startedAt, f.granularity)),
     db
       .select({
@@ -648,14 +715,14 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .from(subscriptions)
       .where(and(...newSubConds(f.from, f.to)))
       .groupBy(bucketExpr(subscriptions.createdAt, f.granularity)),
-    // ---- trial depth histogram (10s buckets, capped at 60) ----
+    // ---- trial depth histogram (10s buckets, capped at 60; previews only) ----
     db
       .select({
         bucket: sql<number>`LEAST(${trialSessions.lastPositionSeconds} / 10, 6)::int`,
         n: count(),
       })
       .from(trialSessions)
-      .where(and(...trialConds(f.from, f.to)))
+      .where(and(...trialConds(f.from, f.to, "preview")))
       .groupBy(sql`LEAST(${trialSessions.lastPositionSeconds} / 10, 6)`),
     // ---- engagement (subscribers) ----
     db
@@ -700,8 +767,17 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .orderBy(desc(sql`SUM(${watchProgress.positionSeconds})`))
       .limit(10),
     // ---- campaign table (chosen attribution model, in range) ----
+    // Sessions of BOTH kinds (top-of-funnel volume) + the wall-reach count:
+    // preview paywall (≥55s) or the free tier's sign-up wall — the per-
+    // campaign engagement signal that works while conversions are ~zero.
     db
-      .select({ source: tT.source, medium: tT.medium, campaign: tT.campaign, n: count() })
+      .select({
+        source: tT.source,
+        medium: tT.medium,
+        campaign: tT.campaign,
+        n: count(),
+        walled: sql<number>`COUNT(*) FILTER (WHERE (${trialSessions.kind} = 'preview' AND ${trialSessions.lastPositionSeconds} >= 55) OR (${trialSessions.kind} = 'episodes' AND ${trialSessions.signupWallAt} IS NOT NULL))::int`,
+      })
       .from(trialSessions)
       .where(and(...trialConds(f.from, f.to)))
       .groupBy(tT.source, tT.medium, tT.campaign),
@@ -710,10 +786,19 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .from(users)
       .where(and(...userConds(f.from, f.to)))
       .groupBy(uT.source, uT.medium, uT.campaign),
+    // New subs per campaign — created in range, still access-granting, and
+    // honoring the channel/campaign filter. Same flow grain as the Sessions /
+    // Signups columns (the old all-time active snapshot made the per-row
+    // Sess→sub ratio divide two different populations).
     db
       .select({ source: sT.source, medium: sT.medium, campaign: sT.campaign, n: count() })
       .from(subscriptions)
-      .where(eq(subscriptions.status, "active"))
+      .where(
+        and(
+          inArray(subscriptions.status, [...ACCESS_GRANTING_STATUSES]),
+          ...newSubConds(f.from, f.to),
+        ),
+      )
       .groupBy(sT.source, sT.medium, sT.campaign),
     // ---- channel dropdown options (distinct sources, all-time) ----
     db
@@ -725,8 +810,6 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .selectDistinct({ campaign: tCmp })
       .from(trialSessions)
       .where(sql`${tCmp} IS NOT NULL`),
-    // ---- mux ----
-    getMuxData(muxTf.timeframe),
   ]);
 
   // Assemble -----------------------------------------------------------------
@@ -739,6 +822,7 @@ export async function loadDashboard(f: AnalyticsFilters) {
   const series = fillSeries(f.from, f.to, f.granularity, {
     signups: new Map(seriesSignups.map((r) => [r.bucket, Number(r.n)])),
     trials: new Map(seriesTrials.map((r) => [r.bucket, Number(r.n)])),
+    free: new Map(seriesFree.map((r) => [r.bucket, Number(r.n)])),
     conversions: new Map(seriesConversions.map((r) => [r.bucket, Number(r.n)])),
     newSubs: new Map(seriesNewSubs.map((r) => [r.bucket, Number(r.n)])),
   });
@@ -777,8 +861,6 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .sort(),
   ];
 
-  const muxClampedNote = muxTf.clamped;
-
   return {
     filters: f,
     showsList,
@@ -793,8 +875,10 @@ export async function loadDashboard(f: AnalyticsFilters) {
       activeSubs,
       servicedSubs: Number(servicedSubsRow[0].n),
       mrr: activeSubs * MONTHLY_PRICE,
-      totalUsers: Number(totalUsersRow[0].n),
-      cancellations: Number(cancellationsRow[0].n),
+      cancellations: {
+        value: Number(cancellationsRow[0].n),
+        prev: Number(cancellationsPrevRow[0].n),
+      },
       conversionRate: started > 0 ? (converted / started) * 100 : 0,
       conversionStarted: started,
       conversionConverted: converted,
@@ -829,10 +913,6 @@ export async function loadDashboard(f: AnalyticsFilters) {
     })),
     statusMix: statusMixRows.map((r) => ({ status: r.status, n: Number(r.n) })),
     campaign,
-    mux: muxResult as MuxDataResult,
-    muxTimeframe: muxTf.timeframe,
-    muxClamped: muxClampedNote,
-    statusScope: statusSet,
   };
 }
 
