@@ -79,6 +79,10 @@ export const subscriptions = pgTable(
       t.userId,
       t.updatedAt.desc(),
     ),
+    // /admin/analytics windows "new subs" on created_at (KPI, time series,
+    // per-campaign columns) — keeps those range scans off seq scans as the
+    // table grows.
+    index("subscriptions_created_at_idx").on(t.createdAt),
   ],
 );
 

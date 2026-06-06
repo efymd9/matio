@@ -85,6 +85,11 @@ export const trialSessions = pgTable(
     // a show; user_id is hit by linkTrialSessionsToCurrentUser.
     index("trial_sessions_show_id_idx").on(t.showId),
     index("trial_sessions_user_id_idx").on(t.userId),
+    // Analytics range scans: /admin/analytics windows every trial metric on
+    // started_at and splits by kind ('preview' vs 'episodes'). This is the
+    // fastest-growing table (one row per play-click) — without the index
+    // every dashboard render runs ~8 parallel seq scans over it.
+    index("trial_sessions_kind_started_at_idx").on(t.kind, t.startedAt),
   ],
 );
 

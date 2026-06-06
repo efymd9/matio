@@ -65,6 +65,10 @@ async function muxFetch(
     headers: { Authorization: `Basic ${auth}` },
     // Shared Data Cache across admin requests; keeps us well under 5 req/s.
     next: { revalidate: REVALIDATE_SECONDS },
+    // A hung Mux response must never stall the dashboard render — the
+    // TimeoutError lands in getMuxData's catch and degrades to the panel's
+    // error state (same bounded-external-call contract as lib/meta-capi.ts).
+    signal: AbortSignal.timeout(3500),
   });
 }
 
