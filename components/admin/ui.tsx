@@ -1,12 +1,18 @@
 import Link from "next/link";
 import { Icon } from "@/components/site/icon";
 import { Label } from "@/components/ui/label";
+import { getAdminDict } from "@/lib/i18n/admin-server";
 
 // Shared admin presentation primitives. Keep the cinema control-room
 // look identical across every admin/shows surface — the show list, the
 // ShowForm panels, the season + episode pages all share these so the
 // section reads as one cohesive tool rather than a stack of differently
 // styled forms.
+//
+// This module is now SERVER-ONLY: DangerPanel and EpisodeStatusBadge are
+// async and call getAdminDict() (which reads request headers/cookies). It
+// can only be imported from server components — today its only importers
+// are the season and episode admin server pages.
 
 export function AdminPageHeader({
   backHref,
@@ -89,17 +95,18 @@ export function Panel({
   );
 }
 
-export function DangerPanel({
+export async function DangerPanel({
   description,
   children,
 }: {
   description: string;
   children: React.ReactNode;
 }) {
+  const { t } = await getAdminDict();
   return (
     <section className="rounded-2xl border border-[#ff3d3d]/25 bg-[#ff3d3d]/[0.04] p-5 sm:p-6">
       <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
-        Danger zone
+        {t.adminUi.dangerZone}
       </p>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-white/65">{description}</p>
@@ -139,18 +146,19 @@ export function Field({
 // missing asset reads as "No video" so an empty episode is obvious at a
 // glance. Each badge pairs colour with an icon/shape so the state is
 // legible without relying on colour alone (colour-blind safe).
-export function EpisodeStatusBadge({
+export async function EpisodeStatusBadge({
   status,
   hasAsset,
 }: {
   status: "processing" | "ready" | "errored";
   hasAsset: boolean;
 }) {
+  const { t } = await getAdminDict();
   if (!hasAsset) {
     return (
       <Badge tone="neutral">
         <span className="inline-block size-1.5 rounded-full bg-white/40" />
-        No video
+        {t.adminUi.noVideo}
       </Badge>
     );
   }
@@ -158,7 +166,7 @@ export function EpisodeStatusBadge({
     return (
       <Badge tone="green">
         <Icon name="check" size={11} color="#7fd87a" />
-        Ready
+        {t.adminUi.ready}
       </Badge>
     );
   }
@@ -166,14 +174,14 @@ export function EpisodeStatusBadge({
     return (
       <Badge tone="red">
         <Icon name="close" size={11} color="#ff7d7d" />
-        Error
+        {t.adminUi.error}
       </Badge>
     );
   }
   return (
     <Badge tone="amber">
       <Spinner className="text-[#f5c451]" />
-      Processing
+      {t.adminUi.processing}
     </Badge>
   );
 }

@@ -15,6 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useAdminT } from "@/lib/i18n/admin-client";
 
 export default function AdminSegmentError({
   error,
@@ -23,6 +24,8 @@ export default function AdminSegmentError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useAdminT();
+
   useEffect(() => {
     console.error(error);
   }, [error]);
@@ -32,12 +35,12 @@ export default function AdminSegmentError({
       <Card>
         <CardHeader>
           <CardTitle className="text-destructive">
-            Something went wrong
+            {t.errorBoundary.title}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-foreground/85">
-            {error.message || "An unexpected error occurred."}
+            {error.message || t.errorBoundary.unexpectedError}
           </p>
           {error.digest && (
             <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
@@ -46,13 +49,13 @@ export default function AdminSegmentError({
           )}
           <div className="flex flex-wrap gap-2 pt-2">
             <Button type="button" onClick={reset}>
-              Try again
+              {t.errorBoundary.tryAgain}
             </Button>
             <Link
               href="/admin"
               className="inline-flex h-9 items-center rounded-md border border-border bg-card px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
             >
-              Back to admin home
+              {t.errorBoundary.backToAdminHome}
             </Link>
           </div>
         </CardContent>

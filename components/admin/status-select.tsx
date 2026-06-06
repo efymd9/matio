@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAdminT } from "@/lib/i18n/admin-client";
 
 type Status = "draft" | "published";
 
@@ -18,6 +19,7 @@ export function StatusSelect({
   name: string;
   defaultValue: Status;
 }) {
+  const t = useAdminT();
   const [value, setValue] = useState<Status>(defaultValue);
   return (
     <>
@@ -27,8 +29,8 @@ export function StatusSelect({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="draft">Draft</SelectItem>
-          <SelectItem value="published">Published</SelectItem>
+          <SelectItem value="draft">{t.statusSelect.draft}</SelectItem>
+          <SelectItem value="published">{t.statusSelect.published}</SelectItem>
         </SelectContent>
       </Select>
     </>

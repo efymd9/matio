@@ -7,6 +7,8 @@ import { Icon } from "@/components/site/icon";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import { ShowForm } from "@/components/admin/show-form";
 import { Input } from "@/components/ui/input";
+import { getAdminDict } from "@/lib/i18n/admin-server";
+import type { AdminDict } from "@/lib/i18n/admin-dictionaries";
 import {
   createSeason,
   deleteSeason,
@@ -22,6 +24,7 @@ export default async function EditShowPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const { t } = await getAdminDict();
 
   const [show] = await db
     .select()
@@ -48,7 +51,7 @@ export default async function EditShowPage({
           className="inline-flex items-center gap-1.5 text-sm text-white/50 transition-colors hover:text-white"
         >
           <Icon name="back" size={14} />
-          Shows
+          {t.showEdit.backToShows}
         </Link>
         <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -56,8 +59,8 @@ export default async function EditShowPage({
               <h1 className="text-3xl font-extrabold tracking-tight text-white">
                 {show.title}
               </h1>
-              <StatusPill status={show.status} />
-              {show.featured ? <FeaturedPill /> : null}
+              <StatusPill status={show.status} t={t} />
+              {show.featured ? <FeaturedPill t={t} /> : null}
             </div>
             <p className="mt-1 font-mono text-xs text-white/45">/{show.slug}</p>
           </div>
@@ -67,7 +70,7 @@ export default async function EditShowPage({
               target="_blank"
               className="inline-flex h-9 items-center gap-1.5 rounded-md border border-white/15 px-3.5 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"
             >
-              View on site
+              {t.showEdit.viewOnSite}
               <Icon name="chevron-right" size={14} />
             </Link>
           ) : null}
@@ -92,19 +95,18 @@ export default async function EditShowPage({
       />
 
       {/* Home hero feature toggle */}
-      <Panel kicker="Home hero" title="Featured show">
+      <Panel kicker={t.showEdit.homeHeroKicker} title={t.showEdit.featuredShowTitle}>
         {show.featured ? (
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-white/65">
-              This show is the home-page hero. Only one show can hold the
-              hero at a time.
+              {t.showEdit.heroCurrentDescription}
             </p>
             <form action={unsetFeaturedShow.bind(null, show.id)}>
               <button
                 type="submit"
                 className="inline-flex h-9 items-center rounded-md border border-white/15 px-4 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"
               >
-                Remove from hero
+                {t.showEdit.removeFromHero}
               </button>
             </form>
           </div>
@@ -112,8 +114,8 @@ export default async function EditShowPage({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-white/65">
               {isPublished
-                ? "Promote this show to the home-page hero. The current hero will be unfeatured."
-                : "Publish the show first — only published shows can be featured."}
+                ? t.showEdit.heroPromoteDescription
+                : t.showEdit.heroPublishFirstDescription}
             </p>
             <form action={setFeaturedShow.bind(null, show.id)}>
               <button
@@ -122,7 +124,7 @@ export default async function EditShowPage({
                 className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#ff3d3d] px-4 text-sm font-bold text-white transition-[filter] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Icon name="star" size={14} color="#ffffff" />
-                Feature on home
+                {t.showEdit.featureOnHome}
               </button>
             </form>
           </div>
@@ -131,18 +133,18 @@ export default async function EditShowPage({
 
       {/* Seasons */}
       <Panel
-        kicker="Content"
-        title="Seasons"
+        kicker={t.showEdit.contentKicker}
+        title={t.showEdit.seasonsTitle}
         right={
           <span className="font-mono text-xs text-white/45">
-            {showSeasons.length} {showSeasons.length === 1 ? "season" : "seasons"}
+            {t.showEdit.seasonCount(showSeasons.length)}
           </span>
         }
       >
         <div className="space-y-2">
           {showSeasons.length === 0 ? (
             <p className="rounded-lg border border-dashed border-white/10 py-6 text-center text-sm text-white/45">
-              No seasons yet. Add the first one below.
+              {t.showEdit.noSeasonsEmptyState}
             </p>
           ) : (
             showSeasons.map((season) => (
@@ -155,7 +157,7 @@ export default async function EditShowPage({
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm text-white/85">
                   <span className="font-semibold text-white">
-                    Season {season.number}
+                    {t.showEdit.seasonLabel(season.number)}
                   </span>
                   {season.title ? (
                     <span className="text-white/55"> · {season.title}</span>
@@ -165,14 +167,14 @@ export default async function EditShowPage({
                   href={`/admin/shows/${show.id}/seasons/${season.id}`}
                   className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 px-3 text-xs font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"
                 >
-                  Episodes
+                  {t.showEdit.episodes}
                   <Icon name="chevron-right" size={13} />
                 </Link>
                 <form action={deleteSeason.bind(null, season.id, show.id)}>
                   <ConfirmDeleteButton
-                    message={`Delete Season ${season.number}? All its episodes will also be removed.`}
+                    message={t.showEdit.deleteSeasonConfirm(season.number)}
                   >
-                    Delete
+                    {t.showEdit.delete}
                   </ConfirmDeleteButton>
                 </form>
               </div>
@@ -188,23 +190,23 @@ export default async function EditShowPage({
             name="number"
             type="number"
             min={1}
-            placeholder="#"
+            placeholder={t.showEdit.seasonNumberPlaceholder}
             required
             className="w-16 text-center"
-            aria-label="Season number"
+            aria-label={t.showEdit.seasonNumberAria}
           />
           <Input
             name="title"
-            placeholder="Title (optional)"
+            placeholder={t.showEdit.seasonTitlePlaceholder}
             className="flex-1"
-            aria-label="Season title"
+            aria-label={t.showEdit.seasonTitleAria}
           />
           <button
             type="submit"
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-white px-4 text-sm font-bold text-black transition-colors hover:bg-white/90"
           >
             <Icon name="plus" size={14} color="#0a0a0c" />
-            Add
+            {t.showEdit.add}
           </button>
         </form>
       </Panel>
@@ -212,18 +214,17 @@ export default async function EditShowPage({
       {/* Danger zone */}
       <section className="rounded-2xl border border-[#ff3d3d]/25 bg-[#ff3d3d]/[0.04] p-5 sm:p-6">
         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
-          Danger zone
+          {t.showEdit.dangerZone}
         </p>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-white/65">
-            Deleting removes this show from the catalog. Seasons and episodes
-            go with it.
+            {t.showEdit.deleteShowDescription}
           </p>
           <form action={softDeleteShow.bind(null, show.id)}>
             <ConfirmDeleteButton
-              message={`Delete "${show.title}"? This cannot be undone.`}
+              message={t.showEdit.deleteShowConfirm(show.title)}
             >
-              Delete this show
+              {t.showEdit.deleteThisShow}
             </ConfirmDeleteButton>
           </form>
         </div>
@@ -261,7 +262,13 @@ function Panel({
   );
 }
 
-function StatusPill({ status }: { status: "draft" | "published" }) {
+function StatusPill({
+  status,
+  t,
+}: {
+  status: "draft" | "published";
+  t: AdminDict;
+}) {
   return (
     <span
       className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] ${
@@ -270,16 +277,18 @@ function StatusPill({ status }: { status: "draft" | "published" }) {
           : "bg-white/10 text-white/65"
       }`}
     >
-      {status}
+      {status === "published"
+        ? t.showEdit.statusPublished
+        : t.showEdit.statusDraft}
     </span>
   );
 }
 
-function FeaturedPill() {
+function FeaturedPill({ t }: { t: AdminDict }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-[#ff3d3d]/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-[#ff3d3d]">
       <Icon name="star" size={10} color="#ff3d3d" />
-      Featured
+      {t.showEdit.featured}
     </span>
   );
 }

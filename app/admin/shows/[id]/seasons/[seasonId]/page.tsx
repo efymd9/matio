@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { EpisodeAccessSelect } from "@/components/admin/access-select";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { createEpisode, deleteEpisode } from "@/app/admin/actions";
+import { getAdminDict } from "@/lib/i18n/admin-server";
 
 export default async function SeasonPage({
   params,
@@ -23,6 +24,7 @@ export default async function SeasonPage({
   params: Promise<{ id: string; seasonId: string }>;
 }) {
   const { id, seasonId } = await params;
+  const { t } = await getAdminDict();
 
   const [show] = await db
     .select()
@@ -61,20 +63,14 @@ export default async function SeasonPage({
       <AdminPageHeader
         backHref={`/admin/shows/${show.id}`}
         backLabel={show.title}
-        kicker={`Season ${season.number}`}
-        title={season.title ? season.title : `Season ${season.number}`}
-        subtitle={
-          <>
-            {seasonEpisodes.length}{" "}
-            {seasonEpisodes.length === 1 ? "episode" : "episodes"} · {readyCount}{" "}
-            ready
-          </>
-        }
+        kicker={t.season.seasonN(season.number)}
+        title={season.title ? season.title : t.season.seasonN(season.number)}
+        subtitle={t.season.episodeCountReady(seasonEpisodes.length, readyCount)}
       />
 
       <Panel
-        kicker="Content"
-        title="Episodes"
+        kicker={t.season.panelKickerContent}
+        title={t.season.panelTitleEpisodes}
         right={
           <span className="font-mono text-xs text-white/45">
             {seasonEpisodes.length}
@@ -84,7 +80,7 @@ export default async function SeasonPage({
         <div className="space-y-2">
           {seasonEpisodes.length === 0 ? (
             <p className="rounded-lg border border-dashed border-white/10 py-6 text-center text-sm text-white/45">
-              No episodes yet. Add the first one below.
+              {t.season.emptyEpisodes}
             </p>
           ) : (
             seasonEpisodes.map((episode) => {
@@ -158,15 +154,18 @@ export default async function SeasonPage({
                       href={editHref}
                       className="inline-flex h-8 items-center rounded-md border border-white/15 px-3 text-xs font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"
                     >
-                      Edit
+                      {t.season.edit}
                     </Link>
                     <form
                       action={deleteEpisode.bind(null, episode.id, season.id, show.id)}
                     >
                       <ConfirmDeleteButton
-                        message={`Delete episode ${episode.number} "${episode.title}"? This cannot be undone.`}
+                        message={t.season.deleteEpisodeConfirm(
+                          episode.number,
+                          episode.title,
+                        )}
                       >
-                        Delete
+                        {t.season.delete}
                       </ConfirmDeleteButton>
                     </form>
                   </div>
@@ -181,9 +180,11 @@ export default async function SeasonPage({
           action={createEpisode.bind(null, season.id, show.id)}
           className="mt-5 space-y-4 border-t border-white/[0.06] pt-5"
         >
-          <p className="text-sm font-semibold text-white">Add an episode</p>
+          <p className="text-sm font-semibold text-white">
+            {t.season.addAnEpisode}
+          </p>
           <div className="grid gap-4 sm:grid-cols-[90px_1fr]">
-            <Field label="Number" htmlFor="ep-number" required>
+            <Field label={t.season.fieldNumber} htmlFor="ep-number" required>
               <Input
                 id="ep-number"
                 name="number"
@@ -193,16 +194,21 @@ export default async function SeasonPage({
                 className="text-center"
               />
             </Field>
-            <Field label="Title" htmlFor="ep-title" required>
-              <Input id="ep-title" name="title" required placeholder="Episode title" />
+            <Field label={t.season.fieldTitle} htmlFor="ep-title" required>
+              <Input
+                id="ep-title"
+                name="title"
+                required
+                placeholder={t.season.episodeTitlePlaceholder}
+              />
             </Field>
           </div>
-          <Field label="Description" htmlFor="ep-description">
+          <Field label={t.season.fieldDescription} htmlFor="ep-description">
             <Textarea
               id="ep-description"
               name="description"
               rows={2}
-              placeholder="Optional synopsis."
+              placeholder={t.season.descriptionPlaceholder}
             />
           </Field>
           <div className="flex justify-end">
@@ -211,7 +217,7 @@ export default async function SeasonPage({
               className="inline-flex h-10 items-center gap-1.5 rounded-md bg-[#ff3d3d] px-4 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.8)] transition-[filter] hover:brightness-110 active:scale-[0.99]"
             >
               <Icon name="plus" size={15} color="#ffffff" />
-              Add episode
+              {t.season.addEpisodeButton}
             </button>
           </div>
         </form>

@@ -4,6 +4,7 @@ import { createUpload } from "@mux/upchunk";
 import { useRouter } from "next/navigation";
 import { useId, useRef, useState } from "react";
 import { createMuxUpload, markEpisodeReprocessing } from "@/app/admin/actions";
+import { useAdminT } from "@/lib/i18n/admin-client";
 
 type Status = "idle" | "preparing" | "uploading" | "uploaded" | "error";
 
@@ -19,6 +20,7 @@ function formatSize(bytes: number): string {
 // event (so a cancelled upload never strands the episode — see
 // app/admin/actions.ts). Everything here is the surface around that.
 export function UploadWidget({ episodeId }: { episodeId: string }) {
+  const t = useAdminT();
   const router = useRouter();
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -33,7 +35,7 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
   function pickFile(next: File | null) {
     if (!next) return;
     if (!next.type.startsWith("video/")) {
-      setError("That doesn’t look like a video file.");
+      setError(t.uploadWidget.invalidVideoFile);
       return;
     }
     setFile(next);
@@ -54,7 +56,9 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
       uploadUrl = result.uploadUrl;
     } catch (err) {
       setStatus("error");
-      setError(err instanceof Error ? err.message : "Failed to start upload");
+      setError(
+        err instanceof Error ? err.message : t.uploadWidget.failedToStartUpload,
+      );
       return;
     }
 
@@ -67,7 +71,7 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
     upload.on("error", (e) => {
       const detail = (e as CustomEvent<{ message?: string }>).detail;
       setStatus("error");
-      setError(detail?.message ?? "Upload failed");
+      setError(detail?.message ?? t.uploadWidget.uploadFailed);
     });
     upload.on("progress", (e) => {
       setProgress((e as CustomEvent<number>).detail);
@@ -81,7 +85,7 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
         setError(
           err instanceof Error
             ? err.message
-            : "Upload finished but the server couldn’t mark the episode reprocessing",
+            : t.uploadWidget.uploadFinishedButMarkFailed,
         );
         return;
       }
@@ -139,11 +143,11 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
             <UploadGlyph />
           </span>
           <span className="text-sm font-semibold text-white">
-            Drop a video here, or{" "}
-            <span className="text-[#ff3d3d]">browse</span>
+            {t.uploadWidget.dropVideoPrefix}
+            <span className="text-[#ff3d3d]">{t.uploadWidget.browse}</span>
           </span>
           <span className="text-[11px] text-white/40">
-            MP4, MOV, or any video file · uploaded straight to Mux
+            {t.uploadWidget.acceptedFormatsHint}
           </span>
         </label>
       ) : (
@@ -163,7 +167,7 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
             {status === "uploaded" ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-[#7fd87a]/15 px-2.5 py-1 text-[11px] font-bold text-[#7fd87a]">
                 <CheckGlyph />
-                Uploaded
+                {t.uploadWidget.uploadedBadge}
               </span>
             ) : !isWorking ? (
               <button
@@ -171,7 +175,7 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
                 onClick={reset}
                 className="text-xs font-medium text-white/50 transition-colors hover:text-white"
               >
-                Remove
+                {t.uploadWidget.remove}
               </button>
             ) : null}
           </div>
@@ -189,10 +193,10 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
               </div>
               <p className="mt-1.5 font-mono text-[11px] text-white/50">
                 {status === "preparing"
-                  ? "Preparing upload…"
+                  ? t.uploadWidget.preparingUpload
                   : status === "uploading"
-                    ? `Uploading · ${progress.toFixed(0)}%`
-                    : "Transcoding on Mux — this page will refresh"}
+                    ? t.uploadWidget.uploadingProgress(progress.toFixed(0))
+                    : t.uploadWidget.transcodingNotice}
               </p>
             </div>
           )}
@@ -205,7 +209,7 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
               className="mt-3.5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-[#ff3d3d] text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.8)] transition-[filter] hover:brightness-110 active:scale-[0.99]"
             >
               <UploadGlyph small />
-              Start upload
+              {t.uploadWidget.startUpload}
             </button>
           )}
         </div>
@@ -226,7 +230,7 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
               }}
               className="mt-0.5 text-xs font-medium text-white/50 transition-colors hover:text-white"
             >
-              Dismiss
+              {t.uploadWidget.dismiss}
             </button>
           </div>
         </div>

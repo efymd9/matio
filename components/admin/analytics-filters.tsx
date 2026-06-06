@@ -2,6 +2,8 @@
 
 import { useCallback, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useAdminT } from "@/lib/i18n/admin-client";
+import type { AdminDict } from "@/lib/i18n/admin-dictionaries";
 import type {
   AnalyticsFilters,
   GranularityChoice,
@@ -12,21 +14,39 @@ import type {
 // the server component re-queries. Native controls — no chart/UI dependency,
 // fully keyboard-accessible, matches the cinema control-room theme.
 
-const PRESETS: { key: string; label: string }[] = [
+// Keys stay at module scope; display labels resolve at render via the dict.
+// The 24h/7d/30d/90d preset labels are language-neutral tokens and stay as-is;
+// only the "all" preset label translates.
+const PRESETS: { key: string; label: string | null }[] = [
   { key: "24h", label: "24h" },
   { key: "7d", label: "7d" },
   { key: "30d", label: "30d" },
   { key: "90d", label: "90d" },
-  { key: "all", label: "All" },
+  { key: "all", label: null },
 ];
 
-const GRANS: { key: GranularityChoice; label: string }[] = [
-  { key: "auto", label: "Auto" },
-  { key: "hour", label: "Hourly" },
-  { key: "day", label: "Daily" },
-  { key: "week", label: "Weekly" },
-  { key: "month", label: "Monthly" },
+const GRANS: { key: GranularityChoice }[] = [
+  { key: "auto" },
+  { key: "hour" },
+  { key: "day" },
+  { key: "week" },
+  { key: "month" },
 ];
+
+function granLabel(t: AdminDict, key: GranularityChoice): string {
+  switch (key) {
+    case "auto":
+      return t.analyticsFilters.granularityAuto;
+    case "hour":
+      return t.analyticsFilters.granularityHourly;
+    case "day":
+      return t.analyticsFilters.granularityDaily;
+    case "week":
+      return t.analyticsFilters.granularityWeekly;
+    case "month":
+      return t.analyticsFilters.granularityMonthly;
+  }
+}
 
 export function AnalyticsFilters({
   filters,
@@ -39,6 +59,7 @@ export function AnalyticsFilters({
   channels: string[];
   campaigns: string[];
 }) {
+  const t = useAdminT();
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -79,7 +100,7 @@ export function AnalyticsFilters({
               onClick={() => patch({ range: p.key, from: null, to: null })}
               className={chip(filters.preset === p.key)}
             >
-              {p.label}
+              {p.label ?? t.analyticsFilters.presetAll}
             </button>
           ))}
           <button
@@ -93,7 +114,7 @@ export function AnalyticsFilters({
             }
             className={chip(isCustom)}
           >
-            Custom
+            {t.analyticsFilters.customPreset}
           </button>
         </div>
 
@@ -106,7 +127,7 @@ export function AnalyticsFilters({
               max={filters.customTo ?? undefined}
               onChange={(e) => patch({ range: "custom", from: e.target.value })}
               className={dateInput}
-              aria-label="From date"
+              aria-label={t.analyticsFilters.fromDateAria}
             />
             <span className="text-white/35">→</span>
             <input
@@ -115,14 +136,14 @@ export function AnalyticsFilters({
               min={filters.customFrom ?? undefined}
               onChange={(e) => patch({ range: "custom", to: e.target.value })}
               className={dateInput}
-              aria-label="To date"
+              aria-label={t.analyticsFilters.toDateAria}
             />
           </div>
         ) : null}
 
         <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-2">
           {/* Granularity */}
-          <Labeled label="Interval">
+          <Labeled label={t.analyticsFilters.intervalLabel}>
             <select
               value={filters.granularityChoice}
               onChange={(e) =>
@@ -132,14 +153,14 @@ export function AnalyticsFilters({
             >
               {GRANS.map((g) => (
                 <option key={g.key} value={g.key}>
-                  {g.label}
+                  {granLabel(t, g.key)}
                 </option>
               ))}
             </select>
           </Labeled>
 
           {/* Show */}
-          <Labeled label="Show">
+          <Labeled label={t.analyticsFilters.showLabel}>
             <select
               value={filters.show}
               onChange={(e) =>
@@ -147,7 +168,7 @@ export function AnalyticsFilters({
               }
               className={select}
             >
-              <option value="all">All shows</option>
+              <option value="all">{t.analyticsFilters.allShows}</option>
               {shows.map((s) => (
                 <option key={s.slug} value={s.slug}>
                   {s.title}
@@ -157,7 +178,7 @@ export function AnalyticsFilters({
           </Labeled>
 
           {/* Channel */}
-          <Labeled label="Channel">
+          <Labeled label={t.analyticsFilters.channelLabel}>
             <select
               value={filters.channel}
               onChange={(e) =>
@@ -167,7 +188,7 @@ export function AnalyticsFilters({
               }
               className={select}
             >
-              <option value="all">All channels</option>
+              <option value="all">{t.analyticsFilters.allChannels}</option>
               {channels.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -177,7 +198,7 @@ export function AnalyticsFilters({
           </Labeled>
 
           {/* Campaign */}
-          <Labeled label="Campaign">
+          <Labeled label={t.analyticsFilters.campaignLabel}>
             <select
               value={filters.campaign}
               onChange={(e) =>
@@ -187,7 +208,7 @@ export function AnalyticsFilters({
               }
               className={select}
             >
-              <option value="all">All campaigns</option>
+              <option value="all">{t.analyticsFilters.allCampaigns}</option>
               {campaigns.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -197,7 +218,7 @@ export function AnalyticsFilters({
           </Labeled>
 
           {/* Status scope */}
-          <Labeled label="Subs">
+          <Labeled label={t.analyticsFilters.subsLabel}>
             <select
               value={filters.status}
               onChange={(e) =>
@@ -205,9 +226,9 @@ export function AnalyticsFilters({
               }
               className={select}
             >
-              <option value="ag">Access-granting</option>
-              <option value="active">Active only</option>
-              <option value="all">All statuses</option>
+              <option value="ag">{t.analyticsFilters.statusAccessGranting}</option>
+              <option value="active">{t.analyticsFilters.statusActiveOnly}</option>
+              <option value="all">{t.analyticsFilters.statusAll}</option>
             </select>
           </Labeled>
 
@@ -218,14 +239,14 @@ export function AnalyticsFilters({
               onClick={() => patch({ attr: null })}
               className={chip(filters.attribution === "first")}
             >
-              First-touch
+              {t.analyticsFilters.firstTouch}
             </button>
             <button
               type="button"
               onClick={() => patch({ attr: "last" })}
               className={chip(filters.attribution === "last")}
             >
-              Last-touch
+              {t.analyticsFilters.lastTouch}
             </button>
           </div>
 
@@ -235,7 +256,7 @@ export function AnalyticsFilters({
             onClick={() => router.push(pathname, { scroll: false })}
             className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white/45 transition-colors hover:text-white"
           >
-            Reset
+            {t.analyticsFilters.reset}
           </button>
         </div>
       </div>

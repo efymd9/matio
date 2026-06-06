@@ -5,6 +5,7 @@ import { useId, useRef, useState } from "react";
 import { Icon } from "@/components/site/icon";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAdminT } from "@/lib/i18n/admin-client";
 
 type Status = "idle" | "uploading" | "error";
 
@@ -38,6 +39,7 @@ export function ImageUploadField({
   ratio: "poster" | "hero";
   hint: string;
 }) {
+  const t = useAdminT();
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<Status>("idle");
@@ -53,7 +55,7 @@ export function ImageUploadField({
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       setStatus("error");
-      setError("That doesn’t look like an image file.");
+      setError(t.imageUpload.notAnImage);
       return;
     }
     setStatus("uploading");
@@ -75,7 +77,7 @@ export function ImageUploadField({
       setStatus("idle");
     } catch (err) {
       setStatus("error");
-      setError(err instanceof Error ? err.message : "Upload failed");
+      setError(err instanceof Error ? err.message : t.imageUpload.uploadFailed);
     } finally {
       // Allow re-selecting the same file after a remove/replace.
       if (inputRef.current) inputRef.current.value = "";
@@ -127,7 +129,7 @@ export function ImageUploadField({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={trimmed}
-              alt={`${label} preview`}
+              alt={t.imageUpload.altPreview(label)}
               className="absolute inset-0 h-full w-full object-cover"
               onError={() => setBroken(true)}
             />
@@ -136,7 +138,7 @@ export function ImageUploadField({
               <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-150 group-hover:bg-black/55 group-hover:opacity-100">
                 <span className="flex items-center gap-1.5 text-xs font-semibold text-white">
                   <UploadGlyph />
-                  Drop or click to replace
+                  {t.imageUpload.dropOrClickToReplace}
                 </span>
               </div>
             )}
@@ -151,11 +153,13 @@ export function ImageUploadField({
               />
             </span>
             <span className="text-[11px] font-semibold text-white/70">
-              {broken ? "Couldn’t load this URL" : "Drop image"}
-              {!broken && <span className="text-[#ff3d3d]"> or browse</span>}
+              {broken ? t.imageUpload.couldntLoadUrl : t.imageUpload.dropImage}
+              {!broken && (
+                <span className="text-[#ff3d3d]"> {t.imageUpload.orBrowse}</span>
+              )}
             </span>
             <span className="text-[10px] text-white/35">
-              PNG, JPG, WebP · uploaded to Blob
+              {t.imageUpload.formatHint}
             </span>
           </div>
         )}
@@ -174,7 +178,7 @@ export function ImageUploadField({
               />
             </div>
             <span className="font-mono text-[11px] text-white/70">
-              Uploading · {progress.toFixed(0)}%
+              {t.imageUpload.uploadingPercent(progress.toFixed(0))}
             </span>
           </div>
         )}
@@ -196,7 +200,7 @@ export function ImageUploadField({
           setBroken(false);
           if (status === "error") setStatus("idle");
         }}
-        placeholder="/shows/my-show-poster.png — or drop a file above"
+        placeholder={t.imageUpload.urlPlaceholder}
         className="font-mono text-xs"
       />
 
@@ -220,7 +224,7 @@ export function ImageUploadField({
               }}
               className="mt-0.5 text-[11px] font-medium text-white/50 transition-colors hover:text-white"
             >
-              Dismiss
+              {t.imageUpload.dismiss}
             </button>
           </div>
         </div>

@@ -2,6 +2,7 @@
 
 import { useFormStatus } from "react-dom";
 import { Icon } from "@/components/site/icon";
+import { useAdminT } from "@/lib/i18n/admin-client";
 
 // Reusable submit button for admin server-action forms. Reads the
 // wrapping <form>'s pending state via useFormStatus and swaps to a
@@ -17,6 +18,7 @@ export function FormSubmitButton({
   icon?: "check" | "plus";
 }) {
   const { pending } = useFormStatus();
+  const t = useAdminT();
   return (
     <button
       type="submit"
@@ -27,7 +29,7 @@ export function FormSubmitButton({
       {pending ? (
         <>
           <Spinner />
-          <span>{pendingLabel ?? "Saving…"}</span>
+          <span>{pendingLabel ?? t.formSubmit.savingDefault}</span>
         </>
       ) : (
         <>

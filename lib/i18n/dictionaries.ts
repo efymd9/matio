@@ -1,6 +1,7 @@
 // String dictionaries for the public surface (catalog, watch, subscribe,
-// errors). Admin pages are intentionally not translated and continue to
-// render hard-coded English.
+// errors). Admin pages are NOT covered here — the admin panel has its own
+// separate ru/en system in admin-dictionaries.ts (Russian default, own
+// admin_locale cookie) that never affects the visitor-facing language.
 //
 // Spanish (es-ES) is the default. English is the secondary locale.
 // Both dicts import here, so they can be referenced from server and

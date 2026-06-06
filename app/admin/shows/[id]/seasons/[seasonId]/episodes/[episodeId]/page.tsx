@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AccessFormSelect } from "@/components/admin/access-select";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { deleteEpisode, updateEpisode } from "@/app/admin/actions";
+import { getAdminDict } from "@/lib/i18n/admin-server";
 
 function formatDuration(seconds: number | null): string {
   if (!seconds) return "—";
@@ -31,6 +32,7 @@ export default async function EditEpisodePage({
   params: Promise<{ id: string; seasonId: string; episodeId: string }>;
 }) {
   const { id, seasonId, episodeId } = await params;
+  const { t } = await getAdminDict();
 
   const [show] = await db
     .select()
@@ -83,8 +85,8 @@ export default async function EditEpisodePage({
     <div className="mx-auto max-w-3xl space-y-7">
       <AdminPageHeader
         backHref={`/admin/shows/${show.id}/seasons/${season.id}`}
-        backLabel={`${show.title} · Season ${season.number}`}
-        kicker={`Season ${season.number} · Episode ${episode.number}`}
+        backLabel={t.episode.backLabelSeason(show.title, season.number)}
+        kicker={t.episode.kickerSeasonEpisode(season.number, episode.number)}
         title={episode.title}
         pills={
           <EpisodeStatusBadge
@@ -96,9 +98,11 @@ export default async function EditEpisodePage({
 
       {/* Video */}
       <Panel
-        kicker="Video"
-        title={episode.muxAssetId ? "Replace video" : "Upload video"}
-        hint="Files upload directly to Mux. After upload, Mux transcodes and the status flips to Ready automatically."
+        kicker={t.episode.videoKicker}
+        title={
+          episode.muxAssetId ? t.episode.replaceVideo : t.episode.uploadVideo
+        }
+        hint={t.episode.videoUploadHint}
       >
         <div className="space-y-5">
           {/* Preview frame + metadata */}
@@ -121,29 +125,31 @@ export default async function EditEpisodePage({
                     E{episode.number}
                   </span>
                   <span className="text-[11px] text-white/35">
-                    {episode.muxAssetId ? "No preview yet" : "No video"}
+                    {episode.muxAssetId
+                      ? t.episode.noPreviewYet
+                      : t.episode.noVideo}
                   </span>
                 </div>
               )}
             </div>
             <dl className="grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2 self-start text-sm">
-              <MetaRow label="Status">
+              <MetaRow label={t.episode.metaStatus}>
                 <EpisodeStatusBadge
                   status={episode.status}
                   hasAsset={!!episode.muxAssetId}
                 />
               </MetaRow>
-              <MetaRow label="Duration">
+              <MetaRow label={t.episode.metaDuration}>
                 <span className="text-white/80">
                   {formatDuration(episode.durationSeconds)}
                 </span>
               </MetaRow>
-              <MetaRow label="Asset ID">
+              <MetaRow label={t.episode.metaAssetId}>
                 <span className="break-all font-mono text-[11px] text-white/55">
                   {episode.muxAssetId ?? "—"}
                 </span>
               </MetaRow>
-              <MetaRow label="Playback ID">
+              <MetaRow label={t.episode.metaPlaybackId}>
                 <span className="break-all font-mono text-[11px] text-white/55">
                   {episode.muxPlaybackId ?? "—"}
                 </span>
@@ -158,13 +164,13 @@ export default async function EditEpisodePage({
       </Panel>
 
       {/* Details */}
-      <Panel kicker="Details" title="Episode info">
+      <Panel kicker={t.episode.detailsKicker} title={t.episode.episodeInfo}>
         <form
           action={updateEpisode.bind(null, episode.id, season.id, show.id)}
           className="space-y-5"
         >
           <div className="grid gap-4 sm:grid-cols-[120px_1fr]">
-            <Field label="Number" htmlFor="number" required>
+            <Field label={t.episode.fieldNumber} htmlFor="number" required>
               <Input
                 id="number"
                 name="number"
@@ -175,7 +181,7 @@ export default async function EditEpisodePage({
                 className="text-center"
               />
             </Field>
-            <Field label="Title" htmlFor="title" required>
+            <Field label={t.episode.fieldTitle} htmlFor="title" required>
               <Input
                 id="title"
                 name="title"
@@ -184,7 +190,7 @@ export default async function EditEpisodePage({
               />
             </Field>
           </div>
-          <Field label="Description" htmlFor="description">
+          <Field label={t.episode.fieldDescription} htmlFor="description">
             <Textarea
               id="description"
               name="description"
@@ -194,8 +200,8 @@ export default async function EditEpisodePage({
           </Field>
 
           <Field
-            label="Who can watch"
-            hint="Free — anyone, no account. Members — any signed-in user. Subscribers — paid members only."
+            label={t.accessSelect.whoCanWatch}
+            hint={t.accessSelect.whoCanWatchHint}
           >
             <AccessFormSelect name="access" defaultValue={episode.access} />
           </Field>
@@ -203,56 +209,68 @@ export default async function EditEpisodePage({
           {/* Skip-intro markers */}
           <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
             <div className="flex items-baseline justify-between gap-2">
-              <p className="text-sm font-semibold text-white">Skip intro</p>
+              <p className="text-sm font-semibold text-white">
+                {t.episode.skipIntro}
+              </p>
               <span className="text-[11px] text-white/45">
-                Leave both blank to hide the chip
+                {t.episode.skipIntroBlankHint}
               </span>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3">
-              <Field label="Start" htmlFor="introStartSeconds" hint="seconds">
+              <Field
+                label={t.episode.fieldStart}
+                htmlFor="introStartSeconds"
+                hint={t.episode.secondsHint}
+              >
                 <Input
                   id="introStartSeconds"
                   name="introStartSeconds"
                   type="number"
                   min={0}
                   step={1}
-                  placeholder="e.g. 5"
+                  placeholder={t.episode.skipIntroPlaceholderStart}
                   defaultValue={episode.introStartSeconds ?? ""}
                 />
               </Field>
-              <Field label="End" htmlFor="introEndSeconds" hint="seconds">
+              <Field
+                label={t.episode.fieldEnd}
+                htmlFor="introEndSeconds"
+                hint={t.episode.secondsHint}
+              >
                 <Input
                   id="introEndSeconds"
                   name="introEndSeconds"
                   type="number"
                   min={1}
                   step={1}
-                  placeholder="e.g. 60"
+                  placeholder={t.episode.skipIntroPlaceholderEnd}
                   defaultValue={episode.introEndSeconds ?? ""}
                 />
               </Field>
             </div>
             <p className="mt-2.5 text-[11px] leading-relaxed text-white/45">
-              The player shows a “Skip intro” pill while playback is in this
-              window and seeks to End on click.
+              {t.episode.skipIntroExplain}
             </p>
           </div>
 
           <div className="flex justify-end">
-            <FormSubmitButton icon="check" pendingLabel="Saving…">
-              Save changes
+            <FormSubmitButton
+              icon="check"
+              pendingLabel={t.episode.savingPending}
+            >
+              {t.episode.saveChanges}
             </FormSubmitButton>
           </div>
         </form>
       </Panel>
 
       {/* Danger zone */}
-      <DangerPanel description="Deleting removes this episode and its video link. This cannot be undone.">
+      <DangerPanel description={t.episode.deleteDescription}>
         <form action={deleteEpisode.bind(null, episode.id, season.id, show.id)}>
           <ConfirmDeleteButton
-            message={`Delete episode ${episode.number} "${episode.title}"? This cannot be undone.`}
+            message={t.episode.deleteConfirm(episode.number, episode.title)}
           >
-            Delete this episode
+            {t.episode.deleteThisEpisode}
           </ConfirmDeleteButton>
         </form>
       </DangerPanel>

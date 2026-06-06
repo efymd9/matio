@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useFormStatus } from "react-dom";
+import { useAdminT } from "@/lib/i18n/admin-client";
 import { Icon } from "@/components/site/icon";
 import { ImageUploadField } from "@/components/admin/image-upload-field";
 import { StatusSelect } from "@/components/admin/status-select";
@@ -53,6 +54,7 @@ export function ShowForm({
   mode: "create" | "edit";
   cancelHref?: string;
 }) {
+  const t = useAdminT();
   const [poster, setPoster] = useState(defaultValues.posterImageUrl);
   const [hero, setHero] = useState(defaultValues.heroImageUrl);
   const [dirty, setDirty] = useState(false);
@@ -64,64 +66,67 @@ export function ShowForm({
       onSubmit={() => setDirty(false)}
       className="space-y-5 pb-28"
     >
-      <Panel kicker="Identity" title="Title, slug & story">
+      <Panel
+        kicker={t.showForm.identityKicker}
+        title={t.showForm.identityTitle}
+      >
         <div className="grid gap-5 sm:grid-cols-[1fr_auto]">
-          <Field label="Title" htmlFor="title" required>
+          <Field label={t.showForm.titleLabel} htmlFor="title" required>
             <Input
               id="title"
               name="title"
               defaultValue={defaultValues.title}
               required
-              placeholder="QUÉDATE CONMIGO"
+              placeholder={t.showForm.titlePlaceholder}
             />
           </Field>
           <Field
-            label="Slug"
+            label={t.showForm.slugLabel}
             htmlFor="slug"
             required
-            hint="lowercase-with-hyphens"
+            hint={t.showForm.slugHint}
           >
             <Input
               id="slug"
               name="slug"
               defaultValue={defaultValues.slug}
               required
-              placeholder="quedate-conmigo"
+              placeholder={t.showForm.slugPlaceholder}
               className="font-mono sm:w-64"
             />
           </Field>
         </div>
-        <Field label="Description" htmlFor="description">
+        <Field label={t.showForm.descriptionLabel} htmlFor="description">
           <Textarea
             id="description"
             name="description"
             defaultValue={defaultValues.description}
             rows={4}
-            placeholder="One or two sentences that sell the show."
+            placeholder={t.showForm.descriptionPlaceholder}
           />
         </Field>
         <Field
-          label="Genre"
+          label={t.showForm.genreLabel}
           htmlFor="genre"
-          hint="Comma-separated. Shown as tags on the catalog."
+          hint={t.showForm.genreHint}
         >
           <Input
             id="genre"
             name="genre"
             defaultValue={defaultValues.genre}
-            placeholder="romance, thriller, drama"
+            placeholder={t.showForm.genrePlaceholder}
           />
         </Field>
       </Panel>
 
       <Panel
-        kicker="Artwork"
-        title="Poster & hero"
-        hint="Drop a file to upload — the preview shows the exact crop the site will render."
+        kicker={t.showForm.artworkKicker}
+        title={t.showForm.artworkTitle}
+        hint={t.showForm.artworkHint}
       >
         <div className="grid gap-6 sm:grid-cols-2">
           <ImageUploadField
-            label="Poster"
+            label={t.showForm.posterLabel}
             name="posterImageUrl"
             value={poster}
             onChange={(v) => {
@@ -129,10 +134,10 @@ export function ShowForm({
               setDirty(true);
             }}
             ratio="poster"
-            hint="Portrait 2:3 · 1024×1536. Catalog cards + OG fallback."
+            hint={t.showForm.posterHint}
           />
           <ImageUploadField
-            label="Hero"
+            label={t.showForm.heroLabel}
             name="heroImageUrl"
             value={hero}
             onChange={(v) => {
@@ -140,34 +145,36 @@ export function ShowForm({
               setDirty(true);
             }}
             ratio="hero"
-            hint="Wide ≈21:9 · 2560×1080, no baked title. Detail page + home hero. Keep subjects in the centre 60%."
+            hint={t.showForm.heroHint}
           />
         </div>
       </Panel>
 
-      <Panel kicker="Visibility" title="Status & placement">
+      <Panel
+        kicker={t.showForm.visibilityKicker}
+        title={t.showForm.visibilityTitle}
+      >
         <div className="space-y-5">
-          <Field label="Status" hint="Drafts are hidden from the public catalog.">
+          <Field label={t.showForm.statusLabel} hint={t.showForm.statusHint}>
             <StatusSelect name="status" defaultValue={defaultValues.status} />
           </Field>
 
           <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/55">
-              Homepage rows
+              {t.showForm.homepageRowsLabel}
             </p>
             <p className="mt-1 text-xs text-white/45">
-              Which rows this show appears in on the home page. It can be in
-              both, either, or neither (still reachable via its URL).
+              {t.showForm.homepageRowsHint}
             </p>
             <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
               <CheckCard
                 name="justReleased"
-                label="Just released"
+                label={t.showForm.justReleasedLabel}
                 defaultChecked={defaultValues.justReleased}
               />
               <CheckCard
                 name="popularNow"
-                label="Popular now"
+                label={t.showForm.popularNowLabel}
                 defaultChecked={defaultValues.popularNow}
               />
             </div>
@@ -277,6 +284,7 @@ function SaveBar({
   mode: "create" | "edit";
   cancelHref?: string;
 }) {
+  const t = useAdminT();
   return (
     <div className="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#141417]/90 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:px-5">
       <span className="flex items-center gap-2 text-xs text-white/50">
@@ -285,7 +293,7 @@ function SaveBar({
             dirty ? "bg-[#ff3d3d]" : "bg-white/25"
           }`}
         />
-        {dirty ? "Unsaved changes" : "All changes saved"}
+        {dirty ? t.showForm.unsavedChanges : t.showForm.allChangesSaved}
       </span>
       <div className="flex items-center gap-2">
         {cancelHref ? (
@@ -293,7 +301,7 @@ function SaveBar({
             href={cancelHref}
             className="inline-flex h-10 items-center rounded-md border border-white/15 px-4 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"
           >
-            Cancel
+            {t.showForm.cancel}
           </Link>
         ) : null}
         <SaveButton mode={mode} />
@@ -303,6 +311,7 @@ function SaveBar({
 }
 
 function SaveButton({ mode }: { mode: "create" | "edit" }) {
+  const t = useAdminT();
   const { pending } = useFormStatus();
   return (
     <button
@@ -314,12 +323,16 @@ function SaveButton({ mode }: { mode: "create" | "edit" }) {
       {pending ? (
         <>
           <Spinner />
-          <span>Saving…</span>
+          <span>{t.showForm.saving}</span>
         </>
       ) : (
         <>
           <Icon name={mode === "create" ? "plus" : "check"} size={15} color="#ffffff" />
-          <span>{mode === "create" ? "Create show" : "Save changes"}</span>
+          <span>
+            {mode === "create"
+              ? t.showForm.createShow
+              : t.showForm.saveChanges}
+          </span>
         </>
       )}
     </button>
