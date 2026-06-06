@@ -172,6 +172,26 @@ Existing deployments keep their snapshot of env vars — only the **next** deplo
 
 **Build settings**: framework auto-detected as Next.js. Routes are dynamic (`ƒ`) by default since they hit DB / cookies.
 
+## Vercel Blob (show artwork)
+
+**Used for**: admin-uploaded poster + hero images on shows. Videos stay on Mux; Blob is images only.
+
+**Store**: `matio-blob` — region **Frankfurt** (co-located with the `fra1` functions and the UK-based admin doing uploads; reads are CDN-edge-cached either way), access **Public** (required: the public pages render these URLs through `next/image`, which fetches them with no auth). Region and access are fixed at store creation.
+
+**Setup** (one-time, already done for prod):
+1. Vercel dashboard → **Storage → Create → Blob** → name it, pick Frankfurt, Public access.
+2. **Connect** the store to the `matio` project — this injects `BLOB_READ_WRITE_TOKEN` into Production/Preview/Development automatically.
+3. Locally: `vercel env pull` (or copy just the `BLOB_READ_WRITE_TOKEN` line into `.env.local`).
+
+CLI equivalent for step 1: `vercel blob create-store <name>` (note: `create-store`, not `store add`).
+
+**Env vars**:
+- `BLOB_READ_WRITE_TOKEN` — **secret**. Read by `handleUpload` in `app/api/admin/upload-image/route.ts` (token minting) and by `del()` in `app/admin/actions.ts` (orphan cleanup). Leave blank to disable uploads — the drop zone surfaces an error and the paste-a-URL fallback still works.
+
+**Flow**: drag-and-drop in the show form → `upload()` from `@vercel/blob/client` streams the file **browser → Blob** (bytes never touch our functions); our route only issues a short-lived token scoped to image content-types, ≤15 MB, and `shows/(poster|hero)-*` pathnames with `addRandomSuffix`. The resulting `https://<storeId>.public.blob.vercel-storage.com/shows/…` URL is saved in `shows.poster_image_url` / `hero_image_url` like any other URL. `updateShow` best-effort-deletes the old Blob object when artwork is replaced or cleared (only if the old URL is on the Blob host).
+
+**next/image**: `*.public.blob.vercel-storage.com` is allowlisted in `next.config.ts` `images.remotePatterns` — a single-level wildcard covers any store id.
+
 ## Meta (Pixel + Conversions API)
 
 **Used for**: advertising measurement for Facebook/Instagram campaigns. Browser **Meta Pixel** (top-of-funnel events) + server-side **Conversions API** (the reliable Purchase signal). Both are **gated on marketing consent** — nothing fires until the visitor accepts marketing cookies in the banner, consistent with the existing attribution gate.
@@ -236,5 +256,6 @@ Leave all three blank to keep PostHog entirely off — both the client provider 
 | Mux | `lib/mux.ts`, `lib/mux-token.ts` (playback + thumbnail JWT signers), `app/admin/actions.ts:createMuxUpload`, `app/api/webhooks/mux/route.ts`, `app/api/playback-token/route.ts`, `components/admin/upload-widget.tsx`, `components/watch/player.tsx`, `components/watch/episodes-overlay.tsx`, `components/watch/up-next-overlay.tsx`, `components/site/hero-banner.tsx` (mux-player hero preview) |
 | Neon | `db/index.ts`, `db/schema/*.ts`, `drizzle.config.ts`, `drizzle/` |
 | Vercel | platform-only; see [operations.md](./operations.md#deploy) |
+| Vercel Blob | `app/api/admin/upload-image/route.ts` (token issuer), `components/admin/image-upload-field.tsx` (drag-and-drop client), `app/admin/actions.ts:deleteOrphanedBlob` (cleanup on replace/clear), `next.config.ts` (remotePatterns) |
 | Meta | `lib/meta-pixel-events.ts`, `lib/meta-capi.ts`, `lib/capi-identity.ts`, `components/site/meta-pixel.tsx`, `components/site/view-content-pixel.tsx`, `components/site/complete-registration-pixel.tsx`, `app/subscribe/{actions.ts,submit-button.tsx,page.tsx}`, `app/api/webhooks/stripe/route.ts`, `proxy.ts` |
 | PostHog | `components/site/posthog-provider.tsx`, `lib/posthog-events.ts`, `lib/posthog-server.ts`, `app/api/webhooks/stripe/route.ts`, `next.config.ts` (rewrite), `proxy.ts` (matcher exclusion) |

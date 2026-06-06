@@ -15,6 +15,8 @@ pnpm dev                         # next dev --turbopack on :3000
 
 Clerk runs in **keyless** mode if you leave `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` blank — first dev boot creates `.clerk/.tmp/keyless.json` (gitignored) with throwaway dev keys.
 
+Poster/hero drag-and-drop needs `BLOB_READ_WRITE_TOKEN` (injected by the connected Blob store — grab it with `vercel env pull`, or copy just that line into `.env.local`). Left blank, the drop zone errors cleanly and the paste-a-URL fallback still works.
+
 ## pnpm scripts
 
 | Command | What it does |
@@ -179,7 +181,7 @@ vercel env pull .env.vercel.production
 
 ### Show artwork — image specs
 
-The admin form has two image URL fields. Both are optional (a show with neither just gets the deterministic tone-gradient placeholder), but a published show is much more compelling with real art.
+The admin form has two artwork fields — **drag-and-drop upload** (client-direct to Vercel Blob) with an editable URL input as fallback. Both are optional (a show with neither just gets the deterministic tone-gradient placeholder), but a published show is much more compelling with real art.
 
 **Poster** (`posterImageUrl`)
 - **Aspect:** 2:3 portrait — the same shape as a printed movie poster.
@@ -201,7 +203,7 @@ The admin form has two image URL fields. Both are optional (a show with neither 
 **File format / size**
 - JPG, PNG, WebP, or AVIF. WebP/AVIF give the smallest files at the same visual quality.
 - Target weight: posters under ~150 KB, heroes under ~400 KB. All artwork goes through `next/image` (responsive `srcset` + WebP conversion at the edge) — see `next.config.ts` `images.remotePatterns`. To allow a new source host, add it there; without an entry `next/image` refuses the URL.
-- Hosting: any HTTPS URL works. For dev, you can paste an Unsplash hotlink to test layout. For production, host on Vercel Blob / S3 / a CDN you control. Mux thumbnails (`image.mux.com`) are already in `remotePatterns`.
+- Hosting: **drop the file on the field** — it uploads client-direct to Vercel Blob (`*.public.blob.vercel-storage.com`, already in `remotePatterns`) and fills the URL itself. Same-origin files committed under `public/shows/` also work (legacy shows use these). An arbitrary external URL (e.g. an Unsplash hotlink) previews fine in the admin form (raw `<img>`) but **throws in `next/image` on the public hero/detail pages** — only allowlisted hosts render. Add the host to `remotePatterns` first if you genuinely need an external source.
 
 ### Trial flow (incognito, anon visitor)
 

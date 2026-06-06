@@ -71,6 +71,13 @@ Hits every `export const runtime = "nodejs";` in `app/api/webhooks/*` and any `e
 
 `'use cache'` + `cacheTag` + `cacheLife` are exported from `next/cache` in 16.x stable, but trying to use the directive in a function body without `cacheComponents: true` in `next.config.ts` builds-but-errors at runtime. See above for what enabling it then breaks.
 
+### Server Action / RSC error messages are redacted in production
+
+An `Error` thrown from a Server Action (or during an RSC render) reaches the client in production as the generic *"An error occurred in the Server Components render. The specific message is omitted in production builds…"* plus a `digest` — **never your `error.message`**. Two consequences:
+
+- Any client `catch` that displays `err.message` (e.g. the admin upload widget) shows the useless generic text in prod, even though it shows the real message in dev. If the admin needs to *act* on the error, **return** a structured `{ error: string }` from the action instead of throwing — returned values aren't redacted.
+- The real message only exists server-side. Find it in Vercel runtime logs (filter `level=error` around the timestamp; the log line contains the full message even when a viewer truncates it — full-text search still matches the hidden part). This is how the Mux "Free plan is limited to 10 assets" 400 behind a generic toast was diagnosed (2026-06-03).
+
 ## React 19 hooks rules
 
 `eslint-config-next@16` ships `eslint-plugin-react-hooks@5+`, which adds two rules that flag patterns that were idiomatic in React 18 and earlier. Both fail the Vercel build by default (Next runs ESLint during `next build`).
@@ -351,7 +358,34 @@ export function getClientIp(req: { headers: Headers }): string {
 
 In local dev there's no Vercel edge, so the header is absent. Fall back to a constant ("unknown") rather than `null` — that puts all unidentified requests into one shared rate-limit bucket. Fail-CLOSED under abuse, painless in dev. **Never `if (ip) ratelimit(...)`** — that branch is the bypass.
 
+## Vercel Blob
+
+### `handleUpload` does NOT let you constrain the pathname via the token options
+
+`onBeforeGenerateToken(pathname, clientPayload, multipart)` receives the **client-supplied** pathname, and `handleUpload` embeds it verbatim in the token it mints — the options you *return* (`allowedContentTypes`, `maximumSizeInBytes`, `addRandomSuffix`, …) can't restrict it. If you don't validate the `pathname` argument yourself, any caller who passes your auth gate can mint a token for **any path in the store**. `app/api/admin/upload-image/route.ts` pins it with `/^shows\/(?:poster|hero)-[A-Za-z0-9._-]+$/`.
+
+### `onUploadCompleted` never fires on localhost
+
+Blob calls the completion webhook from Vercel's side — it can't reach your dev machine, so locally the callback silently never runs (prod-only behavior drift). Avoid depending on it when the client already gets the final URL from `upload()`'s return value; the upload-image route omits it entirely so dev and prod behave identically.
+
+### `addRandomSuffix` means replaced files orphan — delete the old blob yourself
+
+Nothing ever overwrites, so every artwork replacement leaves the previous object billing forever unless you `del()` it. `updateShow` snapshots the prior poster/hero URLs and best-effort-deletes any that changed — gated on the URL actually being on `*.public.blob.vercel-storage.com` so legacy same-origin paths and external URLs are never touched, and wrapped in try/catch so a Blob outage can't fail the save.
+
+### CLI: it's `vercel blob create-store`, not `store add`
+
+And connecting the store to a project (which is what injects `BLOB_READ_WRITE_TOKEN` into all environments) is a dashboard step — `create-store` alone just creates it. Store **region and access (public/private) are fixed at creation**; public is required for artwork since `next/image` fetches by bare URL.
+
 ## Mux SDK 14+
+
+### Free plan caps the whole account at 10 assets — `uploads.create` 400s at the cap
+
+```
+400 {"error":{"type":"invalid_parameters","messages":["Free plan is limited
+to 10 assets, you cannot create direct uploads while exceeding this limit"]}}
+```
+
+The cap is **account-wide** (all environments share it) and counts every asset, including ones whose shows are soft-deleted in our DB — deleting a show never deletes its Mux asset. At the cap, every direct-upload attempt fails regardless of show/episode, and the admin widget surfaces it as the masked generic server-action error (see the Next.js 16 redaction gotcha). Headroom: delete dead assets in the Mux dashboard; real fix: add a payment method. Hit live 2026-06-03 at 10/10.
 
 ### Webhook unwrap is async
 
