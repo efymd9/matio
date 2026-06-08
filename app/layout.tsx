@@ -13,6 +13,12 @@ import { UserMenu } from "@/components/site/user-menu";
 import { CONSENT_COOKIE, parseConsent } from "@/lib/cookie-consent";
 import { LocaleProvider } from "@/lib/i18n/client";
 import { getDict } from "@/lib/i18n/server";
+import { SITE_URL } from "@/lib/seo";
+import {
+  jsonLdScript,
+  organizationJsonLd,
+  websiteJsonLd,
+} from "@/lib/structured-data";
 import "./globals.css";
 
 // Clerk's hosted UI (sign-in modal, sign-up modal, UserButton dropdown,
@@ -56,7 +62,7 @@ export const viewport: Viewport = {
 };
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { t } = await getDict();
+  const { locale, t } = await getDict();
   return {
     metadataBase: new URL(APP_URL),
     title: {
@@ -65,12 +71,23 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     description: t.metadata.siteDescription,
     applicationName: "matio",
+    // Self-referencing canonical pinned to the apex (not metadataBase, which
+    // is preview-host-overridable) so the four resolving hostnames + ?utm_*
+    // variants consolidate onto matio.tv. No alternates.languages: ES/EN share
+    // one URL, so hreflang would be self-referential and is structurally
+    // invalid here.
+    alternates: { canonical: SITE_URL },
     openGraph: {
       type: "website",
       siteName: "matio",
-      url: "/",
+      url: SITE_URL,
       title: t.metadata.siteTitle,
       description: t.metadata.siteDescription,
+      // Social-platform locale hints only — Google ignores og:locale for
+      // language detection (it reads visible text). First-class fields so
+      // Next emits valid `property="og:locale[:alternate]"` meta.
+      locale: locale === "es" ? "es_ES" : "en_US",
+      alternateLocale: locale === "es" ? "en_US" : "es_ES",
     },
     twitter: {
       card: "summary_large_image",
@@ -80,6 +97,13 @@ export async function generateMetadata(): Promise<Metadata> {
     robots: {
       index: true,
       follow: true,
+      googleBot: {
+        index: true,
+        follow: true,
+        "max-image-preview": "large",
+        "max-video-preview": -1,
+        "max-snippet": -1,
+      },
     },
   };
 }
@@ -115,6 +139,17 @@ export default async function RootLayout({
         className={`dark ${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
       >
         <body className="min-h-full bg-background font-sans text-foreground selection:bg-accent/40">
+          {/* Site-wide structured data. Server-rendered into the HTML so
+              HTML-only crawlers read it. Locale-invariant brand graph
+              (Spanish-default semantics); never varied by getLocale(). */}
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: jsonLdScript(organizationJsonLd()) }}
+          />
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: jsonLdScript(websiteJsonLd()) }}
+          />
           <LocaleProvider locale={locale}>
             <a
               href="#main-content"

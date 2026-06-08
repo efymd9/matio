@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { SITE_URL } from "@/lib/seo";
 
 // SEO directive surface. The catalog (/, /shows/<slug>) is fair game for
 // indexing. Everything user-specific or token-gated stays disallowed:
@@ -8,10 +9,9 @@ import type { MetadataRoute } from "next";
 //   /watch/*    — burns trials when crawled; we don't want Googlebot
 //                  consuming previews on behalf of real users.
 //
-// Sitemap pointer matches app/sitemap.ts.
-
-const APP_URL =
-  process.env.NEXT_PUBLIC_APP_URL ?? "https://matio.tv";
+// Sitemap + host pointers use the hard-pinned apex (not NEXT_PUBLIC_APP_URL)
+// so crawlers are always pointed at the canonical apex sitemap, never a
+// preview host. Matches app/sitemap.ts (also SITE_URL-based).
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -22,7 +22,7 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/admin", "/api", "/subscribe", "/watch"],
       },
     ],
-    sitemap: `${APP_URL}/sitemap.xml`,
-    host: APP_URL,
+    sitemap: `${SITE_URL}/sitemap.xml`,
+    host: SITE_URL,
   };
 }

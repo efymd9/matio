@@ -30,6 +30,7 @@ function SiteFooterContent() {
         </div>
         <FooterColumn heading={t.footer.sectionMatio}>
           <FooterLink href="/">{t.footer.browse}</FooterLink>
+          <FooterLink href="/about">{t.footer.about}</FooterLink>
           <FooterLink href="/subscribe">{t.footer.subscribe}</FooterLink>
           <FooterLink href="/api/billing-portal">{t.footer.manage}</FooterLink>
         </FooterColumn>

@@ -1,3 +1,4 @@
+import { preconnect, prefetchDNS } from "react-dom";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons } from "@/db/schema";
@@ -24,6 +25,13 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const { t } = await getDict();
+  // Warm the cross-origin thumbnail/preview host (DNS+TLS) before the ~350KB
+  // hero player chunk loads — the handshake otherwise sits on the LCP path.
+  // crossOrigin "anonymous" matches how next/image fetches, so this reuses the
+  // same connection instead of opening a second. (Metadata API has no
+  // <link rel=preconnect>; React's resource-hint APIs are the Next 16 way.)
+  preconnect("https://image.mux.com", { crossOrigin: "anonymous" });
+  prefetchDNS("https://image.mux.com");
   // Cached published-shows read. lib/catalog.ts wraps the query in
   // unstable_cache with tag CATALOG_TAG; admin mutations bust the tag.
   // Page is still force-dynamic for the hero JWT — only the catalog

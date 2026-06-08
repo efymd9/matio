@@ -5,11 +5,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDict } from "@/lib/i18n/server";
+import { canonicalUrl } from "@/lib/seo";
 
 export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getDict();
   return {
     title: t.legal.termsTitle,
+    alternates: { canonical: canonicalUrl("/terms") },
     robots: { index: true, follow: true },
   };
 }

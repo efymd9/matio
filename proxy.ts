@@ -22,6 +22,7 @@ import {
   parseConsent,
   serializeConsent,
 } from "@/lib/cookie-consent";
+import { LEGACY_ALIAS_HOST, SITE_URL } from "@/lib/seo";
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
 const isAuthRoute = createRouteMatcher(["/subscribe(.*)"]);
@@ -154,6 +155,19 @@ function applyMarketingCookies(req: NextRequest): NextResponse | null {
 }
 
 export default clerkMiddleware(async (auth, req) => {
+  // Consolidate the legacy production alias onto the apex so it isn't indexed
+  // as a duplicate origin. Vercel does NOT auto-noindex production
+  // *.vercel.app aliases (only preview deploys), and the alias currently
+  // returns 200 — a permanent (308) redirect passes its signals to the apex.
+  // Exact host match: never touches the apex, www (Vercel-redirected before
+  // this runs), or per-deploy preview hostnames.
+  if (req.headers.get("host") === LEGACY_ALIAS_HOST) {
+    return NextResponse.redirect(
+      new URL(req.nextUrl.pathname + req.nextUrl.search, SITE_URL),
+      308,
+    );
+  }
+
   if (isAdminRoute(req)) {
     const { userId, redirectToSignIn } = await auth();
     if (!userId) return redirectToSignIn({ returnBackUrl: req.url });

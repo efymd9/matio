@@ -2,12 +2,19 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { episodes, seasons, shows } from "@/db/schema";
+import { episodes, seasons } from "@/db/schema";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
+import { getShowBySlug } from "@/lib/show-query";
+import { SITE_URL, canonicalUrl } from "@/lib/seo";
+import {
+  breadcrumbJsonLd,
+  jsonLdScript,
+  tvSeriesJsonLd,
+} from "@/lib/structured-data";
 import { ViewContentPixel } from "@/components/site/view-content-pixel";
 
 // Per-show metadata: makes Slack / Twitter / iMessage unfurls show the
@@ -20,34 +27,31 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const [show] = await db
-    .select()
-    .from(shows)
-    .where(
-      and(
-        eq(shows.slug, slug),
-        eq(shows.status, "published"),
-        isNull(shows.deletedAt),
-      ),
-    )
-    .limit(1);
+  const show = await getShowBySlug(slug);
   const { t } = await getDict();
   if (!show) return { title: t.showDetail.notFound };
-  const image = show.heroImageUrl ?? show.posterImageUrl ?? null;
+  const url = canonicalUrl(`/shows/${slug}`);
+  // Null-description shows otherwise ship with NO meta description; synthesize
+  // a unique, genre-varied line (anti-thin-content) instead of a constant.
+  const description =
+    show.description ?? t.showDetail.synopsisFallback(show.title, show.genre);
   return {
-    title: show.title,
-    description: show.description ?? undefined,
+    title: t.showDetail.watchOnlineTitle(show.title),
+    description,
+    alternates: { canonical: url },
     openGraph: {
       type: "video.tv_show",
+      url,
       title: show.title,
-      description: show.description ?? undefined,
-      images: image ? [{ url: image }] : undefined,
+      description,
+      // og:image / twitter:image come from the per-show opengraph-image.tsx
+      // (branded 1200×630 card). Don't also set images here — both would
+      // double-emit conflicting og:image tags.
     },
     twitter: {
       card: "summary_large_image",
       title: show.title,
-      description: show.description ?? undefined,
-      images: image ? [image] : undefined,
+      description,
     },
   };
 }
@@ -62,6 +66,7 @@ type EpisodeRowData = {
   muxPlaybackId: string | null;
   muxPlaybackPolicy: string | null;
   status: "processing" | "ready" | "errored";
+  access: "free" | "member" | "subscriber";
   thumbnailUrl: string | null;
 };
 import { Icon } from "@/components/site/icon";
@@ -75,17 +80,7 @@ export default async function ShowDetailPage({
   const { slug } = await params;
   const { t } = await getDict();
 
-  const [show] = await db
-    .select()
-    .from(shows)
-    .where(
-      and(
-        eq(shows.slug, slug),
-        eq(shows.status, "published"),
-        isNull(shows.deletedAt),
-      ),
-    )
-    .limit(1);
+  const show = await getShowBySlug(slug);
   if (!show) notFound();
 
   const showSeasons = await db
@@ -109,6 +104,7 @@ export default async function ShowDetailPage({
             muxPlaybackId: episodes.muxPlaybackId,
             muxPlaybackPolicy: episodes.muxPlaybackPolicy,
             status: episodes.status,
+            access: episodes.access,
           })
           .from(episodes)
           .where(inArray(episodes.seasonId, seasonIds))
@@ -140,8 +136,55 @@ export default async function ShowDetailPage({
   const backdrop = show.heroImageUrl ?? show.posterImageUrl;
   const tone = toneFor(show.slug);
 
+  // Structured data. BreadcrumbList (Home → show) is a live rich result;
+  // TVSeries/TVSeason/TVEpisode feed entity understanding and tie the show to
+  // the Matio Organization. Subscription gating is declared honestly via
+  // isAccessibleForFree on the CreativeWork entities — no VideoObject (Google
+  // requires that on a page where the user can watch, and the player lives on
+  // the robots-disallowed /watch). Only ready episodes are advertised.
+  const readyEpisodes = allEpisodes.filter((e) => e.status === "ready");
+  const seriesJsonLd = tvSeriesJsonLd({
+    slug: show.slug,
+    title: show.title,
+    description: show.description,
+    images: [show.heroImageUrl, show.posterImageUrl].filter(
+      (u): u is string => !!u,
+    ),
+    genre: show.genre,
+    numberOfSeasons: showSeasons.length,
+    numberOfEpisodes: readyEpisodes.length,
+    isAccessibleForFree:
+      readyEpisodes.length > 0 &&
+      readyEpisodes.every((e) => e.access === "free"),
+    seasons: showSeasons.map((s) => ({
+      number: s.number,
+      name: s.title,
+      episodes: (episodesBySeason.get(s.id) ?? [])
+        .filter((e) => e.status === "ready")
+        .map((e) => ({
+          number: e.number,
+          name: e.title,
+          description: e.description,
+          durationSeconds: e.durationSeconds,
+          isAccessibleForFree: e.access === "free",
+        })),
+    })),
+  });
+  const breadcrumbLd = breadcrumbJsonLd([
+    { name: t.showDetail.breadcrumbHome, url: SITE_URL },
+    { name: show.title, url: canonicalUrl(`/shows/${show.slug}`) },
+  ]);
+
   return (
     <main className="bg-background">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLdScript(breadcrumbLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLdScript(seriesJsonLd) }}
+      />
       {/* Meta Pixel ViewContent — renders nothing; fires once the consent-
           gated pixel has loaded. */}
       <ViewContentPixel

@@ -70,6 +70,12 @@ export const es = {
     soon: "Pronto",
     episodeCount: (n: number) =>
       n === 1 ? `${n} episodio` : `${n} episodios`,
+    breadcrumbHome: "Inicio",
+    watchOnlineTitle: (title: string) => `${title} — Ver online`,
+    synopsisFallback: (title: string, genre: string[]) =>
+      `${title}: serie original de Matio${
+        genre.length ? ` · ${genre.join(", ")}` : ""
+      }. Míralo en streaming por suscripción.`,
   },
   watch: {
     comingSoonTitle: "Próximamente",
@@ -240,6 +246,20 @@ export const es = {
     title: ["Historias originales,", "en streaming."],
     tagline: "Mira los primeros 60 segundos gratis.",
   },
+  about: {
+    metaTitle: "Acerca de Matio",
+    metaDescription:
+      "Matio es un estudio de streaming de historias originales en formato corto. Conoce quiénes somos y cómo contactarnos.",
+    heading: "Acerca de Matio",
+    lead: "Matio es un servicio de streaming por suscripción dedicado a historias originales en formato corto, producidas por nuestro estudio.",
+    bodyStudio:
+      "Estrenamos series originales pensadas para verse en cualquier momento. Cada título puede verse gratis durante los primeros 60 segundos; la suscripción mensual desbloquea el catálogo completo, sin anuncios.",
+    bodyWho:
+      "Matio es un proyecto de Matvei Dobrovolskii (empresario individual), con domicilio profesional en 221 Derby Road, Nottingham, Inglaterra y Gales.",
+    contactHeading: "Contacto",
+    contactBody: "Escríbenos a hello@matio.tv.",
+    browseCta: "Explorar el catálogo",
+  },
   footer: {
     sectionLegal: "Legal",
     sectionMatio: "matio",
@@ -249,6 +269,7 @@ export const es = {
     cookiePreferences: "Preferencias de cookies",
     contact: "Contacto",
     browse: "Explorar",
+    about: "Acerca de",
     subscribe: "Suscribirse",
     manage: "Gestionar suscripción",
     tagline: "Historias originales, en streaming.",
@@ -331,6 +352,12 @@ export const en: Dict = {
     soon: "Soon",
     episodeCount: (n: number) =>
       n === 1 ? `${n} episode` : `${n} episodes`,
+    breadcrumbHome: "Home",
+    watchOnlineTitle: (title: string) => `${title} — Watch online`,
+    synopsisFallback: (title: string, genre: string[]) =>
+      `${title}: an original Matio series${
+        genre.length ? ` · ${genre.join(", ")}` : ""
+      }. Watch it on subscription streaming.`,
   },
   watch: {
     comingSoonTitle: "Coming soon",
@@ -501,6 +528,20 @@ export const en: Dict = {
     title: ["Original stories,", "streamed."],
     tagline: "Watch the first 60 seconds free.",
   },
+  about: {
+    metaTitle: "About Matio",
+    metaDescription:
+      "Matio is a streaming studio for original short-form stories. Learn who we are and how to reach us.",
+    heading: "About Matio",
+    lead: "Matio is a subscription streaming service dedicated to original short-form stories, produced by our studio.",
+    bodyStudio:
+      "We release original series made to be watched any time. Every title is free to watch for its first 60 seconds; the monthly membership unlocks the full catalogue, ad-free.",
+    bodyWho:
+      "Matio is a project by Matvei Dobrovolskii (sole trader), with a business address at 221 Derby Road, Nottingham, England & Wales.",
+    contactHeading: "Contact",
+    contactBody: "Reach us at hello@matio.tv.",
+    browseCta: "Browse the catalogue",
+  },
   footer: {
     sectionLegal: "Legal",
     sectionMatio: "matio",
@@ -510,6 +551,7 @@ export const en: Dict = {
     cookiePreferences: "Cookie preferences",
     contact: "Contact",
     browse: "Browse",
+    about: "About",
     subscribe: "Subscribe",
     manage: "Manage subscription",
     tagline: "Original stories, streamed.",
