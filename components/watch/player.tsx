@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import MuxVideo from "@mux/mux-video-react";
 import { useMarketingConsent } from "@/lib/use-marketing-consent";
 
@@ -30,7 +29,7 @@ import {
 import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { useT } from "@/lib/i18n/client";
-import { capturePostHog } from "@/lib/posthog-events";
+import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 import dynamic from "next/dynamic";
 import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
 
@@ -47,10 +46,6 @@ const RateLimitedNotice = dynamic(
 );
 const EpisodesOverlay = dynamic(
   () => import("./episodes-overlay").then((m) => m.EpisodesOverlay),
-  { ssr: false },
-);
-const UpNextOverlay = dynamic(
-  () => import("./up-next-overlay").then((m) => m.UpNextOverlay),
   { ssr: false },
 );
 const SeriesEndOverlay = dynamic(
@@ -96,7 +91,7 @@ export function isEpisodeLocked(tier: EpisodeTier, mode: Mode): boolean {
   return tier !== "free"; // mode === "free"
 }
 
-type OverlayKind = "none" | "episodes" | "upnext" | "seriesEnd";
+type OverlayKind = "none" | "episodes" | "seriesEnd";
 
 // End-states for the player. Distinct from a transient error: once we
 // hit one of these, the <MediaController> stops rendering and a focused
@@ -168,6 +163,12 @@ export function Player({
   const [currentEpisodeId, setCurrentEpisodeId] = useState(initialEpisodeId);
   const [overlay, setOverlay] = useState<OverlayKind>("none");
   const [locked, setLocked] = useState(false);
+  // Mute is shared across episodes so an auto-advance keeps the viewer's
+  // sound choice. Starts muted because autoplay-with-sound is blocked on a
+  // fresh page load (no prior user gesture) — the inner player shows a
+  // tap-to-unmute pill, and once the user unmutes, the page has a user
+  // activation so subsequent auto-advances keep playing with sound.
+  const [muted, setMuted] = useState(true);
   // trial_play_started (PostHog) fires once per show-preview session, not per
   // episode — the ref lives in the outer shell so swapping episodes mid-trial
   // doesn't re-fire it. No-op without marketing consent (PostHog isn't loaded).
@@ -182,6 +183,63 @@ export function Player({
       show_title: showTitle ?? showSlug,
     });
   }, [showTitle, showSlug]);
+
+  // Now that playback autostarts on landing (no poster play-gate), the
+  // play_attempted funnel event fires once per show-preview session for
+  // trial/free modes — it marks "we tried to autoplay", paired with
+  // first_frame ("it actually rendered") to measure autoplay-block bounce.
+  // Deferred via onPostHogReady so the consent-gated SDK has a chance to load
+  // (same as other mount-time funnel events); deps are page-stable so it runs
+  // once. The shell isn't remounted on episode swap.
+  useEffect(() => {
+    if (mode !== "trial" && mode !== "free") return;
+    return onPostHogReady(() => {
+      capturePostHog("play_attempted", {
+        show_slug: showSlug,
+        show_title: showTitle ?? showSlug,
+      });
+    });
+  }, [mode, showSlug, showTitle]);
+
+  // Prefetched-token cache, keyed by episode id. While an episode plays we
+  // fetch the NEXT episode's playback token ahead of time and stash it here;
+  // the inner player consumes it on mount instead of doing a round-trip, so
+  // an auto-advance starts without waiting on /api/playback-token. Tokens
+  // carry their own absolute expiry so a stale entry is ignored.
+  const tokenCacheRef = useRef<
+    Map<string, { token: string; expiresAt: number; mode: string }>
+  >(new Map());
+  const prefetchToken = useCallback(async (episodeId: string) => {
+    const cached = tokenCacheRef.current.get(episodeId);
+    // Skip if a still-comfortably-valid entry exists (>65s of headroom).
+    if (cached && cached.expiresAt - Date.now() > 65_000) return;
+    try {
+      const r = await fetch(
+        `/api/playback-token?episode_id=${encodeURIComponent(episodeId)}`,
+        { cache: "no-store" },
+      );
+      if (!r.ok) return; // 403/429/5xx — let the real mount surface it.
+      const data = (await r.json()) as {
+        token: unknown;
+        expiresIn: unknown;
+        mode?: unknown;
+      };
+      if (typeof data.token === "string" && typeof data.expiresIn === "number") {
+        tokenCacheRef.current.set(episodeId, {
+          token: data.token,
+          expiresAt: Date.now() + data.expiresIn * 1000,
+          mode: typeof data.mode === "string" ? data.mode : "",
+        });
+      }
+    } catch {
+      // Best-effort warm-up — a failure just means the real mount fetches.
+    }
+  }, []);
+  const takeCachedToken = useCallback((episodeId: string) => {
+    const cached = tokenCacheRef.current.get(episodeId);
+    if (cached && cached.expiresAt - Date.now() > 5_000) return cached;
+    return null;
+  }, []);
 
   const current = useMemo(
     () => episodes.find((e) => e.id === currentEpisodeId) ?? episodes[0],
@@ -231,10 +289,14 @@ export function Player({
       resumeSeconds={resumeForThisLoad}
       locked={locked}
       onLockChange={setLocked}
+      muted={muted}
+      onMutedChange={setMuted}
       overlay={overlay}
       onOverlayChange={setOverlay}
       onSwap={swap}
       onTrialStart={onTrialStart}
+      prefetchToken={prefetchToken}
+      takeCachedToken={takeCachedToken}
       userEmail={userEmail}
     />
   );
@@ -251,10 +313,14 @@ function EpisodePlayback({
   resumeSeconds,
   locked,
   onLockChange,
+  muted,
+  onMutedChange,
   overlay,
   onOverlayChange,
   onSwap,
   onTrialStart,
+  prefetchToken,
+  takeCachedToken,
   userEmail,
 }: {
   current: PlayerEpisode;
@@ -267,10 +333,16 @@ function EpisodePlayback({
   resumeSeconds: number | null;
   locked: boolean;
   onLockChange: (locked: boolean) => void;
+  muted: boolean;
+  onMutedChange: (muted: boolean) => void;
   overlay: OverlayKind;
   onOverlayChange: (overlay: OverlayKind) => void;
   onSwap: (episodeId: string) => void;
   onTrialStart: () => void;
+  prefetchToken: (episodeId: string) => void;
+  takeCachedToken: (
+    episodeId: string,
+  ) => { token: string; expiresAt: number; mode: string } | null;
   userEmail?: string | null;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -287,17 +359,22 @@ function EpisodePlayback({
   // is what the paywall branch reads (refs can't be accessed in render).
   const lastSavedRef = useRef(0);
   const [lastSaved, setLastSaved] = useState(0);
-  const [token, setToken] = useState<string | null>(null);
-  const [expiresAt, setExpiresAt] = useState<number | null>(null);
-  const [endState, setEndState] = useState<EndState | null>(null);
-  // Trial play-gate: don't fetch a token (which mints the trial row and
-  // starts the 60s clock) until the user actually presses play. Subscribers
-  // skip the gate — their session has no trial clock to protect. Before this
-  // the clock started on player mount (≈ page load), so a user who lingered
-  // burned the whole preview before ever pressing play.
-  const [started, setStarted] = useState(
-    mode === "subscriber" || mode === "member",
+  // Consume any prefetched token for this episode (warmed by the shell while
+  // the previous episode played) ONCE at mount. The inner is keyed on
+  // current.id, so this memo runs fresh per episode. Seeding token/expiresAt
+  // from it via lazy initial state — rather than setState in an effect — keeps
+  // the auto-advance round-trip-free without a cascading-render lint trip.
+  const cachedInitial = useMemo(
+    () => takeCachedToken(current.id),
+    [current.id, takeCachedToken],
   );
+  const [token, setToken] = useState<string | null>(
+    cachedInitial?.token ?? null,
+  );
+  const [expiresAt, setExpiresAt] = useState<number | null>(
+    cachedInitial?.expiresAt ?? null,
+  );
+  const [endState, setEndState] = useState<EndState | null>(null);
   // Bumped by retry() — included in the token-fetch effect's deps so the
   // fetch reruns without unmounting the inner playback component (which
   // would also tear down the MediaController and any captured renditions).
@@ -352,18 +429,41 @@ function EpisodePlayback({
   // free/member episode-start funnel events fire once per episode mount.
   const tierStartFiredRef = useRef(false);
 
-  // Fetch playback token. Gated on `started`, so a trial user only mints a
-  // token (and starts the 60s clock) once they press play — the poster
-  // play-gate below sets it. Subscribers init started=true and fetch on
-  // mount. Inner is keyed on current.id, so this runs once per episode-mount
-  // once started; per-episode state starts at its
-  // initial value (no setState resets at the top of the effect body).
+  // Fetch playback token on mount. Playback now autostarts on landing (no
+  // poster play-gate), so the trial row is minted — and the 60s clock starts
+  // — as soon as the watch URL loads. Inner is keyed on current.id, so this
+  // runs once per episode-mount; per-episode state starts at its initial value
+  // (no setState resets at the top of the effect body).
+  //
+  // First it tries a prefetched token from the shell cache (an auto-advance
+  // warms the next episode's token while the current one plays) so the swap
+  // doesn't wait on a round-trip. A retry() (fetchKey > 0) always refetches.
   // Branches on response status so that a 429 / 5xx / parse failure
   // doesn't get framed as a "preview ended" paywall. AbortController
   // cancels the in-flight fetch on episode swap so a slow response
   // can't race the new episode's fetch.
   useEffect(() => {
-    if (!started || currentLocked) return;
+    if (currentLocked) return;
+    // Prefetched token already seeded into state (lazy initial). Just fire the
+    // per-episode start analytics and skip the network round-trip. A retry()
+    // (fetchKey > 0) cleared the token, so it always falls through to a fresh
+    // fetch below.
+    if (fetchKey === 0 && cachedInitial) {
+      if (cachedInitial.mode === "trial") onTrialStart();
+      if (
+        (cachedInitial.mode === "free" || cachedInitial.mode === "member") &&
+        !tierStartFiredRef.current
+      ) {
+        tierStartFiredRef.current = true;
+        capturePostHog(
+          cachedInitial.mode === "free"
+            ? "free_episode_started"
+            : "member_episode_started",
+          { show_slug: showSlug, episode_number: currentPosition },
+        );
+      }
+      return;
+    }
     const hasAbort = typeof AbortController !== "undefined";
     const abort = hasAbort ? new AbortController() : null;
     let cancelled = false;
@@ -425,7 +525,7 @@ function EpisodePlayback({
     current.id,
     fetchKey,
     onTrialStart,
-    started,
+    cachedInitial,
     currentLocked,
     showSlug,
     currentPosition,
@@ -569,6 +669,19 @@ function EpisodePlayback({
     };
   }, [current.id, mode]);
 
+  // Keep the underlying media element's `muted` property in sync with the
+  // shared state. React can be unreliable about reflecting the `muted` prop
+  // onto a media element (it sets the attribute, not always the property), and
+  // a muted autoplay only succeeds if the element is actually muted at play()
+  // time — so we enforce it imperatively. Re-runs on token (the <MuxVideo>
+  // remounts on a subscriber token refresh, reattaching videoRef). Writing the
+  // same value React already reflects is a no-op; the volumechange it may emit
+  // just echoes the current state.
+  useEffect(() => {
+    const el = videoRef.current;
+    if (el) el.muted = muted;
+  }, [muted, token]);
+
   // Seek to resume position once the player has metadata for the episode.
   // This is the server-provided resume and applies only on the initial episode
   // load. A subscriber token-refresh remount also re-runs this effect (deps
@@ -693,59 +806,6 @@ function EpisodePlayback({
     return <PlaybackUnavailable showSlug={showSlug} onRetry={retry} />;
   }
 
-  // Trial play-gate. Until the user presses play we render a poster with a
-  // play affordance and DON'T fetch a token — so the 60s trial clock starts
-  // on play, not on page load. Subscribers init started=true and never see
-  // this. Tapping anywhere on the surface starts the preview.
-  if (!started) {
-    return (
-      <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black">
-        {current.thumbnailUrl ? (
-          <Image
-            src={current.thumbnailUrl}
-            alt=""
-            fill
-            sizes="100vw"
-            className="object-cover opacity-40"
-            priority
-          />
-        ) : null}
-        <span
-          aria-hidden
-          className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/55"
-        />
-        <button
-          type="button"
-          onClick={() => {
-            capturePostHog("play_attempted", {
-              show_slug: showSlug,
-              show_title: showTitle ?? showSlug,
-            });
-            setStarted(true);
-          }}
-          aria-label={t.player.playPauseAria}
-          className="group absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 text-white"
-        >
-          <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full border border-white/20 bg-white/15 backdrop-blur-xl transition-transform duration-150 group-hover:scale-105">
-            <span className="-mr-1 inline-flex">
-              <Icon name="play" size={32} />
-            </span>
-          </span>
-          <span className="text-xs font-semibold uppercase tracking-[0.3em] text-white/80">
-            {mode === "free" ? t.player.playFreeEpisode : t.player.playPreview}
-          </span>
-        </button>
-        <Link
-          href={`/shows/${showSlug}`}
-          aria-label={t.player.backToShowAria}
-          className="absolute left-5 top-5 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition-colors hover:bg-black/70 sm:left-8"
-        >
-          <Icon name="back" size={18} />
-        </Link>
-      </div>
-    );
-  }
-
   if (!token) {
     return (
       <div className="flex aspect-video w-full items-center justify-center bg-black">
@@ -823,11 +883,15 @@ function EpisodePlayback({
         // surface; the fullscreen button still hands off to the system
         // player on demand.
         playsInline
-        // Trial mode only: the token was just fetched in direct response to
-        // the user tapping the poster play-gate, so autoplay continues that
-        // gesture (falling back to the visible play button if a browser
-        // blocks unmuted autoplay). Subscribers keep manual play.
-        autoPlay={mode === "trial" || mode === "free"}
+        // Autostart on landing for every mode (less funnel friction). Browsers
+        // block autoplay-with-sound without a prior user gesture, so we start
+        // muted and surface a tap-to-unmute pill; once the viewer unmutes, the
+        // page has a user activation and later auto-advances keep sound.
+        autoPlay
+        muted={muted}
+        // Buffer eagerly so playback starts fast and an auto-advance into a
+        // prefetched-token episode has segments warming as early as possible.
+        preload="auto"
         envKey={muxDataEnabled ? MUX_DATA_ENV_KEY : undefined}
         disableTracking={!muxDataEnabled}
         disableCookies={!muxDataEnabled}
@@ -857,7 +921,20 @@ function EpisodePlayback({
             if (wasPlayingRef.current) void v.play().catch(() => {});
           }
         }}
+        onVolumeChange={(e) => {
+          // Mirror the element's muted state up to the shell so the
+          // tap-to-unmute pill reflects both our pill and media-chrome's mute
+          // button, and so the choice persists across an auto-advance.
+          onMutedChange(e.currentTarget.muted);
+        }}
         onPlaying={() => {
+          // Warm the next episode's token while this one plays so an
+          // auto-advance starts without a /api/playback-token round-trip.
+          // Skip trial (previews end at the paywall before the episode does)
+          // and any next episode locked above this viewer's tier.
+          if (next && mode !== "trial" && !isEpisodeLocked(next.tier, mode)) {
+            prefetchToken(next.id);
+          }
           // First real playback frame for this episode mount. Fires once even
           // across a token-refresh remount (the guard ref lives on the outer
           // component). No-op without marketing consent (PostHog not loaded).
@@ -901,15 +978,14 @@ function EpisodePlayback({
             }
           }
           if (next) {
-            if (isEpisodeLocked(next.tier, mode)) {
-              // Auto-advance into the locked episode: the swap remounts the
-              // inner player which renders the right wall full-surface, and
-              // ?ep=<locked id> lands in the URL so the post-signup redirect
-              // resumes exactly there. No up-next countdown into a wall.
-              onSwap(next.id);
-            } else {
-              onOverlayChange("upnext");
-            }
+            // Instant auto-advance: swap straight to the next episode with no
+            // up-next countdown. The inner player remounts and consumes the
+            // token prefetched while this episode played, so the transition is
+            // near-instant. If next is locked above this viewer's tier the
+            // same swap lands them on the right wall (and ?ep=<locked id> in
+            // the URL resumes there after signup) — no token was prefetched
+            // for it.
+            onSwap(next.id);
           } else if (mode === "subscriber") {
             // Last episode of the show finished. Subscribers see the
             // "next episode in production" reminder sheet. Trial users
@@ -1024,6 +1100,32 @@ function EpisodePlayback({
           </MediaSeekForwardButton>
         </div>
       </div>
+
+      {/* Tap-to-unmute pill. Playback autostarts muted (browsers block
+          autoplay-with-sound without a prior gesture), so this is the
+          affordance to turn sound on. Stays visible even while the chrome is
+          auto-hidden (no media-ui-inactive opacity), and hides once unmuted or
+          when controls are locked. */}
+      {muted && !locked ? (
+        <button
+          type="button"
+          onClick={() => {
+            const el = videoRef.current;
+            if (el) {
+              el.muted = false;
+              // A muted autoplay can leave volume pinned at 0 on some
+              // browsers — lift it so unmute is actually audible.
+              if (el.volume === 0) el.volume = 1;
+            }
+            onMutedChange(false);
+          }}
+          aria-label={t.player.muteAria}
+          className="absolute left-1/2 top-16 z-20 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/20 bg-black/60 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-colors hover:bg-black/75 sm:top-20"
+        >
+          <Icon name="mute" size={16} />
+          {t.player.tapToUnmute}
+        </button>
+      ) : null}
 
       {/* Skip-intro chip — only renders when in the intro window and the
           chrome isn't locked. */}
@@ -1179,14 +1281,6 @@ function EpisodePlayback({
           mode={mode}
           onSelect={onSwap}
           onClose={() => onOverlayChange("none")}
-        />
-      ) : null}
-      {overlay === "upnext" && next ? (
-        <UpNextOverlay
-          next={next}
-          showSlug={showSlug}
-          onPlayNow={() => onSwap(next.id)}
-          onCancel={() => onOverlayChange("none")}
         />
       ) : null}
       {overlay === "seriesEnd" ? (
