@@ -10,6 +10,14 @@ import {
 
 export const showStatus = pgEnum("show_status", ["draft", "published"]);
 
+// Video orientation for the show's episodes. Drives which watch player chrome
+// renders: "horizontal" keeps the standard cinema player; "vertical" uses the
+// minimal TikTok-style portrait player. Admin-set per show.
+export const showOrientation = pgEnum("show_orientation", [
+  "horizontal",
+  "vertical",
+]);
+
 export const shows = pgTable("shows", {
   id: uuid("id").primaryKey().defaultRandom(),
   slug: text("slug").notNull().unique(),
@@ -22,6 +30,9 @@ export const shows = pgTable("shows", {
     .notNull()
     .default(sql`ARRAY[]::text[]`),
   status: showStatus("status").notNull().default("draft"),
+  // "horizontal" (default) renders the standard player; "vertical" renders the
+  // portrait/TikTok-style player. See lib/i18n and components/watch/player.tsx.
+  orientation: showOrientation("orientation").notNull().default("horizontal"),
   // Only one show is the "home hero" at a time; setFeaturedShow enforces.
   featured: boolean("featured").notNull().default(false),
   // Homepage section flags. Independent — a show can be in both, either, or

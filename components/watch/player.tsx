@@ -83,6 +83,11 @@ export type EpisodeTier = "free" | "member" | "subscriber";
 
 export type Mode = "subscriber" | "trial" | "free" | "member";
 
+// Video orientation of the show (admin-set, mirrors shows.orientation). Drives
+// which chrome the player renders: "horizontal" = the standard cinema player;
+// "vertical" = the minimal TikTok-style portrait player.
+export type Orientation = "horizontal" | "vertical";
+
 // Whether `mode` may play an episode of `tier`. Subscriber and legacy-trial
 // modes never lock (trial gating is the 60s clock, not position).
 export function isEpisodeLocked(tier: EpisodeTier, mode: Mode): boolean {
@@ -139,6 +144,7 @@ export function Player({
   episodes,
   initialEpisodeId,
   mode,
+  orientation = "horizontal",
   showId,
   showSlug,
   showTitle,
@@ -148,6 +154,7 @@ export function Player({
   episodes: PlayerEpisode[];
   initialEpisodeId: string;
   mode: Mode;
+  orientation?: Orientation;
   showId: string;
   showSlug: string;
   showTitle?: string;
@@ -283,6 +290,7 @@ export function Player({
       next={next}
       episodes={episodes}
       mode={mode}
+      orientation={orientation}
       showId={showId}
       showSlug={showSlug}
       showTitle={showTitle}
@@ -307,6 +315,7 @@ function EpisodePlayback({
   next,
   episodes,
   mode,
+  orientation,
   showId,
   showSlug,
   showTitle,
@@ -327,6 +336,7 @@ function EpisodePlayback({
   next: PlayerEpisode | null;
   episodes: PlayerEpisode[];
   mode: Mode;
+  orientation: Orientation;
   showId: string;
   showSlug: string;
   showTitle?: string;
@@ -392,10 +402,13 @@ function EpisodePlayback({
   // empty/CEA-608 placeholders), so we gate the button on our own check.
   const [hasCaptions, setHasCaptions] = useState(false);
   // Live aspect ratio of the playing asset, read off the video element
-  // once metadata is available. Default 16:9 so the first paint isn't a
-  // zero-height container; corrects to e.g. 9/16 for portrait shorts
+  // once metadata is available. Default seeded from the show's declared
+  // orientation (9:16 portrait vs 16:9 landscape) so the first paint isn't a
+  // wrong-shaped or zero-height container; corrects to the asset's exact ratio
   // within ~200ms of the manifest arriving.
-  const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
+  const [aspectRatio, setAspectRatio] = useState<number>(
+    orientation === "vertical" ? 9 / 16 : 16 / 9,
+  );
   const supportsAspectRatio = SUPPORTS_ASPECT_RATIO;
   // Rolling timestamps of recent video <error> events. A single decode
   // hiccup on cellular is normal noise; we only surrender the slot to
@@ -819,6 +832,373 @@ function EpisodePlayback({
     );
   }
 
+  // Media-chrome CSS custom properties — range + menu theming. Shared by the
+  // horizontal and vertical layouts; spread into each MediaController's style.
+  const mediaChromeVars = {
+    "--media-primary-color": "#ffffff",
+    "--media-secondary-color": "transparent",
+    "--media-text-color": "#ffffff",
+    "--media-control-background": "transparent",
+    "--media-control-hover-background": "rgba(255,255,255,0.08)",
+    "--media-range-bar-color": "#ff3d3d",
+    "--media-range-track-background": "rgba(255,255,255,0.18)",
+    "--media-range-track-border-radius": "2px",
+    "--media-range-track-height": "4px",
+    "--media-range-thumb-background": "#ff3d3d",
+    "--media-range-thumb-border-radius": "9999px",
+    "--media-range-thumb-width": "12px",
+    "--media-range-thumb-height": "12px",
+    "--media-range-thumb-box-shadow": "0 0 0 6px rgba(255,61,61,0.25)",
+    "--media-tooltip-display": "none",
+    "--media-font-family":
+      "var(--font-sans), -apple-system, BlinkMacSystemFont, sans-serif",
+    // Settings / rendition menu — cinema-red themed.
+    "--media-menu-background": "rgba(15, 15, 18, 0.95)",
+    "--media-menu-border": "1px solid rgba(255, 255, 255, 0.1)",
+    "--media-menu-border-radius": "10px",
+    "--media-menu-padding": "6px",
+    "--media-menu-item-border-radius": "6px",
+    "--media-menu-item-checked-bg": "rgba(255, 61, 61, 0.15)",
+    "--media-menu-item-checked-color": "#ff3d3d",
+    "--media-menu-item-hover-background": "rgba(255, 255, 255, 0.08)",
+    "--media-menu-icon-color": "#ffffff",
+  } as React.CSSProperties;
+
+  // Shared media element — identical for both orientations; only the chrome
+  // around it differs. object-contain letterboxes the asset inside whatever
+  // box each layout provides (a no-op for the horizontal aspect-matched
+  // container; in vertical it centers the portrait video on a full-height
+  // black canvas).
+  const videoEl = (
+    <MuxVideo
+      // Keyed on the token so a subscriber token refresh remounts the element
+      // (the wrapper ignores tokens-only changes); playhead/play-state are
+      // restored in onLoadedMetadata. Trial tokens never refresh, so this is
+      // stable for the whole trial preview.
+      key={token}
+      ref={videoRef}
+      slot="media"
+      playbackId={current.playbackId}
+      tokens={{ playback: token }}
+      streamType="on-demand"
+      // Without playsInline iOS Safari auto-promotes the video into its
+      // system player on tap, drawing native chrome over ours. Setting
+      // it keeps playback in the page so our custom controls own the
+      // surface; the fullscreen button still hands off to the system
+      // player on demand.
+      playsInline
+      // Autostart on landing for every mode (less funnel friction). Browsers
+      // block autoplay-with-sound without a prior user gesture, so we start
+      // muted and surface a tap-to-unmute pill; once the viewer unmutes, the
+      // page has a user activation and later auto-advances keep sound.
+      autoPlay
+      muted={muted}
+      // Buffer eagerly so playback starts fast and an auto-advance into a
+      // prefetched-token episode has segments warming as early as possible.
+      preload="auto"
+      envKey={muxDataEnabled ? MUX_DATA_ENV_KEY : undefined}
+      disableTracking={!muxDataEnabled}
+      disableCookies={!muxDataEnabled}
+      metadata={{
+        video_id: current.id,
+        video_title: current.title,
+        // video_series gives the per-show breakdown in the Mux dashboard.
+        video_series: showTitle ?? showSlug,
+        player_name: "matio-watch",
+      }}
+      onLoadedMetadata={(e) => {
+        // HTMLVideoElement exposes intrinsic dimensions once the
+        // manifest is parsed. Use those to size the player container
+        // so portrait/landscape both render naturally.
+        const v = e.currentTarget;
+        if (v.videoWidth > 0 && v.videoHeight > 0) {
+          setAspectRatio(v.videoWidth / v.videoHeight);
+        }
+        // Restore playhead/play-state after a token-refresh remount (mirrors
+        // Mux's own in-place re-init). resumeSeconds (server resume) is
+        // handled by a separate effect and only on the initial episode load,
+        // so the two never collide.
+        const resumeAt = resumeAfterRefreshRef.current;
+        if (resumeAt != null) {
+          resumeAfterRefreshRef.current = null;
+          if (resumeAt > (v.currentTime ?? 0)) v.currentTime = resumeAt;
+          if (wasPlayingRef.current) void v.play().catch(() => {});
+        }
+      }}
+      onVolumeChange={(e) => {
+        // Mirror the element's muted state up to the shell so the
+        // tap-to-unmute pill reflects both our pill and media-chrome's mute
+        // button, and so the choice persists across an auto-advance.
+        onMutedChange(e.currentTarget.muted);
+      }}
+      onPlaying={() => {
+        // Warm the next episode's token while this one plays so an
+        // auto-advance starts without a /api/playback-token round-trip.
+        // Skip trial (previews end at the paywall before the episode does)
+        // and any next episode locked above this viewer's tier.
+        if (next && mode !== "trial" && !isEpisodeLocked(next.tier, mode)) {
+          prefetchToken(next.id);
+        }
+        // First real playback frame for this episode mount. Fires once even
+        // across a token-refresh remount (the guard ref lives on the outer
+        // component). No-op without marketing consent (PostHog not loaded).
+        if (firstFrameFiredRef.current) return;
+        firstFrameFiredRef.current = true;
+        capturePostHog("first_frame", { show_slug: showSlug, mode });
+      }}
+      onError={(e) => {
+        // HTMLMediaElement exposes MediaError on the element after an
+        // error fires. Codes:
+        //   1 MEDIA_ERR_ABORTED              — user-driven, ignore.
+        //   2 MEDIA_ERR_NETWORK              — transient, let HLS retry.
+        //   3 MEDIA_ERR_DECODE               — terminal.
+        //   4 MEDIA_ERR_SRC_NOT_SUPPORTED    — terminal.
+        // Transient errors (no code, NETWORK, or unknown) trip the
+        // unavailable end-state only after 3 occurrences in 10s — a
+        // single buffer-stall on cellular shouldn't kill the player.
+        const code = e.currentTarget.error?.code;
+        if (code === 3 || code === 4) {
+          setEndState("unavailable");
+          return;
+        }
+        if (code === 1) return;
+        const now = Date.now();
+        errorTimesRef.current = [
+          ...errorTimesRef.current.filter((ts) => now - ts < 10_000),
+          now,
+        ];
+        if (errorTimesRef.current.length >= 3) {
+          setEndState("unavailable");
+        }
+      }}
+      onEnded={() => {
+        const el = videoRef.current;
+        if (el) {
+          const t = Math.floor(el.duration ?? 0);
+          if (mode === "trial" || mode === "free") {
+            void saveTrialPosition(current.id, t).catch(() => {});
+          } else {
+            void saveWatchProgress(current.id, t, true).catch(() => {});
+          }
+        }
+        if (next) {
+          // Instant auto-advance: swap straight to the next episode with no
+          // up-next countdown. The inner player remounts and consumes the
+          // token prefetched while this episode played, so the transition is
+          // near-instant. If next is locked above this viewer's tier the
+          // same swap lands them on the right wall (and ?ep=<locked id> in
+          // the URL resumes there after signup) — no token was prefetched
+          // for it.
+          onSwap(next.id);
+        } else if (mode === "subscriber") {
+          // Last episode of the show finished. Subscribers see the
+          // "next episode in production" reminder sheet. Trial users
+          // realistically can't reach this branch (60s preview vs
+          // full episode duration); skip the overlay for them so a
+          // freak edge case — say a 30s teaser — doesn't dump a paid
+          // surface on a free preview.
+          onOverlayChange("seriesEnd");
+        } else if (mode === "member") {
+          // End of the member tier and nothing beyond is published yet —
+          // this IS the subscription paywall moment for members.
+          setEndState("paywall");
+        } else if (mode === "free") {
+          // free_episodes covers every ready episode (member tier empty
+          // until more publish) — still pitch the account.
+          setEndState("signupWall");
+        }
+      }}
+      className="h-full w-full object-contain"
+    />
+  );
+
+  // Tap-to-unmute pill (shared). Playback autostarts muted (browsers block
+  // autoplay-with-sound without a prior gesture), so this is the affordance to
+  // turn sound on. Stays visible even while the chrome is auto-hidden, and
+  // hides once unmuted or when controls are locked.
+  const unmutePill =
+    muted && !locked ? (
+      <button
+        type="button"
+        onClick={() => {
+          const el = videoRef.current;
+          if (el) {
+            el.muted = false;
+            // A muted autoplay can leave volume pinned at 0 on some
+            // browsers — lift it so unmute is actually audible.
+            if (el.volume === 0) el.volume = 1;
+          }
+          onMutedChange(false);
+        }}
+        aria-label={t.player.muteAria}
+        className="absolute left-1/2 top-16 z-30 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/20 bg-black/60 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-colors hover:bg-black/75 sm:top-20"
+      >
+        <Icon name="mute" size={16} />
+        {t.player.tapToUnmute}
+      </button>
+    ) : null;
+
+  // Episodes + series-end overlays (shared). Both portal above the chrome.
+  const overlaysEl = (
+    <>
+      {overlay === "episodes" ? (
+        <EpisodesOverlay
+          episodes={episodes}
+          currentEpisodeId={current.id}
+          showSlug={showSlug}
+          mode={mode}
+          onSelect={onSwap}
+          onClose={() => onOverlayChange("none")}
+        />
+      ) : null}
+      {overlay === "seriesEnd" ? (
+        <SeriesEndOverlay
+          showId={showId}
+          showTitle={showTitle ?? current.title}
+          defaultEmail={userEmail}
+          onDismiss={() => onOverlayChange("none")}
+        />
+      ) : null}
+    </>
+  );
+
+  // ---- Vertical (TikTok-style) layout ----
+  // Minimal portrait chrome: tap-to-play/pause, a thin scrubbable progress
+  // bar, back + title, mute/captions, and (multi-episode shows) an Episodes
+  // button. No seek/rate/quality/lock/fullscreen clutter. The container is
+  // full-height and capped to the asset's width so it's a centered vertical
+  // strip on desktop and edge-to-edge on a phone.
+  if (orientation === "vertical") {
+    return (
+      <MediaController
+        style={
+          {
+            display: "block",
+            position: "relative",
+            height: "100%",
+            width: "100%",
+            maxWidth: `min(100vw, calc(100vh * ${aspectRatio}))`,
+            margin: "0 auto",
+            backgroundColor: "#000",
+            ...mediaChromeVars,
+          } as React.CSSProperties
+        }
+        className="group/player relative isolate"
+      >
+        {videoEl}
+
+        {/* Tap anywhere to toggle play. Full-surface button beneath the bars
+            (which sit at higher z); shows a centered play glyph only while
+            paused, leaving a clean surface during playback. */}
+        <MediaPlayButton
+          className="!absolute !inset-0 z-10 !flex items-center justify-center !bg-transparent text-white"
+          aria-label={t.player.playPauseAria}
+        >
+          <span slot="play" className="contents">
+            <span className="flex h-[76px] w-[76px] items-center justify-center rounded-full border border-white/20 bg-black/40 backdrop-blur-xl">
+              <span className="-mr-1 inline-flex">
+                <Icon name="play" size={34} />
+              </span>
+            </span>
+          </span>
+          <span slot="pause" className="contents" />
+        </MediaPlayButton>
+
+        {/* Top bar — back + title (left); captions/mute (right). */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 bg-gradient-to-b from-black/70 to-transparent px-4 pb-10 pt-[max(env(safe-area-inset-top),0.85rem)] transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0">
+          <div className="pointer-events-auto flex min-w-0 items-center gap-2.5">
+            <Link
+              href={`/shows/${showSlug}`}
+              aria-label={t.player.backToShowAria}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition-colors hover:bg-black/70"
+            >
+              <Icon name="back" size={16} />
+            </Link>
+            <div className="min-w-0">
+              <p className="font-mono text-[10px] leading-none text-white/65">
+                {episodeLabel}
+              </p>
+              <h1 className="mt-0.5 truncate text-sm font-bold leading-tight text-white">
+                {showTitle ? `${showTitle} — ${current.title}` : current.title}
+              </h1>
+            </div>
+          </div>
+          <div className="pointer-events-auto flex items-center gap-1">
+            {hasCaptions ? (
+              <MediaCaptionsButton
+                className="!bg-transparent !p-2 text-white/85 transition-colors hover:text-white"
+                aria-label={t.player.captionsAria}
+              >
+                <span slot="icon" className="contents">
+                  <Icon name="subtitle" size={18} />
+                </span>
+              </MediaCaptionsButton>
+            ) : null}
+            <MediaMuteButton
+              className="!bg-transparent !p-2 text-white/85 transition-colors hover:text-white"
+              aria-label={t.player.muteAria}
+            >
+              <span slot="high" className="contents">
+                <Icon name="volume" size={18} />
+              </span>
+              <span slot="medium" className="contents">
+                <Icon name="volume" size={18} />
+              </span>
+              <span slot="low" className="contents">
+                <Icon name="volume" size={18} />
+              </span>
+              <span slot="off" className="contents">
+                <Icon name="mute" size={18} />
+              </span>
+            </MediaMuteButton>
+          </div>
+        </div>
+
+        {/* Skip-intro chip */}
+        {showSkipIntro && current.introEndSeconds != null ? (
+          <button
+            type="button"
+            onClick={() => {
+              const el = videoRef.current;
+              if (el && current.introEndSeconds != null) {
+                el.currentTime = current.introEndSeconds;
+              }
+            }}
+            className="absolute bottom-[104px] right-4 z-30 rounded-md border border-white/25 bg-white/15 px-3.5 py-2 text-xs font-semibold text-white backdrop-blur-xl transition-colors hover:bg-white/25"
+          >
+            {t.player.skipIntro}
+          </button>
+        ) : null}
+
+        {/* Bottom bar — progress + minimal time/episodes. Safe-area padded. */}
+        <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black/75 to-transparent pt-10 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 pl-[max(env(safe-area-inset-left),1rem)] pr-[max(env(safe-area-inset-right),1rem)] pb-[max(env(safe-area-inset-bottom),1rem)]">
+          <MediaTimeRange className="!block !h-3 !w-full !bg-transparent" />
+          <div className="mt-1.5 flex items-center justify-between gap-3 font-mono text-[11px] tabular-nums text-white/80">
+            <MediaTimeDisplay className="!bg-transparent !p-0 !text-white/80" />
+            {episodes.length > 1 ? (
+              <button
+                type="button"
+                onClick={() => onOverlayChange("episodes")}
+                className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-white/12 px-3 py-1.5 font-sans text-[11px] font-semibold text-white transition-colors hover:bg-white/20"
+              >
+                <Icon name="menu" size={13} />
+                {t.player.episodesBtn}
+              </button>
+            ) : null}
+            <MediaTimeDisplay
+              remaining
+              className="!bg-transparent !p-0 !text-white/55"
+            />
+          </div>
+        </div>
+
+        {unmutePill}
+        {overlaysEl}
+      </MediaController>
+    );
+  }
+
+  // ---- Horizontal (standard cinema) layout ----
   return (
     <MediaController
       style={
@@ -835,177 +1215,12 @@ function EpisodePlayback({
           maxWidth: `min(100vw, calc(100vh * ${aspectRatio}))`,
           margin: "0 auto",
           backgroundColor: "#000",
-          "--media-primary-color": "#ffffff",
-          "--media-secondary-color": "transparent",
-          "--media-text-color": "#ffffff",
-          "--media-control-background": "transparent",
-          "--media-control-hover-background": "rgba(255,255,255,0.08)",
-          "--media-range-bar-color": "#ff3d3d",
-          "--media-range-track-background": "rgba(255,255,255,0.18)",
-          "--media-range-track-border-radius": "2px",
-          "--media-range-track-height": "4px",
-          "--media-range-thumb-background": "#ff3d3d",
-          "--media-range-thumb-border-radius": "9999px",
-          "--media-range-thumb-width": "12px",
-          "--media-range-thumb-height": "12px",
-          "--media-range-thumb-box-shadow": "0 0 0 6px rgba(255,61,61,0.25)",
-          "--media-tooltip-display": "none",
-          "--media-font-family":
-            "var(--font-sans), -apple-system, BlinkMacSystemFont, sans-serif",
-          // Settings / rendition menu — cinema-red themed.
-          "--media-menu-background": "rgba(15, 15, 18, 0.95)",
-          "--media-menu-border": "1px solid rgba(255, 255, 255, 0.1)",
-          "--media-menu-border-radius": "10px",
-          "--media-menu-padding": "6px",
-          "--media-menu-item-border-radius": "6px",
-          "--media-menu-item-checked-bg": "rgba(255, 61, 61, 0.15)",
-          "--media-menu-item-checked-color": "#ff3d3d",
-          "--media-menu-item-hover-background": "rgba(255, 255, 255, 0.08)",
-          "--media-menu-icon-color": "#ffffff",
+          ...mediaChromeVars,
         } as React.CSSProperties
       }
       className="group/player relative isolate"
     >
-      <MuxVideo
-        // Keyed on the token so a subscriber token refresh remounts the element
-        // (the wrapper ignores tokens-only changes); playhead/play-state are
-        // restored in onLoadedMetadata. Trial tokens never refresh, so this is
-        // stable for the whole trial preview.
-        key={token}
-        ref={videoRef}
-        slot="media"
-        playbackId={current.playbackId}
-        tokens={{ playback: token }}
-        streamType="on-demand"
-        // Without playsInline iOS Safari auto-promotes the video into its
-        // system player on tap, drawing native chrome over ours. Setting
-        // it keeps playback in the page so our custom controls own the
-        // surface; the fullscreen button still hands off to the system
-        // player on demand.
-        playsInline
-        // Autostart on landing for every mode (less funnel friction). Browsers
-        // block autoplay-with-sound without a prior user gesture, so we start
-        // muted and surface a tap-to-unmute pill; once the viewer unmutes, the
-        // page has a user activation and later auto-advances keep sound.
-        autoPlay
-        muted={muted}
-        // Buffer eagerly so playback starts fast and an auto-advance into a
-        // prefetched-token episode has segments warming as early as possible.
-        preload="auto"
-        envKey={muxDataEnabled ? MUX_DATA_ENV_KEY : undefined}
-        disableTracking={!muxDataEnabled}
-        disableCookies={!muxDataEnabled}
-        metadata={{
-          video_id: current.id,
-          video_title: current.title,
-          // video_series gives the per-show breakdown in the Mux dashboard.
-          video_series: showTitle ?? showSlug,
-          player_name: "matio-watch",
-        }}
-        onLoadedMetadata={(e) => {
-          // HTMLVideoElement exposes intrinsic dimensions once the
-          // manifest is parsed. Use those to size the player container
-          // so portrait/landscape both render naturally.
-          const v = e.currentTarget;
-          if (v.videoWidth > 0 && v.videoHeight > 0) {
-            setAspectRatio(v.videoWidth / v.videoHeight);
-          }
-          // Restore playhead/play-state after a token-refresh remount (mirrors
-          // Mux's own in-place re-init). resumeSeconds (server resume) is
-          // handled by a separate effect and only on the initial episode load,
-          // so the two never collide.
-          const resumeAt = resumeAfterRefreshRef.current;
-          if (resumeAt != null) {
-            resumeAfterRefreshRef.current = null;
-            if (resumeAt > (v.currentTime ?? 0)) v.currentTime = resumeAt;
-            if (wasPlayingRef.current) void v.play().catch(() => {});
-          }
-        }}
-        onVolumeChange={(e) => {
-          // Mirror the element's muted state up to the shell so the
-          // tap-to-unmute pill reflects both our pill and media-chrome's mute
-          // button, and so the choice persists across an auto-advance.
-          onMutedChange(e.currentTarget.muted);
-        }}
-        onPlaying={() => {
-          // Warm the next episode's token while this one plays so an
-          // auto-advance starts without a /api/playback-token round-trip.
-          // Skip trial (previews end at the paywall before the episode does)
-          // and any next episode locked above this viewer's tier.
-          if (next && mode !== "trial" && !isEpisodeLocked(next.tier, mode)) {
-            prefetchToken(next.id);
-          }
-          // First real playback frame for this episode mount. Fires once even
-          // across a token-refresh remount (the guard ref lives on the outer
-          // component). No-op without marketing consent (PostHog not loaded).
-          if (firstFrameFiredRef.current) return;
-          firstFrameFiredRef.current = true;
-          capturePostHog("first_frame", { show_slug: showSlug, mode });
-        }}
-        onError={(e) => {
-          // HTMLMediaElement exposes MediaError on the element after an
-          // error fires. Codes:
-          //   1 MEDIA_ERR_ABORTED              — user-driven, ignore.
-          //   2 MEDIA_ERR_NETWORK              — transient, let HLS retry.
-          //   3 MEDIA_ERR_DECODE               — terminal.
-          //   4 MEDIA_ERR_SRC_NOT_SUPPORTED    — terminal.
-          // Transient errors (no code, NETWORK, or unknown) trip the
-          // unavailable end-state only after 3 occurrences in 10s — a
-          // single buffer-stall on cellular shouldn't kill the player.
-          const code = e.currentTarget.error?.code;
-          if (code === 3 || code === 4) {
-            setEndState("unavailable");
-            return;
-          }
-          if (code === 1) return;
-          const now = Date.now();
-          errorTimesRef.current = [
-            ...errorTimesRef.current.filter((ts) => now - ts < 10_000),
-            now,
-          ];
-          if (errorTimesRef.current.length >= 3) {
-            setEndState("unavailable");
-          }
-        }}
-        onEnded={() => {
-          const el = videoRef.current;
-          if (el) {
-            const t = Math.floor(el.duration ?? 0);
-            if (mode === "trial" || mode === "free") {
-              void saveTrialPosition(current.id, t).catch(() => {});
-            } else {
-              void saveWatchProgress(current.id, t, true).catch(() => {});
-            }
-          }
-          if (next) {
-            // Instant auto-advance: swap straight to the next episode with no
-            // up-next countdown. The inner player remounts and consumes the
-            // token prefetched while this episode played, so the transition is
-            // near-instant. If next is locked above this viewer's tier the
-            // same swap lands them on the right wall (and ?ep=<locked id> in
-            // the URL resumes there after signup) — no token was prefetched
-            // for it.
-            onSwap(next.id);
-          } else if (mode === "subscriber") {
-            // Last episode of the show finished. Subscribers see the
-            // "next episode in production" reminder sheet. Trial users
-            // realistically can't reach this branch (60s preview vs
-            // full episode duration); skip the overlay for them so a
-            // freak edge case — say a 30s teaser — doesn't dump a paid
-            // surface on a free preview.
-            onOverlayChange("seriesEnd");
-          } else if (mode === "member") {
-            // End of the member tier and nothing beyond is published yet —
-            // this IS the subscription paywall moment for members.
-            setEndState("paywall");
-          } else if (mode === "free") {
-            // free_episodes covers every ready episode (member tier empty
-            // until more publish) — still pitch the account.
-            setEndState("signupWall");
-          }
-        }}
-        className="h-full w-full"
-      />
+      {videoEl}
 
       {/* Top scrim */}
       <div
@@ -1101,31 +1316,7 @@ function EpisodePlayback({
         </div>
       </div>
 
-      {/* Tap-to-unmute pill. Playback autostarts muted (browsers block
-          autoplay-with-sound without a prior gesture), so this is the
-          affordance to turn sound on. Stays visible even while the chrome is
-          auto-hidden (no media-ui-inactive opacity), and hides once unmuted or
-          when controls are locked. */}
-      {muted && !locked ? (
-        <button
-          type="button"
-          onClick={() => {
-            const el = videoRef.current;
-            if (el) {
-              el.muted = false;
-              // A muted autoplay can leave volume pinned at 0 on some
-              // browsers — lift it so unmute is actually audible.
-              if (el.volume === 0) el.volume = 1;
-            }
-            onMutedChange(false);
-          }}
-          aria-label={t.player.muteAria}
-          className="absolute left-1/2 top-16 z-20 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/20 bg-black/60 px-4 py-2.5 text-sm font-semibold text-white shadow-[0_8px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-colors hover:bg-black/75 sm:top-20"
-        >
-          <Icon name="mute" size={16} />
-          {t.player.tapToUnmute}
-        </button>
-      ) : null}
+      {unmutePill}
 
       {/* Skip-intro chip — only renders when in the intro window and the
           chrome isn't locked. */}
@@ -1273,24 +1464,7 @@ function EpisodePlayback({
       ) : null}
 
       {/* Overlays */}
-      {overlay === "episodes" ? (
-        <EpisodesOverlay
-          episodes={episodes}
-          currentEpisodeId={current.id}
-          showSlug={showSlug}
-          mode={mode}
-          onSelect={onSwap}
-          onClose={() => onOverlayChange("none")}
-        />
-      ) : null}
-      {overlay === "seriesEnd" ? (
-        <SeriesEndOverlay
-          showId={showId}
-          showTitle={showTitle ?? current.title}
-          defaultEmail={userEmail}
-          onDismiss={() => onOverlayChange("none")}
-        />
-      ) : null}
+      {overlaysEl}
     </MediaController>
   );
 }

@@ -187,6 +187,7 @@ export default async function WatchPage({
       <WatchShell>
         <Player
           mode="subscriber"
+          orientation={show.orientation}
           showId={show.id}
           showSlug={show.slug}
           showTitle={show.title}
@@ -227,6 +228,7 @@ export default async function WatchPage({
           <CompleteRegistrationPixel userId={userId} utm={signupUtm} />
           <Player
             mode="member"
+            orientation={show.orientation}
             showId={show.id}
             showSlug={show.slug}
             showTitle={show.title}
@@ -264,6 +266,7 @@ export default async function WatchPage({
       <WatchShell>
         <Player
           mode="free"
+          orientation={show.orientation}
           showId={show.id}
           showSlug={show.slug}
           showTitle={show.title}
@@ -307,6 +310,7 @@ export default async function WatchPage({
     <WatchShell>
       <Player
         mode="trial"
+        orientation={show.orientation}
         showId={show.id}
         showSlug={show.slug}
         showTitle={show.title}

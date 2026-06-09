@@ -409,6 +409,11 @@ export const ru = {
     heroLabel: "Hero",
     heroHint:
       "Широкий ≈21:9 · 2560×1080, без впечатанного названия. Страница сериала + hero на главной. Ключевые объекты — в центральных 60%.",
+    orientationLabel: "Ориентация видео",
+    orientationHint:
+      "Горизонтальная — обычный кинопроигрыватель. Вертикальная — минималистичный плеер в стиле TikTok для портретного видео.",
+    orientationHorizontal: "Горизонтальная",
+    orientationVertical: "Вертикальная",
     visibilityKicker: "Видимость",
     visibilityTitle: "Статус и размещение",
     statusLabel: "Статус",
@@ -833,6 +838,11 @@ export const en: AdminDict = {
     heroLabel: "Hero",
     heroHint:
       "Wide ≈21:9 · 2560×1080, no baked title. Detail page + home hero. Keep subjects in the centre 60%.",
+    orientationLabel: "Video orientation",
+    orientationHint:
+      "Horizontal uses the standard cinema player. Vertical uses the minimal TikTok-style player for portrait video.",
+    orientationHorizontal: "Horizontal",
+    orientationVertical: "Vertical",
     visibilityKicker: "Visibility",
     visibilityTitle: "Status & placement",
     statusLabel: "Status",

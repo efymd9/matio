@@ -19,6 +19,7 @@ export type ShowFormValues = {
   heroImageUrl: string;
   genre: string;
   status: "draft" | "published";
+  orientation: "horizontal" | "vertical";
   justReleased: boolean;
   popularNow: boolean;
 };
@@ -31,6 +32,7 @@ export const EMPTY_SHOW_FORM: ShowFormValues = {
   heroImageUrl: "",
   genre: "",
   status: "draft",
+  orientation: "horizontal",
   justReleased: false,
   popularNow: false,
 };
@@ -148,6 +150,12 @@ export function ShowForm({
             hint={t.showForm.heroHint}
           />
         </div>
+        <Field
+          label={t.showForm.orientationLabel}
+          hint={t.showForm.orientationHint}
+        >
+          <OrientationToggle defaultValue={defaultValues.orientation} />
+        </Field>
       </Panel>
 
       <Panel
@@ -272,6 +280,50 @@ function CheckCard({
         <Icon name="check" size={12} color="#ffffff" />
       </span>
     </label>
+  );
+}
+
+// Two-option segmented control for the show's video orientation. Radio
+// inputs (one named "orientation") so exactly one value posts; styling uses
+// the `peer-checked:` sibling combinator (Safari 3+) rather than `:has()`,
+// which CLAUDE.md flags as a silent no-op on iOS Safari < 15.4.
+function OrientationToggle({
+  defaultValue,
+}: {
+  defaultValue: "horizontal" | "vertical";
+}) {
+  const t = useAdminT();
+  const options: {
+    value: "horizontal" | "vertical";
+    label: string;
+    icon: "landscape" | "portrait";
+  }[] = [
+    { value: "horizontal", label: t.showForm.orientationHorizontal, icon: "landscape" },
+    { value: "vertical", label: t.showForm.orientationVertical, icon: "portrait" },
+  ];
+  return (
+    <div className="inline-grid grid-cols-2 gap-2">
+      {options.map((o) => (
+        <label key={o.value} className="relative block cursor-pointer">
+          <input
+            type="radio"
+            name="orientation"
+            value={o.value}
+            defaultChecked={defaultValue === o.value}
+            className="peer sr-only"
+          />
+          <div className="flex items-center gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-3 transition-colors hover:border-white/20 hover:bg-white/[0.06] peer-checked:border-[#ff3d3d]/60 peer-checked:bg-[#ff3d3d]/[0.08] peer-focus-visible:ring-2 peer-focus-visible:ring-[#ff3d3d]/60">
+            <span
+              aria-hidden
+              className={`shrink-0 rounded-sm border-2 border-white/70 ${
+                o.icon === "portrait" ? "h-5 w-3.5" : "h-3.5 w-5"
+              }`}
+            />
+            <span className="text-sm font-medium text-white/85">{o.label}</span>
+          </div>
+        </label>
+      ))}
+    </div>
   );
 }
 
