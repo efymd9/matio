@@ -63,6 +63,12 @@ export async function captureServerEvent(params: {
   distinctId: string;
   event: string;
   properties?: Record<string, unknown>;
+  // Optional deterministic event UUID. PostHog de-duplicates ingested
+  // events that share a uuid, so passing a stable value (e.g. derived from
+  // the Stripe subscription id) makes an event idempotent across the two
+  // writers that can both fire it in the guest-checkout welcome-vs-webhook
+  // race.
+  uuid?: string;
 }): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
   const client = getPostHogServer();
   if (!client) return { ok: false, skipped: true };
@@ -71,6 +77,7 @@ export async function captureServerEvent(params: {
       distinctId: params.distinctId,
       event: params.event,
       properties: params.properties,
+      ...(params.uuid ? { uuid: params.uuid } : {}),
     });
     return { ok: true };
   } catch (err) {

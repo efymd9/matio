@@ -2,7 +2,9 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { useFormStatus } from "react-dom";
 import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
+import { startGuestCheckout } from "@/app/subscribe/guest-actions";
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
@@ -27,6 +29,7 @@ export function Paywall({
   showTitle,
   variant = "trial",
   episodeId,
+  payFirst = false,
 }: {
   showSlug: string;
   resumeSeconds?: number;
@@ -41,6 +44,11 @@ export function Paywall({
   // interrupted them. Without it, ?resume= seeks episode 1 of the show to
   // another episode's playhead.
   episodeId?: string;
+  // PAY_FIRST_CHECKOUT flag, read server-side on the watch page. When set,
+  // the signed-out primary CTA posts straight to guest Stripe Checkout
+  // (account created after payment) instead of opening Clerk sign-up.
+  // Signed-in non-subscribers keep the /subscribe path either way.
+  payFirst?: boolean;
 }) {
   const t = useT();
 
@@ -104,29 +112,53 @@ export function Paywall({
             ) : null}
           </h2>
           <p className="mt-2 text-sm font-medium text-white/65">
-            {variant === "tier"
-              ? t.paywall.subscribeBody
-              : t.paywall.signUpToContinue}
+            {payFirst
+              ? t.paywall.payFirstBody
+              : variant === "tier"
+                ? t.paywall.subscribeBody
+                : t.paywall.signUpToContinue}
           </p>
 
           <div className="mt-5 flex justify-center">
             <Show when="signed-out">
-              <SignUpButton
-                mode="modal"
-                forceRedirectUrl={subscribeHref}
-                signInForceRedirectUrl={subscribeHref}
-              >
-                <button
-                  type="button"
-                  onClick={() =>
-                    capturePostHog("signup_cta_clicked", { auth: "signed_out" })
-                  }
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98]"
+              {payFirst ? (
+                // Pay-first: straight to guest Stripe Checkout, no Clerk
+                // step. The hidden fields mirror the /subscribe form so the
+                // buyer returns to this exact episode+position after paying.
+                <form action={startGuestCheckout} className="contents">
+                  <input type="hidden" name="show" value={showSlug} />
+                  {episodeId ? (
+                    <input type="hidden" name="ep" value={episodeId} />
+                  ) : null}
+                  {resumeSeconds && resumeSeconds > 0 ? (
+                    <input
+                      type="hidden"
+                      name="resume"
+                      value={String(resumeSeconds)}
+                    />
+                  ) : null}
+                  <PayFirstButton />
+                </form>
+              ) : (
+                <SignUpButton
+                  mode="modal"
+                  forceRedirectUrl={subscribeHref}
+                  signInForceRedirectUrl={subscribeHref}
                 >
-                  <Icon name="play" size={14} color="#ffffff" />
-                  <span>{t.paywall.signUpCta}</span>
-                </button>
-              </SignUpButton>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      capturePostHog("signup_cta_clicked", {
+                        auth: "signed_out",
+                      })
+                    }
+                    className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98]"
+                  >
+                    <Icon name="play" size={14} color="#ffffff" />
+                    <span>{t.paywall.signUpCta}</span>
+                  </button>
+                </SignUpButton>
+              )}
             </Show>
             <Show when="signed-in">
               <Link
@@ -166,5 +198,36 @@ export function Paywall({
         </div>
       </div>
     </div>
+  );
+}
+
+// Submit button for the pay-first form. Lives inside the <form> so
+// useFormStatus sees its pending state (true from click until the server
+// action redirects to Stripe). signup_cta_clicked keeps firing — with a
+// flow marker — so the saved funnels' CTA step survives the reorder even
+// though the click now starts checkout instead of sign-up; the matching
+// checkout_started fires server-side in startGuestCheckout.
+function PayFirstButton() {
+  const { pending } = useFormStatus();
+  const t = useT();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      aria-disabled={pending}
+      aria-busy={pending}
+      onClick={() =>
+        capturePostHog("signup_cta_clicked", {
+          auth: "signed_out",
+          flow: "pay_first",
+        })
+      }
+      className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98] disabled:cursor-wait disabled:opacity-90"
+    >
+      <Icon name="play" size={14} color="#ffffff" />
+      <span>
+        {pending ? t.paywall.continuingToCheckout : t.paywall.payFirstCta}
+      </span>
+    </button>
   );
 }

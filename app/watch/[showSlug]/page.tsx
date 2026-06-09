@@ -259,7 +259,9 @@ export default async function WatchPage({
 
     // Anonymous viewer: free tier. Resume from the session row — last
     // episode watched (when no explicit ?ep= deep link) at its last
-    // position.
+    // position. payFirst routes the wall's signed-out CTA straight to
+    // guest Stripe Checkout (PAY_FIRST_CHECKOUT flag).
+    const payFirst = process.env.PAY_FIRST_CHECKOUT === "1";
     const freeSessionToken =
       (await cookies()).get(TRIAL_COOKIE)?.value ?? null;
     const freeSession = freeSessionToken
@@ -290,6 +292,7 @@ export default async function WatchPage({
           initialEpisodeId={freeInitial.id}
           resumeSeconds={queryResume ?? freeResume}
           userEmail={userEmail}
+          payFirst={payFirst}
         />
       </WatchShell>
     );
@@ -313,7 +316,13 @@ export default async function WatchPage({
     ? await findTrialSession(sessionToken, show.id)
     : null;
 
-  if (trial && !isTrialActive(trial)) {
+  // Pay-first: a returning expired-trial visitor stays on the watch page —
+  // the player's first token fetch 403s and renders the paywall, whose
+  // signed-out CTA goes straight to guest Checkout. The legacy redirect to
+  // /subscribe would bounce an anonymous visitor off Clerk sign-up instead,
+  // re-erecting exactly the wall the flag removes.
+  const payFirst = process.env.PAY_FIRST_CHECKOUT === "1";
+  if (trial && !isTrialActive(trial) && !payFirst) {
     const sp = new URLSearchParams({ show: show.slug });
     // lastPositionSeconds is only meaningful for the user's first trial of
     // this show; for a converted trial it's a stale offset from before they
@@ -336,6 +345,7 @@ export default async function WatchPage({
         initialEpisodeId={initial.id}
         resumeSeconds={queryResume ?? (trial?.lastPositionSeconds || null)}
         userEmail={userEmail}
+        payFirst={payFirst}
       />
     </WatchShell>
   );

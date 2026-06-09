@@ -166,6 +166,9 @@ export const es = {
     pickUpWhereLeftOff: "Retoma justo donde lo dejaste.",
     signUpToContinue: "Crea una cuenta gratis para seguir viendo.",
     signUpCta: "Crear cuenta",
+    payFirstBody:
+      "Suscríbete con Stripe y sigue viendo al instante. Crearemos tu cuenta con el correo del pago.",
+    payFirstCta: "Hazte miembro · 38 $/mes",
     alreadyMember: "¿Ya tienes cuenta?",
     signInLink: "Inicia sesión",
     continuingToCheckout: "Yendo al pago…",
@@ -211,6 +214,23 @@ export const es = {
       `Tu plan ${plan} está ${status}. Cambia o cancela cuando quieras en tu cuenta.`,
     manageSubscription: "Gestionar suscripción",
     backToBrowse: "Volver a explorar",
+  },
+  welcome: {
+    kicker: "Membresía activa",
+    title: "Bienvenido a matio.",
+    signingIn: "Iniciando tu sesión…",
+    ready: "Todo listo.",
+    watchNow: "Ver ahora",
+    accountEmail: (maskedEmail: string) =>
+      `Tu membresía está vinculada a ${maskedEmail}.`,
+    signInToWatch:
+      "Inicia sesión con ese correo para empezar a ver — te enviaremos un código.",
+    signInCta: "Iniciar sesión",
+    ticketFailed:
+      "No pudimos iniciar tu sesión automáticamente. Inicia sesión con el correo que usaste en el pago.",
+    claimPending:
+      "El pago se ha procesado y tu cuenta se está activando. Inicia sesión con el correo que usaste en el pago, o vuelve a abrir este enlace en un momento.",
+    wrongEmail: "¿No es tu correo? Escríbenos a hello@matio.tv",
   },
   notFound: {
     code: "404",
@@ -449,6 +469,9 @@ export const en: Dict = {
     pickUpWhereLeftOff: "Pick up where you left off.",
     signUpToContinue: "Create a free account to keep watching.",
     signUpCta: "Sign up",
+    payFirstBody:
+      "Subscribe with Stripe and keep watching instantly. We'll set up your account from your checkout email.",
+    payFirstCta: "Get membership · $38/mo",
     alreadyMember: "Already have an account?",
     signInLink: "Sign in",
     continuingToCheckout: "Continuing to checkout…",
@@ -494,6 +517,23 @@ export const en: Dict = {
       `Your ${plan} plan is ${status}. Change or cancel any time in your account.`,
     manageSubscription: "Manage subscription",
     backToBrowse: "Back to browse",
+  },
+  welcome: {
+    kicker: "Membership active",
+    title: "Welcome to matio.",
+    signingIn: "Signing you in…",
+    ready: "You're all set.",
+    watchNow: "Watch now",
+    accountEmail: (maskedEmail: string) =>
+      `Your membership is linked to ${maskedEmail}.`,
+    signInToWatch:
+      "Sign in with that email to start watching — we'll send you a code.",
+    signInCta: "Sign in",
+    ticketFailed:
+      "We couldn't sign you in automatically. Sign in with the email you used at checkout.",
+    claimPending:
+      "Your payment went through and your account is activating. Sign in with the email you used at checkout, or reopen this link in a moment.",
+    wrongEmail: "Wrong email? Contact hello@matio.tv",
   },
   notFound: {
     code: "404",

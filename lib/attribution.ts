@@ -216,7 +216,18 @@ export function fromStripeMetadata(
 // connects to a real user id. Safe to call from other authenticated
 // touchpoints in the future.
 export async function applyUserAttribution(userId: string): Promise<void> {
-  const { first, last } = await readAttributionCookies();
+  const payload = await readAttributionCookies();
+  await applyUserAttributionPayload(userId, payload);
+}
+
+// Same write semantics as applyUserAttribution, but takes the payload
+// directly instead of reading request cookies — for contexts where the
+// attribution arrives out-of-band (the guest-checkout claim reads it back
+// from Stripe subscription metadata inside the cookie-less webhook).
+export async function applyUserAttributionPayload(
+  userId: string,
+  { first, last }: { first: AttributionPayload; last: AttributionPayload },
+): Promise<void> {
   if (!hasAnyField(first) && !hasAnyField(last)) return;
 
   const { db } = await import("@/db");

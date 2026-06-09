@@ -1,11 +1,12 @@
 "use server";
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
-import { episodes, seasons, shows, subscriptions, users } from "@/db/schema";
+import { subscriptions, users } from "@/db/schema";
 import { getOrSyncCurrentUser } from "@/lib/admin";
+import { buildWatchPath, resolveCheckoutTarget } from "@/lib/checkout-target";
 import {
   readAttributionCookies,
   toStripeMetadata,
@@ -90,76 +91,19 @@ export async function startCheckout(formData: FormData) {
   const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   // If the user came from a watch flow, carry show+resume through so we
-  // can drop them back into playback after Stripe Checkout.
-  const showSlugRaw = formData.get("show");
-  const resume = formData.get("resume");
-  const epRaw = formData.get("ep");
-
-  // Validate the slug against an actual published show before letting it
-  // shape any redirect URL. Without this, formData.show is attacker-
-  // controlled input that flows into the Stripe-hosted Checkout page's
-  // cancel link and the post-payment success URL — both surfaces a user
-  // (or anti-phishing scanner) would inspect. A bad slug would also 404
-  // the user after a successful payment.
-  let showSlug: string | null = null;
-  if (typeof showSlugRaw === "string" && showSlugRaw) {
-    const [match] = await db
-      .select({ slug: shows.slug })
-      .from(shows)
-      .where(
-        and(
-          eq(shows.slug, showSlugRaw),
-          eq(shows.status, "published"),
-          isNull(shows.deletedAt),
-        ),
-      )
-      .limit(1);
-    if (match) showSlug = match.slug;
-  }
-
-  // Validate the return episode the same way as the slug — it's attacker-
-  // controlled input that flows into the Stripe success/cancel URLs. Only a
-  // ready episode belonging to the validated show passes; anything else is
-  // silently dropped (the success URL then falls back to the show's start).
-  let episodeId: string | null = null;
-  if (
-    showSlug &&
-    typeof epRaw === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      epRaw,
-    )
-  ) {
-    const [epMatch] = await db
-      .select({ id: episodes.id })
-      .from(episodes)
-      .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
-      .innerJoin(shows, eq(seasons.showId, shows.id))
-      .where(
-        and(
-          eq(episodes.id, epRaw),
-          eq(episodes.status, "ready"),
-          eq(shows.slug, showSlug),
-        ),
-      )
-      .limit(1);
-    if (epMatch) episodeId = epMatch.id;
-  }
+  // can drop them back into playback after Stripe Checkout. Validation
+  // lives in lib/checkout-target.ts (shared with the guest checkout).
+  const target = await resolveCheckoutTarget(formData);
 
   // No /account page anymore — Stripe Checkout success lands back on the
-  // catalog. If the user came from a watch flow, the override below sends
+  // catalog. If the user came from a watch flow, the watch path sends
   // them straight back into playback.
-  let successUrl = `${origin}/?welcome=1`;
-  if (showSlug) {
-    const watchParams = new URLSearchParams();
-    if (episodeId) watchParams.set("ep", episodeId);
-    if (typeof resume === "string" && resume) watchParams.set("resume", resume);
-    const qs = watchParams.toString();
-    successUrl = `${origin}/watch/${encodeURIComponent(showSlug)}${qs ? `?${qs}` : ""}`;
-  }
+  const watchPath = buildWatchPath(target);
+  const successUrl = watchPath ? `${origin}${watchPath}` : `${origin}/?welcome=1`;
   const cancelParams = new URLSearchParams();
-  if (showSlug) cancelParams.set("show", showSlug);
-  if (episodeId) cancelParams.set("ep", episodeId);
-  if (typeof resume === "string" && resume) cancelParams.set("resume", resume);
+  if (target.showSlug) cancelParams.set("show", target.showSlug);
+  if (target.episodeId) cancelParams.set("ep", target.episodeId);
+  if (target.resume) cancelParams.set("resume", target.resume);
   const cancelQs = cancelParams.toString();
   const cancelUrl = `${origin}/subscribe${cancelQs ? `?${cancelQs}` : ""}`;
 

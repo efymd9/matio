@@ -163,6 +163,7 @@ export function Player({
   resumeSeconds,
   userEmail,
   autoplay = true,
+  payFirst = false,
 }: {
   episodes: PlayerEpisode[];
   initialEpisodeId: string;
@@ -177,6 +178,9 @@ export function Player({
   // False for crawlers (server-side userAgent().isBot): keeps the poster
   // play-gate so bots never trigger the token fetch that mints trial rows.
   autoplay?: boolean;
+  // PAY_FIRST_CHECKOUT flag (server-read on the watch page): the paywall's
+  // signed-out CTA goes straight to guest Stripe Checkout.
+  payFirst?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -287,6 +291,7 @@ export function Player({
       onAdvance={advance}
       onTrialStart={onTrialStart}
       userEmail={userEmail}
+      payFirst={payFirst}
     />
   );
 }
@@ -309,6 +314,7 @@ function EpisodePlayback({
   onAdvance,
   onTrialStart,
   userEmail,
+  payFirst,
 }: {
   current: PlayerEpisode;
   next: PlayerEpisode | null;
@@ -327,6 +333,7 @@ function EpisodePlayback({
   onAdvance: (episodeId: string) => void;
   onTrialStart: () => void;
   userEmail?: string | null;
+  payFirst?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const t = useT();
@@ -1066,6 +1073,7 @@ function EpisodePlayback({
         showTitle={showTitle}
         episodeLabel={episodeLabel}
         variant={mode === "free" || mode === "member" ? "tier" : "trial"}
+        payFirst={payFirst}
       />
     );
   }

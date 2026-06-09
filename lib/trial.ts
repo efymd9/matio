@@ -225,6 +225,28 @@ export async function linkTrialSessionsToCurrentUser(): Promise<void> {
     .where(and(or(...matchers), isNull(trialSessions.userId)));
 }
 
+// Exact-token-only variant of linkTrialSessionsToCurrentUser for contexts
+// with no Clerk session and no request cookies — the guest-checkout claim
+// (Stripe webhook / the /welcome page), where the trial token arrives via
+// Stripe subscription metadata instead. Deliberately NO IP-hash fallback:
+// this linkage feeds conversion accounting (trial→paid), so claiming a
+// shared-NAT neighbour's anonymous rows here would inflate it. The caller
+// must guarantee the users row exists first (trial_sessions.user_id FK).
+export async function linkTrialSessionsByToken(
+  sessionToken: string,
+  userId: string,
+): Promise<void> {
+  await db
+    .update(trialSessions)
+    .set({ userId })
+    .where(
+      and(
+        eq(trialSessions.sessionToken, sessionToken),
+        isNull(trialSessions.userId),
+      ),
+    );
+}
+
 // Called from the Stripe webhook when a user's subscription becomes active.
 // Flips converted = true on every trial_sessions row this user owns. This is
 // an analytics-only marker now (it powers the trial-to-paid metric on the
