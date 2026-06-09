@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import MuxVideo from "@mux/mux-video-react";
+import { canAutoplayMuted } from "@/lib/can-autoplay";
 import { useMarketingConsent } from "@/lib/use-marketing-consent";
 
 // Public Mux Data env key (distinct from the API token / signing key). Empty
@@ -115,6 +116,13 @@ const SUPPORTS_ASPECT_RATIO =
   typeof CSS.supports === "function" &&
   CSS.supports("aspect-ratio", "16 / 9");
 
+// How long before the current episode ends we prefetch the next episode's
+// token and start warming its stream. 45s gives the hidden preloader time
+// to fill its ~30s forward buffer (hls.js default maxBufferLength) — Mux
+// serves media segments with week-long deterministic cache URLs, so the
+// preloader's fetches become browser-cache hits for the visible player.
+const PRELOAD_LEAD_SECONDS = 45;
+
 type EndState = "paywall" | "signupWall" | "rateLimited" | "unavailable";
 
 // 403s on gated shows carry a reason ("signup_required" /
@@ -136,10 +144,15 @@ async function classifyTokenFailure(r: Response): Promise<EndState> {
 
 // Outer shell owns episode selection, overlay visibility, and the locked
 // flag — none of which should reset on episode swap. The inner
-// EpisodePlayback is keyed on current.id, so swapping episodes unmounts
-// and remounts it, which is what naturally resets per-episode state
-// (token, paywall, aspect ratio, captions, skip-intro, last-saved
-// position) without needing setState calls at the top of effects.
+// EpisodePlayback is keyed on mountKey: manual swaps bump it, so they
+// unmount and remount the inner player, which is what naturally resets
+// per-episode state (token, paywall, aspect ratio, captions, skip-intro,
+// last-saved position) without needing setState calls at the top of
+// effects. Auto-advance at episode end deliberately does NOT bump it —
+// the underlying <video> element must survive the transition because
+// WebKit's autoplay blessing is per-element (a remounted element can't
+// continue playing unmuted without a fresh gesture); the inner component
+// resets its per-episode state explicitly for that one path.
 export function Player({
   episodes,
   initialEpisodeId,
@@ -149,6 +162,7 @@ export function Player({
   showTitle,
   resumeSeconds,
   userEmail,
+  autoplay = true,
 }: {
   episodes: PlayerEpisode[];
   initialEpisodeId: string;
@@ -160,12 +174,27 @@ export function Player({
   // Pre-fill for the SeriesEndOverlay reminder form. Null for trial
   // users and any case where we couldn't resolve a user email.
   userEmail?: string | null;
+  // False for crawlers (server-side userAgent().isBot): keeps the poster
+  // play-gate so bots never trigger the token fetch that mints trial rows.
+  autoplay?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const [currentEpisodeId, setCurrentEpisodeId] = useState(initialEpisodeId);
+  // Bumped on manual swaps only — see the component comment above.
+  const [mountKey, setMountKey] = useState(0);
+  // Server-provided resume must only ever apply to the episode this mount
+  // started on. BOTH halves are snapshotted from the first render: the
+  // props change together after a swap/advance (router.replace re-renders
+  // the page with ?ep=<new id>, recomputing resumeSeconds for THAT
+  // episode), so freezing only the id would pair it with another
+  // episode's live offset — seeking ep1 to ep2's position on swap-back.
+  const [initialResume] = useState(() => ({
+    id: initialEpisodeId,
+    seconds: resumeSeconds ?? null,
+  }));
   const [overlay, setOverlay] = useState<OverlayKind>("none");
   const [locked, setLocked] = useState(false);
   // trial_play_started (PostHog) fires once per show-preview session, not per
@@ -193,10 +222,22 @@ export function Player({
       ? episodes[currentIdx + 1]
       : null;
 
-  // Only honor server-provided resume on the initially loaded episode;
-  // subsequent swaps start from 0 by design.
+  // Only honor server-provided resume on the episode this mount started
+  // on; subsequent swaps/advances start from 0 by design.
   const resumeForThisLoad =
-    current.id === initialEpisodeId ? (resumeSeconds ?? null) : null;
+    current.id === initialResume.id ? initialResume.seconds : null;
+
+  // Reflect an episode change in the URL so refresh/share lands on it,
+  // stripping ?resume= (it only applies to the initial render).
+  const updateUrl = useCallback(
+    (episodeId: string) => {
+      const sp = new URLSearchParams(searchParams?.toString() ?? "");
+      sp.set("ep", episodeId);
+      sp.delete("resume");
+      router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   // Swap to a different episode — updates the URL, closes any open
   // overlay, and triggers the inner remount via the key change.
@@ -207,20 +248,28 @@ export function Player({
         return;
       }
       setCurrentEpisodeId(episodeId);
+      setMountKey((k) => k + 1);
       setOverlay("none");
-      const sp = new URLSearchParams(searchParams?.toString() ?? "");
-      sp.set("ep", episodeId);
-      // Resume only applies to the initial render — strip it so a swap
-      // doesn't replay a stale offset.
-      sp.delete("resume");
-      router.replace(`${pathname}?${sp.toString()}`, { scroll: false });
+      updateUrl(episodeId);
     },
-    [currentEpisodeId, pathname, router, searchParams],
+    [currentEpisodeId, updateUrl],
+  );
+
+  // Auto-advance at episode end — same as swap but WITHOUT the remount:
+  // the inner player keeps its <video> element and installs the new
+  // episode via a src change (per-episode state resets explicitly there).
+  const advance = useCallback(
+    (episodeId: string) => {
+      setCurrentEpisodeId(episodeId);
+      setOverlay("none");
+      updateUrl(episodeId);
+    },
+    [updateUrl],
   );
 
   return (
     <EpisodePlayback
-      key={current.id}
+      key={mountKey}
       current={current}
       next={next}
       episodes={episodes}
@@ -229,11 +278,13 @@ export function Player({
       showSlug={showSlug}
       showTitle={showTitle}
       resumeSeconds={resumeForThisLoad}
+      autoplay={autoplay}
       locked={locked}
       onLockChange={setLocked}
       overlay={overlay}
       onOverlayChange={setOverlay}
       onSwap={swap}
+      onAdvance={advance}
       onTrialStart={onTrialStart}
       userEmail={userEmail}
     />
@@ -249,11 +300,13 @@ function EpisodePlayback({
   showSlug,
   showTitle,
   resumeSeconds,
+  autoplay,
   locked,
   onLockChange,
   overlay,
   onOverlayChange,
   onSwap,
+  onAdvance,
   onTrialStart,
   userEmail,
 }: {
@@ -265,11 +318,13 @@ function EpisodePlayback({
   showSlug: string;
   showTitle?: string;
   resumeSeconds: number | null;
+  autoplay: boolean;
   locked: boolean;
   onLockChange: (locked: boolean) => void;
   overlay: OverlayKind;
   onOverlayChange: (overlay: OverlayKind) => void;
   onSwap: (episodeId: string) => void;
+  onAdvance: (episodeId: string) => void;
   onTrialStart: () => void;
   userEmail?: string | null;
 }) {
@@ -287,27 +342,98 @@ function EpisodePlayback({
   // is what the paywall branch reads (refs can't be accessed in render).
   const lastSavedRef = useRef(0);
   const [lastSaved, setLastSaved] = useState(0);
-  const [token, setToken] = useState<string | null>(null);
-  const [expiresAt, setExpiresAt] = useState<number | null>(null);
+  // Active playback snapshot: which episode the <video> is (or is about to
+  // be) playing, plus the token minted FOR that episode. The three travel
+  // together because a Mux JWT is signed per playback id — handing
+  // <MuxVideo> a new playbackId alongside a stale token would 403 every
+  // segment request. Null until the first token fetch resolves.
+  const [playback, setPlayback] = useState<{
+    episodeId: string;
+    playbackId: string;
+    token: string;
+    expiresAt: number;
+  } | null>(null);
   const [endState, setEndState] = useState<EndState | null>(null);
-  // Trial play-gate: don't fetch a token (which mints the trial row and
-  // starts the 60s clock) until the user actually presses play. Subscribers
-  // skip the gate — their session has no trial clock to protect. Before this
-  // the clock started on player mount (≈ page load), so a user who lingered
-  // burned the whole preview before ever pressing play.
+  // Whether this session should attempt autoplay at all. The attempt
+  // itself is owned by the first-play effect below (NOT <MuxVideo
+  // autoPlay> — playback-core's "any" chain retries muted on ANY play()
+  // rejection, including the AbortError a user's own startup pause fires).
+  const autoplayWanted = autoplay || mode === "trial" || mode === "free";
+  // subscriber/member fetch a token on mount unconditionally (no row mint
+  // to protect). trial/free wait for the autoplay-capability probe below:
+  // capable sessions start on land — the 60s trial clock begins together
+  // with playback, the explicit product choice — while blocked sessions
+  // (iOS Low Power Mode etc.) keep the poster play-gate so the clock
+  // can't burn with zero frames rendered. Crawlers stay gated forever.
   const [started, setStarted] = useState(
     mode === "subscriber" || mode === "member",
   );
+  // "pending" while the muted-autoplay probe runs (trial/free humans only);
+  // "blocked" renders the poster gate; "allowed" flips `started`.
+  const [autoplayProbe, setAutoplayProbe] = useState<
+    "pending" | "allowed" | "blocked"
+  >(() =>
+    mode === "subscriber" || mode === "member"
+      ? "allowed"
+      : autoplay
+        ? "pending"
+        : "blocked",
+  );
+  // True once the user has actually interacted with the player surface
+  // (poster-gate tap, tap-to-play). A pre-gesture rate-limit 429 degrades
+  // to the poster gate instead of a full-surface error.
+  const hadGestureRef = useRef(false);
+  // Set on the element's `pause` event — which only fires for real pauses
+  // (user/scripted) and the natural-end transition (reset in onEnded), so
+  // the autoplay-block probe can tell "blocked" from "user chose to pause".
+  const pausedByUserRef = useRef(false);
+  // True when the muted state was OUR doing (the first-play chain's
+  // NotAllowedError fallback) rather than the user's (persisted
+  // media-chrome mute pref, manual mute). Only fallback-muting earns the
+  // unmute pill. A ref written by the chain itself — an event-timing
+  // snapshot (e.g. on loadstart) loses the race, because the play()
+  // rejection mutes in a microtask before any media event fires.
+  const mutedByFallbackRef = useRef(false);
   // Bumped by retry() — included in the token-fetch effect's deps so the
   // fetch reruns without unmounting the inner playback component (which
   // would also tear down the MediaController and any captured renditions).
   const [fetchKey, setFetchKey] = useState(0);
   const retry = useCallback(() => {
+    // The retry button IS a gesture — a 429 on the retried fetch should
+    // surface the honest RateLimitedNotice, not the poster-gate fallback.
+    hadGestureRef.current = true;
     setEndState(null);
-    setToken(null);
-    setExpiresAt(null);
+    setPlayback(null);
     setFetchKey((k) => k + 1);
   }, []);
+  // <MuxVideo> remount key for subscriber token REFRESHES only (the wrapper
+  // ignores tokens-only prop changes, so a refreshed token can't reach
+  // hls.js without a remount). Auto-advance must NOT bump it: an episode
+  // change flips playbackId, which the wrapper handles in place on the same
+  // <video> element — and that element identity is what carries WebKit's
+  // per-element autoplay blessing from one episode into the next.
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  // Prefetched token for the next episode, fetched shortly before the
+  // current one ends so auto-advance skips the token round-trip. `mode`
+  // carries the response's tier so the gapless install can fire the
+  // free/member episode-start funnel events (the fetch effect — their
+  // usual emitter — is skipped on that path).
+  const [nextPrefetch, setNextPrefetch] = useState<{
+    episodeId: string;
+    token: string;
+    expiresAt: number;
+    mode: "free" | "member" | null;
+  } | null>(null);
+  // One prefetch attempt per episode; reset in the onEnded advance path.
+  const prefetchAttemptedRef = useRef(false);
+  // "Tap for sound" pill — autoplay landed in the muted fallback.
+  const [showUnmutePill, setShowUnmutePill] = useState(false);
+  // Autoplay fully blocked (e.g. iOS Low Power Mode): playback-core leaves
+  // the element paused with no signal, so we detect it and surface a
+  // tap-to-play affordance ourselves.
+  const [needsTap, setNeedsTap] = useState(false);
+  // Transient "Up next" chip shown right after an auto-advance.
+  const [chipEpisodeId, setChipEpisodeId] = useState<string | null>(null);
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   // Whether the underlying media element exposes at least one real
   // caption/subtitle track. media-chrome's built-in auto-hide on
@@ -324,14 +450,19 @@ function EpisodePlayback({
   // hiccup on cellular is normal noise; we only surrender the slot to
   // PlaybackUnavailable when 3 errors land inside a 10s window.
   const errorTimesRef = useRef<number[]>([]);
-  // Subscriber token-refresh remounts <MuxVideo> (keyed on token) because the
-  // wrapper only rebuilds its HLS src on a playbackId change, never on a
-  // tokens-only change — so a refreshed token can't reach hls.js otherwise.
+  // Subscriber token-refresh remounts <MuxVideo> (keyed on refreshNonce)
+  // because the wrapper only rebuilds its HLS src on a playbackId change,
+  // never on a tokens-only change — so a refreshed token can't reach hls.js
+  // otherwise.
   // Capture playhead + play-state before the swap and restore them on the new
   // element's loadedmetadata so the remount is seamless. Trial tokens are never
   // refreshed, so this only fires for subscribers (~once an hour).
   const resumeAfterRefreshRef = useRef<number | null>(null);
   const wasPlayingRef = useRef(false);
+  // The refresh remount creates a fresh element (muted=false by default) —
+  // a fallback-muted session never wrote media-chrome's mute pref, so the
+  // muted state must be carried across explicitly.
+  const mutedAtRefreshRef = useRef<boolean | null>(null);
   // first_frame fires once per episode mount when playback actually starts, so
   // we can tell "play attempted but never rendered" from "actually played".
   const firstFrameFiredRef = useRef(false);
@@ -352,29 +483,100 @@ function EpisodePlayback({
   // free/member episode-start funnel events fire once per episode mount.
   const tierStartFiredRef = useRef(false);
 
-  // Fetch playback token. Gated on `started`, so a trial user only mints a
-  // token (and starts the 60s clock) once they press play — the poster
-  // play-gate below sets it. Subscribers init started=true and fetch on
-  // mount. Inner is keyed on current.id, so this runs once per episode-mount
-  // once started; per-episode state starts at its
-  // initial value (no setState resets at the top of the effect body).
-  // Branches on response status so that a 429 / 5xx / parse failure
-  // doesn't get framed as a "preview ended" paywall. AbortController
-  // cancels the in-flight fetch on episode swap so a slow response
-  // can't race the new episode's fetch.
+  // Tracks prop-driven episode changes for the render-phase reset below.
+  const [prevEpisodeId, setPrevEpisodeId] = useState(current.id);
+
+  // Gapless auto-advance: when the outer shell advances the episode WITHOUT
+  // remounting (the onEnded path), per-episode state resets here, during
+  // render — React's "adjust state when props change" pattern. An effect
+  // would trip react-hooks/set-state-in-effect, and a keyed remount would
+  // discard the <video> element along with its per-element autoplay
+  // blessing (WebKit) — see the Player shell comment. The prefetched-token
+  // installation and all ref resets live in the onEnded handler (event
+  // context — render must stay pure); this block is visual-state cleanup
+  // only.
+  if (current.id !== prevEpisodeId) {
+    setPrevEpisodeId(current.id);
+    // A leftover prefetch here belongs to a previous episode's "next" (the
+    // advance path already consumed and cleared its own) — drop it.
+    if (nextPrefetch) setNextPrefetch(null);
+    setEndState(null);
+    setLastSaved(0);
+    setShowSkipIntro(false);
+    setHasCaptions(false);
+    setNeedsTap(false);
+  }
+
+  // Trial/free autoplay gate: wait until the tab is actually visible, then
+  // probe whether muted autoplay is permitted (lib/can-autoplay.ts).
+  // Capable sessions start on land — the token fetch mints the row at the
+  // same moment playback begins. Blocked sessions keep the poster gate so
+  // the 60s clock can't burn unwatched, and background-tab lands don't
+  // mint at all until the tab is foregrounded.
+  useEffect(() => {
+    if (autoplayProbe !== "pending" || started) return;
+    let cancelled = false;
+    const probe = () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      void canAutoplayMuted().then((ok) => {
+        if (cancelled) return;
+        setAutoplayProbe(ok ? "allowed" : "blocked");
+        if (ok) setStarted(true);
+      });
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") probe();
+    };
+    if (document.visibilityState === "visible") probe();
+    else document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [autoplayProbe, started]);
+
+  // Fetch playback token. Gated on `started` — set on mount for
+  // subscriber/member, by the autoplay probe for capable trial/free
+  // sessions, and by the poster-gate tap otherwise — so the token (and, in
+  // trial mode, the 60s clock) starts together with playback.
+  // Skipped while the active snapshot already belongs to this episode
+  // (prefetched auto-advance installs it during render; a subscriber token
+  // refresh updates it in place). Branches on response status so that a
+  // 429 / 5xx / parse failure doesn't get framed as a "preview ended"
+  // paywall. AbortController cancels the in-flight fetch on episode swap so
+  // a slow response can't race the new episode's fetch.
   useEffect(() => {
     if (!started || currentLocked) return;
+    if (playback && playback.episodeId === current.id) return;
+    const episodeId = current.id;
+    const playbackId = current.playbackId;
     const hasAbort = typeof AbortController !== "undefined";
     const abort = hasAbort ? new AbortController() : null;
     let cancelled = false;
     fetch(
-      `/api/playback-token?episode_id=${encodeURIComponent(current.id)}`,
+      `/api/playback-token?episode_id=${encodeURIComponent(episodeId)}`,
       { cache: "no-store", ...(abort ? { signal: abort.signal } : {}) },
     )
       .then(async (r) => {
         if (cancelled) return;
         if (!r.ok) {
-          setEndState(await classifyTokenFailure(r));
+          const failure = await classifyTokenFailure(r);
+          if (cancelled) return;
+          if (
+            failure === "rateLimited" &&
+            mode === "trial" &&
+            !hadGestureRef.current
+          ) {
+            // Pre-gesture 429: the mount fetch lost the IP-bucket race to
+            // other landers (CGNAT, ad webviews). Don't present a
+            // full-surface error to someone who hasn't touched anything —
+            // fall back to the poster gate; a real tap re-attempts and
+            // only then surfaces the honest rate-limit notice.
+            setStarted(false);
+            setAutoplayProbe("blocked");
+            return;
+          }
+          setEndState(failure);
           return;
         }
         try {
@@ -391,12 +593,16 @@ function EpisodePlayback({
             setEndState("unavailable");
             return;
           }
-          setToken(data.token);
-          setExpiresAt(Date.now() + data.expiresIn * 1000);
-          // Trial-mode token issued → a 60s preview just started. Fire the
-          // trial_play_started funnel event (deduped to once per show-preview
-          // by the shell). The Meta Lead now fires on signup completion.
-          if (data.mode === "trial") onTrialStart();
+          setPlayback({
+            episodeId,
+            playbackId,
+            token: data.token,
+            expiresAt: Date.now() + data.expiresIn * 1000,
+          });
+          // trial_play_started deliberately does NOT fire here anymore —
+          // it fires on the first `playing` frame (onPlaying) so the saved
+          // PostHog funnels keep meaning "started watching", not "token
+          // minted on land".
           if (
             (data.mode === "free" || data.mode === "member") &&
             !tierStartFiredRef.current
@@ -423,8 +629,10 @@ function EpisodePlayback({
     };
   }, [
     current.id,
+    current.playbackId,
+    playback,
     fetchKey,
-    onTrialStart,
+    mode,
     started,
     currentLocked,
     showSlug,
@@ -452,9 +660,13 @@ function EpisodePlayback({
   //    A trial preview is meant to end at the paywall, so we just schedule a
   //    single transition to it at the token's expiry.
   useEffect(() => {
-    if (!expiresAt) return;
+    if (!playback) return;
     const REFRESH_LEAD_MS = 60_000;
-    const remaining = expiresAt - Date.now();
+    const remaining = playback.expiresAt - Date.now();
+    // Refresh the token the snapshot was minted for — during an
+    // un-prefetched auto-advance the snapshot briefly trails current.id,
+    // and a refresh for the wrong episode would 403-or-replace it.
+    const { episodeId, playbackId } = playback;
 
     // Short-lived token => trial. Don't refresh; end the preview at expiry.
     // (Subscriber refreshes always re-arm with a fresh ~1h expiresAt, so they
@@ -482,7 +694,7 @@ function EpisodePlayback({
         }
         try {
           const r = await fetch(
-            `/api/playback-token?episode_id=${encodeURIComponent(current.id)}`,
+            `/api/playback-token?episode_id=${encodeURIComponent(episodeId)}`,
             { cache: "no-store", ...(abort ? { signal: abort.signal } : {}) },
           );
           if (r.ok) {
@@ -491,22 +703,31 @@ function EpisodePlayback({
               token: unknown;
               expiresIn: unknown;
             };
+            if (cancelled) return;
             if (
               typeof data.token === "string" &&
               typeof data.expiresIn === "number"
             ) {
               // Capture playhead + play-state before the token swap remounts
-              // <MuxVideo> (key={token}); restored on its loadedmetadata. The
-              // old token is still valid here (we're REFRESH_LEAD_MS ahead of
-              // expiry), so playback keeps running until React commits the
-              // new element.
+              // <MuxVideo> (key={refreshNonce}); restored on its
+              // loadedmetadata. The old token is still valid here (we're
+              // REFRESH_LEAD_MS ahead of expiry), so playback keeps running
+              // until React commits the new element. The nonce remount is
+              // required because the wrapper ignores tokens-only changes —
+              // and it's the ONLY remaining remount of a live element.
               const el = videoRef.current;
               if (el) {
                 resumeAfterRefreshRef.current = el.currentTime;
                 wasPlayingRef.current = !el.paused;
+                mutedAtRefreshRef.current = el.muted;
               }
-              setToken(data.token);
-              setExpiresAt(Date.now() + data.expiresIn * 1000);
+              setPlayback({
+                episodeId,
+                playbackId,
+                token: data.token,
+                expiresAt: Date.now() + data.expiresIn * 1000,
+              });
+              setRefreshNonce((n) => n + 1);
               return;
             }
             setEndState("unavailable");
@@ -529,7 +750,7 @@ function EpisodePlayback({
       abort?.abort();
       clearTimeout(timer);
     };
-  }, [expiresAt, current.id, mode]);
+  }, [playback, mode]);
 
   // Save progress every 10s while playing AND visible. On tab hide
   // (visibilitychange/pagehide) we flush a final save immediately —
@@ -540,6 +761,13 @@ function EpisodePlayback({
     const flush = () => {
       const el = videoRef.current;
       if (!el) return;
+      // Mid-auto-advance the element still holds the PREVIOUS episode
+      // (snapshot trails current.id) — saving would cross-write the old
+      // playhead under the new id. The ended check alone isn't enough: a
+      // seek or replay during the gap un-ends the element.
+      if (!playback || playback.episodeId !== current.id) return;
+      // An ended element was already final-saved by onEnded.
+      if (el.ended) return;
       const t = Math.floor(el.currentTime ?? 0);
       if (t > 0 && t !== lastSavedRef.current) {
         lastSavedRef.current = t;
@@ -567,17 +795,17 @@ function EpisodePlayback({
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", flush);
     };
-  }, [current.id, mode]);
+  }, [current.id, mode, playback]);
 
   // Seek to resume position once the player has metadata for the episode.
   // This is the server-provided resume and applies only on the initial episode
   // load. A subscriber token-refresh remount also re-runs this effect (deps
-  // include token), but its playhead is owned by resumeAfterRefreshRef in
+  // include playback), but its playhead is owned by resumeAfterRefreshRef in
   // onLoadedMetadata — skip here when that restore is pending so we don't yank a
   // mid-playback viewer back toward the original resume point.
   useEffect(() => {
     if (resumeAfterRefreshRef.current != null) return;
-    if (!token || !resumeSeconds || resumeSeconds <= 0) return;
+    if (!playback || !resumeSeconds || resumeSeconds <= 0) return;
     const el = videoRef.current;
     if (!el) return;
     const handler = () => {
@@ -587,7 +815,7 @@ function EpisodePlayback({
     };
     el.addEventListener("loadedmetadata", handler, { once: true });
     return () => el.removeEventListener("loadedmetadata", handler);
-  }, [token, resumeSeconds]);
+  }, [playback, resumeSeconds]);
 
   // Detect real caption/subtitle tracks on the underlying media element so
   // we can decide whether to render the CC button. The textTracks list is
@@ -616,7 +844,7 @@ function EpisodePlayback({
       el.textTracks.removeEventListener?.("addtrack", onAdd);
       el.textTracks.removeEventListener?.("removetrack", onAdd);
     };
-  }, [token]);
+  }, [playback]);
 
   // Skip-intro chip — visible while currentTime falls inside the episode's
   // intro window. Only activates when both markers are present (admin-set
@@ -635,7 +863,164 @@ function EpisodePlayback({
     update();
     el.addEventListener("timeupdate", update);
     return () => el.removeEventListener("timeupdate", update);
-  }, [current.introStartSeconds, current.introEndSeconds, token]);
+  }, [current.introStartSeconds, current.introEndSeconds, playback]);
+
+  // First-play attempt — owned here rather than via <MuxVideo autoPlay>:
+  // playback-core's "any" chain retries muted on ANY play() rejection,
+  // including the AbortError fired when the USER pauses during startup,
+  // which force-resumed them muted. We retry muted only on NotAllowedError
+  // (a genuine policy block). Armed per snapshot install, and re-fired on
+  // loadstart, so it covers page-land, auto-advance src swaps, and
+  // token-refresh remounts alike.
+  useEffect(() => {
+    if (!playback || playback.episodeId !== current.id) return;
+    if (!autoplayWanted) return;
+    const el = videoRef.current;
+    if (!el) return;
+    let cancelled = false;
+    const attempt = () => {
+      // el.ended: an auto-advance just fired off this element's old src —
+      // playing it again would visibly rewind the finished episode while
+      // the wrapper tears it down. The new src's loadstart re-attempts.
+      // pausedByUser: a startup pause must stick even across later
+      // re-triggers (e.g. the hourly token-refresh remount).
+      if (cancelled || firstFrameFiredRef.current) return;
+      if (!el.paused || el.ended || pausedByUserRef.current) return;
+      el.play().catch((err: unknown) => {
+        if (cancelled) return;
+        if ((err as { name?: string })?.name !== "NotAllowedError") return;
+        const wasMuted = el.muted;
+        el.muted = true;
+        mutedByFallbackRef.current = true;
+        el.play().catch(() => {
+          if (!cancelled) {
+            el.muted = wasMuted;
+            mutedByFallbackRef.current = false;
+          }
+        });
+      });
+    };
+    // The wrapper may have already installed the src before this effect ran
+    // (its init effect commits first) — attempt now AND on every loadstart.
+    attempt();
+    el.addEventListener("loadstart", attempt);
+    return () => {
+      cancelled = true;
+      el.removeEventListener("loadstart", attempt);
+    };
+  }, [playback, current.id, autoplayWanted]);
+
+  // Prefetch the next episode's playback token once the playhead is within
+  // PRELOAD_LEAD_SECONDS of the end, so auto-advance skips the token
+  // round-trip (the hidden preloader element below warms the stream
+  // itself). Trial mode is excluded: its token TTL is the preview's
+  // remaining seconds — a prefetched trial token is dead by the time it's
+  // needed, and a 60s preview ends at the paywall, not the next episode.
+  // Prefetch failures are deliberately silent: the advance path falls back
+  // to a fetch-on-swap, which still reuses the live element.
+  useEffect(() => {
+    if (!playback || playback.episodeId !== current.id) return;
+    if (mode === "trial") return;
+    if (!next || isEpisodeLocked(next.tier, mode)) return;
+    const el = videoRef.current;
+    if (!el) return;
+    const nextId = next.id;
+    let cancelled = false;
+    const check = () => {
+      if (prefetchAttemptedRef.current) return;
+      // Right after an auto-advance the element still holds the FINISHED
+      // episode (ended, remaining 0) until the new src installs — without
+      // this guard the boundary check() would prefetch the next-NEXT
+      // episode immediately instead of PRELOAD_LEAD_SECONDS before the end.
+      if (el.ended) return;
+      const dur = el.duration;
+      if (!Number.isFinite(dur) || dur <= 0) return;
+      if (dur - el.currentTime > PRELOAD_LEAD_SECONDS) return;
+      prefetchAttemptedRef.current = true;
+      fetch(`/api/playback-token?episode_id=${encodeURIComponent(nextId)}`, {
+        cache: "no-store",
+      })
+        .then(async (r) => {
+          if (!r.ok || cancelled) return;
+          const data = (await r.json()) as {
+            token: unknown;
+            expiresIn: unknown;
+            mode?: unknown;
+          };
+          if (
+            typeof data.token !== "string" ||
+            typeof data.expiresIn !== "number" ||
+            cancelled
+          ) {
+            return;
+          }
+          setNextPrefetch({
+            episodeId: nextId,
+            token: data.token,
+            expiresAt: Date.now() + data.expiresIn * 1000,
+            mode:
+              data.mode === "free" || data.mode === "member"
+                ? data.mode
+                : null,
+          });
+        })
+        .catch(() => {});
+    };
+    check();
+    el.addEventListener("timeupdate", check);
+    return () => {
+      cancelled = true;
+      el.removeEventListener("timeupdate", check);
+    };
+  }, [playback, current.id, mode, next]);
+
+  // Autoplay-block detection. A failed first-play attempt leaves the
+  // element paused with no event (e.g. the capability probe passed but the
+  // real play still got denied, or playback-core raced us). If the media
+  // has metadata and nothing has played ~2s later, surface a tap-to-play
+  // affordance — unless the pause was the user's own. Armed on
+  // loadedmetadata as well as canplay: iOS Safari's native-HLS path often
+  // never reaches canplay for a paused element (it stops at
+  // HAVE_METADATA), which would otherwise make the overlay unreachable on
+  // exactly the platform (Low Power Mode) it exists for. The tap is a real
+  // gesture, so it also blesses the element for unmuted auto-advance later
+  // (WebKit's blessing is per-element and survives src changes).
+  useEffect(() => {
+    if (!playback || playback.episodeId !== current.id) return;
+    if (!autoplayWanted) return;
+    const el = videoRef.current;
+    if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const arm = () => {
+      if (firstFrameFiredRef.current) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (
+          !firstFrameFiredRef.current &&
+          el.paused &&
+          !el.ended &&
+          !pausedByUserRef.current
+        ) {
+          setNeedsTap(true);
+        }
+      }, 2_000);
+    };
+    if (el.readyState >= 1) arm();
+    el.addEventListener("loadedmetadata", arm);
+    el.addEventListener("canplay", arm);
+    return () => {
+      el.removeEventListener("loadedmetadata", arm);
+      el.removeEventListener("canplay", arm);
+      if (timer) clearTimeout(timer);
+    };
+  }, [playback, current.id, autoplayWanted]);
+
+  // Auto-hide the "Up next" chip a few seconds after an auto-advance.
+  useEffect(() => {
+    if (!chipEpisodeId) return;
+    const timer = setTimeout(() => setChipEpisodeId(null), 5_000);
+    return () => clearTimeout(timer);
+  }, [chipEpisodeId]);
 
   // Emit playback_failed once when we surrender to the infra-error overlay
   // (5xx / decode / network / parse) — distinct from the expected paywall and
@@ -693,10 +1078,43 @@ function EpisodePlayback({
     return <PlaybackUnavailable showSlug={showSlug} onRetry={retry} />;
   }
 
-  // Trial play-gate. Until the user presses play we render a poster with a
-  // play affordance and DON'T fetch a token — so the 60s trial clock starts
-  // on play, not on page load. Subscribers init started=true and never see
-  // this. Tapping anywhere on the surface starts the preview.
+  const loadingSurface = (
+    <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black">
+      {current.thumbnailUrl ? (
+        <Image
+          src={current.thumbnailUrl}
+          alt=""
+          fill
+          sizes="100vw"
+          className="object-cover opacity-40"
+          priority
+        />
+      ) : null}
+      <span
+        aria-hidden
+        className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/55"
+      />
+      <div className="relative z-10 flex items-center gap-3 text-white/60">
+        <span className="size-2 animate-pulse rounded-full bg-[#ff3d3d]" />
+        <span className="text-xs font-medium uppercase tracking-[0.3em]">
+          {t.watch.loading}
+        </span>
+      </div>
+    </div>
+  );
+
+  // While the autoplay-capability probe settles (trial/free humans —
+  // typically tens of milliseconds), show the splash rather than flashing
+  // the poster gate at users who are about to autoplay.
+  if (!started && autoplayProbe === "pending") {
+    return loadingSurface;
+  }
+
+  // Poster play-gate — crawler sessions (autoplay=false from the server's
+  // isBot check, so bots never trigger the row-minting token fetch),
+  // autoplay-blocked sessions (the probe said no — minting on land would
+  // burn the 60s clock with zero frames), and pre-gesture rate-limited
+  // lands. The tap is the user gesture that starts the session.
   if (!started) {
     return (
       <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black">
@@ -721,6 +1139,7 @@ function EpisodePlayback({
               show_slug: showSlug,
               show_title: showTitle ?? showSlug,
             });
+            hadGestureRef.current = true;
             setStarted(true);
           }}
           aria-label={t.player.playPauseAria}
@@ -746,17 +1165,13 @@ function EpisodePlayback({
     );
   }
 
-  if (!token) {
-    return (
-      <div className="flex aspect-video w-full items-center justify-center bg-black">
-        <div className="flex items-center gap-3 text-white/60">
-          <span className="size-2 animate-pulse rounded-full bg-[#ff3d3d]" />
-          <span className="text-xs font-medium uppercase tracking-[0.3em]">
-            {t.watch.loading}
-          </span>
-        </div>
-      </div>
-    );
+  // First-load splash, shown while the very first token fetch is in flight
+  // (autoplay sessions land here instead of the poster gate, so keep the
+  // episode thumbnail as the backdrop — a black void on land reads as
+  // broken). Auto-advance never returns here: the snapshot stays mounted
+  // through the transition so the <video> element survives.
+  if (!playback) {
+    return loadingSurface;
   }
 
   return (
@@ -807,15 +1222,17 @@ function EpisodePlayback({
       className="group/player relative isolate"
     >
       <MuxVideo
-        // Keyed on the token so a subscriber token refresh remounts the element
-        // (the wrapper ignores tokens-only changes); playhead/play-state are
-        // restored in onLoadedMetadata. Trial tokens never refresh, so this is
-        // stable for the whole trial preview.
-        key={token}
+        // Keyed on the refresh nonce so a subscriber token refresh remounts
+        // the element (the wrapper ignores tokens-only changes);
+        // playhead/play-state are restored in onLoadedMetadata. Episode
+        // auto-advance does NOT bump the nonce: it changes playbackId+token
+        // together, which the wrapper applies in place on the same <video> —
+        // preserving the element's autoplay blessing across episodes.
+        key={refreshNonce}
         ref={videoRef}
         slot="media"
-        playbackId={current.playbackId}
-        tokens={{ playback: token }}
+        playbackId={playback.playbackId}
+        tokens={{ playback: playback.token }}
         streamType="on-demand"
         // Without playsInline iOS Safari auto-promotes the video into its
         // system player on tap, drawing native chrome over ours. Setting
@@ -823,11 +1240,10 @@ function EpisodePlayback({
         // surface; the fullscreen button still hands off to the system
         // player on demand.
         playsInline
-        // Trial mode only: the token was just fetched in direct response to
-        // the user tapping the poster play-gate, so autoplay continues that
-        // gesture (falling back to the visible play button if a browser
-        // blocks unmuted autoplay). Subscribers keep manual play.
-        autoPlay={mode === "trial" || mode === "free"}
+        // No autoPlay prop on purpose: the first-play attempt (unmuted →
+        // muted fallback on NotAllowedError only) is owned by our effect
+        // above, so a user's startup pause sticks instead of being
+        // force-resumed by playback-core's "any" chain.
         envKey={muxDataEnabled ? MUX_DATA_ENV_KEY : undefined}
         disableTracking={!muxDataEnabled}
         disableCookies={!muxDataEnabled}
@@ -853,17 +1269,57 @@ function EpisodePlayback({
           const resumeAt = resumeAfterRefreshRef.current;
           if (resumeAt != null) {
             resumeAfterRefreshRef.current = null;
+            if (mutedAtRefreshRef.current != null) {
+              v.muted = mutedAtRefreshRef.current;
+              mutedAtRefreshRef.current = null;
+            }
             if (resumeAt > (v.currentTime ?? 0)) v.currentTime = resumeAt;
-            if (wasPlayingRef.current) void v.play().catch(() => {});
+            if (wasPlayingRef.current) {
+              // The remounted element has no gesture blessing — if the
+              // unmuted restore is denied, continue muted rather than
+              // silently stalling at minute ~59.
+              void v.play().catch((err: unknown) => {
+                if ((err as { name?: string })?.name !== "NotAllowedError") {
+                  return;
+                }
+                v.muted = true;
+                void v.play().catch(() => {});
+              });
+            }
           }
         }}
+        onPause={() => {
+          // `pause` only fires for real pause() calls and the natural-end
+          // transition (reset in onEnded) — never for a blocked autoplay
+          // attempt or the wrapper's teardown (load() emits no pause). So
+          // this reliably marks "the user chose to stop".
+          pausedByUserRef.current = true;
+        }}
         onPlaying={() => {
-          // First real playback frame for this episode mount. Fires once even
-          // across a token-refresh remount (the guard ref lives on the outer
-          // component). No-op without marketing consent (PostHog not loaded).
+          setNeedsTap(false);
+          pausedByUserRef.current = false;
+          // Funnel event = "started watching": fires from the first real
+          // frame, NOT token issuance, so blocked-autoplay lands don't
+          // count. Deduped to once per show-preview by the shell.
+          if (mode === "trial") onTrialStart();
+          // First playback frame for this episode (the guard ref survives
+          // token-refresh remounts and resets on auto-advance). If it's
+          // playing muted because OUR fallback muted it, offer the unmute
+          // pill — user-muted starts (pref/manual) don't qualify. No-op
+          // without marketing consent (PostHog not loaded).
           if (firstFrameFiredRef.current) return;
           firstFrameFiredRef.current = true;
+          if (videoRef.current?.muted && mutedByFallbackRef.current) {
+            setShowUnmutePill(true);
+          }
           capturePostHog("first_frame", { show_slug: showSlug, mode });
+        }}
+        onVolumeChange={() => {
+          // User unmuted through the regular mute button (or we did via the
+          // pill) — the pill is moot either way.
+          if (videoRef.current && !videoRef.current.muted) {
+            setShowUnmutePill(false);
+          }
         }}
         onError={(e) => {
           // HTMLMediaElement exposes MediaError on the element after an
@@ -907,8 +1363,70 @@ function EpisodePlayback({
               // ?ep=<locked id> lands in the URL so the post-signup redirect
               // resumes exactly there. No up-next countdown into a wall.
               onSwap(next.id);
-            } else {
+            } else if (mode === "trial") {
+              // Legacy 60s preview: keep the countdown card. The preview
+              // ends at the paywall, not the next episode — instant
+              // advance would burn the remaining seconds on a transition
+              // the user didn't choose.
               onOverlayChange("upnext");
+            } else {
+              // Instant auto-advance: same <video> element, new src.
+              // Install the prefetched token here (falling back to the
+              // fetch effect when it's missing or about to expire) — the
+              // first-play effect then starts the new episode on the
+              // still-blessed element. This handler is the only entry into
+              // the gapless path, so all per-episode refs reset here too
+              // (the render-phase block handles the visual state).
+              capturePostHog("episode_auto_advanced", {
+                show_slug: showSlug,
+                from_episode: currentPosition,
+                to_episode: currentPosition + 1,
+              });
+              lastSavedRef.current = 0;
+              firstFrameFiredRef.current = false;
+              tierStartFiredRef.current = false;
+              prefetchAttemptedRef.current = false;
+              errorTimesRef.current = [];
+              resumeAfterRefreshRef.current = null;
+              wasPlayingRef.current = false;
+              pausedByUserRef.current = false;
+              if (
+                nextPrefetch &&
+                nextPrefetch.episodeId === next.id &&
+                nextPrefetch.expiresAt > Date.now() + 5_000
+              ) {
+                setPlayback({
+                  episodeId: next.id,
+                  playbackId: next.playbackId,
+                  token: nextPrefetch.token,
+                  expiresAt: nextPrefetch.expiresAt,
+                });
+                // The fetch effect — the usual emitter of the tier-start
+                // funnel events — is skipped on this path, so fire from
+                // the prefetched response's mode instead.
+                if (
+                  nextPrefetch.mode === "free" ||
+                  nextPrefetch.mode === "member"
+                ) {
+                  tierStartFiredRef.current = true;
+                  capturePostHog(
+                    nextPrefetch.mode === "free"
+                      ? "free_episode_started"
+                      : "member_episode_started",
+                    {
+                      show_slug: showSlug,
+                      episode_number: currentPosition + 1,
+                    },
+                  );
+                }
+              }
+              // No usable prefetch: keep the old snapshot mounted (paused
+              // on its end frame) so the element survives; the token-fetch
+              // effect sees playback.episodeId !== current.id and swaps in
+              // place (firing the tier events itself).
+              setNextPrefetch(null);
+              setChipEpisodeId(next.id);
+              onAdvance(next.id);
             }
           } else if (mode === "subscriber") {
             // Last episode of the show finished. Subscribers see the
@@ -1042,6 +1560,82 @@ function EpisodePlayback({
         </button>
       ) : null}
 
+      {/* "Tap for sound" pill — autoplay landed in the muted fallback. */}
+      {showUnmutePill && !locked ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            // Route through media-chrome's request pipeline so its
+            // persisted mute preference updates too — a bare el.muted
+            // flip would be re-muted by the stored pref on the next
+            // element mount.
+            e.currentTarget.dispatchEvent(
+              new CustomEvent("mediaunmuterequest", {
+                composed: true,
+                bubbles: true,
+              }),
+            );
+            const el = videoRef.current;
+            if (el) el.muted = false;
+            setShowUnmutePill(false);
+          }}
+          className="absolute bottom-[110px] left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/25 bg-black/60 px-4 py-2 text-xs font-semibold text-white backdrop-blur-xl transition-colors hover:bg-black/75"
+        >
+          <Icon name="mute" size={14} />
+          {t.player.tapForSound}
+        </button>
+      ) : null}
+
+      {/* Tap-to-play — autoplay fully blocked (e.g. iOS Low Power Mode);
+          playback-core leaves the element paused with no signal, so this
+          is our own affordance. The tap doubles as the gesture that
+          blesses the element for unmuted auto-advance later. */}
+      {needsTap && !locked ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            hadGestureRef.current = true;
+            setNeedsTap(false);
+            const el = videoRef.current;
+            if (el) void el.play().catch(() => {});
+          }}
+          aria-label={t.player.playPauseAria}
+          className="absolute inset-0 z-20 flex items-center justify-center"
+        >
+          <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full border border-white/20 bg-white/15 text-white backdrop-blur-xl">
+            <span className="-mr-1 inline-flex">
+              <Icon name="play" size={32} />
+            </span>
+          </span>
+        </button>
+      ) : null}
+
+      {/* Transient "Up next" chip right after an auto-advance, so the
+          instant cut doesn't disorient. */}
+      {chipEpisodeId === current.id && !locked ? (
+        <div className="pointer-events-none absolute left-1/2 top-5 z-20 max-w-[80%] -translate-x-1/2 truncate rounded-full border border-white/15 bg-black/60 px-4 py-2 text-xs font-semibold text-white backdrop-blur-xl">
+          {t.player.upNextBtn} · {episodeLabel} — {current.title}
+        </div>
+      ) : null}
+
+      {/* Brief dimmer while an un-prefetched auto-advance fetches its
+          token — the old episode's end frame stays mounted underneath so
+          the <video> element (and its autoplay blessing) survives.
+          Deliberately interactive (pointer-events on, click swallowed):
+          the controls below still belong to the FINISHED episode, and a
+          seek/replay there would cross-write progress under the new id. */}
+      {playback.episodeId !== current.id ? (
+        <div
+          aria-hidden
+          onClick={(e) => e.stopPropagation()}
+          className="absolute inset-0 z-20 flex cursor-wait items-center justify-center bg-black/40"
+        >
+          <span className="size-2 animate-pulse rounded-full bg-[#ff3d3d]" />
+        </div>
+      ) : null}
+
       {/* Mini Matio branding */}
       <div
         className={`pointer-events-none absolute bottom-[88px] left-5 z-10 opacity-50 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:left-8 ${locked ? "!opacity-0" : ""}`}
@@ -1168,6 +1762,29 @@ function EpisodePlayback({
           <Icon name="lock" size={16} />
           {t.player.tapToUnlock}
         </button>
+      ) : null}
+
+      {/* Hidden next-episode preloader: starts ~PRELOAD_LEAD_SECONDS before
+          the end and buffers ~30s of the upcoming episode, landing its
+          segments in the browser HTTP cache for the visible player's
+          re-init (Mux segment URLs are deterministic and cacheable for a
+          week; playlists are no-store but tiny). display:none — never
+          slotted as media; Mux Data force-disabled so it can't count
+          phantom views or drop viewer cookies. */}
+      {nextPrefetch && next && nextPrefetch.episodeId === next.id ? (
+        <MuxVideo
+          key={nextPrefetch.episodeId}
+          style={{ display: "none" }}
+          aria-hidden
+          muted
+          playsInline
+          preload="auto"
+          playbackId={next.playbackId}
+          tokens={{ playback: nextPrefetch.token }}
+          streamType="on-demand"
+          disableTracking
+          disableCookies
+        />
       ) : null}
 
       {/* Overlays */}

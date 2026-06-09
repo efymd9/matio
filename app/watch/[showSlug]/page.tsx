@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import { userAgent } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
@@ -148,6 +149,21 @@ export default async function WatchPage({
   // grants access and why the period-end timestamp is also enforced.
   const isSubscriber = userId ? await hasActiveSubscription(userId) : false;
 
+  // Crawlers keep the poster play-gate: autoplay-on-land makes the player
+  // fetch a token on mount, which (for anonymous modes) mints a
+  // trial_sessions row — JS-rendering bots would pollute the funnel and
+  // burn the per-(IP, show) rate-limit buckets. Next's isBot list only
+  // covers declared crawlers, so it's supplemented with the common
+  // JS-rendering auditors/monitors that slip through (fail-open by design
+  // — an unflagged bot just mints one row).
+  const reqHeaders = await headers();
+  const uaString = reqHeaders.get("user-agent") ?? "";
+  const autoplay =
+    !userAgent({ headers: reqHeaders }).isBot &&
+    !/headless|lighthouse|pagespeed|gtmetrix|ptst|pingdom|uptime|statuscake|checkly|synthetics|crawl|spider|scrape/i.test(
+      uaString,
+    );
+
   // Look up the user's email to pre-fill the SeriesEndOverlay reminder
   // form. Cheap single-row lookup; only fires for signed-in viewers
   // (anonymous trial users never reach the series-end overlay anyway).
@@ -187,6 +203,7 @@ export default async function WatchPage({
       <WatchShell>
         <Player
           mode="subscriber"
+          autoplay={autoplay}
           showId={show.id}
           showSlug={show.slug}
           showTitle={show.title}
@@ -227,6 +244,7 @@ export default async function WatchPage({
           <CompleteRegistrationPixel userId={userId} utm={signupUtm} />
           <Player
             mode="member"
+            autoplay={autoplay}
             showId={show.id}
             showSlug={show.slug}
             showTitle={show.title}
@@ -264,6 +282,7 @@ export default async function WatchPage({
       <WatchShell>
         <Player
           mode="free"
+          autoplay={autoplay}
           showId={show.id}
           showSlug={show.slug}
           showTitle={show.title}
@@ -277,11 +296,13 @@ export default async function WatchPage({
   }
 
   // Trial branch. The trial row is created lazily inside
-  // /api/playback-token when the player actually requests a token — that
-  // way the 60-second clock starts on play, not on page load, and we never
-  // record a row for an unpublished show. Here we only *read* the row to
-  // decide whether to render the player or bounce an expired-trial user
-  // straight to /subscribe.
+  // /api/playback-token when the player actually requests a token — for
+  // human visitors the player autoplays on land, so the 60-second clock
+  // starts with the first render's token fetch; bots keep the poster
+  // play-gate and never mint. Either way we never record a row for an
+  // unpublished show. Here we only *read* the row to decide whether to
+  // render the player or bounce an expired-trial user straight to
+  // /subscribe.
   //
   // We intentionally don't short-circuit on trial.converted — a former
   // subscriber (paid then canceled) with a still-set cookie would otherwise
@@ -307,6 +328,7 @@ export default async function WatchPage({
     <WatchShell>
       <Player
         mode="trial"
+        autoplay={autoplay}
         showId={show.id}
         showSlug={show.slug}
         showTitle={show.title}

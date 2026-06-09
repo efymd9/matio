@@ -1,4 +1,13 @@
 import "server-only";
+
+// GRAIN NOTE (2026-06-09): autoplay-on-land changed what a trial_sessions
+// row means. Rows (kind='preview' AND kind='episodes') now mint when a
+// visible, autoplay-CAPABLE session lands on /watch — playback starts in
+// the same moment — instead of on an explicit play press; autoplay-blocked
+// sessions still mint on tap. Every metric counting rows or row-starts
+// (Превью KPI, acquisition funnel stage 1, episode-funnel "started",
+// conversion cohorts, campaign Sessions) is land-grain after that date.
+// Third grain era: mount-mint (pre-2026-05-31) → click-mint → land-mint.
 import {
   and,
   type AnyColumn,

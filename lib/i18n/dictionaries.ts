@@ -122,6 +122,7 @@ export const es = {
     playPreview: "Ver 60 s gratis",
     playFreeEpisode: "Ver gratis",
     fullscreenAria: "Pantalla completa",
+    tapForSound: "Activar sonido",
   },
   episodesOverlay: {
     title: "Episodios",
@@ -404,6 +405,7 @@ export const en: Dict = {
     playPreview: "Watch 60s free",
     playFreeEpisode: "Watch free",
     fullscreenAria: "Toggle fullscreen",
+    tapForSound: "Tap for sound",
   },
   episodesOverlay: {
     title: "Episodes",

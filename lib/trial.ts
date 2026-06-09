@@ -17,8 +17,12 @@ export const TRIAL_COOKIE = "trial_session";
 
 // Cap on trial-row creations per (client-IP, show) per hour. Stops the
 // "clear cookies → fresh 60s" loop without disrupting households on a
-// shared IP watching different shows.
-export const TRIAL_RATELIMIT_PER_HOUR = 3;
+// shared IP watching different shows. Raised 3 → 10 with autoplay-on-land
+// (2026-06-09): rows now mint per cookie-less LAND, not per play press, so
+// the old cap punished CGNAT/ad-webview traffic that never pressed
+// anything. 10 still bounds the cookie-clear loop at ~10 preview-minutes
+// per (IP, show) hour.
+export const TRIAL_RATELIMIT_PER_HOUR = 10;
 const RATELIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 // Lightweight error so the route handler can map to a 429 cleanly.
@@ -146,9 +150,10 @@ export function hashClientIp(ip: string): string {
 // rotate IPs by simply varying the header on each request.
 //
 // In local dev there is no Vercel edge, so the header is absent and we
-// fall back to a constant. That puts all un-identifiable requests into
-// a single shared bucket — fail-closed under abuse (3 trials per show
-// total for the whole anonymous pool), painless for local development.
+// fall back to a constant. That puts all un-identifiable requests into a
+// single shared bucket — fail-closed under abuse (TRIAL_RATELIMIT_PER_HOUR
+// trials per show total for the whole anonymous pool), painless for local
+// development.
 export function getClientIp(req: {
   headers: { get(name: string): string | null };
 }): string {
