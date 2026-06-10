@@ -4,17 +4,16 @@ import { useEffect } from "react";
 import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 
-// Fires Lead + CompleteRegistration (Meta) + signup_completed (PostHog) once
-// per user. Rendered on /subscribe, which new users hit immediately after Clerk
-// sign-up (forceRedirectUrl), so it lands close to the actual registration.
-// Signup completion is our Meta "Lead" — a stronger intent signal than the
-// trial preview, which no longer fires a Lead. Lead and CompleteRegistration
-// share ONE dedup flag so they always fire together (or not at all), and so
-// users who registered before this change (creg flag already set) don't
-// retro-fire a Lead on their next /subscribe visit. All browser-side and
-// inherently consent-gated (their ready-deferral never fires without a loaded
-// SDK). De-dupe via a localStorage flag keyed by user id, set only AFTER the
-// events actually fire so a not-yet-loaded SDK doesn't burn it.
+// Fires CompleteRegistration (Meta) + signup_completed (PostHog) once per
+// user, at the account-materialization moment: first authed /subscribe for
+// the signed-in flow, post-sign-in /welcome for pay-first buyers. Meta Lead
+// moved to the paywall (2026-06-10 funnel mapping: ViewContent at play start
+// → Lead at the paywall → InitiateCheckout at the CTA → Purchase) — it no
+// longer fires here; the localStorage key keeps its historical "creg" name
+// so users who fired before the change don't retro-fire. All browser-side
+// and inherently consent-gated (the ready-deferral never fires without a
+// loaded SDK). De-dupe via a localStorage flag keyed by user id, set only
+// AFTER the events actually fire so a not-yet-loaded SDK doesn't burn it.
 export function CompleteRegistrationPixel({
   userId,
   utm,
@@ -41,9 +40,6 @@ export function CompleteRegistrationPixel({
     const offPixel = fbDone
       ? () => {}
       : onPixelReady(() => {
-          // Signup completion is our "Lead". CompleteRegistration stays as the
-          // canonical registration event; both fire on the same trigger.
-          trackPixel("Lead", { content_category: "signup" });
           trackPixel("CompleteRegistration");
           try {
             localStorage.setItem(fbKey, "1");

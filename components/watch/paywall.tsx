@@ -8,6 +8,7 @@ import { startGuestCheckout } from "@/app/subscribe/guest-actions";
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
+import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 
 // Trial-end prompt. The conversion path is:
@@ -53,12 +54,44 @@ export function Paywall({
   const t = useT();
 
   useEffect(() => {
-    return onPostHogReady(() => {
+    const offPostHog = onPostHogReady(() => {
       capturePostHog("paywall_shown", {
         show_slug: showSlug,
         wall: variant === "tier" ? "subscription" : "trial_end",
       });
     });
+
+    // Meta Lead = "reached the paywall" (2026-06-10 funnel mapping:
+    // ViewContent at play start → Lead here → InitiateCheckout at the CTA →
+    // Purchase from the webhook). Once per browser via the localStorage
+    // flag — Lead approximates unique prospects, not impressions; the flag
+    // is set only AFTER the fire so a not-yet-loaded SDK doesn't burn it.
+    const leadKey = "matio:fb:lead";
+    let leadDone = false;
+    try {
+      leadDone = !!localStorage.getItem(leadKey);
+    } catch {
+      // Storage blocked (private mode): fire anyway.
+    }
+    const offPixel = leadDone
+      ? () => {}
+      : onPixelReady(() => {
+          trackPixel("Lead", {
+            content_category: "paywall",
+            content_type: "product",
+            content_ids: [showSlug],
+          });
+          try {
+            localStorage.setItem(leadKey, "1");
+          } catch {
+            // ignore storage write failures
+          }
+        });
+
+    return () => {
+      offPostHog();
+      offPixel();
+    };
   }, [showSlug, variant]);
 
   const params = new URLSearchParams({ show: showSlug });

@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect } from "react";
-import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 
-// Fires a Meta Pixel ViewContent + PostHog show_viewed for a show detail page.
-// Rendered by the server component app/(public)/shows/[slug]/page.tsx, which
-// can't call fbq/posthog directly. Both fires are deferred until their
-// consent-gated SDK has loaded (and never fire at all without marketing
-// consent).
+// Fires PostHog show_viewed for a show detail page. Rendered by the server
+// component app/(public)/shows/[slug]/page.tsx, which can't call posthog
+// directly. Deferred until the consent-gated SDK has loaded (never fires
+// without marketing consent).
+//
+// The Meta ViewContent that used to fire here moved to the watch player's
+// first playing frame (2026-06-10 funnel mapping: ViewContent = started
+// watching) — ad traffic lands directly on /watch and never saw the show
+// page, so the old placement missed the paid funnel entirely.
 export function ViewContentPixel({
   slug,
   title,
@@ -19,25 +22,13 @@ export function ViewContentPixel({
   genre?: string | null;
 }) {
   useEffect(() => {
-    const offPixel = onPixelReady(() => {
-      trackPixel("ViewContent", {
-        content_type: "product",
-        content_ids: [slug],
-        content_name: title,
-        ...(genre ? { content_category: genre } : {}),
-      });
-    });
-    const offPostHog = onPostHogReady(() => {
+    return onPostHogReady(() => {
       capturePostHog("show_viewed", {
         show_slug: slug,
         show_title: title,
         ...(genre ? { genre } : {}),
       });
     });
-    return () => {
-      offPixel();
-      offPostHog();
-    };
   }, [slug, title, genre]);
   return null;
 }

@@ -31,6 +31,7 @@ import {
 import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { useT } from "@/lib/i18n/client";
+import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog } from "@/lib/posthog-events";
 import dynamic from "next/dynamic";
 import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
@@ -204,8 +205,6 @@ export function Player({
   // trial_play_started (PostHog) fires once per show-preview session, not per
   // episode — the ref lives in the outer shell so swapping episodes mid-trial
   // doesn't re-fire it. No-op without marketing consent (PostHog isn't loaded).
-  // The Meta Pixel Lead used to fire here too; it now fires on signup
-  // completion instead (components/site/complete-registration-pixel.tsx).
   const trialStartFiredRef = useRef(false);
   const onTrialStart = useCallback(() => {
     if (trialStartFiredRef.current) return;
@@ -215,6 +214,25 @@ export function Player({
       show_title: showTitle ?? showSlug,
     });
   }, [showTitle, showSlug]);
+
+  // Meta ViewContent = "started watching" (2026-06-10 funnel mapping:
+  // ViewContent → Lead at paywall → InitiateCheckout → Purchase). Fires on
+  // the first real playing frame — NOT page land or token issuance, so
+  // blocked-autoplay sessions and crawlers never count — once per player
+  // mount, any mode. Deferred onto the consent-gated pixel; without consent
+  // the listener never fires.
+  const viewContentFiredRef = useRef(false);
+  const onFirstPlay = useCallback(() => {
+    if (viewContentFiredRef.current) return;
+    viewContentFiredRef.current = true;
+    onPixelReady(() => {
+      trackPixel("ViewContent", {
+        content_type: "product",
+        content_ids: [showSlug],
+        content_name: showTitle ?? showSlug,
+      });
+    });
+  }, [showSlug, showTitle]);
 
   const current = useMemo(
     () => episodes.find((e) => e.id === currentEpisodeId) ?? episodes[0],
@@ -290,6 +308,7 @@ export function Player({
       onSwap={swap}
       onAdvance={advance}
       onTrialStart={onTrialStart}
+      onFirstPlay={onFirstPlay}
       userEmail={userEmail}
       payFirst={payFirst}
     />
@@ -313,6 +332,7 @@ function EpisodePlayback({
   onSwap,
   onAdvance,
   onTrialStart,
+  onFirstPlay,
   userEmail,
   payFirst,
 }: {
@@ -332,6 +352,7 @@ function EpisodePlayback({
   onSwap: (episodeId: string) => void;
   onAdvance: (episodeId: string) => void;
   onTrialStart: () => void;
+  onFirstPlay: () => void;
   userEmail?: string | null;
   payFirst?: boolean;
 }) {
@@ -1306,9 +1327,12 @@ function EpisodePlayback({
         onPlaying={() => {
           setNeedsTap(false);
           pausedByUserRef.current = false;
-          // Funnel event = "started watching": fires from the first real
+          // Funnel events = "started watching": fire from the first real
           // frame, NOT token issuance, so blocked-autoplay lands don't
-          // count. Deduped to once per show-preview by the shell.
+          // count. Both deduped to once per session by the shell. Meta
+          // ViewContent fires for every mode; PostHog trial_play_started
+          // keeps its preview-only meaning.
+          onFirstPlay();
           if (mode === "trial") onTrialStart();
           // First playback frame for this episode (the guard ref survives
           // token-refresh remounts and resets on auto-advance). If it's
