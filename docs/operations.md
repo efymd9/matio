@@ -210,13 +210,27 @@ The admin form has two artwork fields — **drag-and-drop upload** (client-direc
 1. **Incognito window** → `/`. Click the show poster → `/shows/<slug>` → Play → `/watch/<slug>`. The page renders the Player in trial mode but **no cookie is set and no `trial_sessions` row exists yet** — the 60s clock hasn't started.
 2. Player mounts → fetches `/api/playback-token?episode_id=<id>`. The route handler verifies show is published+ready, runs `mintTrialSession({ sessionToken, showId, ipHash })` which creates the row with `expires_at = now + 60s` and `ip_hash = HMAC(MUX_SIGNING_KEY_PRIVATE_KEY, x-forwarded-for)`, then sets the `trial_session` cookie (HTTP-only, secure-in-prod, sameSite=lax, 1y) on the response and returns the 60s JWT.
 3. Video plays in the custom mux-video + media-chrome player (cinema-red bottom bar, mono `S1·E1` kicker). After 60s the player **pauses** and the soft-sidekick paywall sheet slides up. Buffered-ahead chunks don't keep playing because the player calls `videoRef.current.pause()` at token expiry.
-4. **Paywall** — the bottom sheet shows two plan tiles (Monthly / Annual, Annual highlighted by default). Click Monthly to flip the highlight. Click "Continue · Subscribe" → the button shows press feedback (`active:scale`) and a spinner while `useTransition` navigates to `/subscribe?show=<slug>&plan=<picked>&resume=<seconds>`.
-5. Proxy gates `/subscribe` → bounces through Clerk sign-up modal → back to `/subscribe?show=…&plan=…&resume=…`. The page calls `getOrSyncCurrentUser()` (ensures the mirror row exists before `linkTrialSessionsToCurrentUser` runs — otherwise the FK on `trial_sessions.user_id` would crash on fresh signups), then `linkTrialSessionsToCurrentUser()` claims any unlinked trial rows on the cookie. The radio-card picker boots with the chosen plan already selected.
-6. Click "Continue · Subscribe" on `/subscribe` → animated `SubmitButton` (uses `useFormStatus`) shows a spinner while `startCheckout` runs → redirected to Stripe Checkout. Use test card `4242 4242 4242 4242`, any CVC, any future date.
+4. **Paywall** — the bottom sheet shows a single CTA. With `PAY_FIRST_CHECKOUT` **on**, the signed-out CTA reads "Get membership · $38/mo" and posts straight to guest Stripe Checkout (see the pay-first recipe below). With the flag **off** it opens the Clerk sign-up modal with `forceRedirectUrl=/subscribe?show=<slug>&ep=<id>&resume=<seconds>`.
+5. (Flag off / signed-in path) `/subscribe` renders the single membership card. The page calls `getOrSyncCurrentUser()` (ensures the mirror row exists before `linkTrialSessionsToCurrentUser` runs — otherwise the FK on `trial_sessions.user_id` would crash on fresh signups), then `linkTrialSessionsToCurrentUser()` claims any unlinked trial rows on the cookie.
+6. Click "Continue · Subscribe" → animated `SubmitButton` (uses `useFormStatus`) shows a spinner while `startCheckout` runs → redirected to Stripe Checkout. Use test card `4242 4242 4242 4242`, any CVC, any future date (test mode only).
 7. Stripe webhook → `subscriptions` row created with `status='active'` → `markUserTrialsConverted` flips `trial_sessions.converted=true` for the user's rows.
 8. Redirected to `/watch/<slug>?resume=<seconds>` — player gets a 1h subscriber token, seeks to resume position.
 
 **Verifying the IP rate-limit**: clear cookies + reload + play 3× in under an hour on the same show. The 4th attempt's `/api/playback-token` call returns `429` → player paywalls immediately without spending a fresh 60s. Different shows have independent buckets; a household sharing an IP can still trial multiple shows.
+
+### Pay-first guest purchase (`PAY_FIRST_CHECKOUT=1`)
+
+In production this is a **real $38 charge** — use an email alias you control and refund yourself in the Stripe dashboard afterwards. Locally, test-mode card `4242…` works as usual (flag in `.env.local`).
+
+1. **Incognito window** → `/watch/<gated-slug>` → watch through the free episodes (or deep-link a subscriber episode via `?ep=`). The paywall's signed-out CTA reads "Get membership · $38/mo" and posts `startGuestCheckout` — no Clerk modal.
+2. Stripe Checkout opens with an **email field** (no pre-filled customer). Pay with a fresh email alias (e.g. `you+paytest@…`).
+3. Land on `/welcome` → "Signing you in…" → "You're all set" → auto-redirect into `/watch` playing the locked episode in subscriber mode. Behind the scenes: the webhook and the page raced the same idempotent `claimGuestCheckout` + `mirrorSubscription`; whichever won, both wrote once.
+4. Verify the data: Clerk dashboard has a new user with **no password**; `users` row has `signup_origin='guest_checkout'` + the new `stripe_customer_id`; `subscriptions` row is `active`; the incognito session's `trial_sessions` rows are linked (`user_id` set, `converted=true`).
+5. **Second device / lost cookie**: open a different browser → `/watch/<slug>` → paywall → "Already have an account? Sign in" → enter the alias email → 6-digit code → subscriber access. (This is the passwordless account's only credential — if it fails, check the Clerk email-code sign-in toggle.)
+6. **Fallback path**: paste the `/welcome?session_id=…` URL into another browser — it must show the masked email + email-code sign-in, **never** an automatic session (the `checkout_claim` cookie binding is absent there).
+7. Cancel via UserButton → "Manage subscription" (or the no-code portal link with the same email), then **refund the charge** in Stripe.
+
+Watch the `welcome_signin_succeeded` / `welcome_fallback_shown(reason)` events in PostHog — they tell you which path the buyer actually took.
 
 ### Episode swap (URL sync)
 

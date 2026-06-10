@@ -32,7 +32,7 @@ Schemas live in `db/schema/`, one file per logical domain (CLAUDE.md convention)
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `users` | Clerk-id-keyed mirror of Clerk users | `id` (Clerk user id, PK), `email`, `role` (`user`\|`admin`), `stripe_customer_id` |
+| `users` | Clerk-id-keyed mirror of Clerk users | `id` (Clerk user id, PK), `email`, `role` (`user`\|`admin`), `stripe_customer_id`, `signup_origin` (`clerk_signup`\|`guest_checkout` — how the account came to exist; admin "Signups" metrics scope to `clerk_signup` because guest accounts materialize AT purchase) |
 | `subscriptions` | Stripe-mirrored subscription state | `user_id`, `stripe_subscription_id`, `status`, `plan`, `current_period_end`, `cancel_at_period_end`, `created_at` (independent of `updated_at` so churn analytics don't drift on later webhook updates) |
 | `stripe_events` | Webhook idempotency log | `event_id` (PK, the Stripe event id) — claimed via INSERT … ON CONFLICT DO NOTHING before the handler runs; conflicts return 200 OK with no work. Rolled back (DELETE) on handler exception so Stripe's retry can re-attempt |
 | `shows` | The catalog | `slug` (unique), `genre[]`, `status` (`draft`\|`published`), `deleted_at` (soft-delete) |
@@ -58,6 +58,7 @@ Hot-path indexes (migration 0010): `subscriptions(user_id, updated_at DESC)` for
   - `getOrSyncCurrentUser()` — read-or-upsert from `currentUser()` if the local row is missing. Use anywhere a missing mirror would block the user from making progress (e.g. `/subscribe` page render before `linkTrialSessionsToCurrentUser`, `startCheckout` server action, `/api/billing-portal` route). Closes the race where a brand-new signup hits these surfaces before the `user.created` webhook lands.
   - `getCurrentAdmin()` / `requireAdmin()` — role-gated variants for admin pages and actions.
 - `users.email` is required because the promote-to-admin script and Stripe customer lookups both rely on it.
+- **Pay-first guest accounts** (`PAY_FIRST_CHECKOUT=1`) are created server-side by `lib/guest-checkout.ts:claimGuestCheckout` via the Backend API — `clerkClient().users.createUser({ emailAddress, skipPasswordRequirement: true })` — from the email typed at Stripe Checkout. They are **passwordless**: email-code is their only credential, so the production Clerk instance must keep "Email verification code" sign-in enabled. The `/welcome` success page signs the buyer in without a form via a server-minted sign-in ticket (`signInTokens.createSignInToken`, 600s TTL), consumed client-side with the signal-based `signIn.ticket({ticket})` + `signIn.finalize()`. A ticket is minted ONLY when the claim **created** the account this checkout AND the httpOnly `checkout_claim` cookie matches the session's `client_reference_id` — every other case (pre-existing account, lost cookie, other session active) degrades to email-code sign-in with a masked email. `users.signup_origin` records the provenance.
 
 ## Trial system (the most subtle piece)
 
@@ -247,7 +248,12 @@ A separate **"Watch time · Mux Data"** panel carries the *real* numbers — tot
 Approximations called out in code comments:
 - Churn = cancellations / (cancellations + still-active). True churn needs a snapshot of "active at start of window," which we don't maintain.
 - Watch time (engagement section) = sum of last-known position; doesn't account for repeat watching. The Mux Data panel is the authoritative cut.
-- First-touch attribution on users only captures the first authenticated touch where UTM cookies were present (specifically the `/subscribe` page render). A user who signs up via the header on `/` and never visits `/subscribe` stays NULL — they don't appear in conversion attribution because they're not paid users anyway.
+- First-touch attribution on users only captures the first authenticated touch where UTM cookies were present (specifically the `/subscribe` page render). A user who signs up via the header on `/` and never visits `/subscribe` stays NULL — they don't appear in conversion attribution because they're not paid users anyway. Pay-first guest accounts get theirs stamped at claim time from Stripe metadata instead (`applyUserAttributionPayload`).
+
+**Pay-first adaptations (2026-06-10)**, after the funnel reorder made several definitions stale:
+- The Signups KPI / trend series / campaign-table column scope to `users.signup_origin = 'clerk_signup'` — guest accounts are created AT purchase and would otherwise just echo "New subs".
+- The campaign table's "Wall %" episodes-kind arm has a **positional fallback** (`furthest_episode_number >= the show's last free position`, derived by `loadLastFreePositions`, mirroring `loadEpisodeFunnels`) — the `signup_wall_at` stamp is member-tier-only and never fires on shows with no member episodes, which would have read 0% regardless of engagement.
+- The per-show episode funnel renders **tier-adaptively**: shows with `memberCount === 0` drop the two member stages (they'd read a hard 0 forever beneath a nonzero "Subscribed") and relabel the wall stage to the subscription paywall.
 
 ## Campaign attribution
 
@@ -313,14 +319,15 @@ Three measurement channels feed the funnel, all gated on `cookie_consent.marketi
 
 **Multiple browser pixels**: `META_PIXEL_IDS` is the primary `NEXT_PUBLIC_META_PIXEL_ID` plus any comma-separated extras in `NEXT_PUBLIC_META_PIXEL_IDS`. `<MetaPixel>` runs one `fbq('init', …)` per id and renders one `<noscript>` tracking img per id. Every call site stays unchanged — `fbq('track', …)` with no pixel-id argument fans out to *all* initialized pixels — so adding a second ad account is purely an env change. Still consent-gated.
 
-The five **browser events**:
+The **browser events** follow the 2026-06-10 funnel mapping — started watching → ViewContent, reached paywall → Lead, started checkout → InitiateCheckout, subscribed → Purchase (server-side):
 
 | Event | Where | Notes |
 |---|---|---|
 | `PageView` | all pages + every SPA nav | fired by `<MetaPixel>` |
-| `ViewContent` | `/shows/[slug]` | `components/site/view-content-pixel.tsx` |
-| `InitiateCheckout` | `/subscribe` submit | `app/subscribe/submit-button.tsx` on click |
-| `Lead` + `CompleteRegistration` | `/subscribe` (signup completion) | both in `components/site/complete-registration-pixel.tsx`, fired together and deduped once-per-user via one `localStorage` flag. Signup is our "Lead" (a stronger intent signal than the trial preview, which no longer fires a Lead) |
+| `ViewContent` | watch player's **first playing frame** (any mode) | once per player mount, fired from the `Player` shell. Moved off `/shows/[slug]` because ad traffic lands directly on `/watch` and never fired it there; the show page keeps only the PostHog `show_viewed` (`components/site/view-content-pixel.tsx`) |
+| `Lead` | **paywall shown** (`components/watch/paywall.tsx`) | once per browser via the `matio:fb:lead` localStorage flag (set after the fire) — approximates unique prospects, not impressions |
+| `InitiateCheckout` | checkout start, **server-side via CAPI** | fired from both checkout actions: the paywall CTA (`startGuestCheckout`, anonymous — fbp/fbc/IP/UA match only) and the `/subscribe` submit (`startCheckout`). Server-side because browser beacons raced the cross-origin Stripe redirect |
+| `CompleteRegistration` | account materialization | first authed `/subscribe`, or post-sign-in `/welcome` for pay-first buyers. Deduped per user on the historical `matio:fb:creg:` flag; no longer brings a Lead with it |
 
 ### Server-side Purchase via Conversions API (`lib/meta-capi.ts`)
 
@@ -464,6 +471,13 @@ Migration to Next 16's `'use cache'` + `cacheTag` + `updateTag` is deliberately 
 
 ## Subscription pipeline
 
+Two entry flows share one mirror. The **auth-first flow** (signed-in users
+always; everyone when `PAY_FIRST_CHECKOUT` is off) is the original pipeline
+below. The **pay-first guest flow** (flag on, signed-out viewers) skips Clerk
+entirely until after payment — see the next subsection.
+
+### Auth-first flow
+
 ```
 In-player paywall (components/watch/paywall.tsx)
    │  primary CTA: <SignUpButton mode="modal" forceRedirectUrl=…>
@@ -512,11 +526,19 @@ DELETED so Stripe's retry can re-attempt.
    │  - customer.subscription.{created,updated,deleted}: mirrorSubscription
    │  - invoice.{paid,payment_failed}: pull subscription, mirrorSubscription
    ▼
-mirrorSubscription:
-   - lookup user by stripe_customer_id
+mirrorSubscription (lib/subscription-mirror.ts — moved out of the route
+file so /welcome can run the same idempotent mirror inline):
+   - lookup user by stripe_customer_id; if MISSING and the sub carries
+       guest=1 metadata → claimGuestCheckout (see pay-first flow below);
+       missing + non-guest → warn-and-return as before
    - require current_period_end on access-granting statuses (throws if
        missing, so Stripe retries — defaulting to now() locked out
        just-paid users)
+   - guest duplicate guard: a guest sub transitioning into an access-
+       granting status while the user already holds a DIFFERENT access-
+       granting row is NOT mirrored (loud console.error, manual refund —
+       alert-only by design; mirroring would violate the partial unique
+       index and 500-loop the webhook)
    - upsert subscriptions row keyed on stripe_subscription_id
      (partial unique index on (user_id) WHERE status IN active/trialing/
      past_due — only one access-granting row per user at a time)
@@ -526,6 +548,60 @@ mirrorSubscription:
    ▼ redirect to success_url
 /watch/<slug>?resume=<n>  or  /?welcome=1
 ```
+
+### Pay-first guest flow (`PAY_FIRST_CHECKOUT=1`, 2026-06-10)
+
+```
+In-player paywall, signed-out CTA = <form action={startGuestCheckout}>
+   ▼
+startGuestCheckout (app/subscribe/guest-actions.ts — NO auth)
+   ├── flag off / signed-in / trial-cookie-linked-to-subscriber →
+   │     redirect to the auth-first /subscribe flow
+   ├── mint-or-reuse httpOnly checkout_claim cookie (UUID, 30d) — the
+   │     browser↔session binding; reused so parallel tabs share one token
+   ├── shared show/ep/resume validation (lib/checkout-target.ts)
+   └── checkout.sessions.create: NO customer (Stripe creates one from the
+         email typed on the hosted page), client_reference_id=claim token,
+         subscription_data.metadata = guest=1 + claim_token + trial_token
+         (the trial cookie, for exact-token linkage) + attr_*/capi_*/
+         ph_consent; idempotencyKey folds a request-variant digest so a
+         changed-intent retry in the same hour doesn't 400
+   ▼ Stripe Checkout (hosted; buyer types email + card)
+   ▼
+TWO writers run the SAME idempotent claim+mirror, whichever lands first:
+   • webhook → mirrorSubscription no-user branch → claimGuestCheckout
+   • /welcome page render → claimGuestCheckout + mirrorSubscription inline
+       (closes the webhook-vs-redirect race without polling)
+
+claimGuestCheckout (lib/guest-checkout.ts) — idempotent, THROWS on failure
+(in the webhook that rolls back the stripe_events claim so Stripe retries;
+a guest sub is never warn-and-returned):
+   - fast path: customer already bound to a user → re-run linkage only
+   - resolve email from the Stripe customer → find-or-create the Clerk
+       user (createUser skipPasswordRequirement; race-safe re-lookup);
+       reports `created` — the ticket-minting gate
+   - users mirror upsert; stripeCustomerId is REBOUND only for churned
+       users (an active subscriber keeps their original binding so their
+       real sub keeps mirroring + the billing portal stays correct)
+   - linkTrialSessionsByToken (exact token from metadata — no IP fallback)
+       + applyUserAttributionPayload (attr_* metadata → users columns)
+   ▼
+/welcome (outside the /subscribe auth matcher; robots noindex)
+   - validates session_id shape → retrieves the session (expand:
+       subscription) → requires complete + paid + guest metadata
+   - ticket sign-in ONLY when claim.created && cookie === client_
+       reference_id && no other session — else email-code fallback with
+       a MASKED email (never the full address; session_id is URL-borne
+       and shareable). Fallback returns to /welcome after sign-in so the
+       deferred signup events still fire.
+   - TicketSignIn: signIn.ticket({ticket}) + finalize() → CompleteRegistration
+       + signup_completed fire post-sign-in → router.replace to /watch
+```
+
+The flag also disables the expired-trial server redirect to `/subscribe` on
+the watch page — the player's token 403 renders the pay-first paywall
+instead, so a returning expired-trial visitor isn't bounced into Clerk
+sign-up.
 
 **Subscription gate (read path).** Every place we check "is this user a subscriber?" — `/api/playback-token`, `app/watch/[showSlug]/page.tsx`, `saveWatchProgress` — goes through `hasActiveSubscription(userId)` in `lib/subscription-access.ts`. The filter is `status IN ACCESS_GRANTING_STATUSES AND current_period_end > now()`, ordered by `updated_at DESC LIMIT 1`. `ACCESS_GRANTING_STATUSES = ["active","trialing","past_due"]` — past_due grants access because Stripe is mid-retry on a failed invoice and locking the user out makes Customer-Portal recovery impossible. Defense-in-depth: even if a `customer.subscription.deleted` webhook is dropped and the row stays in an access-granting state in our DB, the period-end check expires playback at the user's actual term.
 
@@ -543,6 +619,7 @@ isAuthRoute  = createRouteMatcher(["/subscribe(.*)"]);
 - `/admin/*`: Clerk userId required, then DB lookup `users.role='admin'`. Non-admin → redirect `/`. The role read is wrapped in a module-scope 5-second cache (`roleCache: Map<userId, {role, expiresAt}>`) so RSC prefetch fan-out + matcher-caught traffic don't translate 1:1 into Neon queries — without it a single signed-in user could saturate the pooled connection by spamming admin URLs. Anonymous → `redirectToSignIn` (admins already have accounts).
 - `/subscribe/*`: Clerk userId required. Anonymous → `redirectToSignUp({ returnBackUrl })` — the paywall conversion path defaults to creating an account; Clerk's hosted sign-up page links to sign-in for the minority returning case.
 - `/watch/*`: public. Trial cookie is **not** set here — `/api/playback-token` mints it on first play, after verifying the show is published+ready.
+- `/welcome`: **deliberately outside the auth matcher** — the pay-first buyer has no session yet; that's the point. The page does its own validation (Stripe session retrieve + the `checkout_claim` cookie binding) and its own `auth()` check for the already-signed-in branch.
 - Everything else: passes through.
 
 Public catalog (`/`, `/shows/[slug]`) isn't gated — it surfaces only `status='published' AND deleted_at IS NULL` rows.

@@ -174,6 +174,16 @@ The classic example: a fresh signup goes straight from Clerk's hosted signup →
 
 Fix: anywhere a missing mirror would block the flow, use `getOrSyncCurrentUser()` from `lib/admin.ts` instead of a raw query. It reads the row, and if it's missing, upserts from Clerk's `currentUser()` (idempotent with the webhook via `onConflictDoNothing`).
 
+### Signal-based `useSignIn` — and never gate its `setState` on effect cleanup
+
+`useSignIn` from `@clerk/nextjs` (v7) returns the NEW signal-based surface — `{ signIn, errors, fetchStatus }` — not the legacy `{ isLoaded, signIn, setActive }` (that one moved to `@clerk/nextjs/legacy`). Ticket sign-in is `await signIn.ticket({ ticket })` then `await signIn.finalize()` (promotes the completed sign-in to the active session); both return `{ error }` instead of throwing.
+
+The trap that cost us the `/welcome` auto sign-in: **the `signIn` object identity changes when clerk-js finishes loading** (pre-load it's a method-queuing proxy; post-load it's the real resource), so an effect depending on `[signIn]` re-runs — and its cleanup fires — at exactly the moment the queued `ticket()` call resolves. The classic `let cancelled = true`-in-cleanup pattern therefore discards the result on the NORMAL cold-load path and strands the UI forever (dev StrictMode hits it deterministically too). Fix: guard one-shot execution with a `useRef`, call `setState` unconditionally (React no-ops setState on unmounted components), and don't use a cancellation flag at all. See `components/welcome/ticket-sign-in.tsx`.
+
+### `createUser({ skipPasswordRequirement })` + find-or-create race
+
+`clerkClient().users.createUser({ emailAddress: [email], skipPasswordRequirement: true })` creates a passwordless account (email-code becomes the only credential — the instance must have email-code **sign-in** enabled or the account is unreachable). Find-or-create must be race-safe: two concurrent webhook deliveries can both pass the `getUserList({ emailAddress })` lookup, and the loser's `createUser` rejects on the duplicate identifier — catch, re-lookup, and only rethrow if the user genuinely isn't there. See `lib/guest-checkout.ts:ensureClerkUser`.
+
 ### "Send Example" test payload has no email → return 200, not 400
 
 Clerk's dashboard **Webhooks → Testing → Send Example** `user.created` ships a sample user with an empty `email_addresses` array. The handler requires an email (`users.email` is NOT NULL), so it used to return 400 — which (a) made Clerk **retry the example endlessly** and (b) showed the dashboard test as failed even when the signing secret was correct, sending you on a wild goose chase. Fixed: `app/api/webhooks/clerk/route.ts` now logs a warning and returns **200** for any emailless `user.created` (real email-signups always have one; phone/username-only would also hit this). General rule: only return non-2xx from a webhook for something a retry could fix (signature failure, transient DB error) — acknowledge structurally-unprocessable events with 200.
@@ -225,6 +235,8 @@ await stripe.checkout.sessions.create(
 ```
 
 Without it, two parallel submissions both pass the DB and Stripe-list dedupe checks in `startCheckout` (neither is atomic with `sessions.create`) and we end up with two completed subscriptions for the same user.
+
+**But: same key + different params = 400 `idempotency_error`, not a replay.** Stripe only replays byte-identical requests. If anything in the payload drifts between two calls inside the key's window — a new `resume` playhead in the success URL, a rotated mobile IP in `capi_ip` metadata, fresh attribution, a locale switch — the second call hard-fails and that user can't start ANY checkout until the bucket rolls. The guest flow learned this the hard way: its key folds a **digest of the variable request parts** into the key (`checkout:guest:<token>:<hour>:<sha256(params).slice(0,16)>`) so true double-submits still collide while changed-intent retries get a fresh session. See `app/subscribe/guest-actions.ts`.
 
 ### Cancel: `cancel_at_period_end` vs `cancel_at`
 
