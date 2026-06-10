@@ -6,6 +6,7 @@ import { SignInButton, useSignIn } from "@clerk/nextjs";
 import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
 import { Icon } from "@/components/site/icon";
 import { useT } from "@/lib/i18n/client";
+import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 
 // Consumes the server-minted Clerk sign-in ticket on the /welcome page —
 // the buyer paid as a guest and gets a session WITHOUT ever seeing a form.
@@ -73,6 +74,22 @@ export function TicketSignIn({
     })();
   }, [ticket, signIn]);
 
+  // Observability for the post-purchase surface: one outcome event per
+  // render lifecycle. Deferred onto the consent-gated SDK like every other
+  // mount-time event.
+  useEffect(() => {
+    if (phase === "signingIn") return;
+    return onPostHogReady(() => {
+      if (phase === "done") {
+        capturePostHog("welcome_signin_succeeded", {
+          method: ticket ? "ticket" : "session",
+        });
+      } else {
+        capturePostHog("welcome_signin_failed", { reason: "ticket_error" });
+      }
+    });
+  }, [phase, ticket]);
+
   useEffect(() => {
     if (phase !== "done") return;
     // Give the just-mounted pixel/PostHog beacons time to load + flush
@@ -90,6 +107,7 @@ export function TicketSignIn({
       <WelcomeSignInFallback
         destination={destination}
         body={`${t.welcome.ticketFailed} ${t.welcome.accountEmail(maskedEmail)}`}
+        reason="ticket_failed"
       />
     );
   }
@@ -129,11 +147,20 @@ export function TicketSignIn({
 export function WelcomeSignInFallback({
   destination,
   body,
+  reason,
 }: {
   destination: string;
   body: string;
+  // Why the one-click flow degraded — for the welcome_fallback_shown event
+  // (the page knows the branch; the client only reports it).
+  reason: string;
 }) {
   const t = useT();
+  useEffect(() => {
+    return onPostHogReady(() => {
+      capturePostHog("welcome_fallback_shown", { reason });
+    });
+  }, [reason]);
   return (
     <div className="mt-4">
       <p className="text-sm text-white/65">{body}</p>

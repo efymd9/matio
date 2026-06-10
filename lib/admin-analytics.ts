@@ -438,6 +438,37 @@ function mergeCampaignRows(
 
 // ---- the loader ------------------------------------------------------------
 
+// 1-based position of each show's LAST free ready episode in
+// (season number, episode number) order — the positional wall threshold: a
+// viewer whose furthest_episode_number reached it has seen everything the
+// free tier offers and is standing at the wall. Mirror of the derivation
+// inside loadEpisodeFunnels (keep the two in sync). Shows with no free
+// episodes are omitted — for them only the signup_wall_at stamp counts.
+async function loadLastFreePositions(): Promise<Map<string, number>> {
+  const rows = await db
+    .select({
+      showId: seasons.showId,
+      access: episodes.access,
+    })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .where(eq(episodes.status, "ready"))
+    .orderBy(asc(seasons.showId), asc(seasons.number), asc(episodes.number));
+
+  const out = new Map<string, number>();
+  let currentShow: string | null = null;
+  let pos = 0;
+  for (const r of rows) {
+    if (r.showId !== currentShow) {
+      currentShow = r.showId;
+      pos = 0;
+    }
+    pos += 1;
+    if (r.access === "free") out.set(r.showId, pos);
+  }
+  return out;
+}
+
 export type DashboardData = Awaited<ReturnType<typeof loadDashboard>>;
 
 export async function loadDashboard(f: AnalyticsFilters) {
@@ -498,6 +529,12 @@ export async function loadDashboard(f: AnalyticsFilters) {
     const c: (SQL | undefined)[] = [
       gte(users.createdAt, from),
       lte(users.createdAt, to),
+      // Pre-purchase accounts only. Pay-first guest accounts are created AT
+      // purchase (claimGuestCheckout), so without this filter the Signups
+      // KPI / trend / campaign column would just echo "New subs" for paid
+      // traffic and the signups→subs gap would stop measuring checkout
+      // drop-off.
+      eq(users.signupOrigin, "clerk_signup"),
       channelCond(uSrc, f.channel),
       campaignCond(uCmp, f.campaign),
     ];
@@ -534,6 +571,27 @@ export async function loadDashboard(f: AnalyticsFilters) {
 
   // engagement / watch_progress show filter (join to shows)
   const wpShowCond = showId ? eq(seasons.showId, showId) : undefined;
+
+  // Positional wall thresholds for the campaign table's "walled" count: the
+  // 1-based position of each show's LAST free ready episode in
+  // (season, episode) order — the same derivation loadEpisodeFunnels uses
+  // (keep them in sync). Needed because the signup_wall_at stamp is
+  // member-tier-only: a show with no member episodes (free → straight to the
+  // subscription paywall, e.g. thunder-lady post pay-first) never stamps, so
+  // a stamp-only count would read 0% for its campaigns regardless of real
+  // engagement. Episode tiers are config, not range data — one cheap query.
+  const wallPosByShow = await loadLastFreePositions();
+  const walledCond = sql.join(
+    [
+      sql`(${trialSessions.kind} = 'preview' AND ${trialSessions.lastPositionSeconds} >= 55)`,
+      sql`(${trialSessions.kind} = 'episodes' AND ${trialSessions.signupWallAt} IS NOT NULL)`,
+      ...[...wallPosByShow.entries()].map(
+        ([wShowId, lastFreePos]) =>
+          sql`(${trialSessions.kind} = 'episodes' AND ${trialSessions.showId} = ${wShowId} AND ${trialSessions.furthestEpisodeNumber} >= ${lastFreePos})`,
+      ),
+    ],
+    sql` OR `,
+  );
 
   const [
     // headline (current)
@@ -777,15 +835,17 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .limit(10),
     // ---- campaign table (chosen attribution model, in range) ----
     // Sessions of BOTH kinds (top-of-funnel volume) + the wall-reach count:
-    // preview paywall (≥55s) or the free tier's sign-up wall — the per-
-    // campaign engagement signal that works while conversions are ~zero.
+    // preview paywall (≥55s), the free tier's sign-up wall stamp, or —
+    // positional fallback — having reached the show's last free episode
+    // (walledCond above). The per-campaign engagement signal that works
+    // while conversions are ~zero.
     db
       .select({
         source: tT.source,
         medium: tT.medium,
         campaign: tT.campaign,
         n: count(),
-        walled: sql<number>`COUNT(*) FILTER (WHERE (${trialSessions.kind} = 'preview' AND ${trialSessions.lastPositionSeconds} >= 55) OR (${trialSessions.kind} = 'episodes' AND ${trialSessions.signupWallAt} IS NOT NULL))::int`,
+        walled: sql<number>`COUNT(*) FILTER (WHERE ${walledCond})::int`,
       })
       .from(trialSessions)
       .where(and(...trialConds(f.from, f.to)))

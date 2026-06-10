@@ -27,32 +27,49 @@ for the design rationale.
 
 ## Events
 
+> **Pay-first funnel reorder (2026-06-10).** With `PAY_FIRST_CHECKOUT=1` the
+> signed-out flow is paywall → Stripe → `/welcome` (account created at
+> purchase). Consequences for events: `checkout_started` fires server-side at
+> the **paywall CTA** on the device distinct_id (skipped when the `ph_*`
+> cookie is absent — slight undercount vs Meta InitiateCheckout);
+> `signup_completed` (+ Meta Lead/CompleteRegistration) fires **after**
+> purchase on `/welcome` at ~purchaser volume; `/subscribe` is no longer on
+> the signed-out path. The signed-in flow is unchanged. Project annotations
+> mark 2026-06-09 (autoplay grain era #3) and 2026-06-10 (this reorder).
+
 | Event | Where |
 |---|---|
 | `$pageview` | every route change (provider) |
 | `show_viewed` | /shows/[slug] |
 | `trial_play_started` | watch player, on first preview play |
 | `paywall_shown` | trial-end paywall mount |
-| `signup_cta_clicked` | paywall CTA (signed_out / signed_in) |
-| `signup_completed` | first authed /subscribe (once per user) |
-| `checkout_started` | /subscribe submit |
-| `subscribe_succeeded` | Stripe webhook (server) |
+| `signup_cta_clicked` | paywall CTA (signed_out / signed_in; `flow: pay_first` when it starts guest checkout) |
+| `signup_completed` | signed-in: first authed /subscribe · pay-first: /welcome after auto sign-in (once per user) |
+| `checkout_started` | signed-in: /subscribe submit (user id) · pay-first: paywall CTA, server-side (device id, `flow: pay_first`) |
+| `subscribe_succeeded` | Stripe webhook + /welcome inline mirror (server; deduped by deterministic uuid) |
+| `welcome_signin_succeeded` | /welcome — session established (`method: ticket \| session`) |
+| `welcome_signin_failed` | /welcome — ticket consumption failed |
+| `welcome_fallback_shown` | /welcome — email-code fallback rendered (`reason`) |
 
 ## Build the funnel
 
 In PostHog → Product analytics → New insight → **Funnel**. **Ads land directly on
 the show player** (`/watch/[showSlug]`), so the primary ad funnel starts there —
-NOT the homepage. Steps in order:
+NOT the homepage. Steps in order (post pay-first — note NO `/subscribe` step:
+guests never load it, and ordered funnels tolerate the signed-in flow's extra
+pageview between steps):
 
 1. Pageview where Path contains `/watch/`  ← ad landing (the player)
 2. `trial_play_started`
 3. `paywall_shown`
 4. `signup_cta_clicked`
-5. Pageview where Path contains `/subscribe`
-6. `checkout_started`
-7. `subscribe_succeeded`
+5. `checkout_started`
+6. `subscribe_succeeded`
 
 Set the conversion window to ~14 days (Matio's funnel is delayed-conversion).
+Do **not** put `signup_completed` before `checkout_started` in any ordered
+funnel — under pay-first it fires last, and the funnel would report paying
+customers as drop-offs at the checkout step.
 
 Add a **Breakdown** by `utm_source` (and a second saved copy by `utm_campaign`)
 to see which campaign leaks at which step. For organic/browse traffic, build a
@@ -74,6 +91,13 @@ The **/shows-landing** ad test lands on the show page rather than the player,
 so its funnel has an **extra `/shows/[slug]` → `/watch/[slug]` step** ahead of
 `trial_play_started` that the primary `/watch` funnel doesn't. Everything else is
 the same step list.
+
+All four (plus the three "Conversion · trial → paid" insights `uQPRcgLy` /
+`BrUI1oNs` / `yBleeXz1`) were **redefined 2026-06-10** for pay-first: the
+`/subscribe` pageview step was removed from the ads funnels, and
+`signup_completed` was dropped from the conversion funnels (it now fires
+post-purchase). Step-conversion numbers before/after that date aren't
+comparable — see the project annotation.
 
 The breakdown insights use a **normalized HogQL expression** (see below) instead
 of the raw `properties.utm_campaign` / `utm_source` so fragmented variants of the

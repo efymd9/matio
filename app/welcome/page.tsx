@@ -165,6 +165,7 @@ export default async function WelcomePage({
       <WelcomeSignInFallback
         destination={welcomeReturnUrl}
         body={t.welcome.claimPending}
+        reason="claim_pending"
       />,
     );
   }
@@ -211,6 +212,13 @@ export default async function WelcomePage({
       <WelcomeSignInFallback
         destination={welcomeReturnUrl}
         body={`${t.welcome.accountEmail(masked)} ${t.welcome.signInToWatch}`}
+        reason={
+          !claim.created
+            ? "existing_account"
+            : activeUserId
+              ? "other_session"
+              : "not_bound"
+        }
       />,
     );
   }
@@ -242,6 +250,7 @@ export default async function WelcomePage({
       <WelcomeSignInFallback
         destination={welcomeReturnUrl}
         body={`${t.welcome.ticketFailed} ${t.welcome.accountEmail(masked)}`}
+        reason="ticket_mint_failed"
       />,
     );
   }

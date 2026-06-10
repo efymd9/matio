@@ -212,9 +212,15 @@ export async function claimGuestCheckout(
   //    guessing, since silently re-keying a users PK would cascade into
   //    subscriptions/trials FKs.
   try {
-    const insert = db
-      .insert(users)
-      .values({ id: userId, email, stripeCustomerId: customerId });
+    // signup_origin only lands on INSERT — an existing row (returning
+    // churned user) keeps its original origin; the rebind path never
+    // rewrites it.
+    const insert = db.insert(users).values({
+      id: userId,
+      email,
+      stripeCustomerId: customerId,
+      signupOrigin: "guest_checkout",
+    });
     await (rebind
       ? insert.onConflictDoUpdate({
           target: users.id,

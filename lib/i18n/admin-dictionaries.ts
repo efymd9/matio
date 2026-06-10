@@ -95,6 +95,10 @@ export const ru = {
         monthly: "по месяцам",
       })[g] ?? g,
     kpiSignups: "Регистрации",
+    // «до оплаты» — аккаунты, созданные при pay-first покупке
+    // (signup_origin='guest_checkout'), сюда не входят: они появляются в
+    // момент оплаты и продублировали бы метрику «Новые подписки».
+    kpiSignupsSub: (range: string) => `${range} · до оплаты`,
     kpiTrialPreviews: "Превью",
     kpiConversions: "Конверсии",
     kpiConversionsSub: "превью → оплата",
@@ -203,7 +207,7 @@ export const ru = {
     tableColMrr: "Новый MRR",
     tableColWall: "До стены",
     tableColWallTitle:
-      "Доля сессий, дошедших до пейволла превью (≥55 с) или до стены регистрации",
+      "Доля сессий, дошедших до пейволла превью (≥55 с), до стены регистрации или до конца бесплатных эпизодов",
     // ---- воронка эпизодов (бесплатный уровень, по сериалу) ----
     episodeFunnelTitle: (title: string) => `Воронка эпизодов · ${title}`,
     episodeFunnelHint: (free: number, member: number, range: string) =>
@@ -212,8 +216,14 @@ export const ru = {
     efStartedHint: "Анонимные сессии, запустившие бесплатный эпизод за период",
     efWallHit: "Дошли до стены регистрации",
     efWallHitHint: "Стена показана, или бесплатные эпизоды закончились",
-    efSignedUp: "Зарегистрировались",
-    efSignedUpHint: "Сессии со стены, привязанные к аккаунту",
+    // Вариант для сериалов без эпизодов по аккаунту: после бесплатных
+    // эпизодов сразу пейволл подписки (pay-first), стены регистрации нет.
+    efPaywallDirect: "Дошли до пейволла подписки",
+    efPaywallDirectHint:
+      "Бесплатные эпизоды закончились — дальше сразу пейволл (эпизодов по аккаунту нет)",
+    efSignedUp: "Получили аккаунт",
+    efSignedUpHint:
+      "Сессии со стены, привязанные к аккаунту. При pay-first аккаунт создаётся в момент покупки — это уже не «регистрация до оплаты»",
     efMemberWatchers: "Смотрели эпизоды по аккаунту",
     efMemberWatchersHint:
       "Привязанные пользователи с прогрессом на эпизодах по аккаунту",
@@ -230,7 +240,7 @@ export const ru = {
     efNoMemberViews: "Просмотров эпизодов по аккаунту пока нет.",
     efDepthLabel: "Глубина бесплатного уровня · сессии, дошедшие до эпизода N",
     efDepthNote:
-      "Глубина — позиция самого дальнего начатого эпизода за сессию (монотонная запись), не досмотр. Привязка регистрации идёт по trial-cookie с IP-фолбэком, поэтому «зарегистрировались» может слегка завышаться в общих сетях.",
+      "Глубина — позиция самого дальнего начатого эпизода за сессию (монотонная запись), не досмотр. Привязка к аккаунту: при обычной регистрации — по trial-cookie с IP-фолбэком (может слегка завышаться в общих сетях), при pay-first покупке — только по точному токену (может занижаться, если webview потерял cookie).",
   },
   showNew: {
     backToShows: "Сериалы",
@@ -530,6 +540,10 @@ export const en: AdminDict = {
     touchLast: "last-touch",
     granularityToken: (g: string) => g,
     kpiSignups: "Signups",
+    // "pre-purchase" — accounts created by a pay-first purchase
+    // (signup_origin='guest_checkout') are excluded: they materialize at
+    // payment and would double-read the "New subs" metric.
+    kpiSignupsSub: (range: string) => `${range} · pre-purchase`,
     kpiTrialPreviews: "Trial previews",
     kpiConversions: "Conversions",
     kpiConversionsSub: "trials → paid",
@@ -630,7 +644,7 @@ export const en: AdminDict = {
     tableColMrr: "New MRR",
     tableColWall: "Wall %",
     tableColWallTitle:
-      "Share of sessions reaching the preview paywall (≥55s) or the sign-up wall",
+      "Share of sessions reaching the preview paywall (≥55s), the sign-up wall, or the end of the free tier",
     // ---- episode-gated funnel (free tier, per show) ----
     episodeFunnelTitle: (title: string) => `Episode funnel · ${title}`,
     episodeFunnelHint: (free: number, member: number, range: string) =>
@@ -639,8 +653,15 @@ export const en: AdminDict = {
     efStartedHint: "Anonymous sessions that played a free episode in range",
     efWallHit: "Hit sign-up wall",
     efWallHitHint: "Wall shown, or reached the end of the free tier",
-    efSignedUp: "Signed up",
-    efSignedUpHint: "Wall-stage sessions linked to a user account",
+    // Variant for shows with no member episodes: after the free tier the
+    // viewer lands straight on the subscription paywall (pay-first) — there
+    // is no sign-up wall.
+    efPaywallDirect: "Hit subscription paywall",
+    efPaywallDirectHint:
+      "Reached the end of the free tier — next stop is the paywall (no member episodes on this show)",
+    efSignedUp: "Got an account",
+    efSignedUpHint:
+      "Wall-stage sessions linked to a user account. Under pay-first the account is created at purchase — no longer a pre-payment signup",
     efMemberWatchers: "Watched member episodes",
     efMemberWatchersHint: "Linked users with progress on any member episode",
     efPaywallHit: "Hit subscription paywall",
@@ -655,7 +676,7 @@ export const en: AdminDict = {
     efNoMemberViews: "No member-episode views yet.",
     efDepthLabel: "Free-tier depth · sessions reaching episode N",
     efDepthNote:
-      "Depth is the furthest episode position a session started (write-monotonic), not completion. Sign-up linking uses the trial cookie with an IP-bucket fallback, so “signed up” can slightly over-attribute on shared networks.",
+      "Depth is the furthest episode position a session started (write-monotonic), not completion. Account linking: classic signups use the trial cookie with an IP-bucket fallback (can slightly over-attribute on shared networks); pay-first purchases link by exact token only (can under-attribute when a webview dropped the cookie).",
   },
   showNew: {
     backToShows: "Shows",

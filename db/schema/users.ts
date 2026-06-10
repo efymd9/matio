@@ -8,6 +8,14 @@ export const users = pgTable("users", {
   role: userRole("role").notNull().default("user"),
   stripeCustomerId: text("stripe_customer_id").unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // How the account came to exist. 'clerk_signup' = the user completed a
+  // Clerk sign-up themselves (default — covers the Clerk webhook mirror and
+  // getOrSyncCurrentUser). 'guest_checkout' = created server-side by the
+  // pay-first claim from a Stripe checkout email (the user never saw a
+  // sign-up form). The admin "Signups" metrics scope to 'clerk_signup' so
+  // they keep measuring pre-purchase intent — a guest account is created AT
+  // purchase and would otherwise double-read the "New subs" metric.
+  signupOrigin: text("signup_origin").notNull().default("clerk_signup"),
   // Per-campaign attribution captured from utm_* cookies on the user's first
   // authenticated touch (/subscribe page render). First-touch is set once
   // and never overwritten — it identifies the campaign that opened the

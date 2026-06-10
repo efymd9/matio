@@ -52,7 +52,19 @@ export type FunnelEvent =
   | "playback_failed"
   // Instant next-episode transition at `ended` (subscriber/member/free —
   // the legacy 60s trial keeps the countdown card instead).
-  | "episode_auto_advanced";
+  | "episode_auto_advanced"
+  // Pay-first /welcome page observability (the critical post-purchase
+  // surface). All consent-gated like every client event:
+  //   welcome_signin_succeeded — session established (method: 'ticket' for
+  //     the one-click flow, 'session' when already signed in on render)
+  //   welcome_signin_failed    — ticket consumption/finalize errored; the
+  //     buyer was shown the email-code fallback
+  //   welcome_fallback_shown   — email-code fallback rendered (reason:
+  //     'claim_pending' | 'existing_account' | 'not_bound' |
+  //     'other_session' | 'ticket_mint_failed')
+  | "welcome_signin_succeeded"
+  | "welcome_signin_failed"
+  | "welcome_fallback_shown";
 
 // Minimal surface we use. The provider assigns the real posthog-js instance
 // (which is structurally compatible) to window.posthog after init.

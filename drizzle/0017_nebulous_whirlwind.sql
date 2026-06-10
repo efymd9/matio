@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "signup_origin" text DEFAULT 'clerk_signup' NOT NULL;

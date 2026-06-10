@@ -122,7 +122,7 @@ export default async function AnalyticsPage({
           current={k.signups.value}
           prev={k.signups.prev}
           spark={sparkSignups}
-          sub={rangeLabel}
+          sub={ta.kpiSignupsSub(rangeLabel)}
         />
         <KpiTile
           label={ta.kpiTrialPreviews}
@@ -223,6 +223,12 @@ export default async function AnalyticsPage({
         >
           <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
             <div>
+              {/* Stage shape adapts to the show's tier config: with no
+                  member episodes (e.g. thunder-lady post pay-first retier)
+                  the wall after the free tier IS the subscription paywall,
+                  and the two member-tier stages would read a hard 0 forever
+                  beneath a nonzero "Subscribed" — an impossible-looking
+                  funnel — so they are dropped and the wall stage relabeled. */}
               <FunnelChart
                 steps={[
                   {
@@ -230,26 +236,36 @@ export default async function AnalyticsPage({
                     value: ef.started,
                     hint: ta.efStartedHint,
                   },
-                  {
-                    label: ta.efWallHit,
-                    value: ef.wallHit,
-                    hint: ta.efWallHitHint,
-                  },
+                  ef.memberCount > 0
+                    ? {
+                        label: ta.efWallHit,
+                        value: ef.wallHit,
+                        hint: ta.efWallHitHint,
+                      }
+                    : {
+                        label: ta.efPaywallDirect,
+                        value: ef.wallHit,
+                        hint: ta.efPaywallDirectHint,
+                      },
                   {
                     label: ta.efSignedUp,
                     value: ef.signedUp,
                     hint: ta.efSignedUpHint,
                   },
-                  {
-                    label: ta.efMemberWatchers,
-                    value: ef.memberWatchers,
-                    hint: ta.efMemberWatchersHint,
-                  },
-                  {
-                    label: ta.efPaywallHit,
-                    value: ef.paywallHit,
-                    hint: ta.efPaywallHitHint,
-                  },
+                  ...(ef.memberCount > 0
+                    ? [
+                        {
+                          label: ta.efMemberWatchers,
+                          value: ef.memberWatchers,
+                          hint: ta.efMemberWatchersHint,
+                        },
+                        {
+                          label: ta.efPaywallHit,
+                          value: ef.paywallHit,
+                          hint: ta.efPaywallHitHint,
+                        },
+                      ]
+                    : []),
                   {
                     label: ta.efSubscribed,
                     value: ef.subscribed,
