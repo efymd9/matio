@@ -19,7 +19,7 @@ import { useT } from "@/lib/i18n/client";
 export function RateLimitedNotice({ showSlug }: { showSlug: string }) {
   const t = useT();
   return (
-    <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black sm:aspect-video sm:h-auto">
       <div
         className="absolute inset-0"
         style={{ backgroundImage: TONE_GRADIENT.c }}
@@ -64,7 +64,7 @@ export function PlaybackUnavailable({
 }) {
   const t = useT();
   return (
-    <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black sm:aspect-video sm:h-auto">
       <div
         className="absolute inset-0"
         style={{ backgroundImage: TONE_GRADIENT.f }}

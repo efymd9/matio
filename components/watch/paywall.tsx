@@ -102,7 +102,7 @@ export function Paywall({
   const subscribeHref = `/subscribe?${params.toString()}`;
 
   return (
-    <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black sm:aspect-video sm:h-auto">
       {/* Dim atmospheric backdrop (stand-in for the paused frame) */}
       <div
         className="absolute inset-0"

@@ -55,7 +55,7 @@ export function SignupWall({
   const watchHref = `/watch/${showSlug}?ep=${encodeURIComponent(targetEpisodeId)}`;
 
   return (
-    <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black sm:aspect-video sm:h-auto">
       <div
         className="absolute inset-0"
         style={{ backgroundImage: TONE_GRADIENT.a }}
