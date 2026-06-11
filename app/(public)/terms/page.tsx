@@ -97,10 +97,13 @@ function TermsEn() {
 
       <Section id="subscription" title="5. Subscription, price and renewal">
         <p>
-          The subscription costs <strong>USD $38 per month</strong>, plus any
-          VAT, sales tax or other indirect tax that applies in your billing
-          country (calculated automatically by Stripe Tax at checkout). The
-          subscription renews monthly until cancelled.
+          Your membership begins with a 3-day trial for <strong>USD $1</strong>,
+          charged today. After the trial it costs <strong>USD $38 per
+          month</strong>, billed automatically from day 3, plus any VAT, sales
+          tax or other indirect tax that applies in your billing country
+          (calculated automatically by Stripe Tax at checkout). The subscription
+          then renews monthly until cancelled. Cancel before the trial ends to
+          avoid the $38 charge.
         </p>
         <p>
           You can cancel at any time from the Stripe Customer Portal — accessible
@@ -291,10 +294,14 @@ function TermsEs() {
 
       <Section id="suscripcion" title="5. Suscripción, precio y renovación">
         <p>
-          La suscripción cuesta <strong>38 USD al mes</strong>, más el IVA,
-          impuesto sobre ventas u otro tributo indirecto aplicable en tu país
-          de facturación (calculado automáticamente por Stripe Tax al pagar).
-          La suscripción se renueva mensualmente hasta que se cancele.
+          Tu membresía empieza con una prueba de 3 días por{" "}
+          <strong>1 USD</strong>, que se cobra hoy. Pasada la prueba, cuesta{" "}
+          <strong>38 USD al mes</strong>, con cargo automático a partir del día
+          3, más el IVA, impuesto sobre ventas u otro tributo indirecto
+          aplicable en tu país de facturación (calculado automáticamente por
+          Stripe Tax al pagar). Después la suscripción se renueva mensualmente
+          hasta que se cancele. Cancela antes de que termine la prueba para
+          evitar el cargo de 38 USD.
         </p>
         <p>
           Puedes cancelar en cualquier momento desde el Portal del Cliente de

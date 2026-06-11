@@ -16,10 +16,15 @@ import {
   readCapiIdentity,
   toCapiMetadata,
 } from "@/lib/capi-identity";
+import {
+  checkoutLineItems,
+  TRIAL_FEE_VALUE,
+  TRIAL_SUBSCRIPTION_DATA,
+} from "@/lib/checkout-trial";
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 import { getDict } from "@/lib/i18n/server";
 import { sendCapiEvents } from "@/lib/meta-capi";
-import { MEMBERSHIP_CURRENCY, MEMBERSHIP_VALUE } from "@/lib/meta-pixel-events";
+import { MEMBERSHIP_CURRENCY } from "@/lib/meta-pixel-events";
 import {
   captureServerEvent,
   toPosthogConsentMetadata,
@@ -59,6 +64,12 @@ export async function startCheckout(formData: FormData) {
   const priceId = process.env.STRIPE_PRICE_MONTHLY;
   if (!priceId) {
     throw new Error("Stripe price for monthly not configured");
+  }
+  // $1/3-day intro trial is mandatory once live — fail loud rather than
+  // silently charge $38 today against the "$1 for 3 days" copy.
+  const trialFeePriceId = process.env.STRIPE_PRICE_TRIAL_FEE;
+  if (!trialFeePriceId) {
+    throw new Error("Stripe trial fee price not configured");
   }
 
   const stripe = getStripe();
@@ -163,10 +174,12 @@ export async function startCheckout(formData: FormData) {
     {
       mode: "subscription",
       customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
+      line_items: checkoutLineItems(priceId, trialFeePriceId),
       success_url: successUrl,
       cancel_url: cancelUrl,
       subscription_data: {
+        // $1 today, 3-day trial, then $38/mo (see lib/checkout-trial.ts).
+        ...TRIAL_SUBSCRIPTION_DATA,
         metadata: {
           userId,
           ...attributionMetadata,
@@ -226,7 +239,7 @@ export async function startCheckout(formData: FormData) {
             clientUserAgent: capiIdentity?.ua,
           },
           customData: {
-            value: MEMBERSHIP_VALUE,
+            value: TRIAL_FEE_VALUE,
             currency: MEMBERSHIP_CURRENCY,
             content_type: "product",
             content_ids: ["matio-membership"],
@@ -239,7 +252,7 @@ export async function startCheckout(formData: FormData) {
         distinctId: userId,
         event: "checkout_started",
         properties: {
-          value: MEMBERSHIP_VALUE,
+          value: TRIAL_FEE_VALUE,
           currency: MEMBERSHIP_CURRENCY,
           // First-touch UTM so the conversion funnel can break down by campaign
           // (already normalized + source-aliased by attribution.ts).

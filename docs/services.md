@@ -44,12 +44,13 @@ Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@cle
 |---|---|
 | `STRIPE_SECRET_KEY` | Dashboard → Developers → API keys (`sk_test_…` / `sk_live_…`) |
 | `STRIPE_WEBHOOK_SECRET` | Dashboard → Developers → Webhooks → endpoint signing secret (`whsec_…`). **Different per environment.** Local `stripe listen` prints a different one than the dashboard endpoint. |
-| `STRIPE_PRICE_MONTHLY` | Printed by `pnpm stripe:setup`. Single $38/mo membership; no annual price anymore. |
+| `STRIPE_PRICE_MONTHLY` | Printed by `pnpm stripe:setup`. The recurring $38/mo membership; no annual price anymore. |
+| `STRIPE_PRICE_TRIAL_FEE` | Printed by `pnpm stripe:setup`. The one-time **$1** "3-day trial" fee charged at checkout (2026-06-11). **Required** by both checkout actions — they throw without it (so it must be set before the trial code deploys). |
 | `NEXT_PUBLIC_APP_URL` | Origin used in Checkout `success_url` / `cancel_url`. `http://localhost:3000` locally; `https://matio.tv` in prod. |
 
 **One-time setup**:
 1. Drop a `sk_test_…` into `.env.local`.
-2. `pnpm stripe:setup` (scripts/stripe-setup.ts) — idempotently creates the single "Matio Membership" product + a $38/mo price, tagged with `metadata.plan=monthly`. If a stale active price exists for that product at a different amount (e.g. the legacy $9.99) the script archives it and creates a new one before printing the id — Stripe prices are immutable so the amount can't be patched in place.
+2. `pnpm stripe:setup` (scripts/stripe-setup.ts) — idempotently creates (a) the "Matio Membership" product + a $38/mo price tagged `metadata.plan=monthly`, and (b) a "Matio — 3-day trial" product + a one-time **$1** price tagged `metadata.plan=trial_fee` (the intro trial fee). If a stale active price exists for either product at a different amount (e.g. the legacy $9.99) the script archives it and creates a new one before printing the ids — Stripe prices are immutable so the amount can't be patched in place. The intro trial = this $1 one-time price as a Checkout `line_item` + `subscription_data.trial_period_days=3` on the $38/mo price (see `lib/checkout-trial.ts`): $1 collected today, $38 starts on day 3 (status `trialing`→`active`), monthly after.
 3. **Customer Portal** — Dashboard → Settings → Billing → Customer portal. Enable "Cancel subscriptions" (mode: at period end). This is what makes the "Manage subscription" button work.
 4. **Local webhook**: `stripe listen --forward-to localhost:3000/api/webhooks/stripe` → it prints a `whsec_…` → paste into `.env.local` `STRIPE_WEBHOOK_SECRET`.
 5. **Prod webhook**: Dashboard → Developers → Webhooks → Add endpoint → `https://matio.tv/api/webhooks/stripe` → subscribe to:
@@ -64,6 +65,7 @@ Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@cle
 **Live mode (current)**: production has been on `sk_live_…` since 2026-05-27. Current live artifacts:
 - Product `prod_UatJzLBiTYS8pS` ("Matio Membership")
 - Price `price_1TbhWlCGXbzphNyzoAGW3wXM` — $38/mo USD, `tax_behavior=exclusive`
+- **$1/3-day intro trial product+price — NOT YET CREATED IN LIVE** (trial code shipped 2026-06-11). Run `pnpm stripe:setup` against the live key to create the "Matio — 3-day trial" product + one-time $1 price, fill in the id here, set `STRIPE_PRICE_TRIAL_FEE` in Vercel prod, then redeploy. The checkout actions throw without it, so set the env var **before** the deploy goes live.
 - Webhook endpoint `we_1Tbdh2CGXbzphNyzsw1zWSZf` → `https://matio.tv/api/webhooks/stripe` (apex, not www — Stripe doesn't follow 307 redirects, so a webhook URL on the www subdomain silently fails since www → apex)
 
 **Stripe Tax**: `tax/settings.status = active`, head office GB. The live price carries `tax_behavior=exclusive` (VAT/GST added on top of $38). `startCheckout` passes `automatic_tax: { enabled: true }` + `customer_update: { address: "auto", name: "auto" }` + `billing_address_collection: "required"` so Checkout collects the billing address, computes tax, and persists the address on the Customer for renewal invoicing. **It collects $0 until a tax registration is added** in Dashboard → Tax → Registrations — the operator is a UK sole trader not yet VAT/OSS-registered, so the verified 2026-05-28 test charge was a flat $38.00 with `tax = null`. The address is captured regardless, so tax switches on automatically once a registration exists; no code change. Flip `tax_behavior` to `inclusive` on the price (one Stripe API call) if you later decide to absorb VAT instead of stacking it on top.
