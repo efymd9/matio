@@ -398,6 +398,10 @@ type TripleRow = {
   // Sessions that reached a decision wall (preview paywall ≥55s, or the
   // free tier's sign-up wall). Only set on the trials rows.
   walled?: number;
+  // Subs actually paying the recurring $38 now (status active/past_due, i.e.
+  // excluding mid-$1-trial `trialing` rows). Only set on the subs rows; drives
+  // MRR so a 3-day $1 trial that hasn't converted isn't credited as $38 MRR.
+  paying?: number;
 };
 
 function mergeCampaignRows(
@@ -427,8 +431,12 @@ function mergeCampaignRows(
   for (const r of signupsRows) upsert(r.source, r.medium, r.campaign).signups += Number(r.n);
   for (const r of subsRows) {
     const row = upsert(r.source, r.medium, r.campaign);
+    // "Subs" counts every access-granting sub created in range (incl. mid-trial
+    // `trialing` — a $1 trial-start is still a real subscription). MRR counts
+    // only the ones actually paying the recurring $38 (active/past_due), so a
+    // trial that hasn't reached its day-3 charge contributes $0 MRR, not $38.
     row.activeSubs += Number(r.n);
-    row.mrr += Number(r.n) * MONTHLY_PRICE;
+    row.mrr += Number(r.paying ?? r.n) * MONTHLY_PRICE;
   }
   return Array.from(map.values()).sort((a, b) => {
     if (b.mrr !== a.mrr) return b.mrr - a.mrr;
@@ -858,9 +866,17 @@ export async function loadDashboard(f: AnalyticsFilters) {
     // New subs per campaign — created in range, still access-granting, and
     // honoring the channel/campaign filter. Same flow grain as the Sessions /
     // Signups columns (the old all-time active snapshot made the per-row
-    // Sess→sub ratio divide two different populations).
+    // Sess→sub ratio divide two different populations). `paying` excludes
+    // mid-$1-trial rows so the campaign MRR isn't inflated by trials that
+    // haven't reached their day-3 $38 charge (see mergeCampaignRows).
     db
-      .select({ source: sT.source, medium: sT.medium, campaign: sT.campaign, n: count() })
+      .select({
+        source: sT.source,
+        medium: sT.medium,
+        campaign: sT.campaign,
+        n: count(),
+        paying: sql<number>`COUNT(*) FILTER (WHERE ${subscriptions.status} IN ('active','past_due'))::int`,
+      })
       .from(subscriptions)
       .where(
         and(
