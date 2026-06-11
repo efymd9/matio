@@ -98,6 +98,8 @@ export async function createShow(formData: FormData) {
   }
 
   const status = str(formData, "status") === "published" ? "published" : "draft";
+  const orientation =
+    str(formData, "orientation") === "vertical" ? "vertical" : "horizontal";
 
   const values: NewShow = {
     title,
@@ -107,6 +109,7 @@ export async function createShow(formData: FormData) {
     heroImageUrl: str(formData, "heroImageUrl") || null,
     genre: parseGenre(formData),
     status,
+    orientation,
     justReleased: checkbox(formData, "justReleased"),
     popularNow: checkbox(formData, "popularNow"),
   };
@@ -131,6 +134,8 @@ export async function updateShow(id: string, formData: FormData) {
   }
 
   const status = str(formData, "status") === "published" ? "published" : "draft";
+  const orientation =
+    str(formData, "orientation") === "vertical" ? "vertical" : "horizontal";
 
   const posterImageUrl = str(formData, "posterImageUrl") || null;
   const heroImageUrl = str(formData, "heroImageUrl") || null;
@@ -156,6 +161,7 @@ export async function updateShow(id: string, formData: FormData) {
       heroImageUrl,
       genre: parseGenre(formData),
       status,
+      orientation,
       justReleased: checkbox(formData, "justReleased"),
       popularNow: checkbox(formData, "popularNow"),
     })

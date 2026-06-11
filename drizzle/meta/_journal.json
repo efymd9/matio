@@ -127,6 +127,13 @@
       "when": 1781096498735,
       "tag": "0017_nebulous_whirlwind",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1781213375535,
+      "tag": "0018_skinny_zuras",
+      "breakpoints": true
     }
   ]
 }

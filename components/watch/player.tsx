@@ -7,6 +7,8 @@ import Image from "next/image";
 import MuxVideo from "@mux/mux-video-react";
 import { canAutoplayMuted } from "@/lib/can-autoplay";
 import { useMarketingConsent } from "@/lib/use-marketing-consent";
+import { useVerticalLayout } from "@/lib/use-vertical-layout";
+import { VerticalChrome } from "./vertical-chrome";
 
 // Public Mux Data env key (distinct from the API token / signing key). Empty
 // when unset → Mux Data stays fully off.
@@ -90,6 +92,12 @@ export type EpisodeTier = "free" | "member" | "subscriber";
 
 export type Mode = "subscriber" | "trial" | "free" | "member";
 
+// Video shape of the show (db `shows.orientation`). "vertical" switches to the
+// portrait/TikTok chrome on mobile-width viewports; "horizontal" (default) and
+// any desktop viewport keep the standard player. Mirrors the server enum so
+// this client module needs no server-only import.
+export type ShowOrientation = "horizontal" | "vertical";
+
 // Whether `mode` may play an episode of `tier`. Subscriber and legacy-trial
 // modes never lock (trial gating is the 60s clock, not position).
 export function isEpisodeLocked(tier: EpisodeTier, mode: Mode): boolean {
@@ -165,6 +173,7 @@ export function Player({
   userEmail,
   autoplay = true,
   payFirst = false,
+  orientation = "horizontal",
 }: {
   episodes: PlayerEpisode[];
   initialEpisodeId: string;
@@ -182,6 +191,8 @@ export function Player({
   // PAY_FIRST_CHECKOUT flag (server-read on the watch page): the paywall's
   // signed-out CTA goes straight to guest Stripe Checkout.
   payFirst?: boolean;
+  // Show's video shape — vertical shows get the portrait chrome on mobile.
+  orientation?: ShowOrientation;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -311,6 +322,7 @@ export function Player({
       onFirstPlay={onFirstPlay}
       userEmail={userEmail}
       payFirst={payFirst}
+      orientation={orientation}
     />
   );
 }
@@ -335,6 +347,7 @@ function EpisodePlayback({
   onFirstPlay,
   userEmail,
   payFirst,
+  orientation,
 }: {
   current: PlayerEpisode;
   next: PlayerEpisode | null;
@@ -355,9 +368,15 @@ function EpisodePlayback({
   onFirstPlay: () => void;
   userEmail?: string | null;
   payFirst?: boolean;
+  orientation: ShowOrientation;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const t = useT();
+  // Portrait/TikTok chrome — only for vertical shows on mobile-width
+  // viewports (desktop keeps the standard letterboxing player). Drives the
+  // container sizing and which chrome renders below; nothing in the playback
+  // engine, token lifecycle, or element-identity strategy changes.
+  const verticalLayout = useVerticalLayout(orientation);
   // Mux Data (watch-time/QoE analytics) is gated on marketing consent AND a
   // configured env key. Until both hold we pass disableTracking/disableCookies
   // so no beacons or viewer-id cookies fire — this also closes the pre-consent
@@ -469,10 +488,14 @@ function EpisodePlayback({
   // empty/CEA-608 placeholders), so we gate the button on our own check.
   const [hasCaptions, setHasCaptions] = useState(false);
   // Live aspect ratio of the playing asset, read off the video element
-  // once metadata is available. Default 16:9 so the first paint isn't a
-  // zero-height container; corrects to e.g. 9/16 for portrait shorts
-  // within ~200ms of the manifest arriving.
-  const [aspectRatio, setAspectRatio] = useState<number>(16 / 9);
+  // once metadata is available. Seed from the show's orientation (9:16 for
+  // vertical, 16:9 otherwise) so the first paint already matches the asset's
+  // shape — a vertical show on desktop no longer reflows from a wide box to a
+  // tall one when the manifest arrives. Still corrected from the real
+  // videoWidth/videoHeight on loadedmetadata for non-standard ratios.
+  const [aspectRatio, setAspectRatio] = useState<number>(
+    orientation === "vertical" ? 9 / 16 : 16 / 9,
+  );
   const supportsAspectRatio = SUPPORTS_ASPECT_RATIO;
   // Rolling timestamps of recent video <error> events. A single decode
   // hiccup on cellular is normal noise; we only surrender the slot to
@@ -1060,6 +1083,14 @@ function EpisodePlayback({
     }
   }, [endState, showSlug, mode]);
 
+  // The portrait chrome has no lock affordance. If a viewer locked the standard
+  // chrome and then crossed into the mobile vertical layout (a wide→narrow
+  // resize / tablet rotate), clear the inherited lock so they aren't left in a
+  // half-locked state the vertical UI can't unlock.
+  useEffect(() => {
+    if (verticalLayout && locked) onLockChange(false);
+  }, [verticalLayout, locked, onLockChange]);
+
   // Wall renders. Lock-based (currentLocked) covers deep links, overlay
   // taps, and auto-advance; endState covers server 403s and natural
   // end-of-tier transitions. Both resolve to the same two surfaces.
@@ -1107,8 +1138,20 @@ function EpisodePlayback({
     return <PlaybackUnavailable showSlug={showSlug} onRetry={retry} />;
   }
 
+  // Sizing for the pre-playback surfaces (loading splash, poster gate). The
+  // mobile vertical layout fills the canvas; a vertical show on desktop (or
+  // the brief moment before the mobile probe settles) gets a portrait box so
+  // it matches the player it's about to become; everything else is 16:9.
+  const surfaceShape = verticalLayout
+    ? "h-full"
+    : orientation === "vertical"
+      ? "mx-auto aspect-[9/16] max-w-[min(100vw,calc(100vh*9/16))]"
+      : "aspect-video";
+
   const loadingSurface = (
-    <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black">
+    <div
+      className={`relative flex w-full items-center justify-center overflow-hidden bg-black ${surfaceShape}`}
+    >
       {current.thumbnailUrl ? (
         <Image
           src={current.thumbnailUrl}
@@ -1146,7 +1189,9 @@ function EpisodePlayback({
   // lands. The tap is the user gesture that starts the session.
   if (!started) {
     return (
-      <div className="relative flex aspect-video w-full items-center justify-center overflow-hidden bg-black">
+      <div
+        className={`relative flex w-full items-center justify-center overflow-hidden bg-black ${surfaceShape}`}
+      >
         {current.thumbnailUrl ? (
           <Image
             src={current.thumbnailUrl}
@@ -1203,51 +1248,78 @@ function EpisodePlayback({
     return loadingSurface;
   }
 
+  // media-chrome theme variables — shared by both chromes. Split out from the
+  // container sizing so the portrait/TikTok layout can fill the viewport while
+  // the standard layout still letterboxes to the asset's aspect ratio.
+  const mediaVars = {
+    "--media-primary-color": "#ffffff",
+    "--media-secondary-color": "transparent",
+    "--media-text-color": "#ffffff",
+    "--media-control-background": "transparent",
+    "--media-control-hover-background": "rgba(255,255,255,0.08)",
+    "--media-range-bar-color": "#ff3d3d",
+    "--media-range-track-background": "rgba(255,255,255,0.18)",
+    "--media-range-track-border-radius": "2px",
+    "--media-range-track-height": "4px",
+    "--media-range-thumb-background": "#ff3d3d",
+    "--media-range-thumb-border-radius": "9999px",
+    "--media-range-thumb-width": "12px",
+    "--media-range-thumb-height": "12px",
+    "--media-range-thumb-box-shadow": "0 0 0 6px rgba(255,61,61,0.25)",
+    "--media-tooltip-display": "none",
+    // Letterbox the slotted <video> inside the controller (media-chrome's
+    // default, pinned explicitly): a no-op for the standard layout (its box
+    // matches the asset ratio) and what makes the full-bleed vertical layout
+    // centre a 9:16 asset with black bars instead of cropping or stretching.
+    "--media-object-fit": "contain",
+    "--media-font-family":
+      "var(--font-sans), -apple-system, BlinkMacSystemFont, sans-serif",
+    // Settings / rendition menu — cinema-red themed.
+    "--media-menu-background": "rgba(15, 15, 18, 0.95)",
+    "--media-menu-border": "1px solid rgba(255, 255, 255, 0.1)",
+    "--media-menu-border-radius": "10px",
+    "--media-menu-padding": "6px",
+    "--media-menu-item-border-radius": "6px",
+    "--media-menu-item-checked-bg": "rgba(255, 61, 61, 0.15)",
+    "--media-menu-item-checked-color": "#ff3d3d",
+    "--media-menu-item-hover-background": "rgba(255, 255, 255, 0.08)",
+    "--media-menu-icon-color": "#ffffff",
+  } as React.CSSProperties;
+
+  // Vertical (mobile) fills the WatchShell's fixed full-screen black canvas;
+  // the <video> below letterboxes the portrait asset inside it via
+  // object-contain. Otherwise keep the asset-shaped, viewport-letterboxed box.
+  const containerStyle: React.CSSProperties = verticalLayout
+    ? {
+        display: "block",
+        width: "100%",
+        height: "100%",
+        backgroundColor: "#000",
+        ...mediaVars,
+      }
+    : {
+        display: "block",
+        width: "100%",
+        aspectRatio: supportsAspectRatio ? aspectRatio : undefined,
+        ...(!supportsAspectRatio
+          ? {
+              position: "relative" as const,
+              height: 0,
+              paddingBottom: `${(1 / aspectRatio) * 100}%`,
+            }
+          : {}),
+        // Letterbox to fit the viewport whichever way the video is shaped:
+        // vertical assets cap at `100vh * ratio` (narrow on landscape,
+        // ~viewport-wide on portrait); horizontal assets cap by width.
+        maxWidth: `min(100vw, calc(100vh * ${aspectRatio}))`,
+        margin: "0 auto",
+        backgroundColor: "#000",
+        ...mediaVars,
+      };
+
   return (
     <MediaController
-      style={
-        {
-          display: "block",
-          width: "100%",
-          aspectRatio: supportsAspectRatio ? aspectRatio : undefined,
-          ...(!supportsAspectRatio
-            ? { position: "relative" as const, height: 0, paddingBottom: `${(1 / aspectRatio) * 100}%` }
-            : {}),
-          // Letterbox to fit the viewport whichever way the video is shaped:
-          // vertical assets cap at `100vh * ratio` (narrow on landscape,
-          // ~viewport-wide on portrait); horizontal assets cap by width.
-          maxWidth: `min(100vw, calc(100vh * ${aspectRatio}))`,
-          margin: "0 auto",
-          backgroundColor: "#000",
-          "--media-primary-color": "#ffffff",
-          "--media-secondary-color": "transparent",
-          "--media-text-color": "#ffffff",
-          "--media-control-background": "transparent",
-          "--media-control-hover-background": "rgba(255,255,255,0.08)",
-          "--media-range-bar-color": "#ff3d3d",
-          "--media-range-track-background": "rgba(255,255,255,0.18)",
-          "--media-range-track-border-radius": "2px",
-          "--media-range-track-height": "4px",
-          "--media-range-thumb-background": "#ff3d3d",
-          "--media-range-thumb-border-radius": "9999px",
-          "--media-range-thumb-width": "12px",
-          "--media-range-thumb-height": "12px",
-          "--media-range-thumb-box-shadow": "0 0 0 6px rgba(255,61,61,0.25)",
-          "--media-tooltip-display": "none",
-          "--media-font-family":
-            "var(--font-sans), -apple-system, BlinkMacSystemFont, sans-serif",
-          // Settings / rendition menu — cinema-red themed.
-          "--media-menu-background": "rgba(15, 15, 18, 0.95)",
-          "--media-menu-border": "1px solid rgba(255, 255, 255, 0.1)",
-          "--media-menu-border-radius": "10px",
-          "--media-menu-padding": "6px",
-          "--media-menu-item-border-radius": "6px",
-          "--media-menu-item-checked-bg": "rgba(255, 61, 61, 0.15)",
-          "--media-menu-item-checked-color": "#ff3d3d",
-          "--media-menu-item-hover-background": "rgba(255, 255, 255, 0.08)",
-          "--media-menu-icon-color": "#ffffff",
-        } as React.CSSProperties
-      }
+      style={containerStyle}
       className="group/player relative isolate"
     >
       <MuxVideo
@@ -1481,6 +1553,44 @@ function EpisodePlayback({
         className="h-full w-full"
       />
 
+      {/* Portrait / TikTok chrome (vertical shows on mobile). Shares this
+          MediaController + <MuxVideo> element with the standard chrome — only
+          the control layout differs. */}
+      {verticalLayout ? (
+        <VerticalChrome
+          showSlug={showSlug}
+          showTitle={showTitle}
+          episodeTitle={current.title}
+          episodeLabel={episodeLabel}
+          episodesCount={episodes.length}
+          hasNext={!!next}
+          showSkipIntro={showSkipIntro}
+          showUnmutePill={showUnmutePill}
+          needsTap={needsTap}
+          chipVisible={chipEpisodeId === current.id}
+          onOpenEpisodes={() => onOverlayChange("episodes")}
+          onUnmute={() => {
+            const el = videoRef.current;
+            if (el) el.muted = false;
+            setShowUnmutePill(false);
+          }}
+          onTapPlay={() => {
+            hadGestureRef.current = true;
+            setNeedsTap(false);
+            const el = videoRef.current;
+            if (el) void el.play().catch(() => {});
+          }}
+          onSkipIntro={() => {
+            const el = videoRef.current;
+            if (el && current.introEndSeconds != null) {
+              el.currentTime = current.introEndSeconds;
+            }
+          }}
+        />
+      ) : null}
+
+      {!verticalLayout && (
+        <>
       {/* Top scrim */}
       <div
         className={`pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/85 via-black/40 to-transparent px-5 pb-14 pt-5 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8 ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
@@ -1651,6 +1761,8 @@ function EpisodePlayback({
           {t.player.upNextBtn} · {episodeLabel} — {current.title}
         </div>
       ) : null}
+        </>
+      )}
 
       {/* Brief dimmer while an un-prefetched auto-advance fetches its
           token — the old episode's end frame stays mounted underneath so
@@ -1668,6 +1780,8 @@ function EpisodePlayback({
         </div>
       ) : null}
 
+      {!verticalLayout && (
+        <>
       {/* Mini Matio branding */}
       <div
         className={`pointer-events-none absolute bottom-[88px] left-5 z-10 opacity-50 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:left-8 ${locked ? "!opacity-0" : ""}`}
@@ -1795,6 +1909,8 @@ function EpisodePlayback({
           {t.player.tapToUnlock}
         </button>
       ) : null}
+        </>
+      )}
 
       {/* Hidden next-episode preloader: starts ~PRELOAD_LEAD_SECONDS before
           the end and buffers ~30s of the upcoming episode, landing its

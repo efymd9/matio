@@ -7,6 +7,7 @@ import { useAdminT } from "@/lib/i18n/admin-client";
 import { Icon } from "@/components/site/icon";
 import { ImageUploadField } from "@/components/admin/image-upload-field";
 import { StatusSelect } from "@/components/admin/status-select";
+import { OrientationSelect } from "@/components/admin/orientation-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,6 +20,7 @@ export type ShowFormValues = {
   heroImageUrl: string;
   genre: string;
   status: "draft" | "published";
+  orientation: "horizontal" | "vertical";
   justReleased: boolean;
   popularNow: boolean;
 };
@@ -31,6 +33,7 @@ export const EMPTY_SHOW_FORM: ShowFormValues = {
   heroImageUrl: "",
   genre: "",
   status: "draft",
+  orientation: "horizontal",
   justReleased: false,
   popularNow: false,
 };
@@ -157,6 +160,16 @@ export function ShowForm({
         <div className="space-y-5">
           <Field label={t.showForm.statusLabel} hint={t.showForm.statusHint}>
             <StatusSelect name="status" defaultValue={defaultValues.status} />
+          </Field>
+
+          <Field
+            label={t.showForm.orientationLabel}
+            hint={t.showForm.orientationHint}
+          >
+            <OrientationSelect
+              name="orientation"
+              defaultValue={defaultValues.orientation}
+            />
           </Field>
 
           <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">

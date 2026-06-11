@@ -89,6 +89,7 @@ export default async function EditShowPage({
           heroImageUrl: show.heroImageUrl ?? "",
           genre: show.genre.join(", "),
           status: show.status,
+          orientation: show.orientation,
           justReleased: show.justReleased,
           popularNow: show.popularNow,
         }}

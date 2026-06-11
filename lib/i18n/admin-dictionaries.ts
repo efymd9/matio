@@ -423,6 +423,9 @@ export const ru = {
     visibilityTitle: "Статус и размещение",
     statusLabel: "Статус",
     statusHint: "Черновики скрыты из публичного каталога.",
+    orientationLabel: "Формат видео",
+    orientationHint:
+      "Вертикальный включает плеер в стиле TikTok на телефонах. На десктопе вид не меняется.",
     homepageRowsLabel: "Ряды на главной",
     homepageRowsHint:
       "В каких рядах на главной появляется этот сериал. Может быть в обоих, в одном или ни в одном (страница всё равно доступна по URL).",
@@ -438,6 +441,10 @@ export const ru = {
   statusSelect: {
     draft: "Черновик",
     published: "Опубликован",
+  },
+  orientationSelect: {
+    horizontal: "Горизонтальный (16:9)",
+    vertical: "Вертикальный (9:16)",
   },
   accessSelect: {
     free: "Бесплатно",
@@ -858,6 +865,9 @@ export const en: AdminDict = {
     visibilityTitle: "Status & placement",
     statusLabel: "Status",
     statusHint: "Drafts are hidden from the public catalog.",
+    orientationLabel: "Video format",
+    orientationHint:
+      "Vertical switches to a TikTok-style player on phones. Desktop looks the same either way.",
     homepageRowsLabel: "Homepage rows",
     homepageRowsHint:
       "Which rows this show appears in on the home page. It can be in both, either, or neither (still reachable via its URL).",
@@ -873,6 +883,10 @@ export const en: AdminDict = {
   statusSelect: {
     draft: "Draft",
     published: "Published",
+  },
+  orientationSelect: {
+    horizontal: "Horizontal (16:9)",
+    vertical: "Vertical (9:16)",
   },
   accessSelect: {
     free: "Free",
