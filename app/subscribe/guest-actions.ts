@@ -3,7 +3,7 @@
 import crypto from "node:crypto";
 import { auth } from "@clerk/nextjs/server";
 import { and, eq, inArray } from "drizzle-orm";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { subscriptions, trialSessions } from "@/db/schema";
@@ -31,9 +31,10 @@ import {
   captureServerEvent,
   toPosthogConsentMetadata,
 } from "@/lib/posthog-server";
+import { guestCheckoutRateLimited } from "@/lib/checkout-rate-limit";
 import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
-import { TRIAL_COOKIE } from "@/lib/trial";
+import { getClientIp, hashClientIp, TRIAL_COOKIE } from "@/lib/trial";
 
 // Pay-first ("invisible account") checkout entry point: NO auth — the
 // anonymous paywall CTA posts here and goes straight to Stripe Checkout.
@@ -66,6 +67,18 @@ export async function startGuestCheckout(formData: FormData) {
   // signed-out viewers, so this is belt-and-braces.
   const { userId } = await auth();
   if (userId) redirect(subscribeFallback);
+
+  // Rate-limit this UNAUTHENTICATED action per IP/hour BEFORE any expensive or
+  // pollution-prone work (the trial-dup DB read, the live Stripe session, and
+  // the Meta CAPI / PostHog events). A cookieless script otherwise gets a fresh
+  // Stripe session + funnel events on every call. Same HMAC IP bucket as the
+  // trial limiter. Over the limit → degrade into the auth flow (Clerk sign-up
+  // naturally throttles), never reaching Stripe/analytics. Fail-open on a DB
+  // error so an infra blip can't block real buyers.
+  const ipHash = hashClientIp(getClientIp({ headers: await headers() }));
+  if (await guestCheckoutRateLimited(ipHash)) {
+    redirect(subscribeFallback);
+  }
 
   const store = await cookies();
 
