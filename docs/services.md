@@ -43,10 +43,11 @@ Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@cle
 | Name | Where to get it |
 |---|---|
 | `STRIPE_SECRET_KEY` | Dashboard → Developers → API keys (`sk_test_…` / `sk_live_…`) |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Dashboard → Developers → API keys (`pk_test_…` / `pk_live_…`). **Must match the secret key's mode.** Powers in-site **Embedded Checkout** on `/checkout` (the `@stripe/stripe-js` loader). NEXT_PUBLIC → inlined at **build** time, so it must be set in Vercel **before** the deploy that wants embedded. **Unset → graceful fallback**: the checkout actions create a hosted session and the `/checkout` page full-navigates to `checkout.stripe.com` exactly as before (no breakage, just not in-site). |
 | `STRIPE_WEBHOOK_SECRET` | Dashboard → Developers → Webhooks → endpoint signing secret (`whsec_…`). **Different per environment.** Local `stripe listen` prints a different one than the dashboard endpoint. |
 | `STRIPE_PRICE_MONTHLY` | Printed by `pnpm stripe:setup`. The recurring $38/mo membership; no annual price anymore. |
 | `STRIPE_PRICE_TRIAL_FEE` | Printed by `pnpm stripe:setup`. The one-time **$1** "3-day trial" fee charged at checkout (2026-06-11). **Required** by both checkout actions — they throw without it (so it must be set before the trial code deploys). |
-| `NEXT_PUBLIC_APP_URL` | Origin used in Checkout `success_url` / `cancel_url`. `http://localhost:3000` locally; `https://matio.tv` in prod. |
+| `NEXT_PUBLIC_APP_URL` | Origin used in Checkout `return_url` (embedded) / `success_url` + `cancel_url` (hosted). `http://localhost:3000` locally; `https://matio.tv` in prod. |
 
 **One-time setup**:
 1. Drop a `sk_test_…` into `.env.local`.

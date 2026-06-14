@@ -4,7 +4,6 @@ import crypto from "node:crypto";
 import { auth } from "@clerk/nextjs/server";
 import { and, eq, inArray } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { subscriptions, trialSessions } from "@/db/schema";
 import { readAttributionCookies, toStripeMetadata } from "@/lib/attribution";
@@ -13,6 +12,11 @@ import {
   readCapiIdentity,
   toCapiMetadata,
 } from "@/lib/capi-identity";
+import {
+  type CheckoutSessionResult,
+  type CheckoutTargetInput,
+  embeddedCheckoutEnabled,
+} from "@/lib/checkout-session";
 import { buildWatchPath, resolveCheckoutTarget } from "@/lib/checkout-target";
 import {
   checkoutLineItems,
@@ -48,8 +52,14 @@ import { getClientIp, hashClientIp, TRIAL_COOKIE } from "@/lib/trial";
 const CLAIM_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 const UUID_RE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
-export async function startGuestCheckout(formData: FormData) {
-  const target = await resolveCheckoutTarget(formData);
+// Pay-first guest checkout. Returns a CheckoutSessionResult the in-site
+// /checkout page consumes (embedded client secret / hosted URL / redirect
+// bounce); no longer redirects itself or takes FormData. Dispatched to from
+// app/checkout/actions.ts only when there's no Clerk session.
+export async function createGuestCheckoutSession(
+  input: CheckoutTargetInput,
+): Promise<CheckoutSessionResult> {
+  const target = await resolveCheckoutTarget(input);
   const fallbackParams = new URLSearchParams();
   if (target.showSlug) fallbackParams.set("show", target.showSlug);
   if (target.episodeId) fallbackParams.set("ep", target.episodeId);
@@ -58,15 +68,17 @@ export async function startGuestCheckout(formData: FormData) {
   const subscribeFallback = `/subscribe${fallbackQs ? `?${fallbackQs}` : ""}`;
 
   // Flag off → the auth flow takes over (proxy routes anonymous visitors
-  // to Clerk sign-up). Also catches a stale form post after a rollback.
-  if (process.env.PAY_FIRST_CHECKOUT !== "1") redirect(subscribeFallback);
+  // to Clerk sign-up). Also catches a stale navigation after a rollback.
+  if (process.env.PAY_FIRST_CHECKOUT !== "1") {
+    return { kind: "redirect", to: subscribeFallback };
+  }
 
   // A live Clerk session means the signed-in flow must own this checkout:
   // it reuses the existing Stripe customer and runs the userId-keyed
-  // duplicate-subscription guards. The paywall only shows this CTA to
-  // signed-out viewers, so this is belt-and-braces.
+  // duplicate-subscription guards. The dispatcher only routes here when
+  // signed-out, so this is belt-and-braces.
   const { userId } = await auth();
-  if (userId) redirect(subscribeFallback);
+  if (userId) return { kind: "redirect", to: subscribeFallback };
 
   // Rate-limit this UNAUTHENTICATED action per IP/hour BEFORE any expensive or
   // pollution-prone work (the trial-dup DB read, the live Stripe session, and
@@ -77,7 +89,7 @@ export async function startGuestCheckout(formData: FormData) {
   // error so an infra blip can't block real buyers.
   const ipHash = hashClientIp(getClientIp({ headers: await headers() }));
   if (await guestCheckoutRateLimited(ipHash)) {
-    redirect(subscribeFallback);
+    return { kind: "redirect", to: subscribeFallback };
   }
 
   const store = await cookies();
@@ -105,7 +117,7 @@ export async function startGuestCheckout(formData: FormData) {
         ),
       )
       .limit(1);
-    if (linked) redirect(subscribeFallback);
+    if (linked) return { kind: "redirect", to: subscribeFallback };
   }
 
   // Claim token: binds this browser to the Checkout session. Reused from
@@ -140,13 +152,16 @@ export async function startGuestCheckout(formData: FormData) {
   const stripe = getStripe();
   const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-  // Success lands on /welcome, which verifies payment + the claim cookie
-  // and signs the buyer in. {CHECKOUT_SESSION_ID} is Stripe's literal
-  // template token — it must NOT be URL-encoded.
+  // After payment, Stripe sends the top frame to /welcome, which verifies the
+  // session + the claim cookie and signs the buyer in. Used as return_url in
+  // embedded mode and success_url in the hosted fallback — same string either
+  // way. {CHECKOUT_SESSION_ID} is Stripe's literal template token (it must NOT
+  // be URL-encoded), substituted identically for return_url and success_url.
   const successQs = fallbackQs ? `&${fallbackQs}` : "";
   const successUrl = `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}${successQs}`;
-  // Cancel goes back to the player (the wall re-renders there), NOT to
-  // /subscribe — an anonymous visitor would just bounce off Clerk sign-up.
+  // Cancel (hosted fallback only) goes back to the player (the wall re-renders
+  // there), NOT to /subscribe — an anonymous visitor would just bounce off
+  // Clerk sign-up. The embedded form has no cancel button (back from /checkout).
   const watchPath = buildWatchPath(target);
   const cancelUrl = watchPath ? `${origin}${watchPath}` : `${origin}/`;
 
@@ -205,10 +220,23 @@ export async function startGuestCheckout(formData: FormData) {
   // different params, which would otherwise dead-end the only anonymous
   // purchase path until the hour rolls. The variant digest folds the
   // drifting parts into the key so only true duplicates collide.
+  // Embedded (in-site iframe) when a publishable key is configured, else the
+  // hosted-redirect fallback. Folded into the idempotency variant so the same
+  // claim token can't collide an embedded session with a hosted one across a
+  // deploy that flips the key (Stripe 400s on a key replayed with different
+  // params — see below).
+  const embedded = embeddedCheckoutEnabled();
+  // NB: pinned Stripe API (2026-04-22.dahlia) names the value 'embedded_page'.
+  const urlParams = embedded
+    ? { ui_mode: "embedded_page" as const, return_url: successUrl }
+    : { success_url: successUrl, cancel_url: cancelUrl };
+
   const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
   const variant = crypto
     .createHash("sha256")
-    .update(JSON.stringify({ successUrl, cancelUrl, sessionMetadata, locale }))
+    .update(
+      JSON.stringify({ successUrl, cancelUrl, sessionMetadata, locale, embedded }),
+    )
     .digest("hex")
     .slice(0, 16);
   const idempotencyKey = `checkout:guest:${claimToken}:${hourBucket}:${variant}`;
@@ -217,13 +245,12 @@ export async function startGuestCheckout(formData: FormData) {
     {
       mode: "subscription",
       // Deliberately NO `customer` (none exists yet — Stripe creates one
-      // from the email typed on the hosted page) and NO `customer_update`
+      // from the email typed on the checkout form) and NO `customer_update`
       // (Stripe rejects it without an existing customer; the collected
       // billing address lands on the new customer automatically).
       client_reference_id: claimToken,
       line_items: checkoutLineItems(priceId, trialFeePriceId),
-      success_url: successUrl,
-      cancel_url: cancelUrl,
+      ...urlParams,
       subscription_data: {
         // $1 today, 3-day trial, then $38/mo (see lib/checkout-trial.ts).
         ...TRIAL_SUBSCRIPTION_DATA,
@@ -243,8 +270,6 @@ export async function startGuestCheckout(formData: FormData) {
     },
     { idempotencyKey },
   );
-
-  if (!session.url) throw new Error("Stripe did not return a session URL");
 
   // Checkout-intent signals, server-side before the redirect (browser
   // beacons race the cross-origin navigation — see startCheckout). No
@@ -311,7 +336,14 @@ export async function startGuestCheckout(formData: FormData) {
     ]);
   }
 
-  redirect(session.url);
+  if (embedded) {
+    if (!session.client_secret) {
+      throw new Error("Stripe did not return an embedded client secret");
+    }
+    return { kind: "embedded", clientSecret: session.client_secret };
+  }
+  if (!session.url) throw new Error("Stripe did not return a session URL");
+  return { kind: "hosted", url: session.url };
 }
 
 // posthog-js persists {distinct_id} in a `ph_<key>_posthog` cookie. Reading

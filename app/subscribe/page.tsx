@@ -12,8 +12,6 @@ import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 import { linkTrialSessionsToCurrentUser } from "@/lib/trial";
-import { startCheckout } from "./actions";
-import { SubmitButton } from "./submit-button";
 
 export default async function SubscribePage({
   searchParams,
@@ -58,6 +56,17 @@ export default async function SubscribePage({
 
   const { show, resume, ep } = await searchParams;
 
+  // Carry the watch-flow params into /checkout, where the embedded Stripe
+  // form renders in-site. The signed-in checkout session is created there
+  // (createCheckoutSession → createAuthCheckoutSession); this page no longer
+  // posts the action directly.
+  const checkoutParams = new URLSearchParams();
+  if (show) checkoutParams.set("show", show);
+  if (resume) checkoutParams.set("resume", resume);
+  if (ep) checkoutParams.set("ep", ep);
+  const checkoutQs = checkoutParams.toString();
+  const checkoutHref = `/checkout${checkoutQs ? `?${checkoutQs}` : ""}`;
+
   // First-touch UTM for signup_completed. The event fires on this UTM-less URL
   // (Clerk redirected here post-signup), so posthog-js can't auto-attach the
   // campaign — we hand it the server-resolved attribution_first cookie.
@@ -100,11 +109,7 @@ export default async function SubscribePage({
           </p>
         </div>
 
-        <form action={startCheckout} className="mt-10 space-y-6">
-          {show && <input type="hidden" name="show" value={show} />}
-          {resume && <input type="hidden" name="resume" value={resume} />}
-          {ep && <input type="hidden" name="ep" value={ep} />}
-
+        <div className="mt-10 space-y-6">
           <MembershipCard
             title={t.subscribe.monthly}
             price={t.subscribe.monthlyPrice}
@@ -112,8 +117,17 @@ export default async function SubscribePage({
             sub={t.subscribe.monthlySub}
           />
 
-          <SubmitButton />
-        </form>
+          {/* Navigates to the in-site /checkout page (embedded Stripe form),
+              not a redirect to checkout.stripe.com. */}
+          <Link
+            href={checkoutHref}
+            prefetch={false}
+            className="group relative inline-flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.8)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.98]"
+          >
+            <Icon name="play" size={14} color="#ffffff" />
+            <span>{t.subscribe.continueSubscribe}</span>
+          </Link>
+        </div>
 
         {/* Trust row */}
         <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-[11px] text-white/45">

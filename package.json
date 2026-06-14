@@ -29,6 +29,8 @@
     "@mux/mux-player-react": "^3.13.0",
     "@mux/mux-video-react": "^0.31.0",
     "@mux/upchunk": "^3.5.0",
+    "@stripe/react-stripe-js": "^6.6.0",
+    "@stripe/stripe-js": "^9.8.0",
     "@vercel/blob": "^2.4.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

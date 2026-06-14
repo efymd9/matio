@@ -177,6 +177,13 @@ export const es = {
     allFreeWatched: "Episodios gratis completados",
     subscribeBody:
       "Suscríbete para ver todo el catálogo y los próximos episodios.",
+    benefits:
+      "Todos los episodios · Catálogo completo · Cancela cuando quieras",
+    openInBrowserIos:
+      "Paga más rápido con Apple Pay: toca ••• y elige «Abrir en Safari».",
+    openInBrowserAndroid: "Paga más rápido con Google Pay.",
+    openInBrowserAndroidCta: "Abrir en Chrome",
+    openInBrowserDismiss: "Cerrar",
   },
   signupWall: {
     kicker: "Continúa gratis",
@@ -214,6 +221,14 @@ export const es = {
       `Tu plan ${plan} está ${status}. Cambia o cancela cuando quieras en tu cuenta.`,
     manageSubscription: "Gestionar suscripción",
     backToBrowse: "Volver a explorar",
+  },
+  checkout: {
+    kicker: "Pago seguro",
+    title: "Completa tu membresía.",
+    back: "Volver",
+    loading: "Cargando el pago seguro…",
+    errorBody: "No pudimos cargar el pago. Inténtalo de nuevo.",
+    retry: "Reintentar",
   },
   welcome: {
     kicker: "Membresía activa",
@@ -480,6 +495,12 @@ export const en: Dict = {
     allFreeWatched: "Free episodes complete",
     subscribeBody:
       "Subscribe to watch the full catalog and every upcoming episode.",
+    benefits: "Every episode · Full catalog · Cancel anytime",
+    openInBrowserIos:
+      'Pay faster with Apple Pay — tap ••• and choose "Open in Safari".',
+    openInBrowserAndroid: "Pay faster with Google Pay.",
+    openInBrowserAndroidCta: "Open in Chrome",
+    openInBrowserDismiss: "Dismiss",
   },
   signupWall: {
     kicker: "Keep watching free",
@@ -517,6 +538,14 @@ export const en: Dict = {
       `Your ${plan} plan is ${status}. Change or cancel any time in your account.`,
     manageSubscription: "Manage subscription",
     backToBrowse: "Back to browse",
+  },
+  checkout: {
+    kicker: "Secure checkout",
+    title: "Complete your membership.",
+    back: "Back",
+    loading: "Loading secure checkout…",
+    errorBody: "We couldn't load checkout. Please try again.",
+    retry: "Try again",
   },
   welcome: {
     kicker: "Membership active",
