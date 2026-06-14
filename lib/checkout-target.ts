@@ -2,14 +2,16 @@ import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
+import type { CheckoutTargetInput } from "@/lib/checkout-session";
 
 // Shared validation for the watch-flow params (show / ep / resume) that both
-// checkout actions (signed-in startCheckout and guest startGuestCheckout)
-// thread through Stripe's success/cancel URLs. The params are attacker-
-// controlled form input that flows into the Stripe-hosted Checkout page's
-// links — both surfaces a user (or anti-phishing scanner) would inspect — so
-// only a published show and a ready episode belonging to it pass; anything
-// else is silently dropped and the URLs fall back to safe defaults.
+// checkout actions (signed-in createAuthCheckoutSession and guest
+// createGuestCheckoutSession) thread through Stripe's return/cancel URLs. The
+// params are attacker-controlled input (query string / form fields) that flows
+// into the checkout page's links — a surface a user (or anti-phishing scanner)
+// would inspect — so only a published show and a ready episode belonging to it
+// pass; anything else is silently dropped and the URLs fall back to safe
+// defaults.
 
 export type CheckoutTarget = {
   showSlug: string | null;
@@ -21,11 +23,11 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function resolveCheckoutTarget(
-  formData: FormData,
+  input: CheckoutTargetInput,
 ): Promise<CheckoutTarget> {
-  const showSlugRaw = formData.get("show");
-  const resumeRaw = formData.get("resume");
-  const epRaw = formData.get("ep");
+  const showSlugRaw = input.show;
+  const resumeRaw = input.resume;
+  const epRaw = input.ep;
 
   let showSlug: string | null = null;
   if (typeof showSlugRaw === "string" && showSlugRaw) {

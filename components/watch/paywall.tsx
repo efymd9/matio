@@ -2,9 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { useFormStatus } from "react-dom";
 import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
-import { startGuestCheckout } from "@/app/subscribe/guest-actions";
 import { Icon } from "@/components/site/icon";
 import { OpenInBrowserHint } from "@/components/watch/open-in-browser-hint";
 import { TONE_GRADIENT } from "@/lib/design";
@@ -101,6 +99,10 @@ export function Paywall({
     params.set("resume", String(resumeSeconds));
   }
   const subscribeHref = `/subscribe?${params.toString()}`;
+  // Pay-first guests go to the in-site /checkout page (embedded Stripe form),
+  // which creates the guest session on mount (createCheckoutSession →
+  // createGuestCheckoutSession). Same watch-flow params so they resume here.
+  const checkoutHref = `/checkout?${params.toString()}`;
 
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black sm:aspect-video sm:h-auto">
@@ -159,23 +161,23 @@ export function Paywall({
           <div className="mt-5 flex justify-center">
             <Show when="signed-out">
               {payFirst ? (
-                // Pay-first: straight to guest Stripe Checkout, no Clerk
-                // step. The hidden fields mirror the /subscribe form so the
-                // buyer returns to this exact episode+position after paying.
-                <form action={startGuestCheckout} className="contents">
-                  <input type="hidden" name="show" value={showSlug} />
-                  {episodeId ? (
-                    <input type="hidden" name="ep" value={episodeId} />
-                  ) : null}
-                  {resumeSeconds && resumeSeconds > 0 ? (
-                    <input
-                      type="hidden"
-                      name="resume"
-                      value={String(resumeSeconds)}
-                    />
-                  ) : null}
-                  <PayFirstButton />
-                </form>
+                // Pay-first: straight to the in-site /checkout page (embedded
+                // Stripe form), no Clerk step. The params carry show+episode+
+                // position so the buyer returns to this exact spot after paying.
+                <Link
+                  href={checkoutHref}
+                  prefetch={false}
+                  onClick={() =>
+                    capturePostHog("signup_cta_clicked", {
+                      auth: "signed_out",
+                      flow: "pay_first",
+                    })
+                  }
+                  className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98]"
+                >
+                  <Icon name="play" size={14} color="#ffffff" />
+                  <span>{t.paywall.payFirstCta}</span>
+                </Link>
               ) : (
                 <SignUpButton
                   mode="modal"
@@ -258,36 +260,5 @@ export function Paywall({
         </div>
       </div>
     </div>
-  );
-}
-
-// Submit button for the pay-first form. Lives inside the <form> so
-// useFormStatus sees its pending state (true from click until the server
-// action redirects to Stripe). signup_cta_clicked keeps firing — with a
-// flow marker — so the saved funnels' CTA step survives the reorder even
-// though the click now starts checkout instead of sign-up; the matching
-// checkout_started fires server-side in startGuestCheckout.
-function PayFirstButton() {
-  const { pending } = useFormStatus();
-  const t = useT();
-  return (
-    <button
-      type="submit"
-      disabled={pending}
-      aria-disabled={pending}
-      aria-busy={pending}
-      onClick={() =>
-        capturePostHog("signup_cta_clicked", {
-          auth: "signed_out",
-          flow: "pay_first",
-        })
-      }
-      className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98] disabled:cursor-wait disabled:opacity-90"
-    >
-      <Icon name="play" size={14} color="#ffffff" />
-      <span>
-        {pending ? t.paywall.continuingToCheckout : t.paywall.payFirstCta}
-      </span>
-    </button>
   );
 }

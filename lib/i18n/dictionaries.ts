@@ -222,6 +222,14 @@ export const es = {
     manageSubscription: "Gestionar suscripción",
     backToBrowse: "Volver a explorar",
   },
+  checkout: {
+    kicker: "Pago seguro",
+    title: "Completa tu membresía.",
+    back: "Volver",
+    loading: "Cargando el pago seguro…",
+    errorBody: "No pudimos cargar el pago. Inténtalo de nuevo.",
+    retry: "Reintentar",
+  },
   welcome: {
     kicker: "Membresía activa",
     title: "Bienvenido a matio.",
@@ -530,6 +538,14 @@ export const en: Dict = {
       `Your ${plan} plan is ${status}. Change or cancel any time in your account.`,
     manageSubscription: "Manage subscription",
     backToBrowse: "Back to browse",
+  },
+  checkout: {
+    kicker: "Secure checkout",
+    title: "Complete your membership.",
+    back: "Back",
+    loading: "Loading secure checkout…",
+    errorBody: "We couldn't load checkout. Please try again.",
+    retry: "Try again",
   },
   welcome: {
     kicker: "Membership active",
