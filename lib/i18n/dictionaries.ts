@@ -177,6 +177,13 @@ export const es = {
     allFreeWatched: "Episodios gratis completados",
     subscribeBody:
       "Suscríbete para ver todo el catálogo y los próximos episodios.",
+    benefits:
+      "Todos los episodios · Catálogo completo · Cancela cuando quieras",
+    openInBrowserIos:
+      "Paga más rápido con Apple Pay: toca ••• y elige «Abrir en Safari».",
+    openInBrowserAndroid: "Paga más rápido con Google Pay.",
+    openInBrowserAndroidCta: "Abrir en Chrome",
+    openInBrowserDismiss: "Cerrar",
   },
   signupWall: {
     kicker: "Continúa gratis",
@@ -480,6 +487,12 @@ export const en: Dict = {
     allFreeWatched: "Free episodes complete",
     subscribeBody:
       "Subscribe to watch the full catalog and every upcoming episode.",
+    benefits: "Every episode · Full catalog · Cancel anytime",
+    openInBrowserIos:
+      'Pay faster with Apple Pay — tap ••• and choose "Open in Safari".',
+    openInBrowserAndroid: "Pay faster with Google Pay.",
+    openInBrowserAndroidCta: "Open in Chrome",
+    openInBrowserDismiss: "Dismiss",
   },
   signupWall: {
     kicker: "Keep watching free",

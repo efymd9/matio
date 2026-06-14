@@ -6,6 +6,7 @@ import { useFormStatus } from "react-dom";
 import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { startGuestCheckout } from "@/app/subscribe/guest-actions";
 import { Icon } from "@/components/site/icon";
+import { OpenInBrowserHint } from "@/components/watch/open-in-browser-hint";
 import { TONE_GRADIENT } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
 import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
@@ -151,6 +152,9 @@ export function Paywall({
                 ? t.paywall.subscribeBody
                 : t.paywall.signUpToContinue}
           </p>
+          <p className="mt-2 text-xs font-medium text-white/45">
+            {t.paywall.benefits}
+          </p>
 
           <div className="mt-5 flex justify-center">
             <Show when="signed-out">
@@ -206,6 +210,29 @@ export function Paywall({
               </Link>
             </Show>
           </div>
+
+          {payFirst ? (
+            <Show when="signed-out">
+              <p className="mt-3 flex items-center justify-center gap-1.5 text-[10px] font-medium text-white/45">
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                {t.subscribe.secureCheckout}
+              </p>
+              <OpenInBrowserHint />
+            </Show>
+          ) : null}
 
           <Show when="signed-out">
             <p className="mt-3 text-[11px] text-white/55">
