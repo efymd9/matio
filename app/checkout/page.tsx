@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { MatioLogo } from "@/components/site/matio-logo";
+import { getPublishableKey } from "@/lib/checkout-session";
 import { getDict } from "@/lib/i18n/server";
 import { CheckoutClient } from "./checkout-client";
 
@@ -21,6 +22,9 @@ export default async function CheckoutPage({
 }) {
   const { show, ep, resume } = await searchParams;
   const { t } = await getDict();
+  // Read the publishable key server-side at request time (runtime, not
+  // build-inlined) and hand it to the client — see lib/checkout-session.ts.
+  const publishableKey = getPublishableKey();
 
   // Back goes to the watch flow the buyer came from (player wall re-renders
   // there) or the catalog. Built from our params only; the slug lands in a
@@ -58,7 +62,12 @@ export default async function CheckoutPage({
           </h1>
         </div>
 
-        <CheckoutClient show={show} ep={ep} resume={resume} />
+        <CheckoutClient
+          show={show}
+          ep={ep}
+          resume={resume}
+          publishableKey={publishableKey}
+        />
 
         <div className="mt-6 text-center">
           <Link

@@ -28,8 +28,30 @@ export type CheckoutSessionResult =
 // Embedded Checkout needs a publishable key on the client (loadStripe). When
 // it's unset we create a HOSTED session and redirect — identical to the
 // pre-embedded behavior — so a deploy that hasn't received the key yet keeps
-// working instead of rendering a dead iframe. NEXT_PUBLIC_* is inlined at build
-// and is also a real server-side env var, so this read is valid in the action.
+// working instead of rendering a dead iframe.
+//
+// IMPORTANT: read at REQUEST time, dynamically, NOT via `process.env.NEXT_PUBLIC_…`
+// (which Next inlines at build time). The publishable key was added to the env
+// AFTER an existing build, and Vercel's build cache reuses Next's inlined client
+// chunks across an env-only change — so a build-time read can be stale (server
+// says embedded while the client never got the key → dead iframe; or vice
+// versa). NEXT_PUBLIC_* vars are present in the server runtime env on Vercel, so
+// a dynamic `process.env[name]` lookup returns the deployment's CURRENT value.
+// The client can't read env at runtime, so the /checkout page reads this server
+// side and passes the key down as a prop (see app/checkout/page.tsx).
+const PUBLISHABLE_KEY_ENV = "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY";
+
+// `name` is a parameter, so the bundler can't constant-fold this into a
+// build-time inline — it stays a runtime lookup.
+function readRuntimeEnv(name: string): string | undefined {
+  return process.env[name];
+}
+
+export function getPublishableKey(): string | null {
+  const key = readRuntimeEnv(PUBLISHABLE_KEY_ENV);
+  return key && key.length > 0 ? key : null;
+}
+
 export function embeddedCheckoutEnabled(): boolean {
-  return !!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+  return getPublishableKey() !== null;
 }

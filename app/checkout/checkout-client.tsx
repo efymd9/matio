@@ -24,10 +24,14 @@ export function CheckoutClient({
   show,
   ep,
   resume,
+  publishableKey,
 }: {
   show?: string;
   ep?: string;
   resume?: string;
+  // Provided by the server (runtime read) so the client never depends on a
+  // build-time-inlined NEXT_PUBLIC value — see lib/checkout-session.ts.
+  publishableKey: string | null;
 }) {
   const t = useT();
   const router = useRouter();
@@ -60,7 +64,7 @@ export function CheckoutClient({
           // null and EmbeddedCheckoutProvider silently never initializes the
           // iframe — past the spinner guard, the buyer would be stuck on a
           // blank card. Surface the retry UI instead.
-          const stripe = await getStripeBrowser();
+          const stripe = await getStripeBrowser(publishableKey);
           if (!stripe) {
             setErrored(true);
             return;
@@ -69,7 +73,7 @@ export function CheckoutClient({
         }
       })
       .catch(() => setErrored(true));
-  }, [show, ep, resume, router]);
+  }, [show, ep, resume, router, publishableKey]);
 
   if (errored) {
     return (
@@ -103,7 +107,7 @@ export function CheckoutClient({
   return (
     <div className="mt-8 overflow-hidden rounded-2xl bg-white p-1 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.8)]">
       <EmbeddedCheckoutProvider
-        stripe={getStripeBrowser()}
+        stripe={getStripeBrowser(publishableKey)}
         options={{ clientSecret }}
       >
         <EmbeddedCheckout />
