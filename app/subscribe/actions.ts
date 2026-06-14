@@ -1,5 +1,6 @@
 "use server";
 
+import crypto from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
@@ -134,13 +135,9 @@ export async function createAuthCheckoutSession(
   const cancelQs = cancelParams.toString();
   const cancelUrl = `${origin}/subscribe${cancelQs ? `?${cancelQs}` : ""}`;
 
-  // Idempotency key dedupes parallel-tab clicks: two simultaneous
-  // submissions inside the same hour bucket return the same Checkout
-  // session from Stripe, so the user can only ever complete one
-  // subscription per intent. Layer 1 + Layer 2 above catch most cases
-  // but neither is atomic with sessions.create.
-  const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
-  const idempotencyKey = `checkout:${userId}:${hourBucket}`;
+  // Idempotency key + subscription metadata are built together just before
+  // sessions.create below (the key hashes the metadata + URLs + mode), so the
+  // computation is deferred to after those are known.
 
   // Snapshot the user's UTM cookies and ship them through Stripe so the
   // webhook can stamp them onto the subscription row. This is the cut
@@ -196,6 +193,32 @@ export async function createAuthCheckoutSession(
     ? { ui_mode: "embedded_page" as const, return_url: successUrl }
     : { success_url: successUrl, cancel_url: cancelUrl };
 
+  // Subscription metadata (userId + attribution / CAPI / analytics-consent
+  // snapshots). Pulled into a variable so the idempotency variant can hash it.
+  const subscriptionMetadata = {
+    userId,
+    ...attributionMetadata,
+    ...capiMetadata,
+    ...analyticsMetadata,
+  };
+
+  // Idempotency key dedupes parallel-tab clicks (same intent within the hour →
+  // same Stripe session). The variant digest folds in every create param that
+  // can drift — the success/return URL, the metadata, locale, and the embedded
+  // flag — so a changed-intent retry within the hour (a different show/resume,
+  // a locale switch, or the hosted→embedded transition itself) gets a NEW key
+  // instead of Stripe 400ing `idempotency_error` ("same key, different
+  // parameters"). Mirrors the guest flow's key in guest-actions.ts.
+  const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
+  const variant = crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({ successUrl, cancelUrl, subscriptionMetadata, locale, embedded }),
+    )
+    .digest("hex")
+    .slice(0, 16);
+  const idempotencyKey = `checkout:${userId}:${hourBucket}:${variant}`;
+
   const session = await stripe.checkout.sessions.create(
     {
       mode: "subscription",
@@ -205,12 +228,7 @@ export async function createAuthCheckoutSession(
       subscription_data: {
         // $1 today, 3-day trial, then $38/mo (see lib/checkout-trial.ts).
         ...TRIAL_SUBSCRIPTION_DATA,
-        metadata: {
-          userId,
-          ...attributionMetadata,
-          ...capiMetadata,
-          ...analyticsMetadata,
-        },
+        metadata: subscriptionMetadata,
       },
       // Stripe Tax — collect billing address, compute VAT/sales tax, and
       // persist the address back to the Customer so renewals invoice
