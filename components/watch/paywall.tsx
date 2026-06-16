@@ -158,6 +158,17 @@ export function Paywall({
             {t.paywall.benefits}
           </p>
 
+          {/* In-app browser (FB/IG webview) escape — PROMINENT, above the CTA:
+              auth + Apple/Google Pay are unreliable in webviews, so nudge the
+              user into their real browser before they pay. Renders nothing
+              outside a webview. Pay-first signed-out only (that's the guest
+              checkout path the webview breaks). */}
+          {payFirst ? (
+            <Show when="signed-out">
+              <OpenInBrowserHint />
+            </Show>
+          ) : null}
+
           <div className="mt-5 flex justify-center">
             <Show when="signed-out">
               {payFirst ? (
@@ -232,7 +243,6 @@ export function Paywall({
                 </svg>
                 {t.subscribe.secureCheckout}
               </p>
-              <OpenInBrowserHint />
             </Show>
           ) : null}
 

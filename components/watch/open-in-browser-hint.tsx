@@ -1,35 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useT } from "@/lib/i18n/client";
+import { detectInAppBrowser, type InAppBrowserEnv } from "@/lib/in-app-browser";
+
+// Stable no-op subscribe for the client-only gate below (the value never
+// changes after mount, so there's nothing to subscribe to).
+const noopSubscribe = () => () => {};
 
 // Funnel finding (2026-06): ~60% of ad traffic lands in the Facebook/Instagram
-// in-app browser (WKWebView on iOS, System WebView on Android). Apple Pay /
-// Google Pay express checkout typically does NOT render inside those webviews,
-// so the $1 guest checkout drops to hand-typing a card — a conversion killer
-// at exactly the moment this hint shows (the in-player paywall CTA).
-//
-// We can't force an escape on iOS (no API), so that branch only instructs.
-// On Android an intent:// URL hands the page to Chrome, where Google Pay works.
-
-type Platform = "ios" | "android" | "other";
-type InAppEnv = { inApp: boolean; platform: Platform };
-
-function detectInAppEnv(): InAppEnv {
-  if (typeof navigator === "undefined") {
-    return { inApp: false, platform: "other" };
-  }
-  const ua = navigator.userAgent || "";
-  // The Meta webviews carry these UA tokens on BOTH platforms (the Android FB
-  // webview reports FB_IAB/FB4A even though it otherwise shares Chrome's UA).
-  const inApp = /FBAN|FBAV|FB_IAB|FB4A|Instagram/i.test(ua);
-  const platform: Platform = /iPhone|iPad|iPod/i.test(ua)
-    ? "ios"
-    : /Android/i.test(ua)
-      ? "android"
-      : "other";
-  return { inApp, platform };
-}
+// in-app browser (WKWebView on iOS, System WebView on Android). Those webviews
+// break the account flow three ways — Google OAuth is blocked, the checkout_claim
+// cookie is dropped across the Stripe round-trip, and Apple/Google Pay + the
+// Embedded Checkout iframe are flaky. The single reliable fix is to get the user
+// into their real browser, so this is now a PROMINENT escape (not a footnote):
+//   - Android: an intent:// URL hands the page to Chrome (Google Pay + Clerk work).
+//   - iOS: no API can force an escape, so we instruct AND offer a tap-to-copy of
+//     the current URL so the user can paste it into Safari.
+// Detection is the shared, pure matcher (lib/in-app-browser.ts) used server-side
+// too. Renders nothing outside an in-app browser, so callers can mount it
+// unconditionally (it's mounted on the paywall and the /welcome sign-in fallback).
 
 // Hands the current page off to Chrome on Android. browser_fallback_url keeps
 // users without Chrome on their default browser instead of dead-ending.
@@ -41,20 +31,63 @@ function chromeIntentUrl(): string {
 }
 
 export function OpenInBrowserHint() {
-  // Detection is constant for the session and only ever runs client-side (the
-  // paywall is a conditionally-rendered, client-only end-state — never in the
-  // server HTML), so a lazy initializer is SSR-safe and avoids setState-in-effect.
-  const [env] = useState<InAppEnv>(detectInAppEnv);
+  // Hydration-safe client gate: false during SSR + the hydration render (so it
+  // matches the server's null output), true afterwards. The paywall never
+  // server-renders this (it's a client-only end-state), but the /welcome
+  // sign-in fallback DOES server-render it — without this gate the
+  // navigator-based lazy init below would mismatch on hydration there. No
+  // setState-in-effect (repo lint rule) — useSyncExternalStore handles it.
+  const isClient = useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
+  // Detection is constant for the session; a lazy initializer is SSR-safe
+  // (navigator is undefined on the server → not-in-app) and avoids
+  // setState-in-effect. Gated behind isClient before it can affect output.
+  const [env] = useState<InAppBrowserEnv>(() =>
+    typeof navigator === "undefined"
+      ? { inApp: false, platform: "other" }
+      : detectInAppBrowser(navigator.userAgent),
+  );
   const [dismissed, setDismissed] = useState(false);
+  const [copied, setCopied] = useState(false);
   const t = useT();
 
-  if (!env.inApp || env.platform === "other" || dismissed) return null;
+  if (!isClient || !env.inApp || env.platform === "other" || dismissed) {
+    return null;
+  }
+
+  const copyLink = async () => {
+    const url = window.location.href;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        // Fallback for webviews without the async clipboard API. Must run
+        // inside this user gesture for execCommand('copy') to be allowed.
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      // Copy blocked — the instruction text still tells them how to open it.
+    }
+  };
 
   return (
-    <div className="mt-3 flex items-start gap-2 rounded-lg border border-white/12 bg-white/[0.06] px-3 py-2 text-left">
+    <div className="mt-4 flex items-start gap-3 rounded-xl border border-[#ff3d3d]/35 bg-[#ff3d3d]/[0.08] px-3.5 py-3 text-left">
       <svg
-        width="14"
-        height="14"
+        width="16"
+        height="16"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -62,29 +95,57 @@ export function OpenInBrowserHint() {
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden
-        className="mt-0.5 shrink-0 text-white/55"
+        className="mt-0.5 shrink-0 text-[#ff7a5e]"
       >
         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
         <polyline points="15 3 21 3 21 9" />
         <line x1="10" y1="14" x2="21" y2="3" />
       </svg>
-      <div className="min-w-0 flex-1 text-[11px] leading-snug text-white/75">
-        {env.platform === "android" ? (
-          <>
-            <span>{t.paywall.openInBrowserAndroid}</span>{" "}
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] font-bold leading-snug text-white">
+          {t.paywall.openInBrowserHeading}
+        </p>
+        <p className="mt-0.5 text-[11.5px] leading-snug text-white/70">
+          {env.platform === "android"
+            ? t.paywall.openInBrowserAndroid
+            : t.paywall.openInBrowserIos}
+        </p>
+        <div className="mt-2">
+          {env.platform === "android" ? (
             <button
               type="button"
               onClick={() => {
                 window.location.href = chromeIntentUrl();
               }}
-              className="font-semibold text-white underline underline-offset-2 transition-colors hover:text-white/80"
+              className="inline-flex h-8 items-center justify-center rounded-md bg-white px-3 text-[12px] font-bold text-black transition-colors hover:bg-white/90"
             >
               {t.paywall.openInBrowserAndroidCta}
             </button>
-          </>
-        ) : (
-          <span>{t.paywall.openInBrowserIos}</span>
-        )}
+          ) : (
+            <button
+              type="button"
+              onClick={copyLink}
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-white px-3 text-[12px] font-bold text-black transition-colors hover:bg-white/90"
+            >
+              {copied ? (
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : null}
+              {copied ? t.paywall.openInBrowserCopied : t.paywall.openInBrowserCopy}
+            </button>
+          )}
+        </div>
       </div>
       <button
         type="button"

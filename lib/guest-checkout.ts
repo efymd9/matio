@@ -52,15 +52,27 @@ export function isGuestSubscription(sub: Stripe.Subscription): boolean {
 export type GuestClaim = {
   userId: string;
   email: string;
-  // True ONLY when this claim created a brand-new Clerk account for the
-  // checkout email. /welcome mints a one-click sign-in ticket only when
-  // this is true: a pre-existing account (created === false) means the
-  // checkout email might belong to someone other than the buyer (Stripe
-  // does not verify email ownership), so it must go through email-code
-  // sign-in instead — otherwise typing a victim's email + paying $38 would
-  // hand the buyer a session on the victim's account. created === false on
-  // EVERY re-run (fast path), which also defeats history-replay re-mints.
+  // True ONLY when THIS claim call created a brand-new Clerk account for the
+  // checkout email (ensureClerkUser). Per-call and RACE-SENSITIVE: in the
+  // welcome-vs-webhook race whichever writer runs first gets created === true
+  // and the other sees the existing user (created === false). Kept for
+  // observability; the one-click ticket gate now uses `guestBorn` instead.
   created: boolean;
+  // Race-proof, attack-proof signal that the bound account was born from THIS
+  // checkout — the gate /welcome keys one-click ticket minting on (paired with
+  // the checkout_claim cookie that proves "this browser paid"). True when:
+  //   - this claim CREATED the Clerk account (created), OR
+  //   - the account is already bound to THIS subscription's Stripe customer
+  //     with origin 'guest_checkout' (the fast path) — i.e. an earlier claim of
+  //     THIS SAME checkout (the welcome-vs-webhook race winner) created it.
+  // It is bound to the per-checkout Stripe customer, NOT the bare signup_origin
+  // enum: an attacker who types a VICTIM's email at Stripe gets a DIFFERENT
+  // customer and resolves to the victim's pre-existing account (created false,
+  // not bound to this customer — and a pre-existing guest account is never
+  // rebound onto this customer), so guestBorn is false → email-code only, never
+  // a minted ticket. Widening this to "any guest_checkout account" reopens
+  // account takeover (Stripe doesn't verify email ownership).
+  guestBorn: boolean;
 };
 
 // Resolve the buyer's email from the Stripe customer the subscription
@@ -154,13 +166,22 @@ export async function claimGuestCheckout(
   // run the idempotent linkage/attribution in case a prior run failed
   // after the users upsert. created: false — a re-run never re-creates.
   const [bound] = await db
-    .select({ id: users.id, email: users.email })
+    .select({
+      id: users.id,
+      email: users.email,
+      signupOrigin: users.signupOrigin,
+    })
     .from(users)
     .where(eq(users.stripeCustomerId, customerId))
     .limit(1);
   if (bound) {
     await linkAndAttribute(sub, bound.id);
-    return { userId: bound.id, email: bound.email, created: false };
+    return {
+      userId: bound.id,
+      email: bound.email,
+      created: false,
+      guestBorn: bound.signupOrigin === "guest_checkout",
+    };
   }
 
   const email = await resolveCustomerEmail(customerId, opts?.emailHint);
@@ -177,7 +198,10 @@ export async function claimGuestCheckout(
   // mirrorSubscription then refuses to mirror this guest sub anyway, so
   // keeping the original binding is correct.
   const [existingMirror] = await db
-    .select({ stripeCustomerId: users.stripeCustomerId })
+    .select({
+      stripeCustomerId: users.stripeCustomerId,
+      signupOrigin: users.signupOrigin,
+    })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
@@ -186,17 +210,35 @@ export async function claimGuestCheckout(
     existingMirror?.stripeCustomerId &&
     existingMirror.stripeCustomerId !== customerId
   ) {
-    const [accessRow] = await db
-      .select({ id: subscriptions.id })
-      .from(subscriptions)
-      .where(
-        and(
-          eq(subscriptions.userId, userId),
-          inArray(subscriptions.status, [...ACCESS_GRANTING_STATUSES]),
-        ),
-      )
-      .limit(1);
-    if (accessRow) rebind = false;
+    if (existingMirror.signupOrigin === "guest_checkout") {
+      // SECURITY: never repoint a pre-existing guest_checkout account onto a
+      // DIFFERENT customer. The one-click ticket fast path keys on
+      // (stripeCustomerId === this customer AND origin === 'guest_checkout');
+      // rebinding a guest account to THIS checkout's customer would make a
+      // victim's account ticket-eligible and enable account takeover via a
+      // guest checkout typed against their email. This rebind only ever served
+      // the rare churned guest re-buyer's billing portal — they sign in via
+      // email-code instead (safe), and their new sub still mirrors onto the
+      // account via the userId path in mirrorSubscription.
+      rebind = false;
+    } else {
+      // clerk_signup account: rebinding is safe for the ticket gate (origin
+      // stays clerk_signup → never guestBorn). Keep the original guard: don't
+      // orphan an account that still holds an access-granting sub on its
+      // current customer (its webhook mirroring resolves the user by that
+      // customer; the duplicate guard refuses this guest sub anyway).
+      const [accessRow] = await db
+        .select({ id: subscriptions.id })
+        .from(subscriptions)
+        .where(
+          and(
+            eq(subscriptions.userId, userId),
+            inArray(subscriptions.status, [...ACCESS_GRANTING_STATUSES]),
+          ),
+        )
+        .limit(1);
+      if (accessRow) rebind = false;
+    }
   }
 
   // Mirror row. Shapes handled:
@@ -219,7 +261,12 @@ export async function claimGuestCheckout(
       id: userId,
       email,
       stripeCustomerId: customerId,
-      signupOrigin: "guest_checkout",
+      // 'guest_checkout' ONLY when THIS claim created the Clerk account
+      // (ensureClerkUser → created). A pre-existing Clerk user that merely
+      // lacked a mirror row (created === false) is a real interactive identity
+      // — stamp 'clerk_signup' so guestBorn (and thus one-click ticket minting)
+      // never mistakes it for guest-born. The normal guest case is created.
+      signupOrigin: created ? "guest_checkout" : "clerk_signup",
     });
     await (rebind
       ? insert.onConflictDoUpdate({
@@ -243,5 +290,18 @@ export async function claimGuestCheckout(
 
   await linkAndAttribute(sub, userId);
 
-  return { userId, email, created };
+  // guestBorn (ticket-eligible) on the MAIN path = `created` ONLY — a brand-new
+  // Clerk account born from THIS checkout. We deliberately do NOT widen this to
+  // a pre-existing guest_checkout account (created === false): an attacker who
+  // types a VICTIM's email at Stripe and pays reaches this main path with
+  // created === false and the victim's userId, so trusting the persisted origin
+  // would mint a one-click ticket onto the victim. The legit welcome-vs-webhook
+  // race (the bug this change fixes) is covered by the FAST PATH above instead:
+  // the race-winning writer creates the row bound to THIS customerId with origin
+  // 'guest_checkout', so the second writer finds it there (bound === this exact
+  // checkout's customer) and returns guestBorn true — never a victim, because a
+  // pre-existing guest account is never rebound onto this customer (see rebind).
+  const guestBorn = created;
+
+  return { userId, email, created, guestBorn };
 }

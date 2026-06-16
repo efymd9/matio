@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SignInButton, useSignIn } from "@clerk/nextjs";
+import { useSignIn } from "@clerk/nextjs";
 import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
 import { Icon } from "@/components/site/icon";
+import { OpenInBrowserHint } from "@/components/watch/open-in-browser-hint";
 import { useT } from "@/lib/i18n/client";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 
@@ -141,9 +142,13 @@ export function TicketSignIn({
   );
 }
 
-// Degraded path: no claim cookie binding / mint failure / claim still
-// activating. Email-code sign-in via the standard Clerk modal — the
-// account is passwordless, so the code IS the credential.
+// Degraded path: no claim cookie binding / not guest-born / mint failure /
+// claim still activating. Self-hosted email-code sign-in — the account is
+// passwordless, so the emailed code IS the credential. Replaces the old Clerk
+// modal: its "Continue with Google" button is dead inside FB/IG webviews
+// (Google blocks OAuth there) and the modal UX is cramped on small webviews;
+// this form shows only the code path we actually support, plus a prominent
+// "open in your browser" escape for webviews where Clerk's client is flaky.
 export function WelcomeSignInFallback({
   destination,
   body,
@@ -163,22 +168,190 @@ export function WelcomeSignInFallback({
   }, [reason]);
   return (
     <div className="mt-4">
-      <p className="text-sm text-white/65">{body}</p>
-      <div className="mt-7 flex justify-center">
-        <SignInButton
-          mode="modal"
-          forceRedirectUrl={destination}
-          signUpForceRedirectUrl={destination}
-        >
-          <button
-            type="button"
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter] duration-150 ease-out hover:brightness-110 active:scale-[0.98]"
-          >
-            {t.welcome.signInCta}
-          </button>
-        </SignInButton>
+      <p className="text-center text-sm text-white/65">{body}</p>
+      <div className="mx-auto mt-1 max-w-sm">
+        <OpenInBrowserHint />
       </div>
-      <p className="mt-6 text-[11px] text-white/40">{t.welcome.wrongEmail}</p>
+      <EmailCodeSignIn destination={destination} />
+      <p className="mt-6 text-center text-[11px] text-white/40">
+        {t.welcome.wrongEmail}
+      </p>
+    </div>
+  );
+}
+
+// Self-hosted, two-step email-code sign-in driven by the signal-based
+// useSignIn (same surface ticket-sign-in uses): create({ identifier }) →
+// emailCode.sendCode() → emailCode.verifyCode({ code }) → finalize() (sets the
+// active session). On success we navigate to `destination` (the /welcome
+// return URL), whose signed-in branch fires the deferred signup events before
+// continuing to playback. The account is passwordless, so the emailed code is
+// the only credential — an attacker who typed but doesn't control the email
+// can't complete it.
+function EmailCodeSignIn({ destination }: { destination: string }) {
+  const t = useT();
+  const router = useRouter();
+  const { signIn } = useSignIn();
+  const [step, setStep] = useState<"email" | "code">("email");
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const ready = !!signIn;
+
+  const sendCode = async (e: FormEvent) => {
+    e.preventDefault();
+    const addr = email.trim();
+    if (!signIn || busy || !addr) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { error: createErr } = await signIn.create({ identifier: addr });
+      if (createErr) {
+        setError(t.welcome.codeSendFailed);
+        return;
+      }
+      const { error: sendErr } = await signIn.emailCode.sendCode();
+      if (sendErr) {
+        setError(t.welcome.codeSendFailed);
+        return;
+      }
+      setStep("code");
+    } catch {
+      setError(t.welcome.codeSendFailed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resend = async () => {
+    if (!signIn || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { error: sendErr } = await signIn.emailCode.sendCode();
+      if (sendErr) setError(t.welcome.codeSendFailed);
+    } catch {
+      setError(t.welcome.codeSendFailed);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verify = async (e: FormEvent) => {
+    e.preventDefault();
+    const c = code.trim();
+    if (!signIn || busy || !c) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { error: verErr } = await signIn.emailCode.verifyCode({ code: c });
+      if (verErr) {
+        setError(t.welcome.codeWrong);
+        return;
+      }
+      const { error: finErr } = await signIn.finalize();
+      if (finErr) {
+        // The code was already accepted; only session activation failed — don't
+        // mislabel it "wrong code". Generic retry message instead.
+        setError(t.welcome.ticketFailed);
+        return;
+      }
+      // Session is live — go to the /welcome return URL (fires the deferred
+      // signup events, then continues to playback). Show the spinner meanwhile.
+      setDone(true);
+      router.replace(destination);
+    } catch {
+      setError(t.welcome.codeWrong);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <p className="mt-7 flex items-center justify-center gap-2 text-sm text-white/65">
+        <Spinner />
+        {t.welcome.signingIn}
+      </p>
+    );
+  }
+
+  const inputCls =
+    "h-12 w-full rounded-md border border-white/15 bg-white/[0.06] px-3.5 text-center text-base text-white placeholder:text-white/35 outline-none transition-colors focus:border-white/40 focus:bg-white/[0.09]";
+  const submitCls =
+    "inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter] duration-150 ease-out hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100";
+
+  return (
+    <div className="mx-auto mt-5 max-w-sm">
+      {step === "email" ? (
+        <form onSubmit={sendCode} className="space-y-3">
+          <input
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(ev) => setEmail(ev.target.value)}
+            placeholder={t.welcome.emailPlaceholder}
+            aria-label={t.welcome.emailLabel}
+            className={inputCls}
+          />
+          <button type="submit" disabled={!ready || busy} className={submitCls}>
+            {busy ? <Spinner /> : null}
+            {busy ? t.welcome.sendingCode : t.welcome.sendCodeCta}
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={verify} className="space-y-3">
+          <p className="text-center text-xs text-white/55">
+            {t.welcome.codeSentTo(email.trim())}
+          </p>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            required
+            value={code}
+            onChange={(ev) => setCode(ev.target.value)}
+            placeholder={t.welcome.codePlaceholder}
+            aria-label={t.welcome.codeLabel}
+            className={`${inputCls} tracking-[0.3em]`}
+          />
+          <button type="submit" disabled={!ready || busy} className={submitCls}>
+            {busy ? <Spinner /> : null}
+            {busy ? t.welcome.verifying : t.welcome.verifyCta}
+          </button>
+          <div className="flex items-center justify-center gap-4 pt-1 text-[11px]">
+            <button
+              type="button"
+              onClick={resend}
+              disabled={busy}
+              className="font-semibold text-white/70 underline underline-offset-2 transition-colors hover:text-white disabled:opacity-50"
+            >
+              {t.welcome.resendCta}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStep("email");
+                setCode("");
+                setError(null);
+              }}
+              className="font-semibold text-white/50 underline underline-offset-2 transition-colors hover:text-white/80"
+            >
+              {t.welcome.changeEmail}
+            </button>
+          </div>
+        </form>
+      )}
+      {error ? (
+        <p className="mt-3 text-center text-xs font-medium text-[#ff7a5e]">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

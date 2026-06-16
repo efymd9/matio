@@ -179,10 +179,14 @@ export const es = {
       "Suscríbete para ver todo el catálogo y los próximos episodios.",
     benefits:
       "Todos los episodios · Catálogo completo · Cancela cuando quieras",
+    openInBrowserHeading: "Ábrelo en tu navegador",
     openInBrowserIos:
-      "Paga más rápido con Apple Pay: toca ••• y elige «Abrir en Safari».",
-    openInBrowserAndroid: "Paga más rápido con Google Pay.",
+      "Para pagar y entrar a tu cuenta sin problemas, toca ••• arriba y elige «Abrir en Safari» — o copia el enlace y pégalo en tu navegador.",
+    openInBrowserAndroid:
+      "Para pagar y entrar a tu cuenta sin problemas, ábrelo en Chrome.",
     openInBrowserAndroidCta: "Abrir en Chrome",
+    openInBrowserCopy: "Copiar enlace",
+    openInBrowserCopied: "Enlace copiado",
     openInBrowserDismiss: "Cerrar",
   },
   signupWall: {
@@ -240,11 +244,25 @@ export const es = {
       `Tu membresía está vinculada a ${maskedEmail}.`,
     signInToWatch:
       "Inicia sesión con ese correo para empezar a ver — te enviaremos un código.",
-    signInCta: "Iniciar sesión",
     ticketFailed:
       "No pudimos iniciar tu sesión automáticamente. Inicia sesión con el correo que usaste en el pago.",
     claimPending:
       "El pago se ha procesado y tu cuenta se está activando. Inicia sesión con el correo que usaste en el pago, o vuelve a abrir este enlace en un momento.",
+    emailLabel: "Correo electrónico",
+    emailPlaceholder: "tu@correo.com",
+    sendCodeCta: "Enviar código",
+    sendingCode: "Enviando…",
+    codeSentTo: (email: string) =>
+      `Te enviamos un código a ${email}. Revisa también la carpeta de spam.`,
+    codeLabel: "Código de verificación",
+    codePlaceholder: "Código de 6 dígitos",
+    verifyCta: "Verificar y entrar",
+    verifying: "Verificando…",
+    resendCta: "Reenviar código",
+    changeEmail: "Cambiar correo",
+    codeSendFailed:
+      "No pudimos enviar el código. Comprueba el correo o abre esta página en tu navegador.",
+    codeWrong: "Código incorrecto o caducado. Inténtalo de nuevo.",
     wrongEmail: "¿No es tu correo? Escríbenos a hello@matio.tv",
   },
   notFound: {
@@ -496,10 +514,13 @@ export const en: Dict = {
     subscribeBody:
       "Subscribe to watch the full catalog and every upcoming episode.",
     benefits: "Every episode · Full catalog · Cancel anytime",
+    openInBrowserHeading: "Open in your browser",
     openInBrowserIos:
-      'Pay faster with Apple Pay — tap ••• and choose "Open in Safari".',
-    openInBrowserAndroid: "Pay faster with Google Pay.",
+      'To pay and sign in without issues, tap ••• above and choose "Open in Safari" — or copy the link and paste it into your browser.',
+    openInBrowserAndroid: "To pay and sign in without issues, open it in Chrome.",
     openInBrowserAndroidCta: "Open in Chrome",
+    openInBrowserCopy: "Copy link",
+    openInBrowserCopied: "Link copied",
     openInBrowserDismiss: "Dismiss",
   },
   signupWall: {
@@ -557,11 +578,25 @@ export const en: Dict = {
       `Your membership is linked to ${maskedEmail}.`,
     signInToWatch:
       "Sign in with that email to start watching — we'll send you a code.",
-    signInCta: "Sign in",
     ticketFailed:
       "We couldn't sign you in automatically. Sign in with the email you used at checkout.",
     claimPending:
       "Your payment went through and your account is activating. Sign in with the email you used at checkout, or reopen this link in a moment.",
+    emailLabel: "Email address",
+    emailPlaceholder: "you@email.com",
+    sendCodeCta: "Send code",
+    sendingCode: "Sending…",
+    codeSentTo: (email: string) =>
+      `We sent a code to ${email}. Check your spam folder too.`,
+    codeLabel: "Verification code",
+    codePlaceholder: "6-digit code",
+    verifyCta: "Verify & sign in",
+    verifying: "Verifying…",
+    resendCta: "Resend code",
+    changeEmail: "Change email",
+    codeSendFailed:
+      "We couldn't send the code. Check the email or open this page in your browser.",
+    codeWrong: "Wrong or expired code. Please try again.",
     wrongEmail: "Wrong email? Contact hello@matio.tv",
   },
   notFound: {
