@@ -58,7 +58,7 @@ Hot-path indexes (migration 0010): `subscriptions(user_id, updated_at DESC)` for
   - `getOrSyncCurrentUser()` — read-or-upsert from `currentUser()` if the local row is missing. Use anywhere a missing mirror would block the user from making progress (e.g. `/subscribe` page render before `linkTrialSessionsToCurrentUser`, `startCheckout` server action, `/api/billing-portal` route). Closes the race where a brand-new signup hits these surfaces before the `user.created` webhook lands.
   - `getCurrentAdmin()` / `requireAdmin()` — role-gated variants for admin pages and actions.
 - `users.email` is required because the promote-to-admin script and Stripe customer lookups both rely on it.
-- **Pay-first guest accounts** (`PAY_FIRST_CHECKOUT=1`) are created server-side by `lib/guest-checkout.ts:claimGuestCheckout` via the Backend API — `clerkClient().users.createUser({ emailAddress, skipPasswordRequirement: true })` — from the email typed at Stripe Checkout. They are **passwordless**: email-code is their only credential, so the production Clerk instance must keep "Email verification code" sign-in enabled. The `/welcome` success page signs the buyer in without a form via a server-minted sign-in ticket (`signInTokens.createSignInToken`, 600s TTL), consumed client-side with the signal-based `signIn.ticket({ticket})` + `signIn.finalize()`. A ticket is minted ONLY when the claim **created** the account this checkout AND the httpOnly `checkout_claim` cookie matches the session's `client_reference_id` — every other case (pre-existing account, lost cookie, other session active) degrades to email-code sign-in with a masked email. `users.signup_origin` records the provenance.
+- **Pay-first guest accounts** (`PAY_FIRST_CHECKOUT=1`) are created server-side by `lib/guest-checkout.ts:claimGuestCheckout` via the Backend API — `clerkClient().users.createUser({ emailAddress, skipPasswordRequirement: true })` — from the email typed at Stripe Checkout. They are **passwordless**: email-code is their only credential, so the production Clerk instance must keep "Email verification code" sign-in enabled. The `/welcome` success page signs the buyer in without a form via a server-minted sign-in ticket (`signInTokens.createSignInToken`, 600s TTL), consumed client-side with the signal-based `signIn.ticket({ticket})` + `signIn.finalize()`. A ticket is minted ONLY when the account is **guest-born for THIS checkout** (`claim.guestBorn`) AND the httpOnly `checkout_claim` cookie matches the session's `client_reference_id` AND no other session is active. `guestBorn` is **customer-bound** — true when this claim `created` the account, OR the account is already bound to THIS subscription's Stripe customer with origin `guest_checkout` (the fast path, which covers the race where the webhook created the account before `/welcome` ran). It is deliberately NOT the bare `signup_origin` enum: keying on "any guest_checkout account" would let an attacker type a victim's email at Stripe, pay $1, and mint a ticket onto the victim's account — so a pre-existing guest account is also never rebound onto a new customer (2026-06-16 security fix; the old gate keyed on per-call `created`, which stranded normal-browser buyers whenever the webhook won the race). Every other case (not guest-born, lost cookie, other session active) degrades to **self-hosted email-code sign-in** (`EmailCodeSignIn`, `signIn.create→emailCode.sendCode→emailCode.verifyCode→finalize`) with a masked email — never token minting. `users.signup_origin` records the provenance (`'guest_checkout'` only when `claimGuestCheckout` actually created the account).
 
 ## Trial system (the most subtle piece)
 
@@ -566,7 +566,11 @@ startGuestCheckout (app/subscribe/guest-actions.ts — NO auth)
          (the trial cookie, for exact-token linkage) + attr_*/capi_*/
          ph_consent; idempotencyKey folds a request-variant digest so a
          changed-intent retry in the same hour doesn't 400
-   ▼ Stripe Checkout (hosted; buyer types email + card)
+   ▼ Stripe Checkout — embedded iframe on /checkout, EXCEPT in-app browsers
+   │   (FB/IG via isInAppBrowser, lib/in-app-browser.ts) + no publishable key
+   │   → HOSTED page (iframe + Apple/Google Pay are flaky in webviews; the
+   │   embedded flag is folded into the idempotency variant); buyer types
+   │   email + card
    ▼
 TWO writers run the SAME idempotent claim+mirror, whichever lands first:
    • webhook → mirrorSubscription no-user branch → claimGuestCheckout
@@ -576,21 +580,29 @@ TWO writers run the SAME idempotent claim+mirror, whichever lands first:
 claimGuestCheckout (lib/guest-checkout.ts) — idempotent, THROWS on failure
 (in the webhook that rolls back the stripe_events claim so Stripe retries;
 a guest sub is never warn-and-returned):
-   - fast path: customer already bound to a user → re-run linkage only
+   - fast path: customer already bound to a user → re-run linkage only;
+       returns guestBorn = (bound row origin === guest_checkout) — safe
+       because a guest row is only ever bound to the customer that created it
    - resolve email from the Stripe customer → find-or-create the Clerk
-       user (createUser skipPasswordRequirement; race-safe re-lookup);
-       reports `created` — the ticket-minting gate
-   - users mirror upsert; stripeCustomerId is REBOUND only for churned
-       users (an active subscriber keeps their original binding so their
-       real sub keeps mirroring + the billing portal stays correct)
+       user (createUser skipPasswordRequirement; race-safe re-lookup)
+   - users mirror upsert; signup_origin = guest_checkout ONLY if created
+       (else clerk_signup — a pre-existing Clerk user lacking a mirror is a
+       real identity). stripeCustomerId is REBOUND only for churned NON-guest
+       accounts — a pre-existing guest account is NEVER rebound (it would
+       poison the customer-bound ticket gate → account takeover); an active
+       subscriber keeps its binding so its real sub keeps mirroring + portal
+   - returns guestBorn = created (main path) — the customer-bound
+       ticket-minting gate, deliberately NOT the bare signup_origin enum
    - linkTrialSessionsByToken (exact token from metadata — no IP fallback)
        + applyUserAttributionPayload (attr_* metadata → users columns)
    ▼
 /welcome (outside the /subscribe auth matcher; robots noindex)
    - validates session_id shape → retrieves the session (expand:
        subscription) → requires complete + paid + guest metadata
-   - ticket sign-in ONLY when claim.created && cookie === client_
-       reference_id && no other session — else email-code fallback with
+   - ticket sign-in ONLY when claim.guestBorn && cookie === client_
+       reference_id && no other session — else SELF-HOSTED email-code
+       fallback (EmailCodeSignIn: create→emailCode.sendCode→verifyCode→
+       finalize, with resend + change-email + OpenInBrowserHint) shown with
        a MASKED email (never the full address; session_id is URL-borne
        and shareable). Fallback returns to /welcome after sign-in so the
        deferred signup events still fire.
