@@ -155,7 +155,14 @@ export default async function AnalyticsPage({
           value={k.newSubs.value.toLocaleString()}
           current={k.newSubs.value}
           prev={k.newSubs.prev}
-          sub={rangeLabel}
+          // Break out how many new subs came via the pay-first guest checkout —
+          // those accounts are excluded from the Signups KPI by design, so this
+          // is where they surface on the dashboard.
+          sub={
+            k.guestSignups.value > 0
+              ? ta.kpiNewSubsGuestSub(rangeLabel, k.guestSignups.value)
+              : rangeLabel
+          }
         />
       </div>
 

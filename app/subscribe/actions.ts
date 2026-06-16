@@ -2,7 +2,7 @@
 
 import crypto from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { db } from "@/db";
 import { subscriptions, users } from "@/db/schema";
 import { getOrSyncCurrentUser } from "@/lib/admin";
@@ -27,6 +27,7 @@ import {
   TRIAL_SUBSCRIPTION_DATA,
 } from "@/lib/checkout-trial";
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
+import { isInAppBrowser } from "@/lib/in-app-browser";
 import { getDict } from "@/lib/i18n/server";
 import { sendCapiEvents } from "@/lib/meta-capi";
 import { MEMBERSHIP_CURRENCY } from "@/lib/meta-pixel-events";
@@ -188,7 +189,12 @@ export async function createAuthCheckoutSession(
   // success_url/cancel_url; hosted uses success_url/cancel_url — so the two are
   // mutually exclusive, spread in per mode. NB: the pinned Stripe API
   // (2026-04-22.dahlia) names the value 'embedded_page', not 'embedded'.
-  const embedded = embeddedCheckoutEnabled();
+  // In-app browsers (FB/IG webviews) get the HOSTED page — the embedded iframe
+  // + Apple/Google Pay are flaky there (same reason as the guest flow). Folded
+  // into the idempotency variant below so a webview's hosted session can't
+  // collide a same-user embedded one within the hour.
+  const inApp = isInAppBrowser((await headers()).get("user-agent"));
+  const embedded = embeddedCheckoutEnabled() && !inApp;
   const urlParams = embedded
     ? { ui_mode: "embedded_page" as const, return_url: successUrl }
     : { success_url: successUrl, cancel_url: cancelUrl };

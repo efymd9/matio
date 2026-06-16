@@ -946,6 +946,34 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .sort(),
   ];
 
+  // Guest-checkout account creations in range (signup_origin='guest_checkout').
+  // Deliberately EXCLUDED from the clerk_signup-only `signups` KPI (a guest
+  // account is created AT purchase, so counting it as a "signup" would
+  // double-read New subs and break the signup→sub funnel) — but pay-first
+  // buyers were otherwise invisible on the dashboard. Counted here and shown
+  // broken out on the New subs tile. Cheap indexed counts, kept out of the big
+  // Promise.all to avoid threading through its positional destructuring.
+  const guestSignupConds = (from: Date, to: Date): SQL[] =>
+    [
+      gte(users.createdAt, from),
+      lte(users.createdAt, to),
+      eq(users.signupOrigin, "guest_checkout"),
+      channelCond(uSrc, f.channel),
+      campaignCond(uCmp, f.campaign),
+    ].filter((x): x is SQL => Boolean(x));
+  const [guestSignupsCur, guestSignupsPrev] = await Promise.all([
+    db
+      .select({ n: count() })
+      .from(users)
+      .where(and(...guestSignupConds(f.from, f.to))),
+    f.prevFrom && f.prevTo
+      ? db
+          .select({ n: count() })
+          .from(users)
+          .where(and(...guestSignupConds(f.prevFrom, f.prevTo)))
+      : Promise.resolve([{ n: 0 }]),
+  ]);
+
   return {
     filters: f,
     showsList,
@@ -957,6 +985,10 @@ export async function loadDashboard(f: AnalyticsFilters) {
       trialPreviews: { value: previews, prev: Number(previewsPrev[0].n) },
       conversions: { value: converted, prev: Number((cohortPrev[0] as { converted: number }).converted) },
       newSubs: { value: Number(newSubsCur[0].n), prev: Number(newSubsPrev[0].n) },
+      guestSignups: {
+        value: Number(guestSignupsCur[0].n),
+        prev: Number(guestSignupsPrev[0].n),
+      },
       activeSubs,
       servicedSubs: Number(servicedSubsRow[0].n),
       mrr: activeSubs * MONTHLY_PRICE,

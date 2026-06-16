@@ -195,25 +195,30 @@ export default async function WelcomePage({
     cookieToken === session.client_reference_id;
 
   // Mint a one-click sign-in ticket ONLY when ALL of:
-  //  - the claim CREATED a brand-new account this checkout (claim.created)
-  //    — a pre-existing account means the typed-at-Stripe email might not
-  //    belong to the buyer (Stripe doesn't verify ownership); minting then
-  //    would be account takeover. created is also false on every re-run, so
-  //    a history-replayed /welcome URL can never re-mint.
+  //  - the bound account is GUEST-BORN (claim.guestBorn) — born from a guest
+  //    checkout for an email that had no prior Clerk account, so it can only be
+  //    the buyer's. A pre-existing clerk_signup account is NOT guest-born: the
+  //    typed-at-Stripe email might not belong to the buyer (Stripe doesn't
+  //    verify ownership), so minting would be account takeover → email-code.
+  //    Unlike the old per-call `created` check, guestBorn is race-proof: the
+  //    webhook creating the account first no longer downgrades the buyer to
+  //    email-code (the bug that stranded normal-browser guests).
   //  - the checkout_claim cookie matches client_reference_id (this is the
-  //    browser that started THIS checkout).
+  //    browser that started THIS checkout — the binding that proves it). This
+  //    cookie match is also what makes a leaked/replayed /welcome URL safe: a
+  //    different browser has no matching cookie, so it can never mint a ticket.
   //  - no other user session is active.
   // Anything else → email-code sign-in (secure: the account is passwordless,
   // so the code is the credential — an attacker who typed but doesn't
   // control the email can't complete it). Return to /welcome after sign-in
   // so the deferred signup events still fire.
-  if (!claim.created || !bound || activeUserId) {
+  if (!claim.guestBorn || !bound || activeUserId) {
     return shell(
       <WelcomeSignInFallback
         destination={welcomeReturnUrl}
         body={`${t.welcome.accountEmail(masked)} ${t.welcome.signInToWatch}`}
         reason={
-          !claim.created
+          !claim.guestBorn
             ? "existing_account"
             : activeUserId
               ? "other_session"
@@ -231,11 +236,13 @@ export default async function WelcomePage({
       expiresInSeconds: SIGN_IN_TOKEN_TTL_SECONDS,
     });
     ticket = token.token;
-    // No need to clear the binding cookie here (and a Server Component
-    // can't mutate cookies anyway): re-mint is already impossible once the
-    // account exists — claim.created is false on every subsequent /welcome
-    // render, so a history-replayed URL falls through to the email-code
-    // fallback instead of minting a fresh ticket.
+    // No need to clear the binding cookie here (and a Server Component can't
+    // mutate cookies anyway): a history-replayed /welcome URL can only re-mint
+    // from the SAME browser whose checkout_claim cookie still matches
+    // client_reference_id — i.e. the buyer's own browser signing in again,
+    // which is harmless (single-use, short-TTL ticket into their own account).
+    // Any other browser fails the cookie binding and falls through to
+    // email-code sign-in.
   } catch (err) {
     console.error("welcome: sign-in token mint failed", {
       userId: claim.userId,

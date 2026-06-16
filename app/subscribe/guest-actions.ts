@@ -24,6 +24,7 @@ import {
   TRIAL_SUBSCRIPTION_DATA,
 } from "@/lib/checkout-trial";
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
+import { isInAppBrowser } from "@/lib/in-app-browser";
 import {
   CHECKOUT_CLAIM_COOKIE,
   GUEST_METADATA_KEYS,
@@ -87,7 +88,14 @@ export async function createGuestCheckoutSession(
   // trial limiter. Over the limit → degrade into the auth flow (Clerk sign-up
   // naturally throttles), never reaching Stripe/analytics. Fail-open on a DB
   // error so an infra blip can't block real buyers.
-  const ipHash = hashClientIp(getClientIp({ headers: await headers() }));
+  const reqHeaders = await headers();
+  const ipHash = hashClientIp(getClientIp({ headers: reqHeaders }));
+  // In-app browsers (FB/IG webviews) make the Embedded Checkout iframe +
+  // Apple/Google Pay flaky and routinely drop the checkout_claim cookie across
+  // the Stripe round-trip — fall back to the HOSTED Stripe page for them (more
+  // robust, better wallet support). Folded into the idempotency variant below
+  // so a webview's hosted session never collides a same-token embedded one.
+  const inApp = isInAppBrowser(reqHeaders.get("user-agent"));
   if (await guestCheckoutRateLimited(ipHash)) {
     return { kind: "redirect", to: subscribeFallback };
   }
@@ -225,7 +233,7 @@ export async function createGuestCheckoutSession(
   // claim token can't collide an embedded session with a hosted one across a
   // deploy that flips the key (Stripe 400s on a key replayed with different
   // params — see below).
-  const embedded = embeddedCheckoutEnabled();
+  const embedded = embeddedCheckoutEnabled() && !inApp;
   // NB: pinned Stripe API (2026-04-22.dahlia) names the value 'embedded_page'.
   const urlParams = embedded
     ? { ui_mode: "embedded_page" as const, return_url: successUrl }

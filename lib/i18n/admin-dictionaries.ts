@@ -119,6 +119,12 @@ export const ru = {
     // past_due rows mid-retry.
     kpiServicedSub: (n: number | string) => `${n} с доступом`,
     kpiNewSubs: "Новые подписки",
+    // Сколько из новых подписок пришло через pay-first гостевую оплату
+    // (signup_origin='guest_checkout'). Эти аккаунты НЕ входят в «Регистрации»
+    // (создаются в момент оплаты), поэтому показываем их здесь, чтобы
+    // гостевые покупки были видны на дашборде.
+    kpiNewSubsGuestSub: (range: string, n: number) =>
+      `${range} · ${n} ${ruPlural(n, ["гостевая оплата", "гостевые оплаты", "гостевых оплат"])}`,
     sectionAcquisitionFunnel: "Воронка привлечения",
     sectionAcquisitionFunnelHint:
       "60-сек превью · запуск → вовлечение → у пейволла → конверсия",
@@ -567,6 +573,12 @@ export const en: AdminDict = {
     kpiActiveSub: (n: number) => `${n} active × $38`,
     kpiServicedSub: (n: number | string) => `${n} serviced`,
     kpiNewSubs: "New subs",
+    // How many of the new subs came via the pay-first guest checkout
+    // (signup_origin='guest_checkout'). These accounts are NOT in "Signups"
+    // (created at purchase), so we surface them here to keep guest buyers
+    // visible on the dashboard.
+    kpiNewSubsGuestSub: (range: string, n: number) =>
+      `${range} · ${n} via guest checkout`,
     sectionAcquisitionFunnel: "Acquisition funnel",
     sectionAcquisitionFunnelHint:
       "60s previews · started → engaged → near paywall → converted",
