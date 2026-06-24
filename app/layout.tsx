@@ -9,6 +9,7 @@ import { SiteFooter } from "@/components/site/site-footer";
 import { CookieBanner } from "@/components/site/cookie-banner";
 import { MetaPixel } from "@/components/site/meta-pixel";
 import { PostHogProvider } from "@/components/site/posthog-provider";
+import { GoogleAnalytics } from "@/components/site/google-analytics";
 import { UserMenu } from "@/components/site/user-menu";
 import { CONSENT_COOKIE, parseConsent } from "@/lib/cookie-consent";
 import { LocaleProvider } from "@/lib/i18n/client";
@@ -173,6 +174,10 @@ export default async function RootLayout({
                 the banner + Meta Pixel for first-paint tracking of returning
                 consented visitors. */}
             <PostHogProvider initialConsent={initialConsent} />
+            {/* Consent-gated Google Analytics 4 — only injects gtag.js after
+                the visitor accepts marketing cookies. Same initialConsent as
+                the other trackers; blank NEXT_PUBLIC_GA_MEASUREMENT_ID → off. */}
+            <GoogleAnalytics initialConsent={initialConsent} />
           </LocaleProvider>
         </body>
       </html>

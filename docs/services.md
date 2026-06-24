@@ -256,6 +256,18 @@ Leave all three blank to keep PostHog entirely off — both the client provider 
 
 **UTM normalization**: `components/site/posthog-provider.tsx` adds a `before_send` hook to `posthog.init` that runs `normalizeUtm` (`lib/utm.ts` — trim + lowercase + strip every char outside `[a-z0-9_-]`) over the auto-captured `utm_campaign` / `utm_source` / `utm_medium` on every event (and thus the derived `$initial_utm_*` person props). This mirrors the app-side normalization (`lib/attribution.ts` `clean()`, which feeds the same value into the attribution cookies, the `attribution_*` columns, and Stripe metadata) so the app and PostHog group campaigns identically. Forward-only — to fix PostHog **history**, the funnel-breakdown insights use the matching HogQL expression `replaceRegexpAll(lower(trim(properties.utm_campaign)), '[^a-z0-9_-]', '')`. Numeric Meta `{{campaign.id}}` values pass through unchanged. WHY: case drift (`TikTok` vs `tiktok`), encoded spaces, and stray junk fragment `utm_campaign` across otherwise-identical campaigns.
 
+### Google Analytics 4
+
+**Env vars**:
+
+| Name | Notes |
+|---|---|
+| `NEXT_PUBLIC_GA_MEASUREMENT_ID` | GA4 Measurement ID (`G-XXXXXXXXXX`), from the GA4 property's Web data stream. **Public** — ships in the client bundle. **Blank → GA fully off** (`components/site/google-analytics.tsx` renders `null`). |
+
+**`NEXT_PUBLIC_*` is build-time** — set it in Vercel *before* deploying (same as the Meta / PostHog public vars). Missing at build → GA ships disabled and needs a redeploy after adding the ID.
+
+**Consent gate**: `components/site/google-analytics.tsx` mirrors the Meta Pixel — `gtag.js` is loaded directly (no npm SDK) and only injected after `cookie_consent.marketing === true`. The tag can't be unloaded once injected, so on **withdrawal** it (1) sets GA's `ga-disable-<id>` kill-switch (`setGaDisabled(true)` in `lib/ga-events.ts`) so gtag stops sending **all** hits — including the cookieless Consent-Mode "ping" beacons that a `denied` update alone does NOT stop — (2) pushes a **Consent Mode v2** `gtag('consent','update', …'denied')` (analytics + ads storage), and (3) the live `consentRef` stops emitting `page_view`. Re-grant clears the kill-switch and updates Consent Mode back to granted. NB: Consent Mode `denied` by itself keeps beaconing anonymized pings — the `ga-disable` flag is the real stop (the gtag equivalent of `fbq('consent','revoke')`). `page_view` is sent on App-Router route changes (the inline `config` fires the first; `trackedPathRef` prevents the double-count). Helpers: `lib/ga-events.ts` (`trackGA` / `onGAReady`). No DB, no webhook, no server component — purely browser-side. The `/cookies` policy lists `_ga` / `_ga_*` and names Google Ireland Ltd as recipient.
+
 ## Service → file map
 
 | Service | Code |
@@ -268,3 +280,4 @@ Leave all three blank to keep PostHog entirely off — both the client provider 
 | Vercel Blob | `app/api/admin/upload-image/route.ts` (token issuer), `components/admin/image-upload-field.tsx` (drag-and-drop client), `app/admin/actions.ts:deleteOrphanedBlob` (cleanup on replace/clear), `next.config.ts` (remotePatterns) |
 | Meta | `lib/meta-pixel-events.ts`, `lib/meta-capi.ts`, `lib/capi-identity.ts`, `components/site/meta-pixel.tsx`, `components/site/view-content-pixel.tsx`, `components/site/complete-registration-pixel.tsx`, `app/subscribe/{actions.ts,submit-button.tsx,page.tsx}`, `app/api/webhooks/stripe/route.ts`, `proxy.ts` |
 | PostHog | `components/site/posthog-provider.tsx`, `lib/posthog-events.ts`, `lib/posthog-server.ts`, `app/api/webhooks/stripe/route.ts`, `next.config.ts` (rewrite), `proxy.ts` (matcher exclusion) |
+| Google Analytics | `components/site/google-analytics.tsx`, `lib/ga-events.ts`, `app/layout.tsx` (mount) |

@@ -1,9 +1,10 @@
 // DRAFT pending legal-counsel review. Describes the cookies the site sets
-// (Clerk + Stripe + attribution + Meta Pixel + PostHog). The attribution_first /
-// attribution_last / _fbp / _fbc / ph_* marketing cookies are gated on
-// cookie_consent.marketing via proxy.ts + the consent banner. Contact details
-// filled 2026-05-27; Meta Pixel + Conversions API disclosure added 2026-05-29;
-// PostHog disclosure added 2026-05-30.
+// (Clerk + Stripe + attribution + Meta Pixel + PostHog + Google Analytics). The
+// attribution_first / attribution_last / _fbp / _fbc / ph_* / _ga / _ga_*
+// marketing cookies are gated on cookie_consent.marketing via proxy.ts + the
+// consent banner. Contact details filled 2026-05-27; Meta Pixel + Conversions
+// API disclosure added 2026-05-29; PostHog disclosure added 2026-05-30; Google
+// Analytics (GA4) disclosure added 2026-06-24.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDict } from "@/lib/i18n/server";
@@ -18,8 +19,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED_ES = "29 de mayo de 2026";
-const LAST_UPDATED_EN = "May 29, 2026";
+const LAST_UPDATED_ES = "24 de junio de 2026";
+const LAST_UPDATED_EN = "June 24, 2026";
 
 export default async function CookiesPage() {
   const { locale, t } = await getDict();
@@ -143,6 +144,13 @@ function CookiesEn() {
               expiry: "Up to 1 year",
               category: "Marketing",
             },
+            {
+              name: "_ga, _ga_* (Google)",
+              purpose:
+                "Set by Google Analytics (GA4) to distinguish your browser and measure site traffic, page views and how visitors use the site. Only set after you accept marketing cookies.",
+              expiry: "Up to 2 years",
+              category: "Marketing",
+            },
           ]}
         />
         <p>
@@ -153,8 +161,13 @@ function CookiesEn() {
           banner. When active they share a limited set of data with{" "}
           <strong>Meta Platforms Ireland Ltd</strong> &mdash; a hashed
           (SHA-256) version of your email address, your IP address, and event
-          signals such as page views, sign-ups and subscriptions. We do not use
-          Google Analytics. Our video provider <strong>Mux</strong> measures
+          signals such as page views, sign-ups and subscriptions. We also use{" "}
+          <strong>Google Analytics</strong> (GA4) to measure site traffic and
+          how visitors use the site. It runs{" "}
+          <strong>only after you accept marketing cookies</strong> &mdash; until
+          then Google&rsquo;s consent-mode signals are withheld &mdash; and
+          shares usage and device data with <strong>Google Ireland Ltd</strong>.
+          Our video provider <strong>Mux</strong> measures
           playback quality and watch time via <strong>Mux Data</strong>; like
           the Pixel, this runs <strong>only after you accept marketing
           cookies</strong> and sets a viewer identifier so we can count unique
@@ -304,6 +317,13 @@ function CookiesEs() {
               expiry: "Hasta 1 año",
               category: "Marketing",
             },
+            {
+              name: "_ga, _ga_* (Google)",
+              purpose:
+                "Las coloca Google Analytics (GA4) para distinguir tu navegador y medir el tráfico del sitio, las vistas de página y cómo lo utilizan los visitantes. Solo se colocan tras aceptar las cookies de marketing.",
+              expiry: "Hasta 2 años",
+              category: "Marketing",
+            },
           ]}
         />
         <p>
@@ -315,7 +335,12 @@ function CookiesEs() {
           datos con <strong>Meta Platforms Ireland Ltd</strong>: una versión
           cifrada (hash SHA-256) de tu correo electrónico, tu dirección IP y
           señales de eventos como visitas de página, registros y suscripciones.
-          No utilizamos Google Analytics. Nuestro proveedor de vídeo{" "}
+          También usamos <strong>Google Analytics</strong> (GA4) para medir el
+          tráfico del sitio y cómo lo utilizan los visitantes. Solo se activa{" "}
+          <strong>tras aceptar las cookies de marketing</strong> &mdash; hasta
+          entonces se retienen las señales del modo de consentimiento de Google
+          &mdash; y comparte datos de uso y de dispositivo con{" "}
+          <strong>Google Ireland Ltd</strong>. Nuestro proveedor de vídeo{" "}
           <strong>Mux</strong> mide la calidad de reproducción y el tiempo de
           visionado mediante <strong>Mux Data</strong>; al igual que el Pixel,
           esto se ejecuta <strong>solo tras aceptar las cookies de

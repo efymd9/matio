@@ -3,7 +3,8 @@
 // Dobrovolskii, sole trader t/a Matio, UK). No DPO appointed (not required
 // under Art. 37). Supervisory authorities named inline: AEPD (ES) / ICO (UK).
 // Sole trader, so "business address" not "registered office".
-// PostHog disclosure added 2026-05-30.
+// PostHog disclosure added 2026-05-30. Google Analytics (GA4) disclosure
+// added 2026-06-24.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDict } from "@/lib/i18n/server";
@@ -18,8 +19,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED_ES = "29 de mayo de 2026";
-const LAST_UPDATED_EN = "May 29, 2026";
+const LAST_UPDATED_ES = "24 de junio de 2026";
+const LAST_UPDATED_EN = "June 24, 2026";
 
 export default async function PrivacyPage() {
   const { locale, t } = await getDict();
@@ -94,9 +95,10 @@ function PrivacyEn() {
             and may attach the snapshot to your account at checkout for revenue
             attribution. If you accept marketing cookies, we also run the Meta
             Pixel and Meta Conversions API for advertising measurement (sharing a
-            hashed email address, IP address and conversion events with Meta) and
+            hashed email address, IP address and conversion events with Meta),
             PostHog for product analytics (funnel and engagement events, masked
-            session replays, processed in the EU).
+            session replays, processed in the EU), and Google Analytics (GA4)
+            for site-traffic measurement.
             See the <Link href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</Link>.
           </li>
           <li>
@@ -140,7 +142,8 @@ function PrivacyEn() {
             and{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_last</code>{" "}
             cookies and, where enabled, the Meta Pixel, Meta Conversions API,
-            and PostHog (product-analytics funnel measurement).
+            PostHog (product-analytics funnel measurement), and Google Analytics
+            (site-traffic measurement).
             Lawful basis: <em>consent</em> — these run only after you accept
             marketing cookies in the banner, and stop if you withdraw consent.
           </li>
@@ -192,6 +195,13 @@ function PrivacyEn() {
             We send funnel events (page views, feature interactions, sign-up
             steps) and masked session replays. SCCs cover any onward transfers to
             PostHog&rsquo;s US infrastructure.
+          </li>
+          <li>
+            <strong>Google Ireland Ltd</strong> (Ireland, with transfers to
+            Google LLC in the US) — site analytics via Google Analytics 4. Only
+            engaged after you accept marketing cookies. We share usage and device
+            data (page views, approximate location from IP, browser/device
+            details) so we can measure site traffic. US transfers covered by SCCs.
           </li>
         </ul>
         <p>
@@ -351,9 +361,10 @@ function PrivacyEs() {
             para atribución de ingresos. Si aceptas las cookies de marketing,
             además usamos el Meta Pixel y la API de Conversiones de Meta para
             medición publicitaria (compartiendo un correo electrónico cifrado,
-            dirección IP y eventos de conversión con Meta) y PostHog para
+            dirección IP y eventos de conversión con Meta), PostHog para
             analítica de producto (eventos de embudo y de uso, grabaciones de
-            sesión enmascaradas, procesados en la UE). Consulta la{" "}
+            sesión enmascaradas, procesados en la UE) y Google Analytics (GA4)
+            para medir el tráfico del sitio. Consulta la{" "}
             <Link href="/cookies" className="underline underline-offset-2 hover:text-white">
               Política de cookies
             </Link>
@@ -402,7 +413,8 @@ function PrivacyEs() {
             y{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_last</code>{" "}
             y, cuando está activado, el Meta Pixel, la API de Conversiones de
-            Meta y PostHog (analítica de embudo de producto).
+            Meta, PostHog (analítica de embudo de producto) y Google Analytics
+            (medición del tráfico del sitio).
             Base jurídica: <em>consentimiento</em>: solo se ejecutan tras
             aceptar las cookies de marketing en el banner y se detienen si
             retiras el consentimiento.
@@ -459,6 +471,14 @@ function PrivacyEs() {
             pasos del registro) y grabaciones de sesión enmascaradas.
             Las CCT cubren cualquier transferencia posterior a la infraestructura
             de EE. UU. de PostHog.
+          </li>
+          <li>
+            <strong>Google Ireland Ltd</strong> (Irlanda, con transferencias a
+            Google LLC en EE. UU.) — analítica del sitio mediante Google
+            Analytics 4. Solo se utiliza tras aceptar las cookies de marketing.
+            Compartimos datos de uso y de dispositivo (visitas de página,
+            ubicación aproximada por IP, detalles de navegador/dispositivo) para
+            medir el tráfico del sitio. Transferencias a EE. UU. amparadas por CCT.
           </li>
         </ul>
         <p>
