@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono, Instrument_Serif } from "next/font/google";
+import { Anton, Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { enUS, esES } from "@clerk/localizations";
@@ -41,11 +41,12 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const instrumentSerif = Instrument_Serif({
+// Anton is the brand display face (titles, section headers) — single
+// weight by design; uppercase/tracking applied at call sites.
+const anton = Anton({
   variable: "--font-display",
   subsets: ["latin"],
   weight: "400",
-  style: ["normal", "italic"],
 });
 
 // metadataBase resolves any relative OG/Twitter image URLs against the
@@ -61,7 +62,7 @@ export const viewport: Viewport = {
   // chin via env(safe-area-inset-*). Without it, those CSS values resolve
   // to 0 and any sticky/fixed UI sits on top of system chrome.
   viewportFit: "cover",
-  themeColor: "#0a0a0c",
+  themeColor: "#0f0a07",
 };
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -140,18 +141,19 @@ export default async function RootLayout({
       appearance={{
         // Official Clerk-designed dark baseTheme. Handles the navbar /
         // panel split, hover states, and opacity ramps so every surface
-        // stays readable. We just layer the cinema-red accent on top
-        // via colorPrimary.
+        // stays readable. We just layer the brand gold on top via
+        // colorPrimary (dark gold-deep text keeps CTAs legible on gold).
         baseTheme: dark,
         variables: {
-          colorPrimary: "#ff3d3d",
-          borderRadius: "0.5rem",
+          colorPrimary: "#e6b366",
+          colorTextOnPrimaryBackground: "#241205",
+          borderRadius: "0.75rem",
         },
       }}
     >
       <html
         lang={t.htmlLang}
-        className={`dark ${geistSans.variable} ${geistMono.variable} ${instrumentSerif.variable} h-full antialiased`}
+        className={`dark ${geistSans.variable} ${geistMono.variable} ${anton.variable} h-full antialiased`}
       >
         <body className="min-h-full bg-background font-sans text-foreground selection:bg-accent/40">
           {/* Site-wide structured data. Server-rendered into the HTML so
@@ -169,7 +171,7 @@ export default async function RootLayout({
           <LocaleProvider locale={locale}>
             <a
               href="#main-content"
-              className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-black focus:shadow-lg"
+              className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-gold focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-gold-deep focus:shadow-lg"
             >
               Skip to content
             </a>

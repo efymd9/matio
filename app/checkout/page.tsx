@@ -51,19 +51,19 @@ export default async function CheckoutPage({
         aria-hidden
         style={{
           backgroundImage:
-            "radial-gradient(circle at 50% 0%, rgba(255,61,61,0.18), transparent 55%)",
+            "radial-gradient(circle at 50% 0%, rgba(230,179,102,0.18), transparent 55%)",
         }}
       />
 
       <div className="relative mx-auto max-w-md px-6 sm:px-8">
         <div className="space-y-4 text-center">
           <div className="flex justify-center">
-            <MatioLogo size={20} accent="#ff3d3d" />
+            <MatioLogo size={20} />
           </div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.4em] text-[#ff3d3d]">
+          <p className="text-[11px] font-bold uppercase tracking-[0.4em] text-gold">
             {t.checkout.kicker}
           </p>
-          <h1 className="text-3xl font-extrabold leading-[0.95] tracking-tight text-white sm:text-4xl">
+          <h1 className="text-3xl font-extrabold leading-[0.95] tracking-tight text-cream sm:text-4xl">
             {t.checkout.title}
           </h1>
         </div>
@@ -78,7 +78,7 @@ export default async function CheckoutPage({
         <div className="mt-6 text-center">
           <Link
             href={backHref}
-            className="text-[11px] font-medium text-white/45 underline underline-offset-2 transition-colors hover:text-white/75"
+            className="text-[11px] font-medium text-cream/45 underline underline-offset-2 transition-colors hover:text-cream/75"
           >
             {t.checkout.back}
           </Link>

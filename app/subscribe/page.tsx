@@ -94,24 +94,24 @@ export default async function SubscribePage({
         aria-hidden
         style={{
           backgroundImage:
-            "radial-gradient(circle at 50% 0%, rgba(255,61,61,0.18), transparent 55%)",
+            "radial-gradient(circle at 50% 0%, rgba(230,179,102,0.18), transparent 55%)",
         }}
       />
 
       <div className="relative mx-auto max-w-md px-6 sm:px-8">
         <div className="space-y-4 text-center">
           <div className="flex justify-center">
-            <MatioLogo size={20} accent="#ff3d3d" />
+            <MatioLogo size={20} />
           </div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.4em] text-[#ff3d3d]">
+          <p className="text-[11px] font-bold uppercase tracking-[0.4em] text-gold">
             {t.subscribe.membershipKicker}
           </p>
-          <h1 className="text-4xl font-extrabold leading-[0.95] tracking-tight text-white sm:text-5xl">
+          <h1 className="text-4xl font-extrabold leading-[0.95] tracking-tight text-cream sm:text-5xl">
             {t.subscribe.membershipHeadline}
             <br />
-            <span className="text-white/55">{t.subscribe.watchEverything}</span>
+            <span className="text-cream/55">{t.subscribe.watchEverything}</span>
           </h1>
-          <p className="text-sm text-white/55">
+          <p className="text-sm text-cream/55">
             {t.subscribe.cancelAnytimeAll}
           </p>
         </div>
@@ -129,15 +129,15 @@ export default async function SubscribePage({
           <Link
             href={checkoutHref}
             prefetch={false}
-            className="group relative inline-flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.8)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.98]"
+            className="group relative inline-flex h-12 w-full items-center justify-center gap-2 overflow-hidden rounded-full bg-gold-cta text-sm font-bold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.98]"
           >
-            <Icon name="play" size={14} color="#ffffff" />
+            <Icon name="play" size={14} color="#241205" />
             <span>{t.subscribe.continueSubscribe}</span>
           </Link>
         </div>
 
         {/* Trust row */}
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-[11px] text-white/45">
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-[11px] text-cream/45">
           <span className="flex items-center gap-1.5">
             <Icon name="lock" size={12} />
             {t.subscribe.secureCheckout}
@@ -164,17 +164,17 @@ function AlreadySubscribed({ sub, t }: { sub: Subscription; t: Dict }) {
         aria-hidden
         style={{
           backgroundImage:
-            "radial-gradient(circle at 50% 0%, rgba(255,61,61,0.16), transparent 55%)",
+            "radial-gradient(circle at 50% 0%, rgba(230,179,102,0.16), transparent 55%)",
         }}
       />
       <div className="relative mx-auto max-w-2xl px-6 text-center sm:px-8">
-        <p className="text-[11px] font-bold uppercase tracking-[0.4em] text-[#ff3d3d]">
+        <p className="text-[11px] font-bold uppercase tracking-[0.4em] text-gold">
           {t.subscribe.alreadyMemberKicker}
         </p>
-        <h1 className="mt-3 text-4xl font-extrabold leading-[0.95] tracking-tight text-white sm:text-5xl">
+        <h1 className="mt-3 text-4xl font-extrabold leading-[0.95] tracking-tight text-cream sm:text-5xl">
           {t.subscribe.youreSubscribed}
         </h1>
-        <p className="mx-auto mt-4 max-w-md text-sm text-white/65">
+        <p className="mx-auto mt-4 max-w-md text-sm text-cream/65">
           {t.subscribe.yourPlanIs(sub.plan, sub.status)}
         </p>
         <div className="mt-7 flex flex-wrap justify-center gap-2.5">
@@ -186,7 +186,7 @@ function AlreadySubscribed({ sub, t }: { sub: Subscription; t: Dict }) {
           </Link>
           <Link
             href="/"
-            className="inline-flex h-11 items-center rounded-md border border-white/15 bg-white/[0.06] px-7 text-sm font-semibold text-white transition-colors hover:bg-white/[0.12]"
+            className="inline-flex h-11 items-center rounded-md border border-white/15 bg-white/[0.06] px-7 text-sm font-semibold text-cream transition-colors hover:bg-white/[0.12]"
           >
             {t.subscribe.backToBrowse}
           </Link>
@@ -211,17 +211,17 @@ function MembershipCard({
   sub?: string;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl border-[1.5px] border-[#ff3d3d] bg-gradient-to-br from-[#ff3d3d22] to-white/[0.04] p-5 shadow-[0_12px_40px_-20px_rgba(255,61,61,0.55)] sm:p-6">
-      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/55">
+    <div className="relative overflow-hidden rounded-2xl border-[1.5px] border-gold bg-gradient-to-br from-gold/[0.13] to-white/[0.04] p-5 shadow-[0_12px_40px_-20px_rgba(230,179,102,0.45)] sm:p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-cream/55">
         {title}
       </p>
       <div className="mt-4 flex items-baseline gap-1.5">
-        <span className="text-3xl font-extrabold tracking-tight text-white">
+        <span className="text-3xl font-extrabold tracking-tight text-cream">
           {price}
         </span>
-        <span className="text-sm text-white/55"> / {interval}</span>
+        <span className="text-sm text-cream/55"> / {interval}</span>
       </div>
-      {sub && <p className="mt-1 text-xs text-white/55">{sub}</p>}
+      {sub && <p className="mt-1 text-xs text-cream/55">{sub}</p>}
     </div>
   );
 }

@@ -17,6 +17,11 @@ import {
   tvSeriesJsonLd,
 } from "@/lib/structured-data";
 import { ViewContentPixel } from "@/components/site/view-content-pixel";
+import { Icon } from "@/components/site/icon";
+import { MetaDot } from "@/components/site/meta-dot";
+import { ShareButton } from "@/components/site/share-button";
+import { TONE_GRADIENT, toneFor } from "@/lib/design";
+import { cn } from "@/lib/utils";
 
 // Per-show metadata: makes Slack / Twitter / iMessage unfurls show the
 // actual show title and (where set) its hero artwork instead of the
@@ -73,8 +78,6 @@ type EpisodeRowData = {
   access: "free" | "member" | "subscriber";
   thumbnailUrl: string | null;
 };
-import { Icon } from "@/components/site/icon";
-import { TONE_GRADIENT, toneFor } from "@/lib/design";
 
 export default async function ShowDetailPage({
   params,
@@ -199,8 +202,9 @@ export default async function ShowDetailPage({
         title={show.title}
         genre={show.genre[0] ?? null}
       />
+
       {/* Hero */}
-      <section className="relative isolate h-[65vh] min-h-[480px] w-full overflow-hidden">
+      <section className="relative isolate h-[520px] w-full overflow-hidden tablet:h-[560px] xl:h-[620px]">
         {backdrop ? (
           <Image
             src={backdrop}
@@ -218,118 +222,158 @@ export default async function ShowDetailPage({
           />
         )}
         <div
-          className="pointer-events-none absolute inset-0 opacity-45"
           aria-hidden
+          className="duotone-strong pointer-events-none absolute inset-0"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
           style={{
             backgroundImage:
-              "radial-gradient(circle at 50% 30%, rgba(255,255,255,0.22), transparent 55%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.5), transparent 60%)",
+              "linear-gradient(to top, #0f0a07 4%, rgba(15,10,7,0.4) 45%, transparent 70%)",
           }}
         />
-        {/* Bottom fade pulls the hero into the page bg */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-background via-background/70 to-transparent" />
-      </section>
+        <div
+          aria-hidden
+          className="glow-floor pointer-events-none absolute inset-0 xl:hidden"
+        />
 
-      {/* Title block — overlaps the hero by pulling negative margin up. */}
-      <section className="relative z-10 -mt-48 px-6 pb-12 sm:px-12">
-        <div className="mx-auto max-w-5xl space-y-5">
-          <h1 className="text-5xl font-extrabold leading-[0.95] tracking-[-0.02em] text-white sm:text-6xl">
-            {show.title}
-          </h1>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-white/75">
-            <span className="font-semibold text-[#7fd87a]">{t.showDetail.matchValue}</span>
-            <span>{new Date(show.createdAt).getFullYear()}</span>
-            <span className="rounded-[3px] border border-white/30 px-1.5 py-px text-[10px] font-medium uppercase">
-              {t.showDetail.ageRating}
-            </span>
-            {totalEpisodes > 0 && (
-              <span>{t.showDetail.episodeCount(totalEpisodes)}</span>
-            )}
-            <span className="rounded-[3px] border border-white/30 px-1.5 py-px text-[10px] font-medium uppercase">
-              {t.showDetail.quality}
-            </span>
-          </div>
+        {/* Top corners — back (left) + share (right), safe-area aware.
+            On tablet+ the persistent site header is visible, so the row
+            drops below it instead of colliding with the logo / nav. */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 pl-[max(env(safe-area-inset-left),1.25rem)] pr-[max(env(safe-area-inset-right),1.25rem)] pt-[max(env(safe-area-inset-top),1rem)] tablet:pt-20">
+          <Link
+            href="/"
+            aria-label={t.showDetail.breadcrumbHome}
+            className="pointer-events-auto inline-flex h-[38px] w-[38px] items-center justify-center rounded-full border border-rust/60 bg-burgundy/45 text-cream backdrop-blur-xl transition-transform active:scale-[0.92]"
+          >
+            <Icon name="back" size={18} />
+          </Link>
+          <ShareButton title={show.title} className="pointer-events-auto" />
+        </div>
 
-          {totalEpisodes > 0 && (
-            <div className="flex flex-col gap-2 pt-1 sm:max-w-md">
-              <Link
-                href={`/watch/${show.slug}`}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-white text-sm font-bold text-black transition-colors hover:bg-white/90"
-              >
-                <Icon name="play" size={18} color="#0a0a0c" />
-                {t.showDetail.play}
-              </Link>
+        {/* Content — bottom-aligned within the hero. */}
+        <div className="relative z-10 flex h-full flex-col justify-end px-6 pb-6 tablet:px-10 tablet:pb-8 xl:px-14">
+          <div className="mx-auto flex w-full max-w-5xl flex-col gap-3">
+            <span className="self-start rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
+              {t.hero.matioOriginal}
+            </span>
+            <h1 className="font-display text-[42px] uppercase leading-[1.0] tracking-[0.01em] text-cream tablet:text-[56px] xl:text-[68px]">
+              {show.title}
+            </h1>
+            <div className="flex flex-wrap items-center gap-2.5 text-xs font-semibold text-cream/75">
+              <span>{new Date(show.createdAt).getFullYear()}</span>
+              {show.genre[0] && (
+                <>
+                  <MetaDot />
+                  <span className="capitalize">{show.genre[0]}</span>
+                </>
+              )}
+              {totalEpisodes > 0 && (
+                <>
+                  <MetaDot />
+                  {/* Design shows an abbreviated "6 ep" here; the dict's
+                      episodeCount() spells out "N episodes" — using it
+                      as-is per spec rather than hardcoding new copy. */}
+                  <span>{t.showDetail.episodeCount(totalEpisodes)}</span>
+                </>
+              )}
+              <MetaDot />
+              <span>{t.showDetail.ageRating}</span>
             </div>
-          )}
-
-          {show.description && (
-            <p className="max-w-3xl text-sm leading-relaxed text-white/85 sm:text-base">
-              {show.description}
-            </p>
-          )}
-
-          {show.genre.length > 0 && (
-            <p className="text-[11px] text-white/55 leading-relaxed">
-              <span className="text-white/40">{t.showDetail.genreLabel}</span>
-              <span className="capitalize">{show.genre.join(" · ")}</span>
-            </p>
-          )}
-
-          {/* Tabs */}
-          <div className="flex gap-6 border-b border-white/10 pt-2 text-sm font-semibold">
-            <span className="border-b-2 border-[#ff3d3d] pb-3 text-white">
-              {t.showDetail.tabEpisodes}
-            </span>
           </div>
         </div>
       </section>
 
-      {/* Episodes */}
-      <section className="mx-auto max-w-5xl px-6 pb-16 sm:px-12 sm:pb-20">
-        {showSeasons.length === 0 ? (
-          <div className="py-12 text-center">
-            <p className="text-2xl font-bold text-white/50">
-              {t.showDetail.noEpisodesYetHeader}
-            </p>
+      {/* Play CTA + synopsis */}
+      {(totalEpisodes > 0 || show.description) && (
+        <section className="px-6 pt-1 pb-8 tablet:px-10 xl:px-14">
+          <div className="mx-auto flex max-w-5xl flex-col gap-4">
+            {totalEpisodes > 0 && (
+              <Link
+                href={`/watch/${show.slug}`}
+                className="inline-flex h-[54px] w-full items-center justify-center gap-2 rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform active:scale-[0.98] tablet:w-auto tablet:min-w-[220px] tablet:self-start"
+              >
+                <Icon name="play" size={17} color="#241205" />
+                {t.showDetail.play}
+              </Link>
+            )}
+            {show.description && (
+              <p className="max-w-3xl text-sm leading-[1.6] text-cream/72">
+                {show.description}
+              </p>
+            )}
           </div>
-        ) : (
-          <div className="space-y-12">
-            {showSeasons.map((season) => {
-              const eps = episodesBySeason.get(season.id) ?? [];
-              return (
-                <div key={season.id} className="space-y-4">
-                  <div className="flex items-center justify-between rounded-md bg-white/[0.06] px-4 py-3">
-                    <div className="flex items-baseline gap-3">
-                      <h2 className="text-sm font-bold text-white">
-                        {t.showDetail.season(season.number)}
-                      </h2>
-                      {season.title && (
-                        <span className="text-xs text-white/60">
-                          {season.title}
-                        </span>
+        </section>
+      )}
+
+      {/* Episodes */}
+      <section className="px-6 pb-16 tablet:px-10 tablet:pb-20 xl:px-14">
+        <div className="mx-auto max-w-5xl">
+          {showSeasons.length === 0 ? (
+            <div className="py-12 text-center">
+              <p className="text-2xl font-bold text-cream/50">
+                {t.showDetail.noEpisodesYetHeader}
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className="h-0.5 w-3.5 shrink-0 rounded-[1px] bg-rust xl:w-[18px]"
+                />
+                <h2 className="font-display text-base uppercase tracking-[0.12em] text-gold xl:text-xl">
+                  {t.showDetail.tabEpisodes}
+                </h2>
+                {showSeasons.length === 1 && (
+                  <span className="ml-auto text-[11px] font-semibold text-cream/45">
+                    {t.showDetail.season(showSeasons[0].number)}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-8">
+                {showSeasons.map((season) => {
+                  const eps = episodesBySeason.get(season.id) ?? [];
+                  return (
+                    <div key={season.id} className="flex flex-col gap-3">
+                      {showSeasons.length > 1 && (
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-[11px] font-semibold text-cream/45">
+                            {t.showDetail.season(season.number)}
+                          </span>
+                          {season.title && (
+                            <span className="text-[11px] text-cream/35">
+                              {season.title}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {eps.length === 0 ? (
+                        <p className="text-sm text-cream/55">
+                          {t.showDetail.noEpisodesYetLine}
+                        </p>
+                      ) : (
+                        <ul className="flex flex-col gap-3">
+                          {eps.map((ep) => (
+                            <EpisodeRow
+                              key={ep.id}
+                              ep={ep}
+                              showSlug={show.slug}
+                              tone={tone}
+                              t={t}
+                            />
+                          ))}
+                        </ul>
                       )}
                     </div>
-                    <Icon name="chevron-right" size={16} color="rgba(255,255,255,0.6)" />
-                  </div>
-                  {eps.length === 0 ? (
-                    <p className="text-sm text-white/55">{t.showDetail.noEpisodesYetLine}</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {eps.map((ep) => (
-                        <EpisodeRow
-                          key={ep.id}
-                          ep={ep}
-                          showSlug={show.slug}
-                          tone={tone}
-                          t={t}
-                        />
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       </section>
     </main>
   );
@@ -362,63 +406,61 @@ function EpisodeRow({
         href={playable ? `/watch/${showSlug}?ep=${ep.id}` : "#"}
         aria-disabled={!playable}
         tabIndex={playable ? 0 : -1}
-        className={`group flex items-start gap-4 rounded-lg p-3 transition-colors ${
-          playable ? "hover:bg-white/[0.04]" : "cursor-default opacity-70"
-        }`}
+        className={cn(
+          "flex items-center gap-3.5 rounded-2xl border border-rust/30 bg-espresso-2 p-2.5 transition-transform",
+          playable
+            ? "hover:brightness-105 active:scale-[0.99]"
+            : "cursor-default opacity-70",
+        )}
       >
         {/* Thumbnail — real signed Mux still if the asset is ready,
             tone-gradient placeholder otherwise. */}
         <div
-          className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-md sm:w-40"
+          className="relative aspect-video w-[118px] shrink-0 overflow-hidden rounded-[10px] tablet:w-[150px]"
           style={
             ep.thumbnailUrl
               ? undefined
               : { backgroundImage: TONE_GRADIENT[tone] }
           }
         >
-          {ep.thumbnailUrl ? (
-            <Image
-              src={ep.thumbnailUrl}
-              alt=""
-              aria-hidden
-              fill
-              sizes="(max-width: 640px) 128px, 160px"
-              className="object-cover"
-            />
-          ) : (
-            <div
-              className="absolute inset-0 opacity-30"
-              aria-hidden
-              style={{
-                backgroundImage:
-                  "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.25), transparent 60%)",
-              }}
-            />
+          {ep.thumbnailUrl && (
+            <>
+              <Image
+                src={ep.thumbnailUrl}
+                alt=""
+                aria-hidden
+                fill
+                sizes="(max-width: 834px) 118px, 150px"
+                className="object-cover"
+              />
+              <div
+                aria-hidden
+                className="duotone pointer-events-none absolute inset-0"
+              />
+            </>
           )}
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60 backdrop-blur-md">
-              <Icon name="play" size={12} color="#ffffff" />
+            <div className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-burgundy/80 backdrop-blur-md">
+              <Icon name="play" size={11} color="#f6efe4" />
             </div>
           </div>
         </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline justify-between gap-3">
-            <h3 className="text-sm font-semibold text-white sm:text-base">
-              {ep.number}. {ep.title}
-            </h3>
-            <span className="shrink-0 text-[11px] text-white/55">
-              {minutes
-                ? t.showDetail.minutes(minutes)
-                : !playable
-                  ? t.showDetail.soon
-                  : ""}
-            </span>
-          </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
+          <h3 className="text-[13px] font-bold text-cream tablet:text-sm">
+            {ep.number}. {ep.title}
+          </h3>
           {ep.description && (
-            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-white/60">
+            <p className="line-clamp-2 text-[11px] leading-normal text-cream/55 tablet:text-xs">
               {ep.description}
             </p>
           )}
+          <span className="text-[10px] font-semibold text-cream/40">
+            {minutes
+              ? t.showDetail.minutes(minutes)
+              : !playable
+                ? t.showDetail.soon
+                : ""}
+          </span>
         </div>
       </Link>
     </li>

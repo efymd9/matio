@@ -129,7 +129,7 @@ export function AnalyticsFilters({
               className={dateInput}
               aria-label={t.analyticsFilters.fromDateAria}
             />
-            <span className="text-white/35">→</span>
+            <span className="text-cream/35">→</span>
             <input
               type="date"
               value={filters.customTo ?? ymd(filters.to)}
@@ -254,7 +254,7 @@ export function AnalyticsFilters({
           <button
             type="button"
             onClick={() => router.push(pathname, { scroll: false })}
-            className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white/45 transition-colors hover:text-white"
+            className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-cream/45 transition-colors hover:text-cream"
           >
             {t.analyticsFilters.reset}
           </button>
@@ -273,7 +273,7 @@ function Labeled({
 }) {
   return (
     <label className="flex items-center gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-white/40">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-cream/40">
         {label}
       </span>
       {children}
@@ -284,16 +284,16 @@ function Labeled({
 function chip(active: boolean): string {
   return `rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
     active
-      ? "bg-[#ff3d3d] text-white shadow-[0_4px_14px_-6px_rgba(255,61,61,0.8)]"
-      : "text-white/55 hover:text-white"
+      ? "bg-gold text-gold-deep shadow-[0_4px_14px_-6px_rgba(230,179,102,0.6)]"
+      : "text-cream/55 hover:text-cream"
   }`;
 }
 
 const select =
-  "h-8 rounded-lg border border-white/10 bg-white/[0.04] px-2 text-xs font-medium text-white outline-none transition-colors hover:border-white/20 focus-visible:border-[#ff3d3d]/70 [&>option]:bg-[#15151a] [&>option]:text-white";
+  "h-8 rounded-lg border border-white/10 bg-white/[0.04] px-2 text-xs font-medium text-cream outline-none transition-colors hover:border-white/20 focus-visible:border-gold/70 [&>option]:bg-[#15151a] [&>option]:text-cream";
 
 const dateInput =
-  "h-8 rounded-lg border border-white/10 bg-white/[0.04] px-2 text-xs font-medium text-white outline-none transition-colors hover:border-white/20 focus-visible:border-[#ff3d3d]/70 [color-scheme:dark]";
+  "h-8 rounded-lg border border-white/10 bg-white/[0.04] px-2 text-xs font-medium text-cream outline-none transition-colors hover:border-white/20 focus-visible:border-gold/70 [color-scheme:dark]";
 
 function ymd(d: Date): string {
   return d.toISOString().slice(0, 10);

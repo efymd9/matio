@@ -84,13 +84,13 @@ export default async function AnalyticsPage({
       {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gold">
             {ta.eyebrow}
           </p>
-          <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-white">
+          <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-cream">
             {ta.heading}
           </h1>
-          <p className="mt-1 text-sm text-white/55">
+          <p className="mt-1 text-sm text-cream/55">
             {rangeLabel}
             {/* Resolved absolute window so a bookmarked relative-range URL
                 shows its actual dates; skipped for all-time (the 2020 floor

@@ -18,7 +18,7 @@
     "test:locale": "tsx scripts/test-locale-negotiation.ts",
     "backfill:mux-policy": "tsx scripts/backfill-mux-policy.ts",
     "seed:fake-shows": "tsx scripts/seed-fake-shows.ts",
-    "gen:icons": "tsx scripts/gen-icons.tsx"
+    "gen:icons": "bash scripts/gen-icons.sh"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

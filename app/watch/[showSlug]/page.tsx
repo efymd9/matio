@@ -15,6 +15,7 @@ import {
 import { Player, type PlayerEpisode } from "@/components/watch/player";
 import { WatchShell } from "@/components/watch/watch-shell";
 import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
+import { Icon } from "@/components/site/icon";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import { getOrSyncCurrentUser } from "@/lib/admin";
@@ -375,19 +376,20 @@ async function ComingSoon({
 }) {
   const { t } = await getDict();
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black px-6">
+    <div className="glow-floor fixed inset-0 z-50 flex flex-col bg-espresso px-6">
       <Link
         href={`/shows/${showSlug}`}
-        className="absolute left-6 top-5 inline-flex h-10 items-center gap-2 rounded-full bg-black/45 px-4 text-sm font-medium text-white backdrop-blur-md transition-colors hover:bg-black/70"
+        className="bg-gold-cta absolute left-6 top-[max(env(safe-area-inset-top),1.25rem)] inline-flex h-10 items-center gap-2 rounded-full px-5 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
       >
-        ← {showTitle}
+        <Icon name="back" size={16} color="#241205" />
+        {showTitle}
       </Link>
       <div className="flex flex-1 items-center justify-center">
-        <div className="space-y-2 text-center">
-          <p className="text-3xl font-extrabold tracking-tight text-white">
+        <div className="space-y-3 text-center">
+          <p className="font-display text-4xl uppercase tracking-[0.02em] text-cream sm:text-5xl">
             {t.watch.comingSoonTitle}
           </p>
-          <p className="text-sm text-white/60">{t.watch.noEpisodesReady}</p>
+          <p className="text-sm text-cream/60">{t.watch.noEpisodesReady}</p>
         </div>
       </div>
     </div>

@@ -28,13 +28,13 @@ export default async function PrivacyPage() {
     <main className="bg-background pt-28 pb-24 sm:pt-32">
       <article className="mx-auto max-w-3xl px-6 sm:px-8">
         <header className="mb-10 space-y-3">
-          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-gold">
             matio
           </p>
-          <h1 className="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
+          <h1 className="text-3xl font-extrabold tracking-tight text-cream sm:text-4xl">
             {t.legal.privacyTitle}
           </h1>
-          <p className="font-mono text-[11px] text-white/45">
+          <p className="font-mono text-[11px] text-cream/45">
             {t.legal.lastUpdated(locale === "en" ? LAST_UPDATED_EN : LAST_UPDATED_ES)}
           </p>
         </header>
@@ -42,7 +42,7 @@ export default async function PrivacyPage() {
         <div className="mt-12 border-t border-white/[0.06] pt-6">
           <Link
             href="/"
-            className="text-sm font-semibold text-white/70 transition-colors hover:text-white"
+            className="text-sm font-semibold text-cream/70 transition-colors hover:text-cream"
           >
             ← {t.legal.backHome}
           </Link>

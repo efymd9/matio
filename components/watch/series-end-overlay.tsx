@@ -65,13 +65,13 @@ export function SeriesEndOverlay({
         if (e.target === e.currentTarget) onDismiss();
       }}
     >
-      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-[#0f0f12]/95 p-6 shadow-[0_20px_80px_rgba(0,0,0,0.5)] backdrop-blur-2xl sm:p-8">
+      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-rust/30 bg-espresso-2/95 p-6 shadow-[0_20px_80px_rgba(0,0,0,0.5)] backdrop-blur-2xl sm:p-8">
         <div
           className="pointer-events-none absolute inset-0 opacity-40"
           aria-hidden
           style={{
             backgroundImage:
-              "radial-gradient(circle at 50% 0%, rgba(255,61,61,0.22), transparent 60%)",
+              "radial-gradient(circle at 50% 0%, rgba(143,47,28,0.4), transparent 60%)",
           }}
         />
 
@@ -79,22 +79,24 @@ export function SeriesEndOverlay({
           type="button"
           onClick={onDismiss}
           aria-label={t.seriesEndOverlay.dismissAria}
-          className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full text-white/65 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
+          className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full text-cream/65 transition-colors hover:bg-cream/10 hover:text-cream focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cream/60"
         >
           <Icon name="close" size={16} />
         </button>
 
         <div className="relative">
           <div className="flex justify-center">
-            <MatioLogo size={14} accent="#ff3d3d" />
+            <MatioLogo size={16} />
           </div>
-          <p className="mt-4 text-center text-[11px] font-bold uppercase tracking-[0.4em] text-[#ff3d3d]">
-            {t.seriesEndOverlay.kicker}
+          <p className="mt-4 flex justify-center">
+            <span className="rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
+              {t.seriesEndOverlay.kicker}
+            </span>
           </p>
-          <h2 className="mt-2 text-center text-2xl font-extrabold leading-tight tracking-tight text-white sm:text-3xl">
+          <h2 className="mt-3 text-center font-display text-2xl uppercase leading-tight tracking-[0.01em] text-cream sm:text-3xl">
             {t.seriesEndOverlay.headline(showTitle)}
           </h2>
-          <p className="mx-auto mt-3 max-w-sm text-center text-sm leading-relaxed text-white/65">
+          <p className="mx-auto mt-3 max-w-sm text-center text-sm leading-relaxed text-cream/72">
             {t.seriesEndOverlay.body}
           </p>
 
@@ -102,7 +104,7 @@ export function SeriesEndOverlay({
             ref={dismissRef}
             type="button"
             onClick={onDismiss}
-            className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-md bg-white text-sm font-bold text-black transition-colors hover:bg-white/90"
+            className="mt-7 inline-flex h-11 w-full items-center justify-center rounded-full bg-gold-cta text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out active:scale-[0.98]"
           >
             {t.seriesEndOverlay.closeCta}
           </button>

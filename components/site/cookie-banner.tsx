@@ -72,21 +72,21 @@ export function CookieBanner({
       role="dialog"
       aria-modal="false"
       aria-labelledby="cookie-banner-heading"
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#0f0f12]/95 backdrop-blur-2xl pl-[max(env(safe-area-inset-left),1rem)] pr-[max(env(safe-area-inset-right),1rem)] pb-[max(env(safe-area-inset-bottom),1rem)] pt-4 sm:pt-5"
+      className="fixed inset-x-0 bottom-0 z-50 border-t border-rust/30 bg-espresso-2/95 backdrop-blur-2xl pl-[max(env(safe-area-inset-left),1rem)] pr-[max(env(safe-area-inset-right),1rem)] pb-[max(env(safe-area-inset-bottom),1rem)] pt-4 sm:pt-5"
     >
       <div className="mx-auto flex max-w-5xl flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
         <div className="flex-1 space-y-1.5">
           <p
             id="cookie-banner-heading"
-            className="text-sm font-bold tracking-tight text-white"
+            className="text-sm font-bold tracking-tight text-cream"
           >
             {t.cookieBanner.title}
           </p>
-          <p className="text-[13px] leading-snug text-white/65">
+          <p className="text-[13px] leading-snug text-cream/65">
             {t.cookieBanner.body}{" "}
             <Link
               href="/cookies"
-              className="font-medium text-white/85 underline underline-offset-2 transition-colors hover:text-white"
+              className="font-medium text-cream/85 underline underline-offset-2 transition-colors hover:text-cream"
             >
               {t.cookieBanner.learnMore}
             </Link>
@@ -97,14 +97,14 @@ export function CookieBanner({
           <button
             type="button"
             onClick={reject}
-            className="inline-flex h-10 items-center justify-center rounded-md border border-white/15 bg-white/[0.05] px-5 text-sm font-semibold text-white transition-colors hover:bg-white/[0.10] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            className="inline-flex h-11 items-center justify-center rounded-full border border-cream/15 bg-cream/5 px-6 text-sm font-semibold text-cream transition-colors hover:bg-cream/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cream/40"
           >
             {t.cookieBanner.essentialOnly}
           </button>
           <button
             type="button"
             onClick={accept}
-            className="inline-flex h-10 items-center justify-center rounded-md bg-white px-5 text-sm font-bold text-black transition-colors hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            className="inline-flex h-11 items-center justify-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform hover:brightness-105 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/70"
           >
             {t.cookieBanner.acceptAll}
           </button>

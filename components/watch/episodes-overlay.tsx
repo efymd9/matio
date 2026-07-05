@@ -96,18 +96,19 @@ export function EpisodesOverlay({
       aria-label={t.episodesOverlay.title}
       onClick={onClose}
       onKeyDown={trapFocus}
-      className="fixed inset-0 z-[100] flex flex-col bg-black/85 backdrop-blur-2xl"
+      className="fixed inset-0 z-[100] flex flex-col bg-espresso/90 backdrop-blur-2xl"
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="mx-auto flex h-full w-full max-w-4xl flex-col px-5 sm:px-8"
+        className="mx-auto flex h-full w-full max-w-4xl flex-col px-5 pt-[max(env(safe-area-inset-top),0px)] sm:px-8"
       >
         <header className="flex items-center justify-between pb-4 pt-5">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
-              {t.episodesOverlay.title}
-            </p>
-            <h2 className="mt-1 text-xl font-extrabold tracking-tight text-white sm:text-2xl">
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.14em] text-gold">
+              <span className="inline-block h-0.5 w-3.5 rounded-[1px] bg-rust" />
+              <span>{t.episodesOverlay.title}</span>
+            </div>
+            <h2 className="mt-1.5 font-display text-2xl uppercase tracking-[0.02em] text-cream sm:text-3xl">
               {t.episodesOverlay.count(episodes.length)}
             </h2>
           </div>
@@ -119,7 +120,7 @@ export function EpisodesOverlay({
               onClose();
             }}
             aria-label={t.episodesOverlay.closeAria}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-cream/10 text-cream transition-colors hover:bg-cream/20"
           >
             <Icon name="close" size={18} />
           </button>
@@ -129,7 +130,7 @@ export function EpisodesOverlay({
             const eps = seasonMap.get(sn)!;
             return (
               <section key={sn} className="mb-6">
-                <h3 className="mb-3 text-sm font-bold text-white/85">
+                <h3 className="mb-3 font-display text-sm uppercase tracking-[0.03em] text-gold">
                   {t.episodesOverlay.season(sn)}
                 </h3>
                 <ul className="space-y-2">
@@ -147,14 +148,14 @@ export function EpisodesOverlay({
                             e.stopPropagation();
                             onSelect(ep.id);
                           }}
-                          className={`group flex w-full items-start gap-4 rounded-lg p-2.5 text-left transition-colors ${
+                          className={`group flex w-full items-start gap-4 rounded-2xl border bg-espresso-2 p-2.5 text-left transition-colors ${
                             isCurrent
-                              ? "bg-white/[0.08] ring-1 ring-[#ff3d3d]/60"
-                              : "hover:bg-white/[0.04]"
+                              ? "border-gold/40 ring-1 ring-gold/60"
+                              : "border-rust/30 hover:border-rust/50"
                           }`}
                         >
                           <div
-                            className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-md sm:w-40"
+                            className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-[14px] sm:w-40"
                             style={
                               ep.thumbnailUrl
                                 ? undefined
@@ -176,12 +177,16 @@ export function EpisodesOverlay({
                                 aria-hidden
                                 style={{
                                   backgroundImage:
-                                    "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.25), transparent 60%)",
+                                    "radial-gradient(circle at 50% 50%, rgba(230,179,102,0.25), transparent 60%)",
                                 }}
                               />
                             )}
+                            <div
+                              aria-hidden
+                              className="duotone pointer-events-none absolute inset-0"
+                            />
                             <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60 backdrop-blur-md">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-burgundy/80 text-cream backdrop-blur-md">
                                 <Icon
                                   name={
                                     locked
@@ -191,28 +196,28 @@ export function EpisodesOverlay({
                                         : "play"
                                   }
                                   size={12}
-                                  color="#ffffff"
+                                  color="#f6efe4"
                                 />
                               </div>
                             </div>
                             {isCurrent ? (
-                              <div className="absolute bottom-0 left-0 right-0 h-1 bg-[#ff3d3d]" />
+                              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gold" />
                             ) : null}
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-baseline justify-between gap-3">
                               <h4
                                 className={`text-sm font-semibold sm:text-base ${
-                                  isCurrent ? "text-white" : "text-white/90"
+                                  isCurrent ? "text-cream" : "text-cream/90"
                                 }`}
                               >
                                 {ep.number}. {ep.title}
                               </h4>
-                              <span className="shrink-0 font-mono text-[11px] text-white/55">
+                              <span className="shrink-0 font-mono text-[11px] text-cream/55">
                                 {locked ? (
                                   <span
                                     aria-label={t.episodesOverlay.lockedAria}
-                                    className="inline-flex items-center gap-1 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-white/70"
+                                    className="inline-flex items-center gap-1 rounded-full bg-burgundy px-2 py-0.5 text-[10px] font-semibold text-cream"
                                   >
                                     <Icon name="lock" size={10} />
                                     {ep.tier === "member"
@@ -227,12 +232,12 @@ export function EpisodesOverlay({
                               </span>
                             </div>
                             {ep.description ? (
-                              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-white/60">
+                              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-cream/60">
                                 {ep.description}
                               </p>
                             ) : null}
                             {isCurrent ? (
-                              <p className="mt-1.5 text-[10px] font-bold uppercase tracking-[0.06em] text-[#ff3d3d]">
+                              <p className="mt-1.5 text-[10px] font-bold uppercase tracking-[0.06em] text-gold">
                                 {t.episodesOverlay.nowPlaying}
                               </p>
                             ) : null}

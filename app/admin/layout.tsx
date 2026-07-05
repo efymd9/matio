@@ -25,27 +25,27 @@ export default async function AdminLayout({
               className="group flex items-center gap-2"
               aria-label={t.nav.homeAria}
             >
-              <MatioLogo size={16} accent="#ff3d3d" color="#ffffff" />
-              <span className="rounded-full bg-[#ff3d3d]/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-[#ff3d3d]">
+              <MatioLogo size={16} />
+              <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-gold">
                 {t.nav.adminBadge}
               </span>
             </Link>
             <Link
               href="/admin"
-              className="text-sm font-medium text-white/65 transition-colors hover:text-white"
+              className="text-sm font-medium text-cream/65 transition-colors hover:text-cream"
             >
               {t.nav.shows}
             </Link>
             <Link
               href="/admin/analytics"
-              className="text-sm font-medium text-white/65 transition-colors hover:text-white"
+              className="text-sm font-medium text-cream/65 transition-colors hover:text-cream"
             >
               {t.nav.analytics}
             </Link>
             <div className="ml-auto flex items-center gap-4">
               <Link
                 href="/"
-                className="text-sm text-white/55 transition-colors hover:text-white"
+                className="text-sm text-cream/55 transition-colors hover:text-cream"
               >
                 {t.nav.backToApp}
               </Link>

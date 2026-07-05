@@ -10,14 +10,14 @@ export default async function NotFound() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-16 text-center">
       <div className="flex flex-col items-center gap-5">
-        <MatioLogo size={28} accent="#ff3d3d" />
-        <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-[#ff3d3d]">
+        <MatioLogo size={28} />
+        <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-gold">
           {t.notFound.code}
         </p>
-        <h1 className="text-3xl font-extrabold leading-[0.95] tracking-tight text-white sm:text-4xl">
+        <h1 className="text-3xl font-extrabold leading-[0.95] tracking-tight text-cream sm:text-4xl">
           {t.notFound.title}
         </h1>
-        <p className="max-w-sm text-sm text-white/55">
+        <p className="max-w-sm text-sm text-cream/55">
           {t.notFound.body}
         </p>
         <Link

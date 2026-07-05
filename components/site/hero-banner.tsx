@@ -3,12 +3,13 @@
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { cn } from "@/lib/utils";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
 import { useMarketingConsent } from "@/lib/use-marketing-consent";
 import { Icon } from "./icon";
+import { MetaDot } from "./meta-dot";
 
 // Public Mux Data env key. Empty when unset → Mux Data stays fully off.
 const MUX_DATA_ENV_KEY = process.env.NEXT_PUBLIC_MUX_DATA_ENV_KEY ?? "";
@@ -21,12 +22,13 @@ const MuxPlayer = dynamic(() => import("@mux/mux-player-react"), {
   ssr: false,
 });
 
-// Cinema-style hero. Layered:
+// Cinema-style hero (gold-duotone redesign). Layers bottom-up:
 //   1. backdrop image OR tone gradient
 //   2. autoplaying muted Mux preview (fades in on first frame)
-//   3. radial accent + vignette
-//   4. bottom-to-top scrim that fades into the page background
-//   5. content column with MATIO ORIGINAL kicker, title, meta, CTAs
+//   3. duotone-strong overlay
+//   4. scrims: bottom fade + (tablet/desktop) left column + (mobile/tablet)
+//      burgundy floor glow
+//   5. content column — premiere badge, Anton title, meta, CTAs
 export function HeroBanner({
   title,
   description,
@@ -36,6 +38,9 @@ export function HeroBanner({
   posterImageUrl,
   previewPlaybackId,
   previewToken,
+  episodeCount,
+  year,
+  paymentsOn,
 }: {
   title: string;
   description: string | null;
@@ -45,6 +50,11 @@ export function HeroBanner({
   posterImageUrl: string | null;
   previewPlaybackId: string | null;
   previewToken: string | null;
+  episodeCount: number;
+  year: number;
+  // Payments kill-switch (server-read, prop-drilled): the CTA must not
+  // promise "Watch free" while a paid gate is live.
+  paymentsOn: boolean;
 }) {
   const [videoPlaying, setVideoPlaying] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
@@ -57,8 +67,20 @@ export function HeroBanner({
   // before it mounts.
   const muxDataEnabled = useMarketingConsent() && !!MUX_DATA_ENV_KEY;
 
+  // Meta row: genre · N episodes · 16+ (· year on tablet/desktop). Each entry
+  // flags whether it's hidden below the tablet breakpoint; only the genre
+  // gets title-cased (DB genres are lowercase).
+  const meta: Array<{ label: string; tabletUp?: boolean; capitalize?: boolean }> =
+    [];
+  if (genre[0]) meta.push({ label: genre[0], capitalize: true });
+  if (episodeCount > 0) {
+    meta.push({ label: t.showDetail.episodeCount(episodeCount) });
+  }
+  meta.push({ label: t.showDetail.ageRating });
+  meta.push({ label: String(year), tabletUp: true });
+
   return (
-    <section className="relative isolate min-h-[640px] w-full overflow-hidden bg-background sm:h-[90vh]">
+    <section className="relative isolate flex h-[640px] w-full flex-col justify-end overflow-hidden bg-background tablet:h-[600px] xl:h-[760px]">
       {/* Static backdrop: image or tone gradient placeholder */}
       {backdrop ? (
         <Image
@@ -114,59 +136,83 @@ export function HeroBanner({
         />
       )}
 
-      {/* Atmospheric overlays — radial accent + cinema scrims. */}
+      {/* Signature duotone still-treatment. */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-50"
         aria-hidden
+        className="duotone-strong pointer-events-none absolute inset-0"
+      />
+
+      {/* Bottom scrim fading into the page background. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 65% 35%, rgba(255,61,61,0.18), transparent 55%), radial-gradient(circle at 25% 80%, rgba(255,255,255,0.10), transparent 50%)",
+            "linear-gradient(to top, #0f0a07 4%, rgba(15,10,7,0.4) 40%, transparent 66%)",
         }}
       />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background via-background/55 to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-3/5 bg-gradient-to-r from-background/85 via-background/40 to-transparent" />
+      {/* Left column scrim — tablet/desktop only (58% desktop, 70% tablet). */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 left-0 hidden w-[70%] tablet:block xl:w-[58%]"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, rgba(15,10,7,0.85), rgba(15,10,7,0.35), transparent)",
+        }}
+      />
+      {/* Burgundy floor glow — mobile/tablet only (absent on desktop by design). */}
+      <div
+        aria-hidden
+        className="glow-floor pointer-events-none absolute inset-0 xl:hidden"
+      />
 
       {/* Content */}
-      <div className="relative z-10 flex h-full min-h-[600px] flex-col justify-end px-6 pb-16 pt-28 sm:px-12 sm:pb-24">
-        <div className="max-w-2xl space-y-4">
-          <div className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
-            <Icon name="star" size={11} />
-            <span>{t.hero.matioOriginal}</span>
-          </div>
-          <h1 className="text-5xl font-extrabold leading-[0.95] tracking-[-0.02em] text-white sm:text-6xl lg:text-7xl">
-            {title}
-          </h1>
-          {genre.length > 0 && (
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-white/70">
-              {genre.slice(0, 3).map((g, i) => (
-                <span key={g} className="flex items-center gap-2">
-                  {i > 0 && <span aria-hidden className="text-white/35">·</span>}
-                  <span className="capitalize">{g}</span>
-                </span>
-              ))}
-            </div>
-          )}
-          {description && (
-            <p className="max-w-xl text-sm leading-relaxed text-white/75 sm:text-base">
-              {description}
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2.5 pt-3">
-            <Link
-              href={`/watch/${slug}`}
-              className="inline-flex h-11 items-center gap-2 rounded-md bg-white px-7 text-sm font-bold text-black transition-all duration-300 hover:bg-white/90"
-            >
-              <Icon name="play" size={16} color="#0a0a0c" />
-              {t.hero.play}
-            </Link>
-            <Link
-              href={`/shows/${slug}`}
-              className="inline-flex h-11 items-center gap-2 rounded-md border border-white/15 bg-white/15 px-7 text-sm font-semibold text-white backdrop-blur-xl transition-colors hover:bg-white/25"
-            >
-              <Icon name="info" size={16} />
-              {t.hero.moreInfo}
-            </Link>
-          </div>
+      <div className="relative z-10 flex max-w-full flex-col gap-[13px] px-6 pb-7 tablet:max-w-[520px] tablet:gap-4 tablet:px-8 tablet:pb-13 xl:max-w-[680px] xl:gap-5 xl:px-12 xl:pb-[72px]">
+        <span className="self-start rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream xl:text-[11px]">
+          {t.hero.premiereBadge}
+        </span>
+        <h1 className="font-display text-[46px] uppercase leading-[1.0] tracking-[0.01em] text-cream tablet:text-[62px] xl:text-[84px] xl:leading-[0.98]">
+          {title}
+        </h1>
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs font-semibold text-cream/75 xl:gap-x-3 xl:text-sm">
+          {meta.map((item, i) => (
+            <Fragment key={item.label}>
+              {i > 0 && (
+                <MetaDot
+                  className={cn(item.tabletUp && "hidden tablet:inline-block")}
+                />
+              )}
+              <span
+                className={cn(
+                  item.capitalize && "capitalize",
+                  item.tabletUp && "hidden tablet:inline",
+                )}
+              >
+                {item.label}
+              </span>
+            </Fragment>
+          ))}
+        </div>
+        {description && (
+          <p className="hidden max-w-[480px] leading-relaxed text-cream/72 tablet:block tablet:text-sm xl:text-base">
+            {description}
+          </p>
+        )}
+        <div className="flex items-center gap-2.5 pt-1.5 tablet:gap-2.5">
+          <Link
+            href={`/watch/${slug}`}
+            className="inline-flex h-[52px] flex-1 items-center justify-center gap-2 rounded-full bg-gold-cta px-8 text-[15px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform active:scale-[0.98] tablet:h-[52px] tablet:flex-none tablet:self-start xl:h-14 xl:px-10 xl:text-base"
+          >
+            <Icon name="play" size={17} color="#241205" />
+            {paymentsOn ? t.hero.play : t.hero.watchFree}
+          </Link>
+          <Link
+            href={`/shows/${slug}`}
+            aria-label={t.hero.moreInfo}
+            className="inline-flex size-[52px] shrink-0 items-center justify-center rounded-full border border-rust/60 bg-burgundy/45 text-cream backdrop-blur-xl transition-transform active:scale-[0.98] xl:size-14"
+          >
+            <Icon name="info" size={19} />
+          </Link>
         </div>
       </div>
     </section>

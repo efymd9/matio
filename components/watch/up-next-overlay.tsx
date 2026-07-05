@@ -74,13 +74,13 @@ export function UpNextOverlay({
       aria-label={t.upNextOverlay.label}
       className="pointer-events-none fixed inset-0 z-[100] flex items-end justify-end pt-5 pl-5 pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pt-8 sm:pl-8 sm:pr-[max(env(safe-area-inset-right),2rem)] sm:pb-[max(env(safe-area-inset-bottom),2rem)]"
     >
-      <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-white/10 bg-[#0f0f12]/95 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
-        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+      <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-rust/30 bg-espresso-2/95 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gold">
           {t.upNextOverlay.label}
         </p>
         <div className="mt-3 flex gap-3">
           <div
-            className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-md sm:w-40"
+            className="relative aspect-video w-32 shrink-0 overflow-hidden rounded-[14px] sm:w-40"
             style={
               next.thumbnailUrl
                 ? undefined
@@ -102,34 +102,38 @@ export function UpNextOverlay({
                 aria-hidden
                 style={{
                   backgroundImage:
-                    "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.25), transparent 60%)",
+                    "radial-gradient(circle at 50% 50%, rgba(230,179,102,0.25), transparent 60%)",
                 }}
               />
             )}
+            <div
+              aria-hidden
+              className="duotone pointer-events-none absolute inset-0"
+            />
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-black/60 backdrop-blur-md">
-                <Icon name="play" size={14} color="#ffffff" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-burgundy/80 text-cream backdrop-blur-md">
+                <Icon name="play" size={14} color="#f6efe4" />
               </div>
             </div>
           </div>
           <div className="min-w-0 flex-1">
-            <p className="font-mono text-[11px] text-white/65">
+            <p className="font-mono text-[11px] text-cream/65">
               S{next.seasonNumber}·E{next.number}
             </p>
-            <h3 className="mt-0.5 truncate text-base font-bold text-white">
+            <h3 className="mt-0.5 truncate text-base font-bold text-cream">
               {next.title}
             </h3>
             {next.description ? (
-              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-white/55">
+              <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-cream/55">
                 {next.description}
               </p>
             ) : null}
           </div>
         </div>
 
-        <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10">
+        <div className="mt-3 h-1 overflow-hidden rounded-full bg-cream/15">
           <div
-            className="h-full bg-[#ff3d3d] transition-[width] duration-1000 ease-linear"
+            className="h-full bg-gold transition-[width] duration-1000 ease-linear"
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -142,9 +146,9 @@ export function UpNextOverlay({
               e.stopPropagation();
               onPlayNow();
             }}
-            className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-white text-sm font-bold text-black transition-colors hover:bg-white/90"
+            className="bg-gold-cta inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
           >
-            <Icon name="play" size={14} color="#0a0a0c" />
+            <Icon name="play" size={14} color="#241205" />
             {t.upNextOverlay.watchNow}
           </button>
           <button
@@ -153,12 +157,12 @@ export function UpNextOverlay({
               e.stopPropagation();
               onCancel();
             }}
-            className="inline-flex h-10 items-center justify-center rounded-md border border-white/15 px-4 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+            className="inline-flex h-11 items-center justify-center rounded-full border border-cream/20 px-4 text-sm font-semibold text-cream transition-colors hover:bg-cream/10"
           >
             {t.upNextOverlay.cancel}
           </button>
         </div>
-        <p className="mt-2 text-center text-[10px] text-white/45" aria-live="polite" aria-atomic="true">
+        <p className="mt-2 text-center text-[10px] text-cream/45" aria-live="polite" aria-atomic="true">
           {t.upNextOverlay.playingIn(remaining)}
         </p>
       </div>

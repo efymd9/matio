@@ -72,14 +72,14 @@ export default async function SeasonPage({
         kicker={t.season.panelKickerContent}
         title={t.season.panelTitleEpisodes}
         right={
-          <span className="font-mono text-xs text-white/45">
+          <span className="font-mono text-xs text-cream/45">
             {seasonEpisodes.length}
           </span>
         }
       >
         <div className="space-y-2">
           {seasonEpisodes.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-white/10 py-6 text-center text-sm text-white/45">
+            <p className="rounded-lg border border-dashed border-white/10 py-6 text-center text-sm text-cream/45">
               {t.season.emptyEpisodes}
             </p>
           ) : (
@@ -114,7 +114,7 @@ export default async function SeasonPage({
                         className="absolute inset-0 h-full w-full object-cover"
                       />
                     ) : (
-                      <div className="absolute inset-0 flex items-center justify-center font-mono text-sm font-bold text-white/25">
+                      <div className="absolute inset-0 flex items-center justify-center font-mono text-sm font-bold text-cream/25">
                         E{episode.number}
                       </div>
                     )}
@@ -122,12 +122,12 @@ export default async function SeasonPage({
 
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-[11px] text-white/45">
+                      <span className="font-mono text-[11px] text-cream/45">
                         E{episode.number}
                       </span>
                       <Link
                         href={editHref}
-                        className="truncate text-sm font-bold text-white after:absolute after:inset-0 hover:text-[#ff3d3d]"
+                        className="truncate text-sm font-bold text-cream after:absolute after:inset-0 hover:text-gold"
                       >
                         {episode.title}
                       </Link>
@@ -137,7 +137,7 @@ export default async function SeasonPage({
                       />
                     </div>
                     {episode.description ? (
-                      <p className="mt-1 line-clamp-1 text-xs text-white/45">
+                      <p className="mt-1 line-clamp-1 text-xs text-cream/45">
                         {episode.description}
                       </p>
                     ) : null}
@@ -152,7 +152,7 @@ export default async function SeasonPage({
                     />
                     <Link
                       href={editHref}
-                      className="inline-flex h-8 items-center rounded-md border border-white/15 px-3 text-xs font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"
+                      className="inline-flex h-8 items-center rounded-md border border-white/15 px-3 text-xs font-semibold text-cream/80 transition-colors hover:bg-white/[0.06] hover:text-cream"
                     >
                       {t.season.edit}
                     </Link>
@@ -180,7 +180,7 @@ export default async function SeasonPage({
           action={createEpisode.bind(null, season.id, show.id)}
           className="mt-5 space-y-4 border-t border-white/[0.06] pt-5"
         >
-          <p className="text-sm font-semibold text-white">
+          <p className="text-sm font-semibold text-cream">
             {t.season.addAnEpisode}
           </p>
           <div className="grid gap-4 sm:grid-cols-[90px_1fr]">
@@ -214,9 +214,9 @@ export default async function SeasonPage({
           <div className="flex justify-end">
             <button
               type="submit"
-              className="inline-flex h-10 items-center gap-1.5 rounded-md bg-[#ff3d3d] px-4 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.8)] transition-[filter] hover:brightness-110 active:scale-[0.99]"
+              className="inline-flex h-10 items-center gap-1.5 rounded-full bg-gold-cta px-4 text-sm font-bold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[filter] hover:brightness-110 active:scale-[0.99]"
             >
-              <Icon name="plus" size={15} color="#ffffff" />
+              <Icon name="plus" size={15} color="#241205" />
               {t.season.addEpisodeButton}
             </button>
           </div>

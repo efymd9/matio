@@ -11,18 +11,18 @@ export default async function NewShowPage() {
       <div>
         <Link
           href="/admin"
-          className="inline-flex items-center gap-1.5 text-sm text-white/50 transition-colors hover:text-white"
+          className="inline-flex items-center gap-1.5 text-sm text-cream/50 transition-colors hover:text-cream"
         >
           <Icon name="back" size={14} />
           {t.showNew.backToShows}
         </Link>
-        <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+        <p className="mt-4 text-[11px] font-bold uppercase tracking-[0.18em] text-gold">
           {t.showNew.eyebrow}
         </p>
-        <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-white">
+        <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-cream">
           {t.showNew.heading}
         </h1>
-        <p className="mt-1 text-sm text-white/55">
+        <p className="mt-1 text-sm text-cream/55">
           {t.showNew.subheading}
         </p>
       </div>

@@ -29,38 +29,90 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="border-t border-white/[0.06] bg-background pl-[max(env(safe-area-inset-left),1.5rem)] pr-[max(env(safe-area-inset-right),1.5rem)] sm:pl-[max(env(safe-area-inset-left),3rem)] sm:pr-[max(env(safe-area-inset-right),3rem)]">
-      <div className="mx-auto grid max-w-screen-2xl gap-10 py-12 sm:grid-cols-[1fr_auto_auto_auto] sm:gap-16 sm:py-16">
-        <div className="space-y-3 sm:max-w-xs">
-          <MatioLogo size={20} accent="#ff3d3d" color="#ffffff" />
-          <p className="text-sm text-white/55">{t.footer.tagline}</p>
+    <footer className="border-t border-rust/30 bg-espresso pl-[max(env(safe-area-inset-left),1.5rem)] pr-[max(env(safe-area-inset-right),1.5rem)] sm:pl-[max(env(safe-area-inset-left),3rem)] sm:pr-[max(env(safe-area-inset-right),3rem)]">
+      {/* Mobile (<834): brand block, then a single wrapping link row.
+          Tablet (834–1279): brand left, link columns right.
+          Desktop (≥1280): 3-column grid with generous column gap. */}
+      <div className="mx-auto flex max-w-screen-2xl flex-col gap-8 py-10 tablet:flex-row tablet:items-start tablet:justify-between tablet:gap-10 tablet:py-12 xl:grid xl:grid-cols-[1fr_auto_auto] xl:gap-24 xl:pt-13 xl:pb-11">
+        <div className="space-y-2.5 tablet:max-w-xs">
+          <MatioLogo size={15} className="xl:hidden" />
+          <MatioLogo size={17} className="hidden xl:block" />
+          <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-gold/75 xl:text-[10px]">
+            {t.footer.tagline}
+          </p>
+          <p className="hidden text-[11px] text-cream/35 tablet:block tablet:pb-[max(env(safe-area-inset-bottom),0px)] xl:hidden xl:pb-0">
+            {t.footer.copyright(year)}
+          </p>
         </div>
-        <FooterColumn heading={t.footer.sectionMatio}>
+
+        {/* Mobile: wrapping inline link row. Hidden from tablet up, where
+            the column layout below takes over. */}
+        <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-cream/55 tablet:hidden">
           <FooterLink href="/">{t.footer.browse}</FooterLink>
           <FooterLink href="/about">{t.footer.about}</FooterLink>
           {paymentsEnabled && (
-            <FooterLink href="/subscribe">{t.footer.subscribe}</FooterLink>
+            <FooterLink href="/subscribe">
+              {t.footer.subscribe}
+            </FooterLink>
           )}
-          <FooterLink href="/api/billing-portal">{t.footer.manage}</FooterLink>
-        </FooterColumn>
-        <FooterColumn heading={t.footer.sectionLegal}>
+          <FooterLink href="/api/billing-portal">
+            {t.footer.manage}
+          </FooterLink>
           <FooterLink href="/terms">{t.footer.terms}</FooterLink>
-          <FooterLink href="/privacy">{t.footer.privacy}</FooterLink>
-          <FooterLink href="/cookies">{t.footer.cookies}</FooterLink>
+          <FooterLink href="/privacy">
+            {t.footer.privacy}
+          </FooterLink>
+          <FooterLink href="/cookies">
+            {t.footer.cookies}
+          </FooterLink>
           <li>
             <button
               type="button"
               onClick={() =>
                 window.dispatchEvent(new Event(COOKIE_PREFS_EVENT))
               }
-              className="text-left text-sm text-white/70 transition-colors hover:text-white focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-2"
+              className="text-left transition-colors hover:text-cream focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-2"
             >
               {t.footer.cookiePreferences}
             </button>
           </li>
-        </FooterColumn>
+        </ul>
+
+        {/* Tablet + desktop: two labeled columns. */}
+        <div className="hidden tablet:flex tablet:gap-14 xl:contents">
+          <FooterColumn heading={t.footer.sectionMatio}>
+            <FooterLink href="/">{t.footer.browse}</FooterLink>
+            <FooterLink href="/about">{t.footer.about}</FooterLink>
+            {paymentsEnabled && (
+              <FooterLink href="/subscribe">{t.footer.subscribe}</FooterLink>
+            )}
+            <FooterLink href="/api/billing-portal">
+              {t.footer.manage}
+            </FooterLink>
+          </FooterColumn>
+          <FooterColumn heading={t.footer.sectionLegal}>
+            <FooterLink href="/terms">{t.footer.terms}</FooterLink>
+            <FooterLink href="/privacy">{t.footer.privacy}</FooterLink>
+            <FooterLink href="/cookies">{t.footer.cookies}</FooterLink>
+            <li>
+              <button
+                type="button"
+                onClick={() =>
+                  window.dispatchEvent(new Event(COOKIE_PREFS_EVENT))
+                }
+                className="text-left text-sm text-cream/70 transition-colors hover:text-cream focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-2"
+              >
+                {t.footer.cookiePreferences}
+              </button>
+            </li>
+          </FooterColumn>
+        </div>
+
+        <p className="pb-[max(env(safe-area-inset-bottom),0px)] text-[11px] text-cream/35 tablet:hidden">
+          {t.footer.copyright(year)}
+        </p>
       </div>
-      <div className="mx-auto max-w-screen-2xl border-t border-white/[0.04] py-5 text-[11px] text-white/40 pb-[max(env(safe-area-inset-bottom),1.25rem)]">
+      <div className="mx-auto hidden max-w-screen-2xl border-t border-cream/[0.06] py-5 pb-[max(env(safe-area-inset-bottom),1.25rem)] text-xs text-cream/40 xl:block">
         {t.footer.copyright(year)}
       </div>
     </footer>
@@ -76,10 +128,10 @@ function FooterColumn({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/45">
+      <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-cream/45">
         {heading}
       </p>
-      <ul className="space-y-2 text-sm text-white/70">{children}</ul>
+      <ul className="space-y-2 text-sm text-cream/70">{children}</ul>
     </div>
   );
 }
@@ -93,10 +145,7 @@ function FooterLink({
 }) {
   return (
     <li>
-      <Link
-        href={href}
-        className="transition-colors hover:text-white"
-      >
+      <Link href={href} className="transition-colors hover:text-cream">
         {children}
       </Link>
     </li>

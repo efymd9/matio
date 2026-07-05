@@ -135,18 +135,18 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
           }}
           className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-6 py-10 text-center transition-colors ${
             dragOver
-              ? "border-[#ff3d3d]/70 bg-[#ff3d3d]/[0.06]"
+              ? "border-gold/70 bg-gold/[0.06]"
               : "border-white/15 bg-black/20 hover:border-white/30 hover:bg-white/[0.03]"
           }`}
         >
           <span className="flex size-11 items-center justify-center rounded-full bg-white/[0.06]">
             <UploadGlyph />
           </span>
-          <span className="text-sm font-semibold text-white">
+          <span className="text-sm font-semibold text-cream">
             {t.uploadWidget.dropVideoPrefix}
-            <span className="text-[#ff3d3d]">{t.uploadWidget.browse}</span>
+            <span className="text-gold">{t.uploadWidget.browse}</span>
           </span>
-          <span className="text-[11px] text-white/40">
+          <span className="text-[11px] text-cream/40">
             {t.uploadWidget.acceptedFormatsHint}
           </span>
         </label>
@@ -157,10 +157,10 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
               <FilmGlyph />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-white">
+              <p className="truncate text-sm font-semibold text-cream">
                 {file.name}
               </p>
-              <p className="font-mono text-[11px] text-white/45">
+              <p className="font-mono text-[11px] text-cream/45">
                 {formatSize(file.size)}
               </p>
             </div>
@@ -173,7 +173,7 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
               <button
                 type="button"
                 onClick={reset}
-                className="text-xs font-medium text-white/50 transition-colors hover:text-white"
+                className="text-xs font-medium text-cream/50 transition-colors hover:text-cream"
               >
                 {t.uploadWidget.remove}
               </button>
@@ -185,13 +185,13 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
             <div className="mt-3.5">
               <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.08]">
                 <div
-                  className="h-full rounded-full bg-[#ff3d3d] transition-[width] duration-200 ease-out"
+                  className="h-full rounded-full bg-gold transition-[width] duration-200 ease-out"
                   style={{
                     width: `${status === "preparing" ? 4 : progress}%`,
                   }}
                 />
               </div>
-              <p className="mt-1.5 font-mono text-[11px] text-white/50">
+              <p className="mt-1.5 font-mono text-[11px] text-cream/50">
                 {status === "preparing"
                   ? t.uploadWidget.preparingUpload
                   : status === "uploading"
@@ -206,7 +206,7 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
             <button
               type="button"
               onClick={startUpload}
-              className="mt-3.5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-[#ff3d3d] text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.8)] transition-[filter] hover:brightness-110 active:scale-[0.99]"
+              className="mt-3.5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-gold-cta text-sm font-bold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[filter] hover:brightness-110 active:scale-[0.99]"
             >
               <UploadGlyph small />
               {t.uploadWidget.startUpload}
@@ -216,19 +216,19 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
       )}
 
       {error && (
-        <div className="flex items-start gap-2 rounded-lg border border-[#ff3d3d]/30 bg-[#ff3d3d]/[0.06] px-3.5 py-2.5">
-          <span className="mt-0.5 shrink-0 text-[#ff7d7d]">
+        <div className="flex items-start gap-2 rounded-lg border border-rust/30 bg-rust/[0.06] px-3.5 py-2.5">
+          <span className="mt-0.5 shrink-0 text-rust">
             <CrossGlyph />
           </span>
           <div className="flex-1">
-            <p className="text-sm text-[#ff7d7d]">{error}</p>
+            <p className="text-sm text-rust">{error}</p>
             <button
               type="button"
               onClick={() => {
                 setError(null);
                 setStatus("idle");
               }}
-              className="mt-0.5 text-xs font-medium text-white/50 transition-colors hover:text-white"
+              className="mt-0.5 text-xs font-medium text-cream/50 transition-colors hover:text-cream"
             >
               {t.uploadWidget.dismiss}
             </button>
@@ -253,7 +253,7 @@ function UploadGlyph({ small }: { small?: boolean }) {
       strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={small ? "text-white" : "text-white/70"}
+      className={small ? "text-cream" : "text-cream/70"}
       aria-hidden
     >
       <path d="M12 16V4" />
@@ -274,7 +274,7 @@ function FilmGlyph() {
       strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="text-white/70"
+      className="text-cream/70"
       aria-hidden
     >
       <rect x="3" y="4" width="18" height="16" rx="2" />

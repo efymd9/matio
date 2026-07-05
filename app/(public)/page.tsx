@@ -1,11 +1,15 @@
 import { preconnect, prefetchDNS } from "react-dom";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons } from "@/db/schema";
-import { GenreRow } from "@/components/site/genre-row";
+import { ContinueWatchingRow } from "@/components/site/continue-watching-row";
 import { HeroBanner } from "@/components/site/hero-banner";
+import { JustReleasedRow } from "@/components/site/just-released-row";
 import { MatioLogo } from "@/components/site/matio-logo";
+import { TopThreeRow } from "@/components/site/top-three-row";
+import { getContinueWatching } from "@/lib/continue-watching";
 import { getPublishedShows } from "@/lib/catalog";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import { TRIAL_DURATION_SECONDS } from "@/lib/trial";
@@ -23,6 +27,57 @@ const PREVIEW_TTL_SECONDS = TRIAL_DURATION_SECONDS;
 // for almost every visitor. Each request must mint a fresh token.
 export const dynamic = "force-dynamic";
 
+// First ready episode of the show's first season → muted hero preview
+// (playback id + signed token when the asset uses a signed policy).
+async function resolveHeroPreview(showId: string): Promise<{
+  previewPlaybackId: string | null;
+  previewToken: string | null;
+}> {
+  const featuredSeasons = await db
+    .select({ id: seasons.id })
+    .from(seasons)
+    .where(eq(seasons.showId, showId))
+    .orderBy(asc(seasons.number))
+    .limit(1);
+  if (featuredSeasons.length === 0) {
+    return { previewPlaybackId: null, previewToken: null };
+  }
+
+  const [readyEp] = await db
+    .select({
+      muxPlaybackId: episodes.muxPlaybackId,
+      muxPlaybackPolicy: episodes.muxPlaybackPolicy,
+    })
+    .from(episodes)
+    .where(
+      and(
+        inArray(
+          episodes.seasonId,
+          featuredSeasons.map((s) => s.id),
+        ),
+        eq(episodes.status, "ready"),
+      ),
+    )
+    .orderBy(asc(episodes.number))
+    .limit(1);
+
+  if (!readyEp?.muxPlaybackId) {
+    return { previewPlaybackId: null, previewToken: null };
+  }
+  let previewToken: string | null = null;
+  if (readyEp.muxPlaybackPolicy === "signed") {
+    try {
+      previewToken = signMuxPlaybackToken(
+        readyEp.muxPlaybackId,
+        PREVIEW_TTL_SECONDS,
+      );
+    } catch {
+      previewToken = null;
+    }
+  }
+  return { previewPlaybackId: readyEp.muxPlaybackId, previewToken };
+}
+
 export default async function HomePage() {
   const { t } = await getDict();
   // Warm the cross-origin thumbnail/preview host (DNS+TLS) before the ~350KB
@@ -38,23 +93,18 @@ export default async function HomePage() {
   // query is cached, not the page itself.
   const published = await getPublishedShows();
 
-  const justReleased = published.filter((s) => s.justReleased);
-  const popularNow = published.filter((s) => s.popularNow);
-
   if (published.length === 0) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background px-6 pt-24 text-center">
-        <div className="space-y-5">
-          <div className="flex justify-center">
-            <MatioLogo size={32} accent="#ff3d3d" />
-          </div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-[#ff3d3d]">
+      <main className="flex min-h-screen items-center justify-center bg-background px-6 text-center">
+        <div className="flex flex-col items-center gap-5">
+          <MatioLogo size={26} />
+          <p className="text-[10px] font-bold uppercase tracking-[0.28em] text-gold/75">
             {t.home.comingSoonKicker}
           </p>
-          <h1 className="text-4xl font-extrabold leading-[0.95] tracking-tight text-white">
+          <h1 className="font-display text-4xl uppercase leading-[1.0] tracking-[0.01em] text-cream sm:text-5xl">
             {t.home.storiesHeadline}
           </h1>
-          <p className="text-sm text-white/60">
+          <p className="max-w-sm text-sm text-cream/60">
             {t.home.catalogBeingCurated}
           </p>
         </div>
@@ -67,62 +117,38 @@ export default async function HomePage() {
     published.find((s) => !!s.heroImageUrl) ??
     published[0];
 
-  let previewPlaybackId: string | null = null;
-  let previewToken: string | null = null;
-
-  const featuredSeasons = await db
-    .select({ id: seasons.id })
-    .from(seasons)
-    .where(eq(seasons.showId, featured.id))
-    .orderBy(asc(seasons.number))
-    .limit(1);
-
-  if (featuredSeasons.length > 0) {
-    const [readyEp] = await db
-      .select({
-        muxPlaybackId: episodes.muxPlaybackId,
-        muxPlaybackPolicy: episodes.muxPlaybackPolicy,
-      })
-      .from(episodes)
-      .where(
-        and(
-          inArray(
-            episodes.seasonId,
-            featuredSeasons.map((s) => s.id),
-          ),
-          eq(episodes.status, "ready"),
+  // The three remaining reads are independent — run them in parallel so a
+  // warm request pays one Neon round-trip of latency, not three in series
+  // (the page is force-dynamic; every visitor hits this path).
+  const [[{ value: featuredEpisodeCount }], preview, continueWatching] =
+    await Promise.all([
+      // Ready-episode count for the featured hero's meta row. Cheap count
+      // query — deliberately NOT folded into the cached catalog read (the
+      // count only matters for the single featured show).
+      db
+        .select({ value: count() })
+        .from(episodes)
+        .innerJoin(seasons, eq(seasons.id, episodes.seasonId))
+        .where(
+          and(eq(seasons.showId, featured.id), eq(episodes.status, "ready")),
         ),
-      )
-      .orderBy(asc(episodes.number))
-      .limit(1);
+      resolveHeroPreview(featured.id),
+      getContinueWatching(),
+    ]);
+  const { previewPlaybackId, previewToken } = preview;
 
-    if (readyEp?.muxPlaybackId) {
-      previewPlaybackId = readyEp.muxPlaybackId;
-      if (readyEp.muxPlaybackPolicy === "signed") {
-        try {
-          previewToken = signMuxPlaybackToken(
-            readyEp.muxPlaybackId,
-            PREVIEW_TTL_SECONDS,
-          );
-        } catch {
-          previewToken = null;
-        }
-      }
-    }
-  }
+  // Top 3: shows flagged popularNow, falling back to the first 3 published
+  // (createdAt desc) when fewer than 3 are flagged. Order stays stable.
+  const popular = published.filter((s) => s.popularNow);
+  const topThree = (popular.length >= 3 ? popular : published).slice(0, 3);
 
-  const sections: Array<{
-    key: string;
-    label: string;
-    shows: typeof published;
-    size: "default" | "big";
-  }> = [
-    { key: "just-released", label: t.home.justReleased, shows: justReleased, size: "big" as const },
-    { key: "popular-now", label: t.home.popularNow, shows: popularNow, size: "big" as const },
-  ].filter((s) => s.shows.length > 0);
+  // Just released: shows flagged justReleased, falling back to ALL published
+  // so no show is orphaned when nothing is flagged.
+  const flaggedNew = published.filter((s) => s.justReleased);
+  const justReleased = flaggedNew.length > 0 ? flaggedNew : published;
 
   return (
-    <main className="bg-background pb-24">
+    <main className="bg-background">
       <HeroBanner
         title={featured.title}
         description={featured.description}
@@ -132,23 +158,18 @@ export default async function HomePage() {
         posterImageUrl={featured.posterImageUrl}
         previewPlaybackId={previewPlaybackId}
         previewToken={previewToken}
+        episodeCount={featuredEpisodeCount}
+        // createdAt round-trips through unstable_cache as a string, not a Date.
+        year={new Date(featured.createdAt).getFullYear()}
+        paymentsOn={paymentsEnabled()}
       />
 
-      <div className="mx-auto max-w-screen-2xl space-y-10 pt-8 sm:pt-10">
-        {sections.map((section, i) => (
-          <div
-            key={section.key}
-            id={`row-${section.key}`}
-            className="scroll-mt-24"
-          >
-            <GenreRow
-              genre={section.label}
-              shows={section.shows}
-              priority={i === 0}
-              size={section.size}
-            />
-          </div>
-        ))}
+      <div className="flex flex-col gap-[34px] pt-[30px] pb-[76px] tablet:gap-10 tablet:pt-9 tablet:pb-[72px] xl:gap-[52px] xl:pt-11 xl:pb-[88px]">
+        {continueWatching.length > 0 && (
+          <ContinueWatchingRow items={continueWatching} />
+        )}
+        <TopThreeRow shows={topThree} />
+        <JustReleasedRow shows={justReleased} />
       </div>
     </main>
   );

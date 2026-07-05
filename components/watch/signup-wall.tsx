@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import Image from "next/image";
+import Link from "next/link";
 import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT } from "@/lib/design";
@@ -24,6 +26,7 @@ export function SignupWall({
   targetEpisodeId,
   episodeNumber,
   memberCount,
+  backdropThumbnailUrl,
 }: {
   showSlug: string;
   showId: string;
@@ -37,6 +40,9 @@ export function SignupWall({
   episodeNumber: number;
   // How many member episodes an account unlocks — drives the body copy.
   memberCount: number;
+  // Current episode's Mux thumbnail, passed by the player. Full-bleed
+  // backdrop when present; falls back to a tone gradient otherwise.
+  backdropThumbnailUrl?: string | null;
 }) {
   const t = useT();
 
@@ -55,106 +61,124 @@ export function SignupWall({
   const watchHref = `/watch/${showSlug}?ep=${encodeURIComponent(targetEpisodeId)}`;
 
   return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black sm:aspect-video sm:h-auto">
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-espresso sm:aspect-video sm:h-auto">
+      {backdropThumbnailUrl ? (
+        <Image
+          src={backdropThumbnailUrl}
+          alt=""
+          fill
+          sizes="100vw"
+          className="object-cover"
+          style={{ objectPosition: "40% 50%" }}
+          priority
+        />
+      ) : (
+        <div
+          className="absolute inset-0"
+          aria-hidden
+          style={{ backgroundImage: TONE_GRADIENT.a }}
+        />
+      )}
       <div
-        className="absolute inset-0"
-        style={{ backgroundImage: TONE_GRADIENT.a }}
+        className="duotone-strong pointer-events-none absolute inset-0"
+        aria-hidden
       />
       <div
-        className="absolute inset-0 opacity-55"
+        className="pointer-events-none absolute inset-0"
         aria-hidden
         style={{
           backgroundImage:
-            "radial-gradient(circle at 60% 40%, rgba(255,255,255,0.18), transparent 60%), radial-gradient(circle at 20% 80%, rgba(0,0,0,0.6), transparent 60%)",
+            "linear-gradient(to top, rgba(15,10,7,0.97) 30%, rgba(15,10,7,0.55) 60%, rgba(15,10,7,0.25) 100%)",
         }}
       />
-      <div className="absolute inset-0 bg-black/55" />
+      <div className="glow-floor pointer-events-none absolute inset-0" aria-hidden />
 
-      {/* "Free episodes watched" chip */}
-      <div className="absolute left-1/2 top-[24%] -translate-x-1/2 rounded-full bg-[#ff3d3d]/95 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-white backdrop-blur-md">
-        {t.signupWall.freeComplete}
+      {/* Top row */}
+      <div className="relative z-10 flex items-center gap-3 pt-[max(env(safe-area-inset-top),1rem)] pl-[max(env(safe-area-inset-left),1.25rem)] pr-[max(env(safe-area-inset-right),1.25rem)]">
+        <Link
+          href={`/shows/${showSlug}`}
+          aria-label={t.player.backToShowAria}
+          className="inline-flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full border border-rust/60 bg-burgundy/45 text-cream backdrop-blur-xl"
+        >
+          <Icon name="back" size={18} />
+        </Link>
+        <div className="min-w-0 flex-1">
+          {showTitle ? (
+            <p className="truncate text-xs font-bold text-cream">
+              {showTitle}
+            </p>
+          ) : null}
+          {episodeLabel ? (
+            <p className="truncate text-[10px] font-semibold text-cream/55">
+              {episodeLabel}
+            </p>
+          ) : null}
+        </div>
       </div>
 
-      {/* Bottom sheet — safe-area padding mirrors Paywall */}
-      <div className="absolute inset-x-0 bottom-0 z-10 border-t border-white/10 bg-[#0f0f12]/95 pt-3 backdrop-blur-2xl pl-[max(env(safe-area-inset-left),1.25rem)] pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pt-4 sm:pl-[max(env(safe-area-inset-left),2rem)] sm:pr-[max(env(safe-area-inset-right),2rem)] sm:pb-[max(env(safe-area-inset-bottom),1.75rem)]">
-        <div className="mx-auto max-w-2xl text-center">
-          <div
-            className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/20"
-            aria-hidden
-          />
+      {/* Bottom block */}
+      <div className="relative z-10 mt-auto flex flex-col gap-3.5 pb-[max(env(safe-area-inset-bottom),1.875rem)] pl-[max(env(safe-area-inset-left),1.5rem)] pr-[max(env(safe-area-inset-right),1.5rem)]">
+        <span className="self-start rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
+          {t.signupWall.kicker}
+        </span>
+        <h2 className="font-display text-4xl uppercase leading-[1.02] tracking-[0.01em] text-cream">
+          {t.signupWall.headline}
+        </h2>
+        <p className="text-[13px] leading-[1.6] text-cream/72">
+          {memberCount > 0
+            ? t.signupWall.body(memberCount)
+            : t.signupWall.bodyNoCount}
+        </p>
 
-          <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#ff3d3d]">
-            {t.signupWall.kicker}
+        <Show when="signed-out">
+          <SignUpButton
+            mode="modal"
+            forceRedirectUrl={watchHref}
+            signInForceRedirectUrl={watchHref}
+          >
+            <button
+              type="button"
+              onClick={() =>
+                capturePostHog("signup_cta_clicked", {
+                  auth: "signed_out",
+                  wall: "signup",
+                })
+              }
+              className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out active:scale-[0.98]"
+            >
+              {t.signupWall.signUpCta}
+            </button>
+          </SignUpButton>
+        </Show>
+        <Show when="signed-in">
+          {/* Race only: a user who signed in in another tab. The member
+              tier is already theirs — send them straight back in. */}
+          <a
+            href={watchHref}
+            className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out active:scale-[0.98]"
+          >
+            {t.signupWall.signUpCta}
+          </a>
+        </Show>
+
+        <Show when="signed-out">
+          <p className="flex items-center justify-center gap-1.5 text-xs text-cream/55">
+            <span>{t.signupWall.alreadyMember}</span>
+            <SignInButton
+              mode="modal"
+              forceRedirectUrl={watchHref}
+              signUpForceRedirectUrl={watchHref}
+            >
+              <button type="button" className="font-bold text-gold">
+                {t.signupWall.signInLink}
+              </button>
+            </SignInButton>
           </p>
-          <h2 className="mt-1 text-xl font-extrabold leading-tight tracking-tight text-white sm:text-2xl">
-            {showTitle ?? t.signupWall.headlineFallback}
-            {episodeLabel ? (
-              <span className="ml-2 text-white/55">· {episodeLabel}</span>
-            ) : null}
-          </h2>
-          <p className="mt-2 text-sm font-medium text-white/65">
-            {memberCount > 0
-              ? t.signupWall.body(memberCount)
-              : t.signupWall.bodyNoCount}
-          </p>
+        </Show>
 
-          <div className="mt-5 flex justify-center">
-            <Show when="signed-out">
-              <SignUpButton
-                mode="modal"
-                forceRedirectUrl={watchHref}
-                signInForceRedirectUrl={watchHref}
-              >
-                <button
-                  type="button"
-                  onClick={() =>
-                    capturePostHog("signup_cta_clicked", {
-                      auth: "signed_out",
-                      wall: "signup",
-                    })
-                  }
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98]"
-                >
-                  <Icon name="play" size={14} color="#ffffff" />
-                  <span>{t.signupWall.signUpCta}</span>
-                </button>
-              </SignUpButton>
-            </Show>
-            <Show when="signed-in">
-              {/* Race only: a user who signed in in another tab. The member
-                  tier is already theirs — send them straight back in. */}
-              <a
-                href={watchHref}
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 active:scale-[0.98]"
-              >
-                <Icon name="play" size={14} color="#ffffff" />
-                <span>{t.signupWall.signUpCta}</span>
-              </a>
-            </Show>
-          </div>
-
-          <Show when="signed-out">
-            <p className="mt-3 text-[11px] text-white/55">
-              {t.signupWall.alreadyMember}{" "}
-              <SignInButton
-                mode="modal"
-                forceRedirectUrl={watchHref}
-                signUpForceRedirectUrl={watchHref}
-              >
-                <button
-                  type="button"
-                  className="font-semibold text-white/85 underline underline-offset-2 transition-colors hover:text-white"
-                >
-                  {t.signupWall.signInLink}
-                </button>
-              </SignInButton>
-            </p>
-          </Show>
-
-          <p className="mt-2 text-center text-[10px] text-white/40">
-            {t.signupWall.noCardNeeded}
-          </p>
-        </div>
+        <p className="text-center text-[10px] font-semibold tracking-[0.04em] text-cream/40">
+          {t.signupWall.noCardNeeded}
+        </p>
       </div>
     </div>
   );

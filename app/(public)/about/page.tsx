@@ -24,30 +24,30 @@ export default async function AboutPage() {
   const paymentsOn = paymentsEnabled();
   return (
     <main className="mx-auto max-w-3xl px-6 py-20 sm:py-28">
-      <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+      <h1 className="font-display text-4xl uppercase leading-[1.02] tracking-[0.01em] text-gold sm:text-5xl">
         {t.about.heading}
       </h1>
-      <p className="mt-6 text-lg leading-relaxed text-white/80">
+      <p className="mt-6 text-lg leading-relaxed text-cream/80">
         {paymentsOn ? t.about.lead : t.about.leadFree}
       </p>
-      <p className="mt-5 text-sm leading-relaxed text-white/70">
+      <p className="mt-5 text-sm leading-relaxed text-cream/72">
         {paymentsOn ? t.about.bodyStudio : t.about.bodyStudioFree}
       </p>
-      <p className="mt-5 text-sm leading-relaxed text-white/70">
+      <p className="mt-5 text-sm leading-relaxed text-cream/72">
         {t.about.bodyWho}
       </p>
 
-      <h2 className="mt-12 text-lg font-bold text-white">
+      <h2 className="mt-12 font-display text-xl uppercase tracking-[0.08em] text-gold">
         {t.about.contactHeading}
       </h2>
-      <p className="mt-3 text-sm leading-relaxed text-white/70">
+      <p className="mt-3 text-sm leading-relaxed text-cream/72">
         {t.about.contactBody}
       </p>
 
       <div className="mt-10">
         <Link
           href="/"
-          className="inline-flex h-11 items-center justify-center rounded-md bg-white px-6 text-sm font-bold text-black transition-colors hover:bg-white/90"
+          className="inline-flex h-[52px] items-center justify-center rounded-full bg-gold-cta px-8 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform active:scale-[0.98]"
         >
           {t.about.browseCta}
         </Link>

@@ -1,13 +1,24 @@
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 
-// Matio mark — outlined circle with a cinema-red disc inside. The wordmark
-// (Geist 700, tight tracking) sits next to it unless `markOnly` is set.
+// Natural pixel size of public/brand/matio-wordmark.png — the gold arched
+// MATIO wordmark (client-provided, final). Rendering derives width from
+// the requested height so the mark never distorts.
+const WORDMARK_WIDTH = 2552;
+const WORDMARK_HEIGHT = 1228;
+const WORDMARK_RATIO = WORDMARK_WIDTH / WORDMARK_HEIGHT;
+
+// Brand wordmark — the ONLY logo used in page chrome (header/footer/player
+// watermark). The dark-red "M" blob mark is reserved for the favicon / app
+// icons and never appears next to the wordmark.
+//
+// `size` is the rendered height in px (≈20–24 header, ≈16 footer).
+// The legacy `color`/`accent`/`markOnly` props from the SVG-era logo are
+// accepted and ignored so call sites can migrate incrementally — the
+// wordmark is a fixed-color asset now.
 export function MatioLogo({
-  size = 22,
+  size = 20,
   className,
-  color = "currentColor",
-  accent = "#ff3d3d",
-  markOnly = false,
 }: {
   size?: number;
   className?: string;
@@ -15,45 +26,14 @@ export function MatioLogo({
   accent?: string;
   markOnly?: boolean;
 }) {
-  const mark = (
-    <svg
-      width={size * 1.05}
-      height={size * 1.05}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden
-      style={{ flexShrink: 0 }}
-    >
-      <circle cx="12" cy="12" r="11" stroke={color} strokeWidth="1.6" fill="none" />
-      <circle cx="12" cy="12" r="4.5" fill={accent} />
-    </svg>
-  );
-  if (markOnly) {
-    return (
-      <span
-        className={cn("inline-flex items-center", className)}
-        style={{ color }}
-        aria-label="matio"
-      >
-        {mark}
-      </span>
-    );
-  }
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-[7px] font-sans font-bold leading-none",
-        className,
-      )}
-      style={{
-        fontSize: size,
-        letterSpacing: "-0.03em",
-        color,
-      }}
-      aria-label="matio"
-    >
-      {mark}
-      <span>matio</span>
-    </span>
+    <Image
+      src="/brand/matio-wordmark.png"
+      alt="MATIO"
+      width={Math.round(size * WORDMARK_RATIO)}
+      height={size}
+      className={cn("block w-auto select-none", className)}
+      style={{ height: size }}
+    />
   );
 }

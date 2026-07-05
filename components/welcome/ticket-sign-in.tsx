@@ -118,24 +118,24 @@ export function TicketSignIn({
       {phase === "done" ? (
         <>
           <CompleteRegistrationPixel userId={userId} utm={utm} />
-          <p className="text-sm text-white/65">{t.welcome.ready}</p>
+          <p className="text-sm text-cream/65">{t.welcome.ready}</p>
           <div className="mt-7 flex justify-center">
             <a
               href={destination}
-              className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter] duration-150 ease-out hover:brightness-110 active:scale-[0.98]"
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-gold-cta px-7 text-sm font-bold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[transform,filter] duration-150 ease-out hover:brightness-110 active:scale-[0.98]"
             >
-              <Icon name="play" size={14} color="#ffffff" />
+              <Icon name="play" size={14} color="#241205" />
               <span>{t.welcome.watchNow}</span>
             </a>
           </div>
         </>
       ) : (
-        <p className="flex items-center justify-center gap-2 text-sm text-white/65">
+        <p className="flex items-center justify-center gap-2 text-sm text-cream/65">
           <Spinner />
           {t.welcome.signingIn}
         </p>
       )}
-      <p className="mt-6 text-[11px] text-white/40">
+      <p className="mt-6 text-[11px] text-cream/40">
         {t.welcome.accountEmail(maskedEmail)} {t.welcome.wrongEmail}
       </p>
     </div>
@@ -168,12 +168,12 @@ export function WelcomeSignInFallback({
   }, [reason]);
   return (
     <div className="mt-4">
-      <p className="text-center text-sm text-white/65">{body}</p>
+      <p className="text-center text-sm text-cream/65">{body}</p>
       <div className="mx-auto mt-1 max-w-sm">
         <OpenInBrowserHint />
       </div>
       <EmailCodeSignIn destination={destination} />
-      <p className="mt-6 text-center text-[11px] text-white/40">
+      <p className="mt-6 text-center text-[11px] text-cream/40">
         {t.welcome.wrongEmail}
       </p>
     </div>
@@ -272,7 +272,7 @@ function EmailCodeSignIn({ destination }: { destination: string }) {
 
   if (done) {
     return (
-      <p className="mt-7 flex items-center justify-center gap-2 text-sm text-white/65">
+      <p className="mt-7 flex items-center justify-center gap-2 text-sm text-cream/65">
         <Spinner />
         {t.welcome.signingIn}
       </p>
@@ -280,9 +280,9 @@ function EmailCodeSignIn({ destination }: { destination: string }) {
   }
 
   const inputCls =
-    "h-12 w-full rounded-md border border-white/15 bg-white/[0.06] px-3.5 text-center text-base text-white placeholder:text-white/35 outline-none transition-colors focus:border-white/40 focus:bg-white/[0.09]";
+    "h-12 w-full rounded-md border border-white/15 bg-white/[0.06] px-3.5 text-center text-base text-cream placeholder:text-cream/35 outline-none transition-colors focus:border-white/40 focus:bg-white/[0.09]";
   const submitCls =
-    "inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter] duration-150 ease-out hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100";
+    "inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-gold-cta px-7 text-sm font-bold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[transform,filter] duration-150 ease-out hover:brightness-110 active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100";
 
   return (
     <div className="mx-auto mt-5 max-w-sm">
@@ -306,7 +306,7 @@ function EmailCodeSignIn({ destination }: { destination: string }) {
         </form>
       ) : (
         <form onSubmit={verify} className="space-y-3">
-          <p className="text-center text-xs text-white/55">
+          <p className="text-center text-xs text-cream/55">
             {t.welcome.codeSentTo(email.trim())}
           </p>
           <input
@@ -329,7 +329,7 @@ function EmailCodeSignIn({ destination }: { destination: string }) {
               type="button"
               onClick={resend}
               disabled={busy}
-              className="font-semibold text-white/70 underline underline-offset-2 transition-colors hover:text-white disabled:opacity-50"
+              className="font-semibold text-cream/70 underline underline-offset-2 transition-colors hover:text-cream disabled:opacity-50"
             >
               {t.welcome.resendCta}
             </button>
@@ -340,7 +340,7 @@ function EmailCodeSignIn({ destination }: { destination: string }) {
                 setCode("");
                 setError(null);
               }}
-              className="font-semibold text-white/50 underline underline-offset-2 transition-colors hover:text-white/80"
+              className="font-semibold text-cream/50 underline underline-offset-2 transition-colors hover:text-cream/80"
             >
               {t.welcome.changeEmail}
             </button>

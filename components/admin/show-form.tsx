@@ -173,10 +173,10 @@ export function ShowForm({
           </Field>
 
           <div className="rounded-xl border border-white/[0.07] bg-black/20 p-4">
-            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/55">
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-cream/55">
               {t.showForm.homepageRowsLabel}
             </p>
-            <p className="mt-1 text-xs text-white/45">
+            <p className="mt-1 text-xs text-cream/45">
               {t.showForm.homepageRowsHint}
             </p>
             <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
@@ -214,13 +214,13 @@ function Panel({
   return (
     <section className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5 sm:p-6">
       <div className="mb-5">
-        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gold">
           {kicker}
         </p>
-        <h2 className="mt-1 text-base font-bold tracking-tight text-white">
+        <h2 className="mt-1 text-base font-bold tracking-tight text-cream">
           {title}
         </h2>
-        {hint ? <p className="mt-1 text-xs text-white/45">{hint}</p> : null}
+        {hint ? <p className="mt-1 text-xs text-cream/45">{hint}</p> : null}
       </div>
       <div className="space-y-5">{children}</div>
     </section>
@@ -242,12 +242,12 @@ function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={htmlFor} className="text-white/80">
+      <Label htmlFor={htmlFor} className="text-cream/80">
         {label}
-        {required ? <span className="ml-0.5 text-[#ff3d3d]">*</span> : null}
+        {required ? <span className="ml-0.5 text-rust">*</span> : null}
       </Label>
       {children}
-      {hint ? <p className="text-[11px] text-white/40">{hint}</p> : null}
+      {hint ? <p className="text-[11px] text-cream/40">{hint}</p> : null}
     </div>
   );
 }
@@ -275,14 +275,14 @@ function CheckCard({
         defaultChecked={defaultChecked}
         className="peer sr-only"
       />
-      <div className="flex items-center gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-3 pr-9 transition-colors hover:border-white/20 hover:bg-white/[0.06] peer-checked:border-[#ff3d3d]/60 peer-checked:bg-[#ff3d3d]/[0.08] peer-focus-visible:ring-2 peer-focus-visible:ring-[#ff3d3d]/60">
-        <span className="text-sm font-medium text-white/85">{label}</span>
+      <div className="flex items-center gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-3 pr-9 transition-colors hover:border-white/20 hover:bg-white/[0.06] peer-checked:border-gold/60 peer-checked:bg-gold/[0.08] peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60">
+        <span className="text-sm font-medium text-cream/85">{label}</span>
       </div>
       <span
         aria-hidden
-        className="pointer-events-none absolute right-3 top-1/2 flex size-5 -translate-y-1/2 scale-50 items-center justify-center rounded-full bg-[#ff3d3d] opacity-0 transition-all duration-150 peer-checked:scale-100 peer-checked:opacity-100"
+        className="pointer-events-none absolute right-3 top-1/2 flex size-5 -translate-y-1/2 scale-50 items-center justify-center rounded-full bg-gold opacity-0 transition-all duration-150 peer-checked:scale-100 peer-checked:opacity-100"
       >
-        <Icon name="check" size={12} color="#ffffff" />
+        <Icon name="check" size={12} color="#241205" />
       </span>
     </label>
   );
@@ -299,11 +299,11 @@ function SaveBar({
 }) {
   const t = useAdminT();
   return (
-    <div className="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#141417]/90 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:px-5">
-      <span className="flex items-center gap-2 text-xs text-white/50">
+    <div className="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-espresso-2/90 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:px-5">
+      <span className="flex items-center gap-2 text-xs text-cream/50">
         <span
           className={`inline-block size-1.5 rounded-full ${
-            dirty ? "bg-[#ff3d3d]" : "bg-white/25"
+            dirty ? "bg-gold" : "bg-white/25"
           }`}
         />
         {dirty ? t.showForm.unsavedChanges : t.showForm.allChangesSaved}
@@ -312,7 +312,7 @@ function SaveBar({
         {cancelHref ? (
           <Link
             href={cancelHref}
-            className="inline-flex h-10 items-center rounded-md border border-white/15 px-4 text-sm font-semibold text-white/80 transition-colors hover:bg-white/[0.06] hover:text-white"
+            className="inline-flex h-10 items-center rounded-md border border-white/15 px-4 text-sm font-semibold text-cream/80 transition-colors hover:bg-white/[0.06] hover:text-cream"
           >
             {t.showForm.cancel}
           </Link>
@@ -331,7 +331,7 @@ function SaveButton({ mode }: { mode: "create" | "edit" }) {
       type="submit"
       disabled={pending}
       aria-busy={pending}
-      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#ff3d3d] px-5 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.8)] transition-[transform,filter] duration-150 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.98] disabled:cursor-wait disabled:opacity-80"
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-gold-cta px-5 text-sm font-bold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[transform,filter] duration-150 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.98] disabled:cursor-wait disabled:opacity-80"
     >
       {pending ? (
         <>
@@ -340,7 +340,7 @@ function SaveButton({ mode }: { mode: "create" | "edit" }) {
         </>
       ) : (
         <>
-          <Icon name={mode === "create" ? "plus" : "check"} size={15} color="#ffffff" />
+          <Icon name={mode === "create" ? "plus" : "check"} size={15} color="#241205" />
           <span>
             {mode === "create"
               ? t.showForm.createShow

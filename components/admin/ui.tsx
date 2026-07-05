@@ -35,7 +35,7 @@ export function AdminPageHeader({
     <div>
       <Link
         href={backHref}
-        className="inline-flex items-center gap-1.5 text-sm text-white/50 transition-colors hover:text-white"
+        className="inline-flex items-center gap-1.5 text-sm text-cream/50 transition-colors hover:text-cream"
       >
         <Icon name="back" size={14} />
         {backLabel}
@@ -43,18 +43,18 @@ export function AdminPageHeader({
       <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           {kicker ? (
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gold">
               {kicker}
             </p>
           ) : null}
           <div className="mt-1 flex flex-wrap items-center gap-2.5">
-            <h1 className="text-3xl font-extrabold tracking-tight text-white">
+            <h1 className="text-3xl font-extrabold tracking-tight text-cream">
               {title}
             </h1>
             {pills}
           </div>
           {subtitle ? (
-            <div className="mt-1 text-sm text-white/55">{subtitle}</div>
+            <div className="mt-1 text-sm text-cream/55">{subtitle}</div>
           ) : null}
         </div>
         {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
@@ -80,13 +80,13 @@ export function Panel({
     <section className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5 sm:p-6">
       <div className="mb-5 flex items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gold">
             {kicker}
           </p>
-          <h2 className="mt-1 text-base font-bold tracking-tight text-white">
+          <h2 className="mt-1 text-base font-bold tracking-tight text-cream">
             {title}
           </h2>
-          {hint ? <p className="mt-1 text-xs text-white/45">{hint}</p> : null}
+          {hint ? <p className="mt-1 text-xs text-cream/45">{hint}</p> : null}
         </div>
         {right}
       </div>
@@ -104,12 +104,12 @@ export async function DangerPanel({
 }) {
   const { t } = await getAdminDict();
   return (
-    <section className="rounded-2xl border border-[#ff3d3d]/25 bg-[#ff3d3d]/[0.04] p-5 sm:p-6">
-      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#ff3d3d]">
+    <section className="rounded-2xl border border-rust/25 bg-rust/[0.06] p-5 sm:p-6">
+      <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-rust">
         {t.adminUi.dangerZone}
       </p>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-white/65">{description}</p>
+        <p className="text-sm text-cream/65">{description}</p>
         {children}
       </div>
     </section>
@@ -131,12 +131,12 @@ export function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={htmlFor} className="text-white/80">
+      <Label htmlFor={htmlFor} className="text-cream/80">
         {label}
-        {required ? <span className="text-[#ff3d3d]">*</span> : null}
+        {required ? <span className="text-rust">*</span> : null}
       </Label>
       {children}
-      {hint ? <p className="text-[11px] text-white/40">{hint}</p> : null}
+      {hint ? <p className="text-[11px] text-cream/40">{hint}</p> : null}
     </div>
   );
 }
@@ -157,7 +157,7 @@ export async function EpisodeStatusBadge({
   if (!hasAsset) {
     return (
       <Badge tone="neutral">
-        <span className="inline-block size-1.5 rounded-full bg-white/40" />
+        <span className="inline-block size-1.5 rounded-full bg-cream/40" />
         {t.adminUi.noVideo}
       </Badge>
     );
@@ -195,9 +195,9 @@ function Badge({
 }) {
   const tones: Record<string, string> = {
     green: "bg-[#7fd87a]/15 text-[#7fd87a]",
-    red: "bg-[#ff3d3d]/15 text-[#ff7d7d]",
+    red: "bg-rust/15 text-rust",
     amber: "bg-[#f5c451]/15 text-[#f5c451]",
-    neutral: "bg-white/10 text-white/65",
+    neutral: "bg-white/10 text-cream/65",
   };
   return (
     <span

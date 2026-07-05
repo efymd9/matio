@@ -84,7 +84,7 @@ export function OpenInBrowserHint() {
   };
 
   return (
-    <div className="mt-4 flex items-start gap-3 rounded-xl border border-[#ff3d3d]/35 bg-[#ff3d3d]/[0.08] px-3.5 py-3 text-left">
+    <div className="mt-4 flex items-start gap-3 rounded-xl border border-rust/35 bg-rust/[0.08] px-3.5 py-3 text-left">
       <svg
         width="16"
         height="16"
@@ -95,17 +95,17 @@ export function OpenInBrowserHint() {
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden
-        className="mt-0.5 shrink-0 text-[#ff7a5e]"
+        className="mt-0.5 shrink-0 text-cream"
       >
         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
         <polyline points="15 3 21 3 21 9" />
         <line x1="10" y1="14" x2="21" y2="3" />
       </svg>
       <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-bold leading-snug text-white">
+        <p className="text-[13px] font-bold leading-snug text-cream">
           {t.paywall.openInBrowserHeading}
         </p>
-        <p className="mt-0.5 text-[11.5px] leading-snug text-white/70">
+        <p className="mt-0.5 text-[11.5px] leading-snug text-cream/70">
           {env.platform === "android"
             ? t.paywall.openInBrowserAndroid
             : t.paywall.openInBrowserIos}
@@ -117,7 +117,7 @@ export function OpenInBrowserHint() {
               onClick={() => {
                 window.location.href = chromeIntentUrl();
               }}
-              className="inline-flex h-8 items-center justify-center rounded-md bg-white px-3 text-[12px] font-bold text-black transition-colors hover:bg-white/90"
+              className="inline-flex h-8 items-center justify-center rounded-full bg-cream/10 px-3 text-[12px] font-bold text-cream transition-colors hover:bg-cream/15"
             >
               {t.paywall.openInBrowserAndroidCta}
             </button>
@@ -125,7 +125,7 @@ export function OpenInBrowserHint() {
             <button
               type="button"
               onClick={copyLink}
-              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-white px-3 text-[12px] font-bold text-black transition-colors hover:bg-white/90"
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-full bg-cream/10 px-3 text-[12px] font-bold text-cream transition-colors hover:bg-cream/15"
             >
               {copied ? (
                 <svg
@@ -151,7 +151,7 @@ export function OpenInBrowserHint() {
         type="button"
         aria-label={t.paywall.openInBrowserDismiss}
         onClick={() => setDismissed(true)}
-        className="-mr-1 -mt-0.5 shrink-0 rounded p-1 text-white/40 transition-colors hover:text-white/80"
+        className="-mr-1 -mt-0.5 shrink-0 rounded p-1 text-cream/40 transition-colors hover:text-cream/80"
       >
         <svg
           width="14"

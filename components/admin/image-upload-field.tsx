@@ -91,7 +91,7 @@ export function ImageUploadField({
 
   return (
     <div className="space-y-2.5">
-      <Label htmlFor={inputId} className="text-white/80">
+      <Label htmlFor={inputId} className="text-cream/80">
         {label}
       </Label>
 
@@ -118,9 +118,9 @@ export function ImageUploadField({
           setDragOver(false);
           if (!uploading) handleFile(e.dataTransfer.files?.[0] ?? null);
         }}
-        className={`group relative block cursor-pointer overflow-hidden rounded-xl border bg-black/40 transition-colors peer-focus-visible:border-[#ff3d3d]/70 peer-focus-visible:ring-2 peer-focus-visible:ring-[#ff3d3d]/60 ${boxRatio} ${
+        className={`group relative block cursor-pointer overflow-hidden rounded-xl border bg-black/40 transition-colors peer-focus-visible:border-gold/70 peer-focus-visible:ring-2 peer-focus-visible:ring-gold/60 ${boxRatio} ${
           dragOver
-            ? "border-[#ff3d3d]/70 bg-[#ff3d3d]/[0.06]"
+            ? "border-gold/70 bg-gold/[0.06]"
             : "border-white/10 hover:border-white/25"
         } ${uploading ? "cursor-wait" : ""}`}
       >
@@ -136,7 +136,7 @@ export function ImageUploadField({
             {/* Hover scrim prompting replace — hidden while uploading. */}
             {!uploading && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-150 group-hover:bg-black/55 group-hover:opacity-100">
-                <span className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-cream">
                   <UploadGlyph />
                   {t.imageUpload.dropOrClickToReplace}
                 </span>
@@ -149,16 +149,16 @@ export function ImageUploadField({
               <Icon
                 name={broken ? "close" : "info"}
                 size={15}
-                color={broken ? "#ff7d7d" : "#ffffff70"}
+                color={broken ? "#ff7d7d" : "#f6efe470"}
               />
             </span>
-            <span className="text-[11px] font-semibold text-white/70">
+            <span className="text-[11px] font-semibold text-cream/70">
               {broken ? t.imageUpload.couldntLoadUrl : t.imageUpload.dropImage}
               {!broken && (
-                <span className="text-[#ff3d3d]"> {t.imageUpload.orBrowse}</span>
+                <span className="text-gold"> {t.imageUpload.orBrowse}</span>
               )}
             </span>
-            <span className="text-[10px] text-white/35">
+            <span className="text-[10px] text-cream/35">
               {t.imageUpload.formatHint}
             </span>
           </div>
@@ -173,18 +173,18 @@ export function ImageUploadField({
           >
             <div className="h-1.5 w-full max-w-[140px] overflow-hidden rounded-full bg-white/[0.12]">
               <div
-                className="h-full rounded-full bg-[#ff3d3d] transition-[width] duration-200 ease-out"
+                className="h-full rounded-full bg-gold transition-[width] duration-200 ease-out"
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <span className="font-mono text-[11px] text-white/70">
+            <span className="font-mono text-[11px] text-cream/70">
               {t.imageUpload.uploadingPercent(progress.toFixed(0))}
             </span>
           </div>
         )}
 
         {/* Aspect-ratio chip */}
-        <span className="pointer-events-none absolute right-2 top-2 rounded-[3px] bg-black/60 px-1.5 py-0.5 font-mono text-[9px] text-white/70 backdrop-blur-md">
+        <span className="pointer-events-none absolute right-2 top-2 rounded-[3px] bg-black/60 px-1.5 py-0.5 font-mono text-[9px] text-cream/70 backdrop-blur-md">
           {ratio === "poster" ? "2:3" : "≈21:9"}
         </span>
       </label>
@@ -204,25 +204,25 @@ export function ImageUploadField({
         className="font-mono text-xs"
       />
 
-      {hint ? <p className="text-[11px] text-white/40">{hint}</p> : null}
+      {hint ? <p className="text-[11px] text-cream/40">{hint}</p> : null}
 
       {error && (
         <div
           role="alert"
-          className="flex items-start gap-2 rounded-lg border border-[#ff3d3d]/30 bg-[#ff3d3d]/[0.06] px-3 py-2"
+          className="flex items-start gap-2 rounded-lg border border-rust/30 bg-rust/[0.06] px-3 py-2"
         >
-          <span className="mt-0.5 shrink-0 text-[#ff7d7d]">
-            <Icon name="close" size={13} color="#ff7d7d" />
+          <span className="mt-0.5 shrink-0 text-rust">
+            <Icon name="close" size={13} color="#a8401f" />
           </span>
           <div className="flex-1">
-            <p className="text-xs text-[#ff7d7d]">{error}</p>
+            <p className="text-xs text-rust">{error}</p>
             <button
               type="button"
               onClick={() => {
                 setError(null);
                 setStatus("idle");
               }}
-              className="mt-0.5 text-[11px] font-medium text-white/50 transition-colors hover:text-white"
+              className="mt-0.5 text-[11px] font-medium text-cream/50 transition-colors hover:text-cream"
             >
               {t.imageUpload.dismiss}
             </button>

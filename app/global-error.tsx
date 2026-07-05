@@ -64,8 +64,8 @@ export default function GlobalError({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: "#0d0d10",
-          color: "#ffffff",
+          backgroundColor: "#0f0a07",
+          color: "#f6efe4",
           fontFamily:
             "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
           padding: "24px",
@@ -80,8 +80,8 @@ export default function GlobalError({
             fill="none"
             style={{ marginBottom: 20 }}
           >
-            <circle cx="12" cy="12" r="11" stroke="#ffffff" strokeWidth="1.6" />
-            <circle cx="12" cy="12" r="4.5" fill="#ff3d3d" />
+            <circle cx="12" cy="12" r="11" stroke="#f6efe4" strokeWidth="1.6" />
+            <circle cx="12" cy="12" r="4.5" fill="#a8401f" />
           </svg>
           <p
             style={{
@@ -89,7 +89,7 @@ export default function GlobalError({
               fontWeight: 700,
               letterSpacing: "0.4em",
               textTransform: "uppercase",
-              color: "#ff3d3d",
+              color: "#a8401f",
               marginBottom: 18,
             }}
           >
@@ -98,7 +98,7 @@ export default function GlobalError({
           <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0, lineHeight: 1 }}>
             {t.globalError.title}
           </h1>
-          <p style={{ marginTop: 16, color: "rgba(255,255,255,0.55)", fontSize: 14 }}>
+          <p style={{ marginTop: 16, color: "rgba(246,239,228,0.55)", fontSize: 14 }}>
             {t.globalError.body}
           </p>
           {error.digest && (
@@ -109,7 +109,7 @@ export default function GlobalError({
                 fontSize: 10,
                 letterSpacing: "0.2em",
                 textTransform: "uppercase",
-                color: "rgba(255,255,255,0.35)",
+                color: "rgba(246,239,228,0.35)",
               }}
             >
               {t.globalError.refLabel} · {error.digest}

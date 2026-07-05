@@ -4,6 +4,25 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Gold-duotone brand constants (design_handoff_matio_redesign, turn 8a).
+   Literal values — they never vary by theme, so they live in a plain
+   @theme block and generate first-class utilities (text-gold, bg-burgundy,
+   border-rust/30, …) with opacity-modifier support. */
+@theme {
+  --color-espresso: #0f0a07;
+  --color-espresso-2: #1a120c;
+  --color-cream: #f6efe4;
+  --color-gold: #e6b366;
+  --color-gold-hi: #eec489;
+  --color-gold-lo: #dfa557;
+  --color-gold-deep: #241205;
+  --color-burgundy: #8f2f1c;
+  --color-rust: #a8401f;
+  /* Redesign breakpoint system: mobile < 834 ≤ tablet < 1280 ≤ desktop.
+     `tablet:` sits between md (768) and lg (1024); desktop = `xl:`. */
+  --breakpoint-tablet: 834px;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -84,8 +103,9 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-/* Matio cinema dark — near-black bg #0a0a0c, cream foreground, cinema-red
-   accent #ff3d3d. Used app-wide via the `dark` class on <html>.
+/* Matio gold-duotone dark — espresso bg #0f0a07, cream ink #f6efe4, gold
+   #e6b366 primary, burgundy #8f2f1c secondary, rust #a8401f tertiary.
+   Used app-wide via the `dark` class on <html>.
 
    Double-declaration pattern: hex fallback first, oklch() second. Safari
    < 15.4 / iOS < 15.4 can't parse oklch(), drops the second declaration,
@@ -94,68 +114,68 @@
    would render the entire dark theme as the CSS-initial value cascade,
    collapsing the UI to default light. */
 .dark {
-  --background: #0a0a0c;
-  --background: oklch(0.115 0.005 270);
-  --foreground: #fafafa;
-  --foreground: oklch(0.985 0 0);
-  --card: #141417;
-  --card: oklch(0.155 0.005 270);
-  --card-foreground: #fafafa;
-  --card-foreground: oklch(0.985 0 0);
-  --popover: #141417;
-  --popover: oklch(0.155 0.005 270);
-  --popover-foreground: #fafafa;
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: #fafafa;
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: #0a0a0c;
-  --primary-foreground: oklch(0.115 0.005 270);
-  --secondary: #1f1f23;
-  --secondary: oklch(0.22 0.005 270);
-  --secondary-foreground: #fafafa;
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: #1c1c20;
-  --muted: oklch(0.2 0.005 270);
-  --muted-foreground: #a1a1aa;
-  --muted-foreground: oklch(0.65 0.005 270);
-  --accent: #ff3d3d;
-  --accent: oklch(0.66 0.235 27);
-  --accent-foreground: #fafafa;
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: #ff3d3d;
-  --destructive: oklch(0.66 0.235 27);
-  --border: #28282d;
-  --border: oklch(0.26 0.005 270);
-  --input: #1f1f23;
-  --input: oklch(0.22 0.005 270);
-  --ring: #ff3d3d;
-  --ring: oklch(0.66 0.235 27);
-  --chart-1: #ff3d3d;
-  --chart-1: oklch(0.66 0.235 27);
-  --chart-2: #a1a1aa;
-  --chart-2: oklch(0.65 0.005 270);
-  --chart-3: #6b6b6b;
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: #5a5a5a;
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: #3f3f3f;
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: #141417;
-  --sidebar: oklch(0.155 0.005 270);
-  --sidebar-foreground: #fafafa;
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: #ff3d3d;
-  --sidebar-primary: oklch(0.66 0.235 27);
-  --sidebar-primary-foreground: #fafafa;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: #1f1f23;
-  --sidebar-accent: oklch(0.22 0.005 270);
-  --sidebar-accent-foreground: #fafafa;
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: #28282d;
-  --sidebar-border: oklch(0.26 0.005 270);
-  --sidebar-ring: #ff3d3d;
-  --sidebar-ring: oklch(0.66 0.235 27);
+  --background: #0f0a07;
+  --background: oklch(0.15 0.011 55.3);
+  --foreground: #f6efe4;
+  --foreground: oklch(0.955 0.016 79.4);
+  --card: #1a120c;
+  --card: oklch(0.19 0.018 58.3);
+  --card-foreground: #f6efe4;
+  --card-foreground: oklch(0.955 0.016 79.4);
+  --popover: #1a120c;
+  --popover: oklch(0.19 0.018 58.3);
+  --popover-foreground: #f6efe4;
+  --popover-foreground: oklch(0.955 0.016 79.4);
+  --primary: #e6b366;
+  --primary: oklch(0.797 0.112 76.3);
+  --primary-foreground: #241205;
+  --primary-foreground: oklch(0.204 0.038 56.3);
+  --secondary: #8f2f1c;
+  --secondary: oklch(0.445 0.134 33.1);
+  --secondary-foreground: #f6efe4;
+  --secondary-foreground: oklch(0.955 0.016 79.4);
+  --muted: #221a14;
+  --muted: oklch(0.225 0.017 58.6);
+  --muted-foreground: #a59f97;
+  --muted-foreground: oklch(0.705 0.013 75.3);
+  --accent: #e6b366;
+  --accent: oklch(0.797 0.112 76.3);
+  --accent-foreground: #241205;
+  --accent-foreground: oklch(0.204 0.038 56.3);
+  --destructive: #a8401f;
+  --destructive: oklch(0.51 0.145 37.4);
+  --border: rgba(168, 64, 31, 0.3);
+  --border: oklch(0.51 0.145 37.4 / 0.3);
+  --input: #2a1d13;
+  --input: oklch(0.244 0.027 58.6);
+  --ring: #e6b366;
+  --ring: oklch(0.797 0.112 76.3);
+  --chart-1: #e6b366;
+  --chart-1: oklch(0.797 0.112 76.3);
+  --chart-2: #a8401f;
+  --chart-2: oklch(0.51 0.145 37.4);
+  --chart-3: #8f2f1c;
+  --chart-3: oklch(0.445 0.134 33.1);
+  --chart-4: #a59f97;
+  --chart-4: oklch(0.705 0.013 75.3);
+  --chart-5: #5c2416;
+  --chart-5: oklch(0.339 0.086 35.2);
+  --sidebar: #1a120c;
+  --sidebar: oklch(0.19 0.018 58.3);
+  --sidebar-foreground: #f6efe4;
+  --sidebar-foreground: oklch(0.955 0.016 79.4);
+  --sidebar-primary: #e6b366;
+  --sidebar-primary: oklch(0.797 0.112 76.3);
+  --sidebar-primary-foreground: #241205;
+  --sidebar-primary-foreground: oklch(0.204 0.038 56.3);
+  --sidebar-accent: #2a1d13;
+  --sidebar-accent: oklch(0.244 0.027 58.6);
+  --sidebar-accent-foreground: #f6efe4;
+  --sidebar-accent-foreground: oklch(0.955 0.016 79.4);
+  --sidebar-border: rgba(168, 64, 31, 0.3);
+  --sidebar-border: oklch(0.51 0.145 37.4 / 0.3);
+  --sidebar-ring: #e6b366;
+  --sidebar-ring: oklch(0.797 0.112 76.3);
 }
 
 @layer base {
@@ -169,18 +189,18 @@
     @apply font-sans;
   }
   ::selection {
-    background: rgba(255, 61, 61, 0.4);
-    background: oklch(0.66 0.235 27 / 0.4);
-    color: #fafafa;
-    color: oklch(0.985 0 0);
+    background: rgba(230, 179, 102, 0.4);
+    background: oklch(0.797 0.112 76.3 / 0.4);
+    color: #f6efe4;
+    color: oklch(0.955 0.016 79.4);
   }
 }
 
-/* Display utility — kept for occasional editorial moments (paywall hook etc.).
-   Default headings use Geist sans per the cinema-red design language. */
+/* Display utility — Anton, the brand display face. Titles/section headers
+   pair it with uppercase + tracking at the call site (0.01em titles,
+   0.12em section headers per the 8a spec). */
 .font-display {
-  font-family: var(--font-display), serif;
-  font-feature-settings: "ss01" on, "ss02" on;
+  font-family: var(--font-display), sans-serif;
 }
 
 /* Hide scrollbar — used on horizontal genre rows + category chip strip. */
@@ -192,27 +212,55 @@
   display: none;
 }
 
-/* Tone gradients — six curated palettes that stand in for poster artwork
-   when a show doesn't have one yet. Driven by `shows.posterTone` ('a'..'f').
-   These mirror lib/design.ts so they're available as plain CSS classes too. */
-.tone-a { background-image: linear-gradient(160deg, #3a1f4d 0%, #0d0918 100%); }
-.tone-b { background-image: linear-gradient(160deg, #1f3a4d 0%, #08121a 100%); }
-.tone-c { background-image: linear-gradient(160deg, #4d3a1f 0%, #1a0e08 100%); }
-.tone-d { background-image: linear-gradient(160deg, #1f4d3a 0%, #08180e 100%); }
-.tone-e { background-image: linear-gradient(160deg, #4d1f3a 0%, #1a0814 100%); }
-.tone-f { background-image: linear-gradient(160deg, #2a2a2e 0%, #0d0d10 100%); }
+/* Tone gradients — six curated warm palettes that stand in for poster
+   artwork when a show doesn't have one yet. All in the espresso/rust
+   family per the 8a design (the first three come straight from the
+   design's fallback posters). Mirror lib/design.ts. */
+.tone-a { background-image: linear-gradient(160deg, #5c2416 0%, #170905 100%); }
+.tone-b { background-image: linear-gradient(160deg, #4a2c12 0%, #140a04 100%); }
+.tone-c { background-image: linear-gradient(160deg, #58321c 0%, #170b05 100%); }
+.tone-d { background-image: linear-gradient(160deg, #4d1f2a 0%, #150710 100%); }
+.tone-e { background-image: linear-gradient(160deg, #3f2a18 0%, #120b04 100%); }
+.tone-f { background-image: linear-gradient(160deg, #33201a 0%, #0f0806 100%); }
 
-/* Poster atmospherics — soft radial highlights that sit over the tone
+/* Poster atmospherics — a soft gold radial that sits over the tone
    gradient. Layered as a pseudo-element so the poster content stays on top. */
 .poster-texture::after {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0.25;
-  background-image:
-    radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.18), transparent 50%),
-    radial-gradient(circle at 80% 80%, rgba(0, 0, 0, 0.5), transparent 60%);
+  opacity: 0.3;
+  background-image: radial-gradient(circle at 35% 25%, rgba(230, 179, 102, 0.4), transparent 55%);
+}
+
+/* Duotone treatment — the signature gold→burgundy overlay applied over
+   every photographic still (mix-blend-mode: overlay). Use as an
+   absolutely-positioned, pointer-events-none div covering the image:
+   default for 16:9 stills/thumbs, -strong for full-bleed heroes/walls,
+   -soft for 2:3 posters. */
+.duotone,
+.duotone-strong,
+.duotone-soft {
+  background-image: linear-gradient(160deg, rgba(230, 179, 102, 0.2), rgba(143, 47, 28, 0.3));
+  mix-blend-mode: overlay;
+}
+.duotone-strong {
+  background-image: linear-gradient(160deg, rgba(230, 179, 102, 0.28), rgba(143, 47, 28, 0.38));
+}
+.duotone-soft {
+  background-image: linear-gradient(160deg, rgba(230, 179, 102, 0.18), rgba(143, 47, 28, 0.26));
+}
+
+/* Ambient burgundy floor glow — mobile/tablet heroes + walls only.
+   Deliberately absent from the desktop (≥1280) hero. */
+.glow-floor {
+  background-image: radial-gradient(ellipse at 50% 105%, rgba(143, 47, 28, 0.5), transparent 55%);
+}
+
+/* Primary CTA gradient — gold pill fill (gold-hi → gold-lo). */
+.bg-gold-cta {
+  background-image: linear-gradient(180deg, #eec489, #dfa557);
 }
 
 /* Mux Player overrides for the hero preview — kill all chrome. */

@@ -21,8 +21,6 @@ import {
   MediaMuteButton,
   MediaPlayButton,
   MediaPlaybackRateButton,
-  MediaSeekBackwardButton,
-  MediaSeekForwardButton,
   MediaTimeDisplay,
   MediaTimeRange,
 } from "media-chrome/react";
@@ -538,6 +536,11 @@ function EpisodePlayback({
   // this component, which renders the wall full-surface instead of
   // fetching a token.
   const currentLocked = isEpisodeLocked(current.tier, mode);
+  // Previous episode in the playable ordering (null on the first). Powers the
+  // center-transport prev button; swaps via the same manual-swap machinery as
+  // the episodes overlay / up-next (onSwap remounts the inner player).
+  const prev: PlayerEpisode | null =
+    currentPosition > 1 ? episodes[currentPosition - 2] : null;
   const firstMemberEpisode = episodes.find((e) => e.tier === "member") ?? null;
   const memberCount = episodes.filter((e) => e.tier === "member").length;
   // free/member episode-start funnel events fire once per episode mount.
@@ -1092,14 +1095,6 @@ function EpisodePlayback({
     }
   }, [endState, showSlug, mode]);
 
-  // The portrait chrome has no lock affordance. If a viewer locked the standard
-  // chrome and then crossed into the mobile vertical layout (a wide→narrow
-  // resize / tablet rotate), clear the inherited lock so they aren't left in a
-  // half-locked state the vertical UI can't unlock.
-  useEffect(() => {
-    if (verticalLayout && locked) onLockChange(false);
-  }, [verticalLayout, locked, onLockChange]);
-
   // Wall renders. Lock-based (currentLocked) covers deep links, overlay
   // taps, and auto-advance; endState covers server 403s and natural
   // end-of-tier transitions. Both resolve to the same two surfaces.
@@ -1121,6 +1116,7 @@ function EpisodePlayback({
           episodes.findIndex((e) => e.id === signupWallTarget.id) + 1
         }
         memberCount={memberCount}
+        backdropThumbnailUrl={current.thumbnailUrl}
       />
     );
   }
@@ -1175,9 +1171,9 @@ function EpisodePlayback({
         aria-hidden
         className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/55"
       />
-      <div className="relative z-10 flex items-center gap-3 text-white/60">
-        <span className="size-2 animate-pulse rounded-full bg-[#ff3d3d]" />
-        <span className="text-xs font-medium uppercase tracking-[0.3em]">
+      <div className="relative z-10 flex items-center gap-3 text-cream/60">
+        <span className="size-2 animate-pulse rounded-full bg-gold" />
+        <span className="text-xs font-semibold uppercase tracking-[0.3em]">
           {t.watch.loading}
         </span>
       </div>
@@ -1213,7 +1209,11 @@ function EpisodePlayback({
         ) : null}
         <span
           aria-hidden
-          className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/55"
+          className="absolute inset-x-0 top-0 z-[1] h-[130px] bg-gradient-to-b from-black/75 to-transparent"
+        />
+        <span
+          aria-hidden
+          className="absolute inset-x-0 bottom-0 z-[1] h-[200px] bg-gradient-to-t from-black/85 to-transparent"
         />
         <button
           type="button"
@@ -1226,21 +1226,21 @@ function EpisodePlayback({
             setStarted(true);
           }}
           aria-label={t.player.playPauseAria}
-          className="group absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 text-white"
+          className="group absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 text-cream"
         >
-          <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full border border-white/20 bg-white/15 backdrop-blur-xl transition-transform duration-150 group-hover:scale-105">
+          <span className="bg-gold-cta flex h-[72px] w-[72px] items-center justify-center rounded-full text-gold-deep shadow-[0_20px_50px_-16px_rgba(230,179,102,0.6)] transition-transform duration-150 group-hover:scale-105">
             <span className="-mr-1 inline-flex">
-              <Icon name="play" size={32} />
+              <Icon name="play" size={32} color="#241205" />
             </span>
           </span>
-          <span className="text-xs font-semibold uppercase tracking-[0.3em] text-white/80">
+          <span className="text-xs font-semibold uppercase tracking-[0.3em] text-cream/80">
             {mode === "free" ? t.player.playFreeEpisode : t.player.playPreview}
           </span>
         </button>
         <Link
           href={`/shows/${showSlug}`}
           aria-label={t.player.backToShowAria}
-          className="absolute left-5 top-5 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition-colors hover:bg-black/70 sm:left-8"
+          className="absolute left-5 top-5 z-20 inline-flex h-10 w-10 items-center justify-center rounded-full border border-rust/60 bg-burgundy/50 text-cream backdrop-blur-xl transition-colors hover:bg-burgundy/70 sm:left-8"
         >
           <Icon name="back" size={18} />
         </Link>
@@ -1261,20 +1261,22 @@ function EpisodePlayback({
   // container sizing so the portrait/TikTok layout can fill the viewport while
   // the standard layout still letterboxes to the asset's aspect ratio.
   const mediaVars = {
-    "--media-primary-color": "#ffffff",
+    "--media-primary-color": "#f6efe4",
     "--media-secondary-color": "transparent",
-    "--media-text-color": "#ffffff",
+    "--media-text-color": "#f6efe4",
     "--media-control-background": "transparent",
-    "--media-control-hover-background": "rgba(255,255,255,0.08)",
-    "--media-range-bar-color": "#ff3d3d",
-    "--media-range-track-background": "rgba(255,255,255,0.18)",
-    "--media-range-track-border-radius": "2px",
+    "--media-control-hover-background": "rgba(246,239,228,0.08)",
+    // Progress = gold: cream/22 track, #e6b366 fill, gold scrubber knob with
+    // a soft gold halo (design player language).
+    "--media-range-bar-color": "#e6b366",
+    "--media-range-track-background": "rgba(246,239,228,0.22)",
+    "--media-range-track-border-radius": "9999px",
     "--media-range-track-height": "4px",
-    "--media-range-thumb-background": "#ff3d3d",
+    "--media-range-thumb-background": "#e6b366",
     "--media-range-thumb-border-radius": "9999px",
-    "--media-range-thumb-width": "12px",
-    "--media-range-thumb-height": "12px",
-    "--media-range-thumb-box-shadow": "0 0 0 6px rgba(255,61,61,0.25)",
+    "--media-range-thumb-width": "14px",
+    "--media-range-thumb-height": "14px",
+    "--media-range-thumb-box-shadow": "0 0 0 4px rgba(230,179,102,0.25)",
     "--media-tooltip-display": "none",
     // Letterbox the slotted <video> inside the controller (media-chrome's
     // default, pinned explicitly): a no-op for the standard layout (its box
@@ -1283,16 +1285,16 @@ function EpisodePlayback({
     "--media-object-fit": "contain",
     "--media-font-family":
       "var(--font-sans), -apple-system, BlinkMacSystemFont, sans-serif",
-    // Settings / rendition menu — cinema-red themed.
-    "--media-menu-background": "rgba(15, 15, 18, 0.95)",
-    "--media-menu-border": "1px solid rgba(255, 255, 255, 0.1)",
-    "--media-menu-border-radius": "10px",
+    // Settings / rendition menu — espresso-2 panel, gold selection.
+    "--media-menu-background": "rgba(26, 18, 12, 0.96)",
+    "--media-menu-border": "1px solid rgba(168, 64, 31, 0.3)",
+    "--media-menu-border-radius": "12px",
     "--media-menu-padding": "6px",
-    "--media-menu-item-border-radius": "6px",
-    "--media-menu-item-checked-bg": "rgba(255, 61, 61, 0.15)",
-    "--media-menu-item-checked-color": "#ff3d3d",
-    "--media-menu-item-hover-background": "rgba(255, 255, 255, 0.08)",
-    "--media-menu-icon-color": "#ffffff",
+    "--media-menu-item-border-radius": "8px",
+    "--media-menu-item-checked-bg": "rgba(230, 179, 102, 0.15)",
+    "--media-menu-item-checked-color": "#e6b366",
+    "--media-menu-item-hover-background": "rgba(230, 179, 102, 0.12)",
+    "--media-menu-icon-color": "#f6efe4",
   } as React.CSSProperties;
 
   // Vertical (mobile) fills the WatchShell's fixed full-screen black canvas;
@@ -1575,13 +1577,19 @@ function EpisodePlayback({
           showTitle={showTitle}
           episodeTitle={current.title}
           episodeLabel={episodeLabel}
+          episodeNumber={current.number}
+          durationSeconds={current.durationSeconds}
           episodesCount={episodes.length}
           hasNext={!!next}
+          hasCaptions={hasCaptions}
+          locked={locked}
           showSkipIntro={showSkipIntro}
           showUnmutePill={showUnmutePill}
           needsTap={needsTap}
           chipVisible={chipEpisodeId === current.id}
           onOpenEpisodes={() => onOverlayChange("episodes")}
+          onLock={() => onLockChange(true)}
+          onUnlock={() => onLockChange(false)}
           onUnmute={() => {
             const el = videoRef.current;
             if (el) el.muted = false;
@@ -1604,55 +1612,64 @@ function EpisodePlayback({
 
       {!verticalLayout && (
         <>
-      {/* Top scrim */}
+      {/* Top scrim + bar */}
       <div
-        className={`pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/85 via-black/40 to-transparent px-5 pb-14 pt-5 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8 ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
+        className={`pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/75 to-transparent px-5 pb-16 pt-5 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8 sm:pt-[22px] ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
       >
-        <div className="pointer-events-auto flex items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link
-              href={`/shows/${showSlug}`}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur-md transition-colors hover:bg-black/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60"
-              aria-label={t.player.backToShowAria}
-            >
-              <Icon name="back" size={18} />
-            </Link>
-            <div className="min-w-0">
-              <p className="font-mono text-[11px] leading-none text-white/70">
-                {episodeLabel}
-              </p>
-              <h1 className="mt-0.5 truncate text-base font-bold leading-tight text-white sm:text-lg">
-                {showTitle ? `${showTitle} — ${current.title}` : current.title}
-              </h1>
-            </div>
+        <div className="pointer-events-auto flex items-center gap-4">
+          <Link
+            href={`/shows/${showSlug}`}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-rust/60 bg-burgundy/50 text-cream backdrop-blur-xl transition-colors hover:bg-burgundy/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold/60 sm:h-[42px] sm:w-[42px]"
+            aria-label={t.player.backToShowAria}
+          >
+            <Icon name="back" size={19} />
+          </Link>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate font-display text-sm uppercase leading-none tracking-[0.03em] text-cream sm:text-[17px]">
+              {showTitle ?? current.title}
+            </h1>
+            <p className="mt-1 truncate text-[11px] font-semibold leading-none text-cream/60 sm:text-xs">
+              {t.home.epShort(current.number)} · {current.title}
+            </p>
           </div>
-          <div className="hidden items-center gap-5 text-white/85 sm:flex">
-            {/* AirPlay button auto-hides when no AirPlay targets are
-                available (Safari with a discoverable device only).
-                pointer-coarse pads the hit-area on touch without
-                inflating desktop visual size. */}
+          {/* Right cluster of translucent-black circles. AirPlay + captions
+              auto-hide (no target / no real text track). The settings gear
+              is the rendition-menu trigger, moved up from the bottom bar. */}
+          <div className="flex shrink-0 items-center gap-2.5 text-cream">
+            {/* No display override on the auto-hiding buttons (AirPlay,
+                rendition): media-chrome toggles their host display to hide
+                them, and its :host already centers the slotted icon — a
+                forced `flex` would pin them visible. Size + circle only. */}
             <MediaAirplayButton
-              className="!bg-transparent !p-0 pointer-coarse:!p-2 text-current transition-colors hover:text-white"
+              className="h-9 w-9 rounded-full !bg-black/40 !p-0 text-current backdrop-blur-xl transition-colors hover:text-cream sm:h-[42px] sm:w-[42px]"
               aria-label={t.player.castAria}
             >
               <span slot="icon" className="contents">
-                <Icon name="cast" size={20} />
+                <Icon name="cast" size={19} />
               </span>
             </MediaAirplayButton>
-            {/* Captions button — gated on a real text track being present
-                on the underlying media element. media-chrome's own
-                auto-hide misfires when Mux exposes empty/CEA-608
-                placeholder tracks, so we control visibility ourselves. */}
             {hasCaptions ? (
               <MediaCaptionsButton
-                className="!bg-transparent !p-0 pointer-coarse:!p-2 text-current transition-colors hover:text-white"
+                className="h-9 w-9 rounded-full !bg-black/40 !p-0 text-current backdrop-blur-xl transition-colors hover:text-cream sm:h-[42px] sm:w-[42px]"
                 aria-label={t.player.captionsAria}
               >
                 <span slot="icon" className="contents">
-                  <Icon name="subtitle" size={20} />
+                  <Icon name="subtitle" size={19} />
                 </span>
               </MediaCaptionsButton>
             ) : null}
+            {/* Settings / quality gear — the rendition-menu trigger (menu
+                itself is pinned bottom-right so it has room to anchor
+                without clipping). Auto-hides when the stream has a single
+                rendition. */}
+            <MediaRenditionMenuButton
+              className="h-9 w-9 rounded-full !bg-black/40 !p-0 text-current backdrop-blur-xl transition-colors hover:text-cream sm:h-[42px] sm:w-[42px]"
+              aria-label={t.player.qualityAria}
+            >
+              <span slot="icon" className="contents">
+                <Icon name="settings" size={19} />
+              </span>
+            </MediaRenditionMenuButton>
           </div>
         </div>
       </div>
@@ -1661,40 +1678,48 @@ function EpisodePlayback({
       <div
         className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
       >
-        <div className="pointer-events-auto flex items-center gap-10 text-white">
-          <MediaSeekBackwardButton
-            seekOffset={10}
-            className="!flex flex-col items-center gap-1 !bg-transparent !p-0 text-white/85 transition-colors hover:text-white"
-            aria-label={t.player.back10Aria}
-          >
-            <span slot="icon" className="contents">
-              <Icon name="rewind" size={26} />
-            </span>
-            <span className="font-mono text-[9px] opacity-70">10s</span>
-          </MediaSeekBackwardButton>
+        {/* prev-episode · gold play/pause · next-episode. The seek clusters
+            the design removed are replaced by episode transport — the
+            scrubber covers in-episode seeking. Prev/next hide when there is
+            no adjacent episode; both swap via onSwap (manual-swap remount). */}
+        <div className="pointer-events-auto flex items-center gap-11 text-cream sm:gap-14">
+          {prev ? (
+            <button
+              type="button"
+              onClick={() => onSwap(prev.id)}
+              aria-label={t.player.prevAria}
+              className="inline-flex h-[46px] w-[46px] items-center justify-center rounded-full bg-black/40 text-cream backdrop-blur-xl transition-transform hover:scale-105 active:scale-95 sm:h-[58px] sm:w-[58px]"
+            >
+              <Icon name="rewind" size={22} />
+            </button>
+          ) : null}
           <MediaPlayButton
-            className="!flex h-[72px] w-[72px] items-center justify-center rounded-full border border-white/20 !bg-white/15 text-white backdrop-blur-xl transition-transform hover:scale-105"
+            className="!flex items-center justify-center !bg-transparent !p-0"
             aria-label={t.player.playPauseAria}
           >
             <span slot="play" className="contents">
-              <span className="-mr-1 inline-flex">
-                <Icon name="play" size={32} />
+              <span className="bg-gold-cta flex h-[68px] w-[68px] items-center justify-center rounded-full text-gold-deep shadow-[0_20px_50px_-16px_rgba(230,179,102,0.6)] transition-transform hover:scale-105 sm:h-[92px] sm:w-[92px]">
+                <span className="-mr-1 inline-flex">
+                  <Icon name="play" size={32} color="#241205" />
+                </span>
               </span>
             </span>
             <span slot="pause" className="contents">
-              <Icon name="pause" size={32} />
+              <span className="bg-gold-cta flex h-[68px] w-[68px] items-center justify-center rounded-full text-gold-deep shadow-[0_20px_50px_-16px_rgba(230,179,102,0.6)] transition-transform hover:scale-105 sm:h-[92px] sm:w-[92px]">
+                <Icon name="pause" size={32} color="#241205" />
+              </span>
             </span>
           </MediaPlayButton>
-          <MediaSeekForwardButton
-            seekOffset={10}
-            className="!flex flex-col items-center gap-1 !bg-transparent !p-0 text-white/85 transition-colors hover:text-white"
-            aria-label={t.player.forward10Aria}
-          >
-            <span slot="icon" className="contents">
-              <Icon name="forward" size={26} />
-            </span>
-            <span className="font-mono text-[9px] opacity-70">10s</span>
-          </MediaSeekForwardButton>
+          {next ? (
+            <button
+              type="button"
+              onClick={() => onSwap(next.id)}
+              aria-label={t.player.nextAria}
+              className="inline-flex h-[46px] w-[46px] items-center justify-center rounded-full bg-black/40 text-cream backdrop-blur-xl transition-transform hover:scale-105 active:scale-95 sm:h-[58px] sm:w-[58px]"
+            >
+              <Icon name="forward" size={22} />
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -1709,7 +1734,7 @@ function EpisodePlayback({
               el.currentTime = current.introEndSeconds;
             }
           }}
-          className="absolute bottom-[110px] right-5 z-20 rounded-md border border-white/25 bg-white/15 px-3.5 py-2 text-xs font-semibold text-white backdrop-blur-xl transition-colors hover:bg-white/25 sm:right-8"
+          className="bg-gold-cta absolute bottom-[124px] right-5 z-20 inline-flex h-[42px] items-center rounded-full px-[22px] text-[13px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform hover:scale-[1.02] active:scale-[0.98] sm:right-8"
         >
           {t.player.skipIntro}
         </button>
@@ -1735,9 +1760,9 @@ function EpisodePlayback({
             if (el) el.muted = false;
             setShowUnmutePill(false);
           }}
-          className="absolute bottom-[110px] left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/25 bg-black/60 px-4 py-2 text-xs font-semibold text-white backdrop-blur-xl transition-colors hover:bg-black/75"
+          className="absolute bottom-[124px] left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/55 px-4 py-2 text-xs font-bold text-cream backdrop-blur-xl transition-colors hover:bg-black/70"
         >
-          <Icon name="mute" size={14} />
+          <Icon name="mute" size={14} color="#e6b366" />
           {t.player.tapForSound}
         </button>
       ) : null}
@@ -1759,9 +1784,9 @@ function EpisodePlayback({
           aria-label={t.player.playPauseAria}
           className="absolute inset-0 z-20 flex items-center justify-center"
         >
-          <span className="flex h-[72px] w-[72px] items-center justify-center rounded-full border border-white/20 bg-white/15 text-white backdrop-blur-xl">
+          <span className="bg-gold-cta flex h-[72px] w-[72px] items-center justify-center rounded-full text-gold-deep shadow-[0_20px_50px_-16px_rgba(230,179,102,0.6)]">
             <span className="-mr-1 inline-flex">
-              <Icon name="play" size={32} />
+              <Icon name="play" size={32} color="#241205" />
             </span>
           </span>
         </button>
@@ -1770,8 +1795,8 @@ function EpisodePlayback({
       {/* Transient "Up next" chip right after an auto-advance, so the
           instant cut doesn't disorient. */}
       {chipEpisodeId === current.id && !locked ? (
-        <div className="pointer-events-none absolute left-1/2 top-5 z-20 max-w-[80%] -translate-x-1/2 truncate rounded-full border border-white/15 bg-black/60 px-4 py-2 text-xs font-semibold text-white backdrop-blur-xl">
-          {t.player.upNextBtn} · {episodeLabel} — {current.title}
+        <div className="pointer-events-none absolute left-1/2 top-5 z-20 max-w-[80%] -translate-x-1/2 truncate rounded-full border border-rust/30 bg-black/60 px-4 py-2 text-xs font-semibold text-cream backdrop-blur-xl">
+          {t.player.upNextBtn} · {t.home.epShort(current.number)} — {current.title}
         </div>
       ) : null}
         </>
@@ -1789,7 +1814,7 @@ function EpisodePlayback({
           onClick={(e) => e.stopPropagation()}
           className="absolute inset-0 z-20 flex cursor-wait items-center justify-center bg-black/40"
         >
-          <span className="size-2 animate-pulse rounded-full bg-[#ff3d3d]" />
+          <span className="size-2 animate-pulse rounded-full bg-gold" />
         </div>
       ) : null}
 
@@ -1797,9 +1822,9 @@ function EpisodePlayback({
         <>
       {/* Mini Matio branding */}
       <div
-        className={`pointer-events-none absolute bottom-[88px] left-5 z-10 opacity-50 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:left-8 ${locked ? "!opacity-0" : ""}`}
+        className={`pointer-events-none absolute bottom-[92px] left-5 z-10 opacity-50 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:left-8 ${locked ? "!opacity-0" : ""}`}
       >
-        <MatioLogo size={11} accent="#ff3d3d" color="#ffffff" />
+        <MatioLogo size={11} />
       </div>
 
       {/* Bottom bar. Side/bottom padding honors iOS landscape notch +
@@ -1808,23 +1833,21 @@ function EpisodePlayback({
       <div
         className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 to-transparent pt-4 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 pl-[max(env(safe-area-inset-left),1.25rem)] pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pl-[max(env(safe-area-inset-left),2rem)] sm:pr-[max(env(safe-area-inset-right),2rem)] ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
       >
+        {/* Gold scrubber — knob/track/fill themed via mediaVars. */}
         <MediaTimeRange className="!block !h-3 !w-full !bg-transparent" />
-        <div className="mt-1 flex justify-between font-mono text-[11px] tabular-nums text-white/85">
-          <MediaTimeDisplay className="!bg-transparent !p-0 !text-white/85" />
+        {/* Control row: timecode (elapsed / duration, Geist Mono) left;
+            right cluster — volume, Episodes pill, playback-rate, fullscreen,
+            and the kept lock toggle (not in the design; retained for
+            function). Wraps on very narrow letterbox widths so the row can't
+            overflow. */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-y-2 text-cream/85">
           <MediaTimeDisplay
-            remaining
-            className="!bg-transparent !p-0 !text-white/55"
+            showDuration
+            className="!bg-transparent !p-0 font-mono !text-xs !font-semibold tabular-nums !text-cream/80"
           />
-        </div>
-        {/* Bottom controls. Right cluster wraps on narrow viewports so 5
-            elements + 2 left controls don't overflow at 320–375px (made
-            worse by Spanish localizations of Episodes/Up Next). Icon
-            buttons grow padding on touch devices (pointer-coarse:) so
-            they meet a ~44pt comfort target without inflating desktop. */}
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-y-2 text-white/85">
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-3 sm:gap-4">
             <MediaMuteButton
-              className="!bg-transparent !p-0 pointer-coarse:!p-2 text-current transition-colors hover:text-white"
+              className="!bg-transparent !p-0 pointer-coarse:!p-2 text-cream transition-opacity hover:opacity-80"
               aria-label={t.player.muteAria}
             >
               <span slot="high" className="contents">
@@ -1842,49 +1865,18 @@ function EpisodePlayback({
             </MediaMuteButton>
             <button
               type="button"
-              aria-label={t.player.lockAria}
-              onClick={() => onLockChange(true)}
-              className="-m-2 p-2 text-current transition-colors hover:text-white"
-            >
-              <Icon name="lock" size={18} />
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <MediaPlaybackRateButton
-              rates={[0.5, 1, 1.25, 1.5, 2]}
-              className="!rounded !bg-white/10 !px-2 !py-1 font-mono !text-[11px] !text-white transition-colors hover:!bg-white/15"
-              aria-label={t.player.rateAria}
-            />
-            <button
-              type="button"
               onClick={() => onOverlayChange("episodes")}
-              className="rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15"
+              className="inline-flex h-9 items-center rounded-full border border-cream/25 px-4 text-xs font-bold text-cream transition-colors hover:bg-cream/10"
             >
               {t.player.episodesBtn}
             </button>
-            {next ? (
-              <button
-                type="button"
-                onClick={() => onSwap(next.id)}
-                className="hidden rounded bg-white/10 px-2.5 py-1 text-[11px] text-white transition-colors hover:bg-white/15 sm:inline-flex"
-              >
-                {t.player.upNextBtn}
-              </button>
-            ) : null}
-            {/* Quality picker — placed in the bottom bar so its menu has
-                room to anchor upward (anchoring from the top bar got it
-                clipped against the player edge). Auto-populates from the
-                stream's renditions; auto-hides when there's only one. */}
-            <MediaRenditionMenuButton
-              className="!ml-1 !bg-transparent !p-0 pointer-coarse:!p-2 text-current transition-colors hover:text-white"
-              aria-label={t.player.qualityAria}
-            >
-              <span slot="icon" className="contents">
-                <Icon name="settings" size={18} />
-              </span>
-            </MediaRenditionMenuButton>
+            <MediaPlaybackRateButton
+              rates={[0.5, 1, 1.25, 1.5, 2]}
+              className="!bg-transparent !p-0 font-mono !text-xs !font-bold !text-cream/80 transition-opacity hover:!opacity-80"
+              aria-label={t.player.rateAria}
+            />
             <MediaFullscreenButton
-              className="!bg-transparent !p-0 pointer-coarse:!p-2 text-current transition-colors hover:text-white"
+              className="!bg-transparent !p-0 pointer-coarse:!p-2 text-cream transition-opacity hover:opacity-80"
               aria-label={t.player.fullscreenAria}
             >
               <span slot="enter" className="contents">
@@ -1894,19 +1886,29 @@ function EpisodePlayback({
                 <Icon name="fullscreen" size={20} />
               </span>
             </MediaFullscreenButton>
+            <button
+              type="button"
+              aria-label={t.player.lockAria}
+              onClick={() => onLockChange(true)}
+              className="-m-2 p-2 text-cream transition-opacity hover:opacity-80"
+            >
+              <Icon name="lock" size={18} />
+            </button>
           </div>
         </div>
       </div>
 
-      {/* Rendition (quality) menu — pinned to the bottom-right of the
-          player, sitting above the bottom bar. We bypass media-chrome's
-          auto-anchor positioning (which was clipping the menu against
-          the player edge) by positioning it explicitly. The button still
-          toggles it via media-chrome's internal invoker wiring. */}
+      {/* Rendition (quality) menu — pinned to the top-right of the player,
+          directly under its gear trigger in the top bar. We bypass
+          media-chrome's auto-anchor positioning (which was clipping the
+          menu against the player edge) by positioning it explicitly; the
+          max-height keeps long rendition lists scrollable on short
+          viewports. The button still toggles it via media-chrome's
+          internal invoker wiring. */}
       <MediaRenditionMenu
         hidden
         anchor="auto"
-        className="!absolute !right-5 !bottom-[92px] z-30 !font-sans sm:!right-8"
+        className="!absolute !right-5 !top-[72px] z-30 !max-h-[60vh] !overflow-y-auto !font-sans sm:!right-8 sm:!top-[88px]"
         style={{ minWidth: "180px" }}
       />
 
@@ -1915,7 +1917,7 @@ function EpisodePlayback({
         <button
           type="button"
           onClick={() => onLockChange(false)}
-          className="absolute left-1/2 top-1/2 z-20 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-white/20 bg-black/60 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur-xl transition-colors hover:bg-black/75"
+          className="absolute left-1/2 top-1/2 z-20 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-rust/60 bg-burgundy/50 px-4 py-2.5 text-sm font-semibold text-cream backdrop-blur-xl transition-colors hover:bg-burgundy/70"
           aria-label={t.player.unlockAria}
         >
           <Icon name="lock" size={16} />

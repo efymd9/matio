@@ -3,11 +3,12 @@ import Link from "next/link";
 import { getAdminDict } from "@/lib/i18n/admin-server";
 
 // Static, dependency-free chart primitives for the admin analytics dashboard.
-// SVG + Tailwind, theme-matched (accent #ff3d3d). Server components — no client
-// JS — using native `title` tooltips. The one interactive chart (metric switch)
-// lives in components/admin/time-series.tsx.
+// SVG + Tailwind, theme-matched (accent #e6b366 gold). Server components — no
+// client JS — using native `title` tooltips. The one interactive chart
+// (metric switch) lives in components/admin/time-series.tsx.
 
-const ACCENT = "#ff3d3d";
+const ACCENT = "#e6b366";
+const BAD = "#a8401f";
 const GOOD = "#7fd87a";
 
 function fmtPct(n: number): string {
@@ -42,11 +43,11 @@ export async function KpiTile({
   return (
     <div className="rounded-xl border border-white/[0.06] bg-white/[0.04] p-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[10px] uppercase tracking-[0.08em] text-white/55">
+        <p className="text-[10px] uppercase tracking-[0.08em] text-cream/55">
           {label}
           {approx ? (
             <span
-              className="ml-1 rounded bg-white/10 px-1 py-0.5 text-[8px] font-bold text-white/50"
+              className="ml-1 rounded bg-white/10 px-1 py-0.5 text-[8px] font-bold text-cream/50"
               title={t.charts.approxTooltip}
             >
               {t.charts.approxBadge}
@@ -55,14 +56,14 @@ export async function KpiTile({
         </p>
         {spark && spark.length > 1 ? <Sparkline data={spark} /> : null}
       </div>
-      <p className="mt-1.5 text-2xl font-extrabold tracking-tight text-white">
+      <p className="mt-1.5 text-2xl font-extrabold tracking-tight text-cream">
         {value}
       </p>
       <div className="mt-0.5 flex items-center gap-2">
         {showDelta ? (
           <DeltaChip current={current!} prev={prev!} goodWhenDown={goodWhenDown} />
         ) : null}
-        {sub ? <p className="text-[11px] text-white/45">{sub}</p> : null}
+        {sub ? <p className="text-[11px] text-cream/45">{sub}</p> : null}
       </div>
     </div>
   );
@@ -80,7 +81,7 @@ export async function DeltaChip({
 }) {
   const { t } = await getAdminDict();
   if (prev === 0 && current === 0) {
-    return <span className="text-[11px] text-white/35">{t.charts.noChange}</span>;
+    return <span className="text-[11px] text-cream/35">{t.charts.noChange}</span>;
   }
   if (prev === 0) {
     return (
@@ -92,7 +93,7 @@ export async function DeltaChip({
   const delta = ((current - prev) / prev) * 100;
   const up = delta >= 0;
   const positive = goodWhenDown ? !up : up;
-  const color = delta === 0 ? "#9ca3af" : positive ? GOOD : ACCENT;
+  const color = delta === 0 ? "#9ca3af" : positive ? GOOD : BAD;
   return (
     <span
       className="inline-flex items-center gap-0.5 text-[11px] font-semibold"
@@ -147,7 +148,7 @@ export async function BarList({
   const { t } = await getAdminDict();
   if (items.length === 0) {
     return (
-      <p className="py-6 text-center text-sm text-white/55">
+      <p className="py-6 text-center text-sm text-cream/55">
         {emptyLabel ?? t.charts.noDataYet}
       </p>
     );
@@ -160,27 +161,27 @@ export async function BarList({
         const label = it.href ? (
           <Link
             href={it.href}
-            className="w-40 shrink-0 truncate text-sm font-semibold text-white transition-colors hover:text-[#ff3d3d]"
+            className="w-40 shrink-0 truncate text-sm font-semibold text-cream transition-colors hover:text-gold"
           >
             {it.label}
           </Link>
         ) : (
-          <span className="w-40 shrink-0 truncate text-sm font-semibold text-white">
+          <span className="w-40 shrink-0 truncate text-sm font-semibold text-cream">
             {it.label}
           </span>
         );
         return (
           <li key={`${it.label}-${i}`} className="flex items-center gap-3">
-            <span className="w-5 shrink-0 font-mono text-xs text-white/40">
+            <span className="w-5 shrink-0 font-mono text-xs text-cream/40">
               {i + 1}
             </span>
             {label}
             <div className="h-2 flex-1 overflow-hidden rounded-full bg-white/[0.06]">
-              <div className="h-full rounded-full bg-[#ff3d3d]" style={{ width: `${pct}%` }} />
+              <div className="h-full rounded-full bg-gold" style={{ width: `${pct}%` }} />
             </div>
-            <span className="w-28 shrink-0 text-right font-mono text-[11px] leading-tight text-white/65">
+            <span className="w-28 shrink-0 text-right font-mono text-[11px] leading-tight text-cream/65">
               {format(it.value)}
-              {it.sub ? <span className="block text-white/35">{it.sub}</span> : null}
+              {it.sub ? <span className="block text-cream/35">{it.sub}</span> : null}
             </span>
           </li>
         );
@@ -213,11 +214,11 @@ export async function FunnelChart({ steps }: { steps: FunnelStep[] }) {
         return (
           <div key={s.label}>
             <div className="flex items-baseline justify-between gap-3 text-xs">
-              <span className="font-semibold text-white">{s.label}</span>
-              <span className="font-mono text-white/55">
+              <span className="font-semibold text-cream">{s.label}</span>
+              <span className="font-mono text-cream/55">
                 {s.value.toLocaleString()}
                 {i > 0 ? (
-                  <span className="ml-2 text-white/35">
+                  <span className="ml-2 text-cream/35">
                     {t.charts.ofPrev(fmtPct(stepPct))}
                   </span>
                 ) : null}
@@ -228,10 +229,10 @@ export async function FunnelChart({ steps }: { steps: FunnelStep[] }) {
               title={s.hint}
             >
               <div
-                className="flex h-full items-center rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] pl-2"
+                className="flex h-full items-center rounded-md bg-gradient-to-r from-gold-hi to-gold-lo pl-2"
                 style={{ width: `${Math.max(ofTop, s.value > 0 ? 3 : 0)}%` }}
               >
-                <span className="text-[10px] font-bold text-white/90">
+                <span className="text-[10px] font-bold text-gold-deep/90">
                   {fmtPct(ofTop)}
                 </span>
               </div>
@@ -259,7 +260,7 @@ export function Histogram({ bars }: { bars: { label: string; n: number }[] }) {
           >
             <div
               className={`w-full rounded-sm transition-colors ${
-                b.n > 0 ? "bg-[#ff3d3d]/70 group-hover/bar:bg-[#ff3d3d]" : "bg-white/[0.04]"
+                b.n > 0 ? "bg-gold/70 group-hover/bar:bg-gold" : "bg-white/[0.04]"
               }`}
               style={{ height: `${Math.max((b.n / max) * 100, b.n > 0 ? 4 : 1)}%` }}
             />
@@ -270,7 +271,7 @@ export function Histogram({ bars }: { bars: { label: string; n: number }[] }) {
         {bars.map((b) => (
           <span
             key={b.label}
-            className="flex-1 text-center font-mono text-[9px] text-white/35"
+            className="flex-1 text-center font-mono text-[9px] text-cream/35"
           >
             {b.label}
           </span>
@@ -298,7 +299,7 @@ export async function Donut({
   const total = segments.reduce((a, s) => a + s.value, 0);
   if (total === 0) {
     return (
-      <p className="py-6 text-center text-sm text-white/55">
+      <p className="py-6 text-center text-sm text-cream/55">
         {t.charts.noSubscriptionsYet}
       </p>
     );
@@ -337,11 +338,11 @@ export async function Donut({
           x="55"
           y="50"
           textAnchor="middle"
-          className="fill-white text-[18px] font-extrabold"
+          className="fill-cream text-[18px] font-extrabold"
         >
           {total}
         </text>
-        <text x="55" y="66" textAnchor="middle" className="fill-white/45 text-[8px]">
+        <text x="55" y="66" textAnchor="middle" className="fill-cream/45 text-[8px]">
           {t.charts.subs}
         </text>
       </svg>
@@ -352,8 +353,8 @@ export async function Donut({
               className="inline-block size-2.5 rounded-sm"
               style={{ background: STATUS_COLORS[s.label] ?? ACCENT }}
             />
-            <span className="text-white/70">{s.label}</span>
-            <span className="font-mono text-white/45">{s.value}</span>
+            <span className="text-cream/70">{s.label}</span>
+            <span className="font-mono text-cream/45">{s.value}</span>
           </li>
         ))}
       </ul>

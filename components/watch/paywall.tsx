@@ -3,7 +3,6 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
-import { Icon } from "@/components/site/icon";
 import { OpenInBrowserHint } from "@/components/watch/open-in-browser-hint";
 import { TONE_GRADIENT } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
@@ -104,25 +103,30 @@ export function Paywall({
   // createGuestCheckoutSession). Same watch-flow params so they resume here.
   const checkoutHref = `/checkout?${params.toString()}`;
 
+  const primaryCta =
+    "inline-flex h-[52px] items-center justify-center rounded-full bg-gold-cta px-7 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 focus-visible:ring-offset-2 focus-visible:ring-offset-espresso-2 active:scale-[0.98]";
+
   return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black sm:aspect-video sm:h-auto">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-espresso sm:aspect-video sm:h-auto">
       {/* Dim atmospheric backdrop (stand-in for the paused frame) */}
       <div
         className="absolute inset-0"
+        aria-hidden
         style={{ backgroundImage: TONE_GRADIENT.a }}
       />
+      <div className="duotone-strong pointer-events-none absolute inset-0" aria-hidden />
       <div
-        className="absolute inset-0 opacity-55"
+        className="pointer-events-none absolute inset-0"
         aria-hidden
         style={{
           backgroundImage:
-            "radial-gradient(circle at 60% 40%, rgba(255,255,255,0.18), transparent 60%), radial-gradient(circle at 20% 80%, rgba(0,0,0,0.6), transparent 60%)",
+            "linear-gradient(to top, rgba(15,10,7,0.97) 30%, rgba(15,10,7,0.55) 60%, rgba(15,10,7,0.25) 100%)",
         }}
       />
-      <div className="absolute inset-0 bg-black/55" />
+      <div className="glow-floor pointer-events-none absolute inset-0" aria-hidden />
 
-      {/* "Preview ended" red chip */}
-      <div className="absolute left-1/2 top-[24%] -translate-x-1/2 rounded-full bg-[#ff3d3d]/95 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-white backdrop-blur-md">
+      {/* "Preview ended" badge */}
+      <div className="absolute left-1/2 top-[24%] -translate-x-1/2 rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
         {variant === "tier"
           ? t.paywall.allFreeWatched
           : t.paywall.previewComplete}
@@ -131,30 +135,30 @@ export function Paywall({
       {/* Bottom sheet. Padding honors iOS home-indicator + notch safe-area
           so the CTA never sits beneath the system gesture bar. Floors keep
           the original 1.25rem/2rem cushion on devices with no inset. */}
-      <div className="absolute inset-x-0 bottom-0 z-10 border-t border-white/10 bg-[#0f0f12]/95 pt-3 backdrop-blur-2xl pl-[max(env(safe-area-inset-left),1.25rem)] pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pt-4 sm:pl-[max(env(safe-area-inset-left),2rem)] sm:pr-[max(env(safe-area-inset-right),2rem)] sm:pb-[max(env(safe-area-inset-bottom),1.75rem)]">
+      <div className="absolute inset-x-0 bottom-0 z-10 border-t border-rust/30 bg-espresso-2/95 pt-3 backdrop-blur-2xl pl-[max(env(safe-area-inset-left),1.25rem)] pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pt-4 sm:pl-[max(env(safe-area-inset-left),2rem)] sm:pr-[max(env(safe-area-inset-right),2rem)] sm:pb-[max(env(safe-area-inset-bottom),1.75rem)]">
         <div className="mx-auto max-w-2xl text-center">
           <div
-            className="mx-auto mb-3 h-1 w-9 rounded-full bg-white/20"
+            className="mx-auto mb-3 h-1 w-9 rounded-full bg-cream/20"
             aria-hidden
           />
 
-          <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-[#ff3d3d]">
+          <span className="inline-flex rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
             {t.paywall.continueWatching}
-          </p>
-          <h2 className="mt-1 text-xl font-extrabold leading-tight tracking-tight text-white sm:text-2xl">
+          </span>
+          <h2 className="mt-3 font-display text-xl uppercase leading-tight tracking-[0.01em] text-cream sm:text-2xl">
             {showTitle ?? t.paywall.yourStory}
             {episodeLabel ? (
-              <span className="ml-2 text-white/55">· {episodeLabel}</span>
+              <span className="ml-2 text-cream/55">· {episodeLabel}</span>
             ) : null}
           </h2>
-          <p className="mt-2 text-sm font-medium text-white/65">
+          <p className="mt-2 text-sm font-medium text-cream/72">
             {payFirst
               ? t.paywall.payFirstBody
               : variant === "tier"
                 ? t.paywall.subscribeBody
                 : t.paywall.signUpToContinue}
           </p>
-          <p className="mt-2 text-xs font-medium text-white/45">
+          <p className="mt-2 text-xs font-medium text-cream/45">
             {t.paywall.benefits}
           </p>
 
@@ -184,10 +188,9 @@ export function Paywall({
                       flow: "pay_first",
                     })
                   }
-                  className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98]"
+                  className={primaryCta}
                 >
-                  <Icon name="play" size={14} color="#ffffff" />
-                  <span>{t.paywall.payFirstCta}</span>
+                  {t.paywall.payFirstCta}
                 </Link>
               ) : (
                 <SignUpButton
@@ -202,10 +205,9 @@ export function Paywall({
                         auth: "signed_out",
                       })
                     }
-                    className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98]"
+                    className={primaryCta}
                   >
-                    <Icon name="play" size={14} color="#ffffff" />
-                    <span>{t.paywall.signUpCta}</span>
+                    {t.paywall.signUpCta}
                   </button>
                 </SignUpButton>
               )}
@@ -216,17 +218,16 @@ export function Paywall({
                 onClick={() =>
                   capturePostHog("signup_cta_clicked", { auth: "signed_in" })
                 }
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-7 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-110 hover:shadow-[0_12px_28px_-10px_rgba(255,61,61,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f12] active:scale-[0.98]"
+                className={primaryCta}
               >
-                <Icon name="play" size={14} color="#ffffff" />
-                <span>{t.paywall.continueSubscribe}</span>
+                {t.paywall.continueSubscribe}
               </Link>
             </Show>
           </div>
 
           {payFirst ? (
             <Show when="signed-out">
-              <p className="mt-3 flex items-center justify-center gap-1.5 text-[10px] font-medium text-white/45">
+              <p className="mt-3 flex items-center justify-center gap-1.5 text-[10px] font-medium text-cream/45">
                 <svg
                   width="11"
                   height="11"
@@ -247,7 +248,7 @@ export function Paywall({
           ) : null}
 
           <Show when="signed-out">
-            <p className="mt-3 text-[11px] text-white/55">
+            <p className="mt-3 text-[11px] text-cream/55">
               {t.paywall.alreadyMember}{" "}
               <SignInButton
                 mode="modal"
@@ -256,7 +257,7 @@ export function Paywall({
               >
                 <button
                   type="button"
-                  className="font-semibold text-white/85 underline underline-offset-2 transition-colors hover:text-white"
+                  className="font-bold text-gold underline underline-offset-2 transition-colors hover:text-gold-hi"
                 >
                   {t.paywall.signInLink}
                 </button>
@@ -264,7 +265,7 @@ export function Paywall({
             </p>
           </Show>
 
-          <p className="mt-2 text-center text-[10px] text-white/40">
+          <p className="mt-2 text-center text-[10px] text-cream/40">
             {t.paywall.cancelAnytimeFromAccount}
           </p>
         </div>

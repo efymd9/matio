@@ -24,7 +24,7 @@ export function FormSubmitButton({
       type="submit"
       disabled={pending}
       aria-busy={pending}
-      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-[#ff3d3d] px-5 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.8)] transition-[filter,transform] duration-150 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3d3d]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.98] disabled:cursor-wait disabled:opacity-80"
+      className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-gold-cta px-5 text-sm font-bold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[filter,transform] duration-150 hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.98] disabled:cursor-wait disabled:opacity-80"
     >
       {pending ? (
         <>
@@ -33,7 +33,7 @@ export function FormSubmitButton({
         </>
       ) : (
         <>
-          {icon ? <Icon name={icon} size={15} color="#ffffff" /> : null}
+          {icon ? <Icon name={icon} size={15} color="#241205" /> : null}
           <span>{children}</span>
         </>
       )}

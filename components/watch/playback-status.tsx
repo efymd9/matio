@@ -12,40 +12,38 @@
 //   transient hiccup shouldn't be framed as a payment issue.
 
 import Link from "next/link";
-import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
 
 export function RateLimitedNotice({ showSlug }: { showSlug: string }) {
   const t = useT();
   return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black sm:aspect-video sm:h-auto">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-espresso sm:aspect-video sm:h-auto">
       <div
         className="absolute inset-0"
+        aria-hidden
         style={{ backgroundImage: TONE_GRADIENT.c }}
       />
-      <div className="absolute inset-0 bg-black/65" />
+      <div className="duotone pointer-events-none absolute inset-0" aria-hidden />
+      <div className="absolute inset-0 bg-espresso/70" aria-hidden />
       <div className="relative mx-auto max-w-md px-6 text-center">
-        <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-amber-300">
+        <span className="inline-flex rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
           {t.watch.rateLimitedKicker}
-        </p>
-        <h2 className="mt-3 text-2xl font-extrabold leading-tight tracking-tight text-white sm:text-3xl">
+        </span>
+        <h2 className="mt-4 font-display text-2xl uppercase leading-tight tracking-[0.01em] text-cream sm:text-3xl">
           {t.watch.rateLimitedTitle}
         </h2>
-        <p className="mt-3 text-sm text-white/65">
-          {t.watch.rateLimitedBody}
-        </p>
+        <p className="mt-3 text-sm text-cream/72">{t.watch.rateLimitedBody}</p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
           <Link
             href={`/subscribe?show=${encodeURIComponent(showSlug)}`}
-            className="inline-flex h-11 items-center gap-2 rounded-md bg-gradient-to-r from-[#ff3d3d] to-[#ff5e3d] px-6 text-sm font-bold text-white shadow-[0_8px_24px_-12px_rgba(255,61,61,0.7)] transition-[transform,filter] hover:brightness-110 active:scale-[0.98]"
+            className="inline-flex h-11 items-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out hover:brightness-105 active:scale-[0.98]"
           >
-            <Icon name="play" size={14} color="#ffffff" />
             {t.watch.rateLimitedSubscribe}
           </Link>
           <Link
             href={`/shows/${showSlug}`}
-            className="inline-flex h-11 items-center rounded-md border border-white/15 bg-white/[0.06] px-6 text-sm font-semibold text-white transition-colors hover:bg-white/[0.12]"
+            className="inline-flex h-11 items-center rounded-full border border-cream/25 px-6 text-sm font-semibold text-cream transition-colors hover:bg-cream/10"
           >
             {t.watch.rateLimitedBack}
           </Link>
@@ -64,33 +62,33 @@ export function PlaybackUnavailable({
 }) {
   const t = useT();
   return (
-    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black sm:aspect-video sm:h-auto">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-espresso sm:aspect-video sm:h-auto">
       <div
         className="absolute inset-0"
+        aria-hidden
         style={{ backgroundImage: TONE_GRADIENT.f }}
       />
-      <div className="absolute inset-0 bg-black/65" />
+      <div className="duotone pointer-events-none absolute inset-0" aria-hidden />
+      <div className="absolute inset-0 bg-espresso/70" aria-hidden />
       <div className="relative mx-auto max-w-md px-6 text-center">
-        <p className="text-[10px] font-bold uppercase tracking-[0.4em] text-[#ff3d3d]">
+        <span className="inline-flex rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
           {t.watch.unavailableKicker}
-        </p>
-        <h2 className="mt-3 text-2xl font-extrabold leading-tight tracking-tight text-white sm:text-3xl">
+        </span>
+        <h2 className="mt-4 font-display text-2xl uppercase leading-tight tracking-[0.01em] text-cream sm:text-3xl">
           {t.watch.unavailableTitle}
         </h2>
-        <p className="mt-3 text-sm text-white/65">
-          {t.watch.unavailableBody}
-        </p>
+        <p className="mt-3 text-sm text-cream/72">{t.watch.unavailableBody}</p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
           <button
             type="button"
             onClick={onRetry}
-            className="inline-flex h-11 items-center rounded-md bg-white px-6 text-sm font-semibold text-black transition-colors hover:bg-white/90"
+            className="inline-flex h-11 items-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out hover:brightness-105 active:scale-[0.98]"
           >
             {t.watch.unavailableRetry}
           </button>
           <Link
             href={`/shows/${showSlug}`}
-            className="inline-flex h-11 items-center rounded-md border border-white/15 bg-white/[0.06] px-6 text-sm font-semibold text-white transition-colors hover:bg-white/[0.12]"
+            className="inline-flex h-11 items-center rounded-full border border-cream/25 px-6 text-sm font-semibold text-cream transition-colors hover:bg-cream/10"
           >
             {t.watch.unavailableBack}
           </Link>

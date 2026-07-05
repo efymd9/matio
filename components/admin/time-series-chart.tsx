@@ -59,21 +59,21 @@ export function TimeSeriesChart({
               onClick={() => setMetric(m.key)}
               className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
                 metric === m.key
-                  ? "bg-[#ff3d3d] text-white"
-                  : "text-white/55 hover:text-white"
+                  ? "bg-gold text-gold-deep"
+                  : "text-cream/55 hover:text-cream"
               }`}
             >
               {t.timeSeriesChart[m.labelKey]}
             </button>
           ))}
         </div>
-        <span className="font-mono text-[11px] text-white/45">
+        <span className="font-mono text-[11px] text-cream/45">
           {t.timeSeriesChart.total(total.toLocaleString())}
         </span>
       </div>
 
       {series.length === 0 ? (
-        <p className="py-10 text-center text-sm text-white/55">
+        <p className="py-10 text-center text-sm text-cream/55">
           {t.timeSeriesChart.noData}
         </p>
       ) : (
@@ -90,7 +90,7 @@ export function TimeSeriesChart({
                   <div
                     className={`w-full rounded-t-sm transition-colors ${
                       v > 0
-                        ? "bg-[#ff3d3d]/60 group-hover/bar:bg-[#ff3d3d]"
+                        ? "bg-gold/60 group-hover/bar:bg-gold"
                         : "bg-white/[0.04]"
                     }`}
                     style={{
@@ -101,7 +101,7 @@ export function TimeSeriesChart({
               );
             })}
           </div>
-          <div className="mt-2 flex justify-between font-mono text-[10px] text-white/35">
+          <div className="mt-2 flex justify-between font-mono text-[10px] text-cream/35">
             <span>{fmtBucket(series[0].key, granularity)}</span>
             <span>{t.timeSeriesChart.peak(max.toLocaleString())}</span>
             <span>{fmtBucket(series[series.length - 1].key, granularity)}</span>

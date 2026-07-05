@@ -43,11 +43,17 @@ export const es = {
     catalogBeingCurated: "Estamos preparando el catálogo. Vuelve en un momento.",
     justReleased: "Recién estrenado",
     popularNow: "Popular ahora",
+    continueWatching: "Continúa viendo",
+    top3: "Top 3 en España",
+    newBadge: "Nuevo",
+    epShort: (n: number) => `Ep. ${n}`,
   },
   hero: {
     matioOriginal: "Original Matio",
     play: "Reproducir",
     moreInfo: "Más información",
+    watchFree: "Ver gratis",
+    premiereBadge: "Original · Estreno",
   },
   genreRow: {
     seeAll: "Ver todo →",
@@ -74,6 +80,7 @@ export const es = {
     episodeCount: (n: number) =>
       n === 1 ? `${n} episodio` : `${n} episodios`,
     breadcrumbHome: "Inicio",
+    shareAria: "Compartir",
     watchOnlineTitle: (title: string) => `${title} — Ver online`,
     synopsisFallback: (title: string, genre: string[]) =>
       `${title}: serie original de Matio${
@@ -117,6 +124,9 @@ export const es = {
     captionsAria: "Activar/desactivar subtítulos",
     back10Aria: "Retroceder 10 segundos",
     forward10Aria: "Avanzar 10 segundos",
+    prevAria: "Episodio anterior",
+    nextAria: "Siguiente episodio",
+    shareAria: "Compartir",
     playPauseAria: "Reproducir / Pausar",
     skipIntro: "Saltar intro",
     muteAria: "Silenciar / activar sonido",
@@ -203,12 +213,14 @@ export const es = {
   signupWall: {
     kicker: "Continúa gratis",
     freeComplete: "Episodios gratis vistos",
+    headline: "Crea tu cuenta",
     headlineFallback: "Tu historia",
     body: (n: number) =>
       n === 1
         ? `Crea una cuenta gratis y desbloquea ${n} episodio más al instante.`
         : `Crea una cuenta gratis y desbloquea ${n} episodios más al instante.`,
-    bodyNoCount: "Crea una cuenta gratis para seguir viendo.",
+    bodyNoCount:
+      "Crea una cuenta gratis para seguir viendo y guardar tu progreso en todas las series.",
     signUpCta: "Crear cuenta gratis",
     alreadyMember: "¿Ya tienes cuenta?",
     signInLink: "Inicia sesión",
@@ -348,7 +360,7 @@ export const es = {
     about: "Acerca de",
     subscribe: "Suscribirse",
     manage: "Gestionar suscripción",
-    tagline: "Historias originales, en streaming.",
+    tagline: "Mundos de historias. Un estudio.",
     copyright: (year: number) => `© ${year} matio. Todos los derechos reservados.`,
   },
   cookieBanner: {
@@ -398,11 +410,17 @@ export const en: Dict = {
     catalogBeingCurated: "The catalog is being curated. Check back shortly.",
     justReleased: "Just released",
     popularNow: "Popular now",
+    continueWatching: "Continue watching",
+    top3: "Top 3 in Spain",
+    newBadge: "New",
+    epShort: (n: number) => `Ep. ${n}`,
   },
   hero: {
     matioOriginal: "Matio Original",
     play: "Play",
     moreInfo: "More info",
+    watchFree: "Watch free",
+    premiereBadge: "Original · Premiere",
   },
   genreRow: {
     seeAll: "See all →",
@@ -429,6 +447,7 @@ export const en: Dict = {
     episodeCount: (n: number) =>
       n === 1 ? `${n} episode` : `${n} episodes`,
     breadcrumbHome: "Home",
+    shareAria: "Share",
     watchOnlineTitle: (title: string) => `${title} — Watch online`,
     synopsisFallback: (title: string, genre: string[]) =>
       `${title}: an original Matio series${
@@ -472,6 +491,9 @@ export const en: Dict = {
     captionsAria: "Toggle captions",
     back10Aria: "Back 10 seconds",
     forward10Aria: "Forward 10 seconds",
+    prevAria: "Previous episode",
+    nextAria: "Next episode",
+    shareAria: "Share",
     playPauseAria: "Play/Pause",
     skipIntro: "Skip intro",
     muteAria: "Mute / unmute",
@@ -556,12 +578,14 @@ export const en: Dict = {
   signupWall: {
     kicker: "Keep watching free",
     freeComplete: "Free episodes watched",
+    headline: "Create your account",
     headlineFallback: "Your story",
     body: (n: number) =>
       n === 1
         ? `Create a free account and instantly unlock ${n} more episode.`
         : `Create a free account and instantly unlock ${n} more episodes.`,
-    bodyNoCount: "Create a free account to keep watching.",
+    bodyNoCount:
+      "Create a free account to keep watching and save your progress across every series.",
     signUpCta: "Create free account",
     alreadyMember: "Already have an account?",
     signInLink: "Sign in",
@@ -701,7 +725,7 @@ export const en: Dict = {
     about: "About",
     subscribe: "Subscribe",
     manage: "Manage subscription",
-    tagline: "Original stories, streamed.",
+    tagline: "Story worlds. One studio.",
     copyright: (year: number) => `© ${year} matio. All rights reserved.`,
   },
   cookieBanner: {

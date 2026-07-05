@@ -1,9 +1,11 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { ImageResponse } from "next/og";
 import { getShowBySlug } from "@/lib/show-query";
 import { en } from "@/lib/i18n/dictionaries";
 
 // Per-show OG card: the show title over its hero art (when public), with the
-// Matio mark — a branded, correctly-sized 1200×630 unfurl. This file
+// Matio wordmark — a branded, correctly-sized 1200×630 unfurl. This file
 // convention auto-wires og:image + twitter:image, so the show page's
 // generateMetadata deliberately sets NO images (avoids a double og:image).
 //
@@ -27,13 +29,26 @@ function publicArt(url: string | null | undefined): string | null {
   return null;
 }
 
+// Memoized at module scope — the wordmark read + base64 encode (~500KB)
+// runs once per server process, not once per show-page unfurl.
+let wordmarkSrcPromise: Promise<string> | null = null;
+function getWordmarkSrc(): Promise<string> {
+  wordmarkSrcPromise ??= readFile(
+    path.join(process.cwd(), "public/brand/matio-wordmark.png"),
+  ).then((buf) => `data:image/png;base64,${buf.toString("base64")}`);
+  return wordmarkSrcPromise;
+}
+
 export default async function Image({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const show = await getShowBySlug(slug);
+  const [show, wordmarkSrc] = await Promise.all([
+    getShowBySlug(slug),
+    getWordmarkSrc(),
+  ]);
   const title = show?.title ?? "matio";
   const background = publicArt(show?.heroImageUrl) ?? publicArt(show?.posterImageUrl);
   const genre = (show?.genre ?? []).slice(0, 3).join(" · ");
@@ -47,13 +62,14 @@ export default async function Image({
           display: "flex",
           flexDirection: "column",
           justifyContent: "flex-end",
-          background: "#0a0a0c",
-          color: "white",
+          background: "#0f0a07",
+          color: "#f6efe4",
           fontFamily: "sans-serif",
           position: "relative",
         }}
       >
         {background ? (
+           
           <img
             src={background}
             alt=""
@@ -68,14 +84,27 @@ export default async function Image({
             }}
           />
         ) : null}
-        {/* Legibility gradient — darker when there's a photo behind the text. */}
+        {/* Duotone tint over the artwork — Satori has no mix-blend-mode
+            support, so this is a flat gradient at reduced opacity standing
+            in for the site's .duotone overlay, not a true blend. */}
+        {background ? (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background:
+                "linear-gradient(160deg, rgba(230,179,102,0.2), rgba(143,47,28,0.3))",
+            }}
+          />
+        ) : null}
+        {/* Legibility scrim to espresso — darker when there's a photo behind the text. */}
         <div
           style={{
             position: "absolute",
             inset: 0,
             background: background
-              ? "linear-gradient(180deg, rgba(10,10,12,0.15) 0%, rgba(10,10,12,0.55) 55%, rgba(10,10,12,0.95) 100%)"
-              : "radial-gradient(circle at 28% 22%, rgba(255,61,61,0.24), transparent 58%)",
+              ? "linear-gradient(180deg, rgba(15,10,7,0.15) 0%, rgba(15,10,7,0.6) 55%, rgba(15,10,7,0.97) 100%)"
+              : "radial-gradient(circle at 26% 20%, rgba(230,179,102,0.16), transparent 55%), radial-gradient(ellipse at 50% 115%, rgba(143,47,28,0.45), transparent 55%)",
           }}
         />
         <div
@@ -87,22 +116,18 @@ export default async function Image({
             gap: 18,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <svg width="46" height="46" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="11" stroke="white" strokeWidth="1.6" fill="none" />
-              <circle cx="12" cy="12" r="4.5" fill="#ff3d3d" />
-            </svg>
-            <span style={{ fontSize: 30, fontWeight: 800, letterSpacing: "-0.03em" }}>
-              matio
-            </span>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            { }
+            <img src={wordmarkSrc} width={144} height={69} alt="" />
           </div>
           <span
             style={{
               fontSize: 76,
               fontWeight: 800,
               lineHeight: 1.02,
-              letterSpacing: "-0.035em",
+              letterSpacing: "-0.02em",
               maxWidth: 1040,
+              color: "#f6efe4",
             }}
           >
             {title}
@@ -110,9 +135,11 @@ export default async function Image({
           {genre ? (
             <span
               style={{
-                fontSize: 26,
-                color: "rgba(255,255,255,0.72)",
-                textTransform: "capitalize",
+                fontSize: 24,
+                fontWeight: 700,
+                color: "rgba(230,179,102,0.7)",
+                textTransform: "uppercase",
+                letterSpacing: "0.12em",
               }}
             >
               {genre}
