@@ -27,6 +27,7 @@ import {
   TRIAL_SUBSCRIPTION_DATA,
 } from "@/lib/checkout-trial";
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { isInAppBrowser } from "@/lib/in-app-browser";
 import { getDict } from "@/lib/i18n/server";
 import { sendCapiEvents } from "@/lib/meta-capi";
@@ -54,6 +55,11 @@ const STRIPE_HAS_SUBSCRIPTION_STATUSES = new Set([
 export async function createAuthCheckoutSession(
   input: CheckoutTargetInput,
 ): Promise<CheckoutSessionResult> {
+  // Payments off → nothing may create a Stripe session. First statement on
+  // purpose: an independently POST-invocable "use server" action, so the
+  // /checkout page + dispatcher guards aren't enough on their own.
+  if (!paymentsEnabled()) return { kind: "redirect", to: "/" };
+
   // getOrSyncCurrentUser handles the race where Clerk's user.created webhook
   // hasn't landed before a brand-new signup hits Subscribe. If we still come
   // back empty here something is wrong with auth — bounce to home, proxy

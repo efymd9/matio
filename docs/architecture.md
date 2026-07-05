@@ -52,7 +52,7 @@ Hot-path indexes (migration 0010): `subscriptions(user_id, updated_at DESC)` for
 - Clerk owns identity + sessions.
 - `users` table mirrors Clerk via `user.created` webhook (`app/api/webhooks/clerk/route.ts`) — handler is idempotent (`onConflictDoNothing` on `users.id`).
 - `users.role` is the **only** source of truth for admin — never Clerk metadata alone.
-- Clerk's hosted UI (sign-in modal, sign-up modal, UserButton dropdown, validation copy) is localized to match the site dictionary via `ClerkProvider`'s `localization` prop in `app/layout.tsx` — `esES` by default, `enUS` when the locale cookie flips. Adding a locale to the site = also add its `@clerk/localizations` bundle to the `CLERK_LOCALIZATIONS` map.
+- Clerk's hosted UI (sign-in modal, sign-up modal, UserButton dropdown, validation copy) is localized to match the site dictionary via `ClerkProvider`'s `localization` prop in `app/layout.tsx` — `enUS` by default (English is the site default since 2026-07-04), `esES` when negotiation / geo affinity / the locale cookie resolves Spanish. Adding a locale to the site = also add its `@clerk/localizations` bundle to the `CLERK_LOCALIZATIONS` map.
 - `proxy.ts` is the first line of defense; pages/actions use `lib/admin.ts` helpers as belt-and-braces:
   - `getCurrentUser()` — pure read, returns the local row or `null`. Use for pages that can tolerate a missing mirror (e.g. analytics-only callsites).
   - `getOrSyncCurrentUser()` — read-or-upsert from `currentUser()` if the local row is missing. Use anywhere a missing mirror would block the user from making progress (e.g. `/subscribe` page render before `linkTrialSessionsToCurrentUser`, `startCheckout` server action, `/api/billing-portal` route). Closes the race where a brand-new signup hits these surfaces before the `user.created` webhook lands.
@@ -417,24 +417,27 @@ locale cookie present + valid ──────────────► that
    ▼                                           the language switcher)
 Accept-Language header
    │
-   ├─ missing/empty ───────────────────────► es (DEFAULT_LOCALE — crawlers:
-   │                                           Googlebot crawls from US IPs
-   │                                           with NO Accept-Language, so
-   │                                           the indexed language never
-   │                                           changed when detection shipped;
-   │                                           geo deliberately NOT consulted)
+   ├─ missing/empty ───────────────────────► en (DEFAULT_LOCALE — English
+   │                                           since 2026-07-04, was es.
+   │                                           Crawlers: Googlebot crawls
+   │                                           from US IPs with NO
+   │                                           Accept-Language, so this arm
+   │                                           IS the site's indexed
+   │                                           language; geo deliberately
+   │                                           NOT consulted)
    ├─ names es/en (q-values, base-subtag   ─► highest-q supported language
-   │   match: es-419→es, en-GB→en)
+   │   match: es-419→es, en-GB→en)            (how Spanish-preferring
+   │                                           browsers keep getting es)
    └─ exists but matches neither           ─► x-vercel-ip-country tiebreak:
        (fr-FR, de, pt-BR, bare *)             ES_AFFINITY_COUNTRIES → es
                                               (Hispanophone + BR/PT — a
                                               pt-only browser reads Spanish
                                               far better than English),
                                               other valid country → en,
-                                              unknown/localhost → es
+                                              unknown/localhost → en
 ```
 
-The negotiation itself lives in `lib/i18n/negotiate.ts` — pure + universal (no `next/headers`), so the same matching rules serve `getLocale()`, the `global-error.tsx` boundary (which can't reach the failed layout's `LocaleProvider` and falls back cookie → `navigator.languages` → es), and `pnpm test:locale` (`scripts/test-locale-negotiation.ts`, ~47 assertions covering RFC 9110 q-values, q=0 exclusion, wildcard, hostile multi-KB headers, and the full ladder).
+The negotiation itself lives in `lib/i18n/negotiate.ts` — pure + universal (no `next/headers`), so the same matching rules serve `getLocale()`, the `global-error.tsx` boundary (which can't reach the failed layout's `LocaleProvider` and falls back cookie → `navigator.languages` → en), and `pnpm test:locale` (`scripts/test-locale-negotiation.ts`, ~53 assertions covering RFC 9110 q-values, q=0 exclusion, wildcard, hostile multi-KB headers, and the full ladder).
 
 Detection **persists nothing** — no cookie, no storage. It re-derives per request, so a user who changes their browser language self-heals on the next visit, and there is no ePrivacy/consent question (consent gates storage/access *on the device*; reading a header the browser already sent is neither — same posture as the no-storage `x-vercel-ip-country` read, worth knowing before "fixing" it by adding a cookie). The explicit switcher choice writes the `locale` cookie (1y), which short-circuits detection entirely.
 

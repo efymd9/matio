@@ -96,7 +96,7 @@ export function websiteJsonLd(): JsonLd {
     "@id": WEBSITE_ID,
     url: SITE_URL,
     name: SITE_NAME,
-    inLanguage: ["es", "en"],
+    inLanguage: ["en", "es"],
     publisher: { "@id": ORG_ID },
   };
 }

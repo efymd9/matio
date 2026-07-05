@@ -8,6 +8,7 @@ import { Icon } from "@/components/site/icon";
 import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import { applyUserAttribution, readAttributionCookies } from "@/lib/attribution";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
@@ -18,6 +19,12 @@ export default async function SubscribePage({
 }: {
   searchParams: Promise<{ show?: string; resume?: string; ep?: string }>;
 }) {
+  // Payments off → nothing to sell. Bounce BEFORE the user-sync /
+  // trial-linking / attribution side effects below so free-mode visits
+  // write nothing. proxy.ts skips its Clerk sign-up bounce for this route
+  // under the same flag, so anonymous visitors land here and go home.
+  if (!paymentsEnabled()) redirect("/");
+
   // Sync the user mirror before anything that touches FKs against users.id.
   // On a fresh signup the Clerk user.created webhook can lag behind the
   // user landing here, leaving trial_sessions.user_id with nothing to point

@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons } from "@/db/schema";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
@@ -34,7 +35,10 @@ export async function generateMetadata({
   // Null-description shows otherwise ship with NO meta description; synthesize
   // a unique, genre-varied line (anti-thin-content) instead of a constant.
   const description =
-    show.description ?? t.showDetail.synopsisFallback(show.title, show.genre);
+    show.description ??
+    (paymentsEnabled()
+      ? t.showDetail.synopsisFallback(show.title, show.genre)
+      : t.showDetail.synopsisFallbackFree(show.title, show.genre));
   return {
     title: t.showDetail.watchOnlineTitle(show.title),
     description,
@@ -142,6 +146,9 @@ export default async function ShowDetailPage({
   // isAccessibleForFree on the CreativeWork entities — no VideoObject (Google
   // requires that on a page where the user can watch, and the player lives on
   // the robots-disallowed /watch). Only ready episodes are advertised.
+  // "Honestly" includes the payments kill-switch: with payments off every
+  // episode actually plays free, so the declaration must say so.
+  const paymentsOn = paymentsEnabled();
   const readyEpisodes = allEpisodes.filter((e) => e.status === "ready");
   const seriesJsonLd = tvSeriesJsonLd({
     slug: show.slug,
@@ -155,7 +162,7 @@ export default async function ShowDetailPage({
     numberOfEpisodes: readyEpisodes.length,
     isAccessibleForFree:
       readyEpisodes.length > 0 &&
-      readyEpisodes.every((e) => e.access === "free"),
+      (!paymentsOn || readyEpisodes.every((e) => e.access === "free")),
     seasons: showSeasons.map((s) => ({
       number: s.number,
       name: s.title,
@@ -166,7 +173,7 @@ export default async function ShowDetailPage({
           name: e.title,
           description: e.description,
           durationSeconds: e.durationSeconds,
-          isAccessibleForFree: e.access === "free",
+          isAccessibleForFree: !paymentsOn || e.access === "free",
         })),
     })),
   });

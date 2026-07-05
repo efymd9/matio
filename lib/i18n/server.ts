@@ -20,7 +20,8 @@ export const LOCALE_COOKIE = LOCALE_COOKIE_NAME;
 // negotiate from Accept-Language with an x-vercel-ip-country tiebreak
 // (lib/i18n/negotiate.ts — nothing is persisted, so a changed browser
 // language re-detects on the next visit). Crawlers send no Accept-Language
-// and keep getting Spanish, same as before detection existed.
+// and get the English default (the site's indexed language since
+// 2026-07-04); Spanish-preferring browsers negotiate to Spanish.
 //
 // Wrapped in React cache() so layout generateMetadata + RootLayout + every
 // page's getDict() share one resolution per request instead of re-parsing

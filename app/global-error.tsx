@@ -11,8 +11,8 @@
 // default locale on the server) and pluck the right dict from there.
 // With no cookie we fall back to navigator.languages — the client-side
 // mirror of the Accept-Language detection getLocale() does on the server
-// (lib/i18n/negotiate.ts) — so a detected-EN visitor doesn't get a
-// Spanish crash screen. Geo isn't available client-side; default copy is
+// (lib/i18n/negotiate.ts) — so a detected-ES visitor doesn't get an
+// English crash screen. Geo isn't available client-side; default copy is
 // fine for that sliver.
 
 import { useEffect, useSyncExternalStore } from "react";

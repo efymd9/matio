@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getOrSyncCurrentUser } from "@/lib/admin";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { getStripe } from "@/lib/stripe";
 
 export const runtime = "nodejs";
@@ -22,9 +23,13 @@ export async function GET() {
 
   // Subscribed users get a portal session. Pre-subscription users have no
   // customer record yet — send them to /subscribe to create one instead of
-  // 500-ing.
+  // 500-ing. With payments off, /subscribe itself bounces home; skip the
+  // double hop. (The portal itself stays functional in free mode — legacy
+  // subscribers cancel through here.)
   if (!user.stripeCustomerId) {
-    return NextResponse.redirect(new URL("/subscribe", origin));
+    return NextResponse.redirect(
+      new URL(paymentsEnabled() ? "/subscribe" : "/", origin),
+    );
   }
 
   const session = await getStripe().billingPortal.sessions.create({

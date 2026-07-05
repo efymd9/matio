@@ -3,7 +3,10 @@
 // separate ru/en system in admin-dictionaries.ts (Russian default, own
 // admin_locale cookie) that never affects the visitor-facing language.
 //
-// Spanish (es-ES) is the default. English is the secondary locale.
+// English is the default (since 2026-07-04 — was Spanish). Spanish stays
+// the locale for visitors likely to prefer it: an es Accept-Language
+// always wins negotiation, and the ES_AFFINITY_COUNTRIES geo tiebreak
+// covers Hispanophone + BR/PT visitors whose header matches neither dict.
 // Both dicts import here, so they can be referenced from server and
 // client components alike without crossing the React Server Component
 // boundary — the LocaleProvider only passes the locale string, the
@@ -12,7 +15,7 @@
 export type Locale = "es" | "en";
 
 export const SUPPORTED_LOCALES: readonly Locale[] = ["es", "en"];
-export const DEFAULT_LOCALE: Locale = "es";
+export const DEFAULT_LOCALE: Locale = "en";
 
 export const es = {
   htmlLang: "es-ES",
@@ -76,6 +79,11 @@ export const es = {
       `${title}: serie original de Matio${
         genre.length ? ` · ${genre.join(", ")}` : ""
       }. Míralo en streaming por suscripción.`,
+    // Payments-off variant (lib/free-mode.ts): no subscription to sell.
+    synopsisFallbackFree: (title: string, genre: string[]) =>
+      `${title}: serie original de Matio${
+        genre.length ? ` · ${genre.join(", ")}` : ""
+      }. Míralo gratis en streaming.`,
   },
   watch: {
     comingSoonTitle: "Próximamente",
@@ -147,7 +155,10 @@ export const es = {
     kicker: "Eso es todo · por ahora",
     headline: (showTitle: string) =>
       `Gracias por ver ${showTitle}.`,
-    body: "El próximo episodio está en producción y se estrenará pronto. Déjanos tu email y te avisamos cuando esté listo.",
+    // No "déjanos tu email" while the capture form is hidden (Resend not
+    // wired) — the overlay is now the universal series-end sheet, so the
+    // copy must not ask for input that has no field.
+    body: "El próximo episodio está en producción y se estrenará pronto.",
     emailLabel: "Correo electrónico",
     emailPlaceholder: "tu@email.com",
     submitCta: "Avísame",
@@ -291,14 +302,21 @@ export const es = {
     siteTitleTemplate: "%s · matio",
     siteDescription:
       "El hogar en streaming por suscripción para historias originales en formato corto. Mira los primeros 60 segundos gratis.",
+    // Payments-off variants (lib/free-mode.ts): the indexed copy must not
+    // promise a subscription gate or a 60s preview that no longer exists.
+    siteDescriptionFree:
+      "El hogar en streaming de historias originales en formato corto. Todo el catálogo, gratis.",
     twitterTitle: "matio",
     twitterDescription:
       "Historias originales en streaming. Mira los primeros 60 segundos gratis.",
+    twitterDescriptionFree:
+      "Historias originales en streaming. Todo el catálogo, gratis.",
   },
   og: {
     kicker: "Streaming de originales",
     title: ["Historias originales,", "en streaming."],
     tagline: "Mira los primeros 60 segundos gratis.",
+    taglineFree: "Míralo todo gratis.",
   },
   about: {
     metaTitle: "Acerca de Matio",
@@ -306,8 +324,12 @@ export const es = {
       "Matio es un estudio de streaming de historias originales en formato corto. Conoce quiénes somos y cómo contactarnos.",
     heading: "Acerca de Matio",
     lead: "Matio es un servicio de streaming por suscripción dedicado a historias originales en formato corto, producidas por nuestro estudio.",
+    leadFree:
+      "Matio es un servicio de streaming dedicado a historias originales en formato corto, producidas por nuestro estudio.",
     bodyStudio:
       "Estrenamos series originales pensadas para verse en cualquier momento. Cada título puede verse gratis durante los primeros 60 segundos; la suscripción mensual desbloquea el catálogo completo, sin anuncios.",
+    bodyStudioFree:
+      "Estrenamos series originales pensadas para verse en cualquier momento. Todo el catálogo puede verse gratis, sin anuncios.",
     bodyWho:
       "Matio es un proyecto de Matvei Dobrovolskii (empresario individual), con domicilio profesional en 221 Derby Road, Nottingham, Inglaterra y Gales.",
     contactHeading: "Contacto",
@@ -412,6 +434,11 @@ export const en: Dict = {
       `${title}: an original Matio series${
         genre.length ? ` · ${genre.join(", ")}` : ""
       }. Watch it on subscription streaming.`,
+    // Payments-off variant (lib/free-mode.ts): no subscription to sell.
+    synopsisFallbackFree: (title: string, genre: string[]) =>
+      `${title}: an original Matio series${
+        genre.length ? ` · ${genre.join(", ")}` : ""
+      }. Watch it free online.`,
   },
   watch: {
     comingSoonTitle: "Coming soon",
@@ -483,7 +510,10 @@ export const en: Dict = {
     kicker: "That's all · for now",
     headline: (showTitle: string) =>
       `Thanks for watching ${showTitle}.`,
-    body: "The next episode is in production and will be out soon. Leave your email and we'll let you know the moment it drops.",
+    // No "leave your email" while the capture form is hidden (Resend not
+    // wired) — the overlay is now the universal series-end sheet, so the
+    // copy must not ask for input that has no field.
+    body: "The next episode is in production and will be out soon.",
     emailLabel: "Email",
     emailPlaceholder: "you@email.com",
     submitCta: "Notify me",
@@ -625,14 +655,21 @@ export const en: Dict = {
     siteTitleTemplate: "%s · matio",
     siteDescription:
       "A subscription streaming home for original short-form stories. Watch the first 60 seconds free.",
+    // Payments-off variants (lib/free-mode.ts): the indexed copy must not
+    // promise a subscription gate or a 60s preview that no longer exists.
+    siteDescriptionFree:
+      "A streaming home for original short-form stories. The full catalogue, free.",
     twitterTitle: "matio",
     twitterDescription:
       "Original stories, streamed. Watch the first 60 seconds free.",
+    twitterDescriptionFree:
+      "Original stories, streamed. The full catalogue, free.",
   },
   og: {
     kicker: "Streaming originals",
     title: ["Original stories,", "streamed."],
     tagline: "Watch the first 60 seconds free.",
+    taglineFree: "Watch everything free.",
   },
   about: {
     metaTitle: "About Matio",
@@ -640,8 +677,12 @@ export const en: Dict = {
       "Matio is a streaming studio for original short-form stories. Learn who we are and how to reach us.",
     heading: "About Matio",
     lead: "Matio is a subscription streaming service dedicated to original short-form stories, produced by our studio.",
+    leadFree:
+      "Matio is a streaming service dedicated to original short-form stories, produced by our studio.",
     bodyStudio:
       "We release original series made to be watched any time. Every title is free to watch for its first 60 seconds; the monthly membership unlocks the full catalogue, ad-free.",
+    bodyStudioFree:
+      "We release original series made to be watched any time. The full catalogue is free to watch, ad-free.",
     bodyWho:
       "Matio is a project by Matvei Dobrovolskii (sole trader), with a business address at 221 Derby Road, Nottingham, England & Wales.",
     contactHeading: "Contact",

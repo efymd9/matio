@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { MatioLogo } from "@/components/site/matio-logo";
 import { getPublishableKey } from "@/lib/checkout-session";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { getDict } from "@/lib/i18n/server";
 import { CheckoutClient } from "./checkout-client";
 
@@ -20,6 +22,10 @@ export default async function CheckoutPage({
 }: {
   searchParams: Promise<{ show?: string; ep?: string; resume?: string }>;
 }) {
+  // Payments off → no checkout. The server actions carry their own guard
+  // (defense in depth for clients mounted across the flag-flip deploy).
+  if (!paymentsEnabled()) redirect("/");
+
   const { show, ep, resume } = await searchParams;
   const { t } = await getDict();
   // Read the publishable key server-side at request time (runtime, not

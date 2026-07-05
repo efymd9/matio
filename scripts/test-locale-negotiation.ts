@@ -3,9 +3,10 @@
 // functions, no env/DB needed. Run: pnpm test:locale
 //
 // The cases encode the design decisions, not just the parser mechanics:
-// crawlers (no Accept-Language) must keep getting the Spanish default so
-// the indexed language never shifts; q=0 means "not acceptable"; `*` falls
-// through to geo; BR/PT count as Spanish-affinity geos.
+// crawlers (no Accept-Language) get the English default — since 2026-07-04
+// English IS the site's indexed language; q=0 means "not acceptable"; `*`
+// falls through to geo; BR/PT count as Spanish-affinity geos and an es
+// Accept-Language always negotiates to Spanish.
 
 import { strict as assert } from "node:assert";
 import {
@@ -74,23 +75,27 @@ eq(localeFromCountry(null), null, "null country");
 eq(localeFromCountry("XX1"), null, "malformed country");
 
 // --- negotiateLocale: the full ladder ------------------------------------
-// 1. No header at all -> default es, geo NEVER consulted (Googlebot crawls
-//    from US IPs with no Accept-Language; the indexed language must not
-//    change because detection shipped).
-eq(negotiateLocale(null, "US"), "es", "crawler: no header + US geo stays es");
-eq(negotiateLocale("", "DE"), "es", "empty header ignores geo");
-eq(negotiateLocale("   ", "GB"), "es", "blank header ignores geo");
+// 1. No header at all -> default en, geo NEVER consulted (Googlebot crawls
+//    from US IPs with no Accept-Language; the default here IS the site's
+//    indexed language — English since the 2026-07-04 flip).
+eq(negotiateLocale(null, "US"), "en", "crawler: no header + US geo -> en");
+eq(negotiateLocale(null, "ES"), "en", "crawler: no header ignores es geo");
+eq(negotiateLocale("", "DE"), "en", "empty header ignores geo");
+eq(negotiateLocale("   ", "GB"), "en", "blank header ignores geo");
 
-// 2. Header names a supported language -> it wins, geo irrelevant.
+// 2. Header names a supported language -> it wins, geo irrelevant. This is
+//    the arm that keeps Spanish for Spanish-preferring browsers.
 eq(negotiateLocale("en-US,en;q=0.9", "ES"), "en", "header beats geo");
 eq(negotiateLocale("es-MX", "US"), "es", "header beats geo (rev)");
 
 // 3. Header present but unsupported -> geo tiebreak -> default.
 eq(negotiateLocale("fr-FR,fr;q=0.9", "FR"), "en", "French visitor -> en");
 eq(negotiateLocale("pt-BR", "BR"), "es", "Brazilian visitor -> es");
-eq(negotiateLocale("de-DE", null), "es", "unsupported + no geo -> default");
+eq(negotiateLocale("fr-FR", "MX"), "es", "es-affinity geo still wins es");
+eq(negotiateLocale("de-DE", null), "en", "unsupported + no geo -> default");
 eq(negotiateLocale("*", "US"), "en", "bare * + US -> en via geo");
-eq(negotiateLocale("*", null), "es", "bare * + no geo -> default");
+eq(negotiateLocale("*", "AR"), "es", "bare * + AR -> es via geo");
+eq(negotiateLocale("*", null), "en", "bare * + no geo -> default");
 
 // --- pickFromLanguageTags (global-error's navigator.languages path) ------
 eq(pickFromLanguageTags(["fr-FR", "en-GB", "es"]), "en", "first supported wins");

@@ -8,6 +8,7 @@ import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { readAttributionCookiesFromRequest } from "@/lib/attribution";
 import { showHasTierGating } from "@/lib/episode-access";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
@@ -110,7 +111,15 @@ export async function GET(req: NextRequest) {
   // pick between the paywall (gated show) and the legacy 60s trial below.
   // Gated 403s carry a machine-readable `reason`; legacy 403s stay
   // reason-less.
-  if (row.access === "free") {
+  //
+  // Free pivot: with payments off, tiers aren't enforced — signed-in
+  // viewers take the member path, anonymous viewers the free path (which
+  // keeps the anonymous funnel tracking + its best-effort rate-limit
+  // semantics). Both existing branches already never 403 for their
+  // audience, so the paywall/signup/trial paths below become unreachable.
+  const access = paymentsEnabled() ? row.access : userId ? "member" : "free";
+
+  if (access === "free") {
     // Funnel tracking row (kind='episodes') — minted on the first free
     // play for this (cookie, show), carrying the attribution snapshot and
     // IP hash exactly like the legacy trial. STRICTLY best-effort: a rate
@@ -161,7 +170,7 @@ export async function GET(req: NextRequest) {
     return res;
   }
 
-  if (row.access === "member") {
+  if (access === "member") {
     if (userId) {
       const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
       logToken({

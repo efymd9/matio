@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 import { getShowBySlug } from "@/lib/show-query";
-import { es } from "@/lib/i18n/dictionaries";
+import { en } from "@/lib/i18n/dictionaries";
 
 // Per-show OG card: the show title over its hero art (when public), with the
 // Matio mark — a branded, correctly-sized 1200×630 unfurl. This file
@@ -11,7 +11,7 @@ import { es } from "@/lib/i18n/dictionaries";
 // which needs Node TCP sockets. ImageResponse works in both runtimes.
 export const runtime = "nodejs";
 
-export const alt = es.metadata.siteTitle;
+export const alt = en.metadata.siteTitle;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 

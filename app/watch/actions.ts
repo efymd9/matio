@@ -12,6 +12,7 @@ import {
   trialSessions,
   watchProgress,
 } from "@/db/schema";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
   getOrderedReadyEpisodeIds,
@@ -74,8 +75,9 @@ export async function saveWatchProgress(
   // All-subscriber (legacy 60s-trial) shows have no such episodes, so
   // non-subscribers are rejected there exactly as before. Mirrors the token
   // route's gate so progress rows can't be written for content the user
-  // can't play.
-  if (!(await hasActiveSubscription(userId))) {
+  // can't play — with payments off every episode is playable, so the gate
+  // (and its subscription lookup) is skipped.
+  if (paymentsEnabled() && !(await hasActiveSubscription(userId))) {
     if (ep.access === "subscriber") return;
   }
 
@@ -148,7 +150,11 @@ export async function saveTrialPosition(
   //  - subscriber: on legacy 60s-preview shows (no tier-gated episode) keep
   //    the plain position write; on gated shows it's not anonymously
   //    playable, so no write.
-  if (row.access === "free") {
+  // Free pivot: with payments off every episode is anonymously playable as
+  // the free tier, so every save takes the full-tracking branch (no 60s
+  // cap, no member/tier-gating rejects) — mirrors the token route.
+  const access = paymentsEnabled() ? row.access : "free";
+  if (access === "free") {
     const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
     const position = orderedIds.indexOf(episodeId) + 1;
     if (position === 0) return;
@@ -163,11 +169,19 @@ export async function saveTrialPosition(
         and(
           eq(trialSessions.sessionToken, sessionToken),
           eq(trialSessions.showId, row.showId),
+          // Full-tracking writes belong to kind='episodes' rows ONLY. A
+          // legacy kind='preview' row can hold this (cookie, show) slot —
+          // free mode makes every show playable and a retiered show hits
+          // this in paid mode too — and writing an uncapped position +
+          // lastEpisodeId there breaks the preview invariants ("clamped at
+          // the save source", no episode pointer) and misplaces the resume
+          // offset if the row is ever read as a trial again.
+          eq(trialSessions.kind, "episodes"),
         ),
       );
     return;
   }
-  if (row.access === "member") return;
+  if (access === "member") return;
   if (await showHasTierGating(row.showId)) return;
 
   // Legacy 60s-preview row (kind='preview'). Cap the stored position at the

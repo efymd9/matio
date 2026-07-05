@@ -6,7 +6,16 @@ import type { NextConfig } from "next";
 // serving, so a forgotten `vercel env add` can't cause a checkout outage.
 // Scoped to VERCEL_ENV === "production" so local `next dev` / `next build` and
 // preview deploys (env not always present) are unaffected.
-if (process.env.VERCEL_ENV === "production") {
+// Also scoped to PAYMENTS_ENABLED === "1" (inlined here — next.config.ts can't
+// resolve the `@/` alias to lib/free-mode.ts, and that module is server-only):
+// with payments off the checkout actions guard-return before reading these, so
+// a free-mode Stripe env cleanup must not brick every subsequent build. NB
+// STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET / STRIPE_PRICE_MONTHLY stay
+// runtime dependencies of the webhook mirror while any live subscriber exists.
+if (
+  process.env.VERCEL_ENV === "production" &&
+  process.env.PAYMENTS_ENABLED === "1"
+) {
   for (const key of ["STRIPE_PRICE_MONTHLY", "STRIPE_PRICE_TRIAL_FEE"]) {
     if (!process.env[key]) {
       throw new Error(

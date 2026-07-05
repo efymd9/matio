@@ -4,6 +4,7 @@
 // (digital-content waiver, §6) is wired in app/subscribe/actions.ts.
 import type { Metadata } from "next";
 import Link from "next/link";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { getDict } from "@/lib/i18n/server";
 import { canonicalUrl } from "@/lib/seo";
 
@@ -21,6 +22,12 @@ const LAST_UPDATED_EN = "May 27, 2026";
 
 export default async function TermsPage() {
   const { locale, t } = await getDict();
+  // Free pivot: with payments off, §4 (60s preview) and §5-6 (pricing /
+  // billing / withdrawal) describe a purchase flow that doesn't currently
+  // exist. The legal wording below stays untouched (counsel-pending, and it
+  // still governs memberships bought before the pivot) — this notice frames
+  // it so the indexed page doesn't sell "$1 today" as a current fact.
+  const paymentsOn = paymentsEnabled();
   return (
     <main className="bg-background pt-28 pb-24 sm:pt-32">
       <article className="mx-auto max-w-3xl px-6 sm:px-8">
@@ -35,6 +42,32 @@ export default async function TermsPage() {
             {t.legal.lastUpdated(locale === "en" ? LAST_UPDATED_EN : LAST_UPDATED_ES)}
           </p>
         </header>
+        {!paymentsOn && (
+          <div className="mb-10 rounded-lg border border-white/[0.12] bg-white/[0.04] p-4 text-sm leading-relaxed text-white/75">
+            {locale === "en" ? (
+              <>
+                <strong>Notice:</strong> payments are currently disabled on
+                matio — all content is free to watch and no new subscriptions
+                or trials can be purchased. The preview, pricing and billing
+                sections below apply only while payments are enabled and to
+                memberships purchased before this change; existing memberships
+                can still be managed and cancelled via the Stripe Customer
+                Portal.
+              </>
+            ) : (
+              <>
+                <strong>Aviso:</strong> los pagos están desactivados
+                actualmente en matio: todo el contenido puede verse gratis y no
+                se pueden comprar nuevas suscripciones ni pruebas. Las
+                secciones sobre vista previa, precios y facturación se aplican
+                solo mientras los pagos estén activados y a las membresías
+                compradas antes de este cambio; las membresías existentes
+                pueden gestionarse y cancelarse desde el Portal de cliente de
+                Stripe.
+              </>
+            )}
+          </div>
+        )}
         {locale === "en" ? <TermsEn /> : <TermsEs />}
         <div className="mt-12 border-t border-white/[0.06] pt-6">
           <Link

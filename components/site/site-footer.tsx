@@ -9,15 +9,22 @@ import { MatioLogo } from "./matio-logo";
 // Site-wide footer. Hidden on /watch (fullscreen player) and /admin
 // (own layout). Carries the three legal links — required for live
 // payments + GDPR Art. 13 — plus a few navigational shortcuts.
-export function SiteFooter() {
+export function SiteFooter({
+  paymentsEnabled,
+}: {
+  // Server-read payments kill-switch (lib/free-mode.ts, passed from the
+  // layout). Off → the Subscribe link is hidden; "Manage subscription"
+  // stays so legacy subscribers can still reach the Stripe portal.
+  paymentsEnabled: boolean;
+}) {
   const pathname = usePathname();
   const hidden =
     pathname?.startsWith("/watch") || pathname?.startsWith("/admin");
   if (hidden) return null;
-  return <SiteFooterContent />;
+  return <SiteFooterContent paymentsEnabled={paymentsEnabled} />;
 }
 
-function SiteFooterContent() {
+function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
   const t = useT();
   const year = new Date().getFullYear();
 
@@ -31,7 +38,9 @@ function SiteFooterContent() {
         <FooterColumn heading={t.footer.sectionMatio}>
           <FooterLink href="/">{t.footer.browse}</FooterLink>
           <FooterLink href="/about">{t.footer.about}</FooterLink>
-          <FooterLink href="/subscribe">{t.footer.subscribe}</FooterLink>
+          {paymentsEnabled && (
+            <FooterLink href="/subscribe">{t.footer.subscribe}</FooterLink>
+          )}
           <FooterLink href="/api/billing-portal">{t.footer.manage}</FooterLink>
         </FooterColumn>
         <FooterColumn heading={t.footer.sectionLegal}>

@@ -18,12 +18,23 @@ import { LanguageSwitcher } from "./language-switcher";
 // pattern via useEffect+setState. useSyncExternalStore is the documented
 // replacement, but hooks must run unconditionally — so we keep the scroll
 // subscription off /watch + /admin by mounting the inner only when needed.
-export function SiteHeader({ authSlot }: { authSlot: React.ReactNode }) {
+export function SiteHeader({
+  authSlot,
+  paymentsEnabled,
+}: {
+  authSlot: React.ReactNode;
+  // Server-read payments kill-switch (lib/free-mode.ts, passed from the
+  // layout — this is a client component and can't read the env itself).
+  // Off → the Subscribe nav links are hidden.
+  paymentsEnabled: boolean;
+}) {
   const pathname = usePathname();
   const hidden =
     pathname?.startsWith("/watch") || pathname?.startsWith("/admin");
   if (hidden) return null;
-  return <SiteHeaderContent authSlot={authSlot} />;
+  return (
+    <SiteHeaderContent authSlot={authSlot} paymentsEnabled={paymentsEnabled} />
+  );
 }
 
 function subscribeToScroll(cb: () => void) {
@@ -37,7 +48,13 @@ function getScrolledServerSnapshot() {
   return false;
 }
 
-function SiteHeaderContent({ authSlot }: { authSlot: React.ReactNode }) {
+function SiteHeaderContent({
+  authSlot,
+  paymentsEnabled,
+}: {
+  authSlot: React.ReactNode;
+  paymentsEnabled: boolean;
+}) {
   const scrolled = useSyncExternalStore(
     subscribeToScroll,
     getScrolledSnapshot,
@@ -74,19 +91,21 @@ function SiteHeaderContent({ authSlot }: { authSlot: React.ReactNode }) {
           >
             {t.header.browse}
           </Link>
-          <Link
-            href="/subscribe"
-            className="-my-2 px-2 py-2 transition-colors hover:text-white"
-          >
-            {t.header.subscribe}
-          </Link>
+          {paymentsEnabled && (
+            <Link
+              href="/subscribe"
+              className="-my-2 px-2 py-2 transition-colors hover:text-white"
+            >
+              {t.header.subscribe}
+            </Link>
+          )}
         </nav>
         <div className="ml-auto flex items-center gap-3 sm:gap-4">
           {/* Mobile-only nav disclosure — without it phones can't reach
               /subscribe from the header (Browse/Subscribe links are
               sm:flex-gated). Desktop hides the trigger and renders the
               inline nav above instead. */}
-          <MobileNavMenu t={t} />
+          <MobileNavMenu t={t} paymentsEnabled={paymentsEnabled} />
           <LanguageSwitcher />
           {authSlot}
         </div>
@@ -95,7 +114,13 @@ function SiteHeaderContent({ authSlot }: { authSlot: React.ReactNode }) {
   );
 }
 
-function MobileNavMenu({ t }: { t: ReturnType<typeof useT> }) {
+function MobileNavMenu({
+  t,
+  paymentsEnabled,
+}: {
+  t: ReturnType<typeof useT>;
+  paymentsEnabled: boolean;
+}) {
   return (
     <Menu.Root>
       <Menu.Trigger
@@ -114,13 +139,15 @@ function MobileNavMenu({ t }: { t: ReturnType<typeof useT> }) {
             >
               {t.header.browse}
             </Menu.Item>
-            <Menu.Item
-              closeOnClick
-              className="block rounded-md px-3 py-2.5 text-sm font-medium text-white/85 outline-none transition-colors data-[highlighted]:bg-white/[0.08] data-[highlighted]:text-white"
-              render={<Link href="/subscribe" />}
-            >
-              {t.header.subscribe}
-            </Menu.Item>
+            {paymentsEnabled && (
+              <Menu.Item
+                closeOnClick
+                className="block rounded-md px-3 py-2.5 text-sm font-medium text-white/85 outline-none transition-colors data-[highlighted]:bg-white/[0.08] data-[highlighted]:text-white"
+                render={<Link href="/subscribe" />}
+              >
+                {t.header.subscribe}
+              </Menu.Item>
+            )}
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

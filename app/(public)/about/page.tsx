@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { getDict } from "@/lib/i18n/server";
 import { canonicalUrl } from "@/lib/seo";
 
@@ -19,14 +20,18 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function AboutPage() {
   const { t } = await getDict();
+  // Payments off → describe the service as free (this page is indexed).
+  const paymentsOn = paymentsEnabled();
   return (
     <main className="mx-auto max-w-3xl px-6 py-20 sm:py-28">
       <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
         {t.about.heading}
       </h1>
-      <p className="mt-6 text-lg leading-relaxed text-white/80">{t.about.lead}</p>
+      <p className="mt-6 text-lg leading-relaxed text-white/80">
+        {paymentsOn ? t.about.lead : t.about.leadFree}
+      </p>
       <p className="mt-5 text-sm leading-relaxed text-white/70">
-        {t.about.bodyStudio}
+        {paymentsOn ? t.about.bodyStudio : t.about.bodyStudioFree}
       </p>
       <p className="mt-5 text-sm leading-relaxed text-white/70">
         {t.about.bodyWho}

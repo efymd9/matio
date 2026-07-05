@@ -7,6 +7,7 @@ import type {
   CheckoutSessionResult,
   CheckoutTargetInput,
 } from "@/lib/checkout-session";
+import { paymentsEnabled } from "@/lib/free-mode";
 
 // Single entry point the in-site /checkout client calls to create a Checkout
 // Session. It resolves the auth state SERVER-SIDE (never trusts the client) and
@@ -21,6 +22,11 @@ import type {
 export async function createCheckoutSession(
   input: CheckoutTargetInput,
 ): Promise<CheckoutSessionResult> {
+  // Payments off → bounce home. The client handles kind:'redirect' via
+  // router.replace, so a /checkout tab open across the flag-flip deploy
+  // degrades cleanly instead of erroring.
+  if (!paymentsEnabled()) return { kind: "redirect", to: "/" };
+
   const { userId } = await auth();
   if (userId) return createAuthCheckoutSession(input);
   return createGuestCheckoutSession(input);

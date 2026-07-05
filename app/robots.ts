@@ -6,6 +6,8 @@ import { SITE_URL } from "@/lib/seo";
 //   /admin/*    — admin panel
 //   /api/*      — JWT issuer, webhooks, billing portal redirect
 //   /subscribe  — checkout form
+//   /checkout   — embedded Stripe checkout; a JS-executing crawler could
+//                  mount the iframe and create live Stripe sessions
 //   /watch/*    — burns trials when crawled; we don't want Googlebot
 //                  consuming previews on behalf of real users.
 //
@@ -19,7 +21,7 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        disallow: ["/admin", "/api", "/subscribe", "/watch"],
+        disallow: ["/admin", "/api", "/subscribe", "/checkout", "/watch"],
       },
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,

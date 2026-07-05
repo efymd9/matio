@@ -113,14 +113,16 @@ export function localeFromCountry(
 }
 
 // The full ladder for a visitor with no `locale` cookie:
-//   1. No Accept-Language at all → DEFAULT_LOCALE. Real browsers always
-//      send the header; the no-header population is crawlers (Googlebot
-//      crawls from US IPs with NO Accept-Language) — keeping them on the
-//      default means the indexed language stays exactly what it was
-//      before detection shipped. Geo is deliberately NOT consulted here.
-//   2. Header names a supported language → highest-q wins.
+//   1. No Accept-Language at all → DEFAULT_LOCALE (English since
+//      2026-07-04). Real browsers always send the header; the no-header
+//      population is crawlers (Googlebot crawls from US IPs with NO
+//      Accept-Language) — so the DEFAULT_LOCALE here IS the indexed
+//      language of the site. Geo is deliberately NOT consulted.
+//   2. Header names a supported language → highest-q wins (this is how
+//      Spanish-preferring browsers keep getting Spanish).
 //   3. Header exists but matches nothing (fr-FR, de, pt-BR, bare `*`) →
-//      geo tiebreak; unknown geo → DEFAULT_LOCALE.
+//      geo tiebreak (ES_AFFINITY_COUNTRIES → es, other valid → en);
+//      unknown geo → DEFAULT_LOCALE.
 export function negotiateLocale(
   acceptLanguage: string | null | undefined,
   country: string | null | undefined,

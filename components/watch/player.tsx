@@ -173,6 +173,7 @@ export function Player({
   userEmail,
   autoplay = true,
   payFirst = false,
+  freeMode = false,
   orientation = "horizontal",
 }: {
   episodes: PlayerEpisode[];
@@ -191,6 +192,11 @@ export function Player({
   // PAY_FIRST_CHECKOUT flag (server-read on the watch page): the paywall's
   // signed-out CTA goes straight to guest Stripe Checkout.
   payFirst?: boolean;
+  // Payments kill-switch (server-read, !paymentsEnabled()): the series-end
+  // paywall/signup-wall are mounted CLIENT-SIDE at `ended` with no server
+  // 403 involved, so the flag must reach this component to route those
+  // moments to the neutral series-end overlay instead.
+  freeMode?: boolean;
   // Show's video shape — vertical shows get the portrait chrome on mobile.
   orientation?: ShowOrientation;
 }) {
@@ -322,6 +328,7 @@ export function Player({
       onFirstPlay={onFirstPlay}
       userEmail={userEmail}
       payFirst={payFirst}
+      freeMode={freeMode}
       orientation={orientation}
     />
   );
@@ -347,6 +354,7 @@ function EpisodePlayback({
   onFirstPlay,
   userEmail,
   payFirst,
+  freeMode,
   orientation,
 }: {
   current: PlayerEpisode;
@@ -368,6 +376,7 @@ function EpisodePlayback({
   onFirstPlay: () => void;
   userEmail?: string | null;
   payFirst?: boolean;
+  freeMode?: boolean;
   orientation: ShowOrientation;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -1532,13 +1541,17 @@ function EpisodePlayback({
               setChipEpisodeId(next.id);
               onAdvance(next.id);
             }
-          } else if (mode === "subscriber") {
+          } else if (mode === "subscriber" || freeMode) {
             // Last episode of the show finished. Subscribers see the
             // "next episode in production" reminder sheet. Trial users
             // realistically can't reach this branch (60s preview vs
             // full episode duration); skip the overlay for them so a
             // freak edge case — say a 30s teaser — doesn't dump a paid
             // surface on a free preview.
+            //
+            // freeMode: with payments off the member/free walls below
+            // must never mount — every viewer gets the same neutral
+            // series-end sheet.
             onOverlayChange("seriesEnd");
           } else if (mode === "member") {
             // End of the member tier and nothing beyond is published yet —

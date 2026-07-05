@@ -24,6 +24,7 @@ import {
   TRIAL_SUBSCRIPTION_DATA,
 } from "@/lib/checkout-trial";
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { isInAppBrowser } from "@/lib/in-app-browser";
 import {
   CHECKOUT_CLAIM_COOKIE,
@@ -60,6 +61,13 @@ const UUID_RE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 export async function createGuestCheckoutSession(
   input: CheckoutTargetInput,
 ): Promise<CheckoutSessionResult> {
+  // Payments off → nothing may create a Stripe session. First statement on
+  // purpose: this is an independently POST-invocable "use server" action,
+  // so the /checkout page + dispatcher guards aren't enough, and bailing
+  // here also skips the DB reads / cookie write below. Straight home ("/"),
+  // not subscribeFallback — /subscribe would just bounce home anyway.
+  if (!paymentsEnabled()) return { kind: "redirect", to: "/" };
+
   const target = await resolveCheckoutTarget(input);
   const fallbackParams = new URLSearchParams();
   if (target.showSlug) fallbackParams.set("show", target.showSlug);

@@ -12,6 +12,7 @@ import { PostHogProvider } from "@/components/site/posthog-provider";
 import { GoogleAnalytics } from "@/components/site/google-analytics";
 import { UserMenu } from "@/components/site/user-menu";
 import { CONSENT_COOKIE, parseConsent } from "@/lib/cookie-consent";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { LocaleProvider } from "@/lib/i18n/client";
 import { getDict } from "@/lib/i18n/server";
 import { SITE_URL } from "@/lib/seo";
@@ -24,9 +25,10 @@ import "./globals.css";
 
 // Clerk's hosted UI (sign-in modal, sign-up modal, UserButton dropdown,
 // any form copy + validation messages) speaks the locale matching the
-// site dictionary. Spanish is the default; English when the cookie
-// resolves to "en". Both bundles ship server-side; only the chosen one
-// crosses the server→client boundary via the ClerkProvider prop.
+// site dictionary. English is the default (since 2026-07-04); Spanish
+// when negotiation / geo affinity / the cookie resolves to "es". Both
+// bundles ship server-side; only the chosen one crosses the
+// server→client boundary via the ClerkProvider prop.
 const CLERK_LOCALIZATIONS = { es: esES, en: enUS } as const;
 
 const geistSans = Geist({
@@ -64,13 +66,19 @@ export const viewport: Viewport = {
 
 export async function generateMetadata(): Promise<Metadata> {
   const { locale, t } = await getDict();
+  // Payments off → the indexed descriptions must not promise a subscription
+  // gate / 60s preview that doesn't exist (Google snippets read this).
+  const paymentsOn = paymentsEnabled();
+  const description = paymentsOn
+    ? t.metadata.siteDescription
+    : t.metadata.siteDescriptionFree;
   return {
     metadataBase: new URL(APP_URL),
     title: {
       default: t.metadata.siteTitle,
       template: t.metadata.siteTitleTemplate,
     },
-    description: t.metadata.siteDescription,
+    description,
     applicationName: "matio",
     // Self-referencing canonical pinned to the apex (not metadataBase, which
     // is preview-host-overridable) so the four resolving hostnames + ?utm_*
@@ -83,7 +91,7 @@ export async function generateMetadata(): Promise<Metadata> {
       siteName: "matio",
       url: SITE_URL,
       title: t.metadata.siteTitle,
-      description: t.metadata.siteDescription,
+      description,
       // Social-platform locale hints only — Google ignores og:locale for
       // language detection (it reads visible text). First-class fields so
       // Next emits valid `property="og:locale[:alternate]"` meta.
@@ -93,7 +101,9 @@ export async function generateMetadata(): Promise<Metadata> {
     twitter: {
       card: "summary_large_image",
       title: t.metadata.twitterTitle,
-      description: t.metadata.twitterDescription,
+      description: paymentsOn
+        ? t.metadata.twitterDescription
+        : t.metadata.twitterDescriptionFree,
     },
     robots: {
       index: true,
@@ -120,6 +130,10 @@ export default async function RootLayout({
   // here doesn't cost a static-generation opt-out.
   const consentCookie = (await cookies()).get(CONSENT_COOKIE)?.value;
   const initialConsent = parseConsent(consentCookie);
+  // Payments kill-switch, read server-side (the flag isn't NEXT_PUBLIC) and
+  // passed down: header/footer hide their Subscribe links when it's off.
+  // The billing-portal links stay — legacy subscribers still cancel there.
+  const paymentsOn = paymentsEnabled();
   return (
     <ClerkProvider
       localization={CLERK_LOCALIZATIONS[locale]}
@@ -142,7 +156,8 @@ export default async function RootLayout({
         <body className="min-h-full bg-background font-sans text-foreground selection:bg-accent/40">
           {/* Site-wide structured data. Server-rendered into the HTML so
               HTML-only crawlers read it. Locale-invariant brand graph
-              (Spanish-default semantics); never varied by getLocale(). */}
+              (English-default semantics since 2026-07-04); never varied by
+              getLocale(). */}
           <script
             type="application/ld+json"
             dangerouslySetInnerHTML={{ __html: jsonLdScript(organizationJsonLd()) }}
@@ -158,11 +173,11 @@ export default async function RootLayout({
             >
               Skip to content
             </a>
-            <SiteHeader authSlot={<UserMenu />} />
+            <SiteHeader authSlot={<UserMenu />} paymentsEnabled={paymentsOn} />
             <div id="main-content">
               {children}
             </div>
-            <SiteFooter />
+            <SiteFooter paymentsEnabled={paymentsOn} />
             <CookieBanner initialConsent={initialConsent} />
             {/* Consent-gated Meta Pixel — only injects fbevents.js after the
                 visitor accepts marketing cookies. Shares the same

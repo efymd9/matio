@@ -19,6 +19,7 @@ import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import { readAttributionCookies } from "@/lib/attribution";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
   TRIAL_COOKIE,
@@ -103,7 +104,15 @@ export default async function WatchPage({
   // Tier-gated iff any ready episode is open below the subscriber tier
   // (mirrors showHasTierGating in lib/episode-access.ts). All-subscriber
   // shows keep the legacy 60s-trial flow below.
-  const gated = ordered.some((e) => e.access !== "subscriber");
+  //
+  // Free pivot: with payments off every show takes the gated path (member
+  // mode signed-in, free mode anonymous) and every episode presents as the
+  // free tier — the player locks episodes CLIENT-SIDE from the tier prop
+  // via isEpisodeLocked, so neutralizing the tiers here (not just the token
+  // route) is load-bearing. The legacy 60s-trial branch and the
+  // expired-trial redirect below become unreachable.
+  const paymentsOn = paymentsEnabled();
+  const gated = !paymentsOn || ordered.some((e) => e.access !== "subscriber");
 
   const playable: PlayerEpisode[] = ordered
     .filter((e) => !!e.muxPlaybackId)
@@ -129,7 +138,7 @@ export default async function WatchPage({
         introStartSeconds: e.introStartSeconds,
         introEndSeconds: e.introEndSeconds,
         thumbnailUrl,
-        tier: e.access,
+        tier: paymentsOn ? e.access : ("free" as const),
       };
     });
 
@@ -254,6 +263,7 @@ export default async function WatchPage({
             initialEpisodeId={initial.id}
             resumeSeconds={queryResume ?? resumeFromProgress}
             userEmail={userEmail}
+            freeMode={!paymentsOn}
           />
         </WatchShell>
       );
@@ -296,6 +306,7 @@ export default async function WatchPage({
           resumeSeconds={queryResume ?? freeResume}
           userEmail={userEmail}
           payFirst={payFirst}
+          freeMode={!paymentsOn}
         />
       </WatchShell>
     );

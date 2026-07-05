@@ -22,6 +22,7 @@ import {
   parseConsent,
   serializeConsent,
 } from "@/lib/cookie-consent";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { LEGACY_ALIAS_HOST, SITE_URL } from "@/lib/seo";
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
@@ -180,6 +181,14 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   if (isAuthRoute(req)) {
+    // Payments off → /subscribe just redirects home at the page level, so
+    // don't bounce anonymous visitors through Clerk sign-up first. Fall
+    // through to the catch-all cookie capture instead of redirecting here:
+    // middleware Set-Cookie survives the page's redirect('/'), so an ad
+    // landing on /subscribe still gets its UTM/fbclid persisted.
+    if (!paymentsEnabled()) {
+      return applyMarketingCookies(req) ?? undefined;
+    }
     // Default the subscribe flow to sign-up rather than sign-in: most
     // visitors who reach /subscribe are first-timers about to create an
     // account, not returning users. Clerk's hosted sign-up page still

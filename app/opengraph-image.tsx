@@ -1,16 +1,17 @@
 import { ImageResponse } from "next/og";
-import { es } from "@/lib/i18n/dictionaries";
+import { paymentsEnabled } from "@/lib/free-mode";
+import { en } from "@/lib/i18n/dictionaries";
 
 // Default OG image rendered at request time via next/og. 1200×630 is the
 // canonical OG card size used by Twitter, Slack, iMessage, and LinkedIn.
 // Per-show pages override this with their own OG via generateMetadata.
 //
 // Social-media crawlers don't carry our locale cookie, so the OG renders
-// in the site's default locale (Spanish). Per-show OGs still surface the
+// in the site's default locale (English). Per-show OGs still surface the
 // show's own title/description verbatim from the database.
 
 export const runtime = "edge";
-export const alt = es.metadata.siteTitle;
+export const alt = en.metadata.siteTitle;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -64,7 +65,7 @@ export default async function OpenGraphImage() {
               color: "#ff3d3d",
             }}
           >
-            {es.og.kicker}
+            {en.og.kicker}
           </span>
           <span
             style={{
@@ -75,12 +76,12 @@ export default async function OpenGraphImage() {
               maxWidth: 980,
             }}
           >
-            {es.og.title[0]}
+            {en.og.title[0]}
             <br />
-            {es.og.title[1]}
+            {en.og.title[1]}
           </span>
           <span style={{ fontSize: 26, color: "rgba(255,255,255,0.65)", marginTop: 12 }}>
-            {es.og.tagline}
+            {paymentsEnabled() ? en.og.tagline : en.og.taglineFree}
           </span>
         </div>
       </div>
