@@ -1,14 +1,21 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import {
   campaignLabel,
+  DIRECT_BUCKET,
   loadDashboard,
   loadEpisodeFunnels,
+  loadFreeShowDepth,
+  loadTrackedLinks,
   parseFilters,
   type AnalyticsFilters as Filters,
+  type TrackedLinkRow,
 } from "@/lib/admin-analytics";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { getMuxData, muxTimeframeForDays } from "@/lib/mux-data";
 import { AnalyticsFilters } from "@/components/admin/analytics-filters";
 import { TimeSeriesChart } from "@/components/admin/time-series-chart";
+import { CopyButton } from "@/components/admin/copy-button";
 import {
   BarList,
   Donut,
@@ -47,6 +54,10 @@ const RANGE_LABEL_KEY: Record<
   custom: "rangeCustom",
 };
 
+function pct(part: number, whole: number): string {
+  return whole > 0 ? `${Math.round((part / whole) * 100)}` : "0";
+}
+
 export default async function AnalyticsPage({
   searchParams,
 }: {
@@ -54,11 +65,19 @@ export default async function AnalyticsPage({
 }) {
   const { t } = await getAdminDict();
   const ta = t.analytics;
+  // Free pivot: with payments off the dashboard reorganizes around the
+  // organic funnel (sessions → depth → signups). Paid panels aren't deleted
+  // — they render again the moment PAYMENTS_ENABLED=1 comes back.
+  const paymentsOn = paymentsEnabled();
   const sp = await searchParams;
   const filters = parseFilters(sp, new Date());
-  const [d, episodeFunnels] = await Promise.all([
-    loadDashboard(filters),
-    loadEpisodeFunnels(filters),
+  const [d, episodeFunnels, trackedLinks, freeShowDepth] = await Promise.all([
+    loadDashboard(filters, paymentsOn),
+    // Tier-gated episode funnels describe walls that don't exist in free
+    // mode; the per-show depth cards below replace them there.
+    paymentsOn ? loadEpisodeFunnels(filters) : Promise.resolve([]),
+    loadTrackedLinks({ from: filters.from, to: filters.to }),
+    paymentsOn ? Promise.resolve([]) : loadFreeShowDepth(filters),
   ]);
   const k = d.kpis;
 
@@ -71,13 +90,14 @@ export default async function AnalyticsPage({
       ? null
       : (d.showsList.find((s) => s.slug === filters.show)?.title ?? filters.show);
   const channelLabel = filters.channel === "all" ? null : filters.channel;
-  const campaignLabel =
+  const campaignFilterLabel =
     filters.campaign === "all" ? null : filters.campaign;
 
   // Sparklines from the time series (period-scoped flow metrics).
   const sparkTrials = d.series.map((p) => p.trials);
   const sparkSignups = d.series.map((p) => p.signups);
   const sparkConversions = d.series.map((p) => p.conversions);
+  const sparkFree = d.series.map((p) => p.free);
 
   return (
     <div className="space-y-6">
@@ -87,8 +107,13 @@ export default async function AnalyticsPage({
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gold">
             {ta.eyebrow}
           </p>
-          <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-cream">
+          <h1 className="mt-1 flex items-center gap-3 text-3xl font-extrabold tracking-tight text-cream">
             {ta.heading}
+            {!paymentsOn ? (
+              <span className="rounded-full bg-gold/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-gold">
+                {ta.freeModeBadge}
+              </span>
+            ) : null}
           </h1>
           <p className="mt-1 text-sm text-cream/55">
             {rangeLabel}
@@ -100,7 +125,7 @@ export default async function AnalyticsPage({
               : ""}
             {showLabel ? ` · ${showLabel}` : ""}
             {channelLabel ? ` · ${channelLabel}` : ""}
-            {campaignLabel ? ` · ${campaignLabel}` : ""}
+            {campaignFilterLabel ? ` · ${campaignFilterLabel}` : ""}
             {` · ${touchLabel}`}
           </p>
         </div>
@@ -112,116 +137,209 @@ export default async function AnalyticsPage({
         shows={d.showsList.map((s) => ({ slug: s.slug, title: s.title }))}
         channels={d.channelOptions}
         campaigns={d.campaignOptions}
+        paymentsOn={paymentsOn}
       />
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        <KpiTile
-          label={ta.kpiSignups}
-          value={k.signups.value.toLocaleString()}
-          current={k.signups.value}
-          prev={k.signups.prev}
-          spark={sparkSignups}
-          sub={ta.kpiSignupsSub(rangeLabel)}
-        />
-        <KpiTile
-          label={ta.kpiTrialPreviews}
-          value={k.trialPreviews.value.toLocaleString()}
-          current={k.trialPreviews.value}
-          prev={k.trialPreviews.prev}
-          spark={sparkTrials}
-          sub={rangeLabel}
-        />
-        <KpiTile
-          label={ta.kpiConversions}
-          value={k.conversions.value.toLocaleString()}
-          current={k.conversions.value}
-          prev={k.conversions.prev}
-          spark={sparkConversions}
-          sub={ta.kpiConversionsSub}
-        />
-        <KpiTile
-          label={ta.kpiTrialToPaid}
-          value={`${k.conversionRate.toFixed(1)}%`}
-          sub={ta.kpiSessionsSub(k.conversionConverted, k.conversionStarted)}
-        />
-        <KpiTile
-          label={ta.kpiMrr}
-          value={`$${k.mrr.toLocaleString()}`}
-          sub={`${ta.kpiActiveSub(k.activeSubs)}${k.servicedSubs !== k.activeSubs ? ` · ${ta.kpiServicedSub(k.servicedSubs)}` : ""}`}
-        />
-        <KpiTile
-          label={ta.kpiNewSubs}
-          value={k.newSubs.value.toLocaleString()}
-          current={k.newSubs.value}
-          prev={k.newSubs.prev}
-          // Break out how many new subs came via the pay-first guest checkout —
-          // those accounts are excluded from the Signups KPI by design, so this
-          // is where they surface on the dashboard.
-          sub={
-            k.guestSignups.value > 0
-              ? ta.kpiNewSubsGuestSub(rangeLabel, k.guestSignups.value)
-              : rangeLabel
-          }
-        />
-      </div>
-
-      {/* Funnel + status mix */}
-      <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-        <Section
-          title={ta.sectionAcquisitionFunnel}
-          hint={ta.sectionAcquisitionFunnelHint}
-        >
-          <FunnelChart
-            steps={[
-              {
-                label: ta.funnelPreviewsStarted,
-                value: d.funnel.previews,
-                hint: ta.funnelPreviewsStartedHint,
-              },
-              {
-                label: ta.funnelPlayed,
-                value: d.funnel.played,
-                hint: ta.funnelPlayedHint,
-              },
-              {
-                label: ta.funnelReachedPaywall,
-                value: d.funnel.nearCap,
-                hint: ta.funnelReachedPaywallHint,
-              },
-              {
-                label: ta.funnelConverted,
-                value: d.funnel.converted,
-                hint: ta.funnelConvertedHint,
-              },
-            ]}
+      {paymentsOn ? (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+          <KpiTile
+            label={ta.kpiSignups}
+            value={k.signups.value.toLocaleString()}
+            current={k.signups.value}
+            prev={k.signups.prev}
+            spark={sparkSignups}
+            sub={ta.kpiSignupsSub(rangeLabel)}
           />
-          <p className="mt-4 text-[10px] leading-relaxed text-white/35">
-            {ta.funnelDepthNote(d.funnel.avgDepth)}
-          </p>
-        </Section>
-
-        <Section
-          title={ta.sectionSubscriptions}
-          hint={ta.sectionSubscriptionsHintMix(filterScopeLabel(filters.status, ta))}
-        >
-          <Donut
-            segments={d.statusMix.map((s) => ({ label: s.status, value: s.n }))}
+          <KpiTile
+            label={ta.kpiTrialPreviews}
+            value={k.trialPreviews.value.toLocaleString()}
+            current={k.trialPreviews.value}
+            prev={k.trialPreviews.prev}
+            spark={sparkTrials}
+            sub={rangeLabel}
           />
-          <div className="mt-4">
-            <KpiTile
-              label={ta.kpiCancellations}
-              value={k.cancellations.value.toLocaleString()}
-              current={k.cancellations.value}
-              prev={k.cancellations.prev}
-              goodWhenDown
-              sub={ta.kpiCancellationsSub(rangeLabel)}
+          <KpiTile
+            label={ta.kpiConversions}
+            value={k.conversions.value.toLocaleString()}
+            current={k.conversions.value}
+            prev={k.conversions.prev}
+            spark={sparkConversions}
+            sub={ta.kpiConversionsSub}
+          />
+          <KpiTile
+            label={ta.kpiTrialToPaid}
+            value={`${k.conversionRate.toFixed(1)}%`}
+            sub={ta.kpiSessionsSub(k.conversionConverted, k.conversionStarted)}
+          />
+          <KpiTile
+            label={ta.kpiMrr}
+            value={`$${k.mrr.toLocaleString()}`}
+            sub={`${ta.kpiActiveSub(k.activeSubs)}${k.servicedSubs !== k.activeSubs ? ` · ${ta.kpiServicedSub(k.servicedSubs)}` : ""}`}
+          />
+          <KpiTile
+            label={ta.kpiNewSubs}
+            value={k.newSubs.value.toLocaleString()}
+            current={k.newSubs.value}
+            prev={k.newSubs.prev}
+            // Break out how many new subs came via the pay-first guest checkout —
+            // those accounts are excluded from the Signups KPI by design, so this
+            // is where they surface on the dashboard.
+            sub={
+              k.guestSignups.value > 0
+                ? ta.kpiNewSubsGuestSub(rangeLabel, k.guestSignups.value)
+                : rangeLabel
+            }
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
+          <KpiTile
+            label={ta.kpiFreeSessions}
+            value={d.free.sessions.value.toLocaleString()}
+            current={d.free.sessions.value}
+            prev={d.free.sessions.prev}
+            spark={sparkFree}
+            sub={ta.kpiFreeSessionsSub(d.free.viewers)}
+          />
+          <KpiTile
+            label={ta.kpiPlayed}
+            value={d.free.played.value.toLocaleString()}
+            current={d.free.played.value}
+            prev={d.free.played.prev}
+            sub={ta.kpiPctOfSessions(pct(d.free.played.value, d.free.sessions.value))}
+          />
+          <KpiTile
+            label={ta.kpiEngaged2}
+            value={d.free.engaged2.value.toLocaleString()}
+            current={d.free.engaged2.value}
+            prev={d.free.engaged2.prev}
+            sub={ta.kpiPctOfSessions(pct(d.free.engaged2.value, d.free.sessions.value))}
+          />
+          <KpiTile
+            label={ta.kpiAvgDepth}
+            value={d.free.avgDepth.toFixed(1)}
+            sub={ta.kpiAvgDepthSub}
+          />
+          <KpiTile
+            label={ta.kpiSignups}
+            value={k.signups.value.toLocaleString()}
+            current={k.signups.value}
+            prev={k.signups.prev}
+            spark={sparkSignups}
+            sub={rangeLabel}
+          />
+        </div>
+      )}
+
+      {/* Funnel + (status mix | sources) */}
+      {paymentsOn ? (
+        <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+          <Section
+            title={ta.sectionAcquisitionFunnel}
+            hint={ta.sectionAcquisitionFunnelHint}
+          >
+            <FunnelChart
+              steps={[
+                {
+                  label: ta.funnelPreviewsStarted,
+                  value: d.funnel.previews,
+                  hint: ta.funnelPreviewsStartedHint,
+                },
+                {
+                  label: ta.funnelPlayed,
+                  value: d.funnel.played,
+                  hint: ta.funnelPlayedHint,
+                },
+                {
+                  label: ta.funnelReachedPaywall,
+                  value: d.funnel.nearCap,
+                  hint: ta.funnelReachedPaywallHint,
+                },
+                {
+                  label: ta.funnelConverted,
+                  value: d.funnel.converted,
+                  hint: ta.funnelConvertedHint,
+                },
+              ]}
             />
-          </div>
-        </Section>
-      </div>
+            <p className="mt-4 text-[10px] leading-relaxed text-white/35">
+              {ta.funnelDepthNote(d.funnel.avgDepth)}
+            </p>
+          </Section>
 
-      {/* Episode-gated funnels (one card per gated show) */}
+          <Section
+            title={ta.sectionSubscriptions}
+            hint={ta.sectionSubscriptionsHintMix(filterScopeLabel(filters.status, ta))}
+          >
+            <Donut
+              segments={d.statusMix.map((s) => ({ label: s.status, value: s.n }))}
+            />
+            <div className="mt-4">
+              <KpiTile
+                label={ta.kpiCancellations}
+                value={k.cancellations.value.toLocaleString()}
+                current={k.cancellations.value}
+                prev={k.cancellations.prev}
+                goodWhenDown
+                sub={ta.kpiCancellationsSub(rangeLabel)}
+              />
+            </div>
+          </Section>
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+          <Section
+            title={ta.sectionOrganicFunnel}
+            hint={ta.sectionOrganicFunnelHint}
+          >
+            <FunnelChart
+              steps={[
+                {
+                  label: ta.ofSessions,
+                  value: d.free.sessions.value,
+                  hint: ta.ofSessionsHint,
+                },
+                {
+                  label: ta.ofPlayed,
+                  value: d.free.played.value,
+                  hint: ta.ofPlayedHint,
+                },
+                {
+                  label: ta.ofEngaged2,
+                  value: d.free.engaged2.value,
+                  hint: ta.ofEngaged2Hint,
+                },
+                {
+                  label: ta.ofEngaged3,
+                  value: d.free.engaged3,
+                  hint: ta.ofEngaged3Hint,
+                },
+              ]}
+            />
+            <p className="mt-4 text-[10px] leading-relaxed text-white/35">
+              {ta.organicDepthNote(d.free.avgDepth.toFixed(1))}
+            </p>
+          </Section>
+
+          <Section
+            title={ta.sectionSources}
+            hint={`${touchLabel} · ${rangeLabel}`}
+          >
+            <BarList
+              items={d.sources.map((s) => ({
+                label: s.source ?? DIRECT_BUCKET,
+                value: s.sessions,
+                sub: ta.sourceRowSub(s.viewers),
+              }))}
+              format={(n) => ta.sourceSessionsCount(n)}
+              emptyLabel={ta.sourcesEmpty}
+            />
+          </Section>
+        </div>
+      )}
+
+      {/* Episode-gated funnels (one card per gated show — paid mode only) */}
       {episodeFunnels.map((ef) => (
         <Section
           key={ef.showSlug}
@@ -310,14 +428,6 @@ export default async function AnalyticsPage({
         </Section>
       ))}
 
-      {/* Time series */}
-      <Section
-        title={ta.sectionTrend}
-        hint={`${rangeLabel} · ${ta.granularityToken(filters.granularity)}`}
-      >
-        <TimeSeriesChart series={d.series} granularity={filters.granularity} />
-      </Section>
-
       {/* Campaign table */}
       <Section
         title={ta.sectionChannelsCampaigns(touchLabel)}
@@ -327,22 +437,78 @@ export default async function AnalyticsPage({
             : ta.sectionChannelsCampaignsHintLast
         }
       >
-        <CampaignTable rows={d.campaign} t={t} />
+        {paymentsOn ? (
+          <CampaignTable rows={d.campaign} t={t} />
+        ) : (
+          <FreeCampaignTable rows={d.campaign} t={t} />
+        )}
       </Section>
 
-      {/* Trial preview depth */}
+      {/* Tracked links (generator lives at /admin/links) */}
       <Section
-        title={ta.sectionTrialPreviewDepth}
-        hint={ta.sectionTrialPreviewDepthHint}
+        title={ta.sectionTrackedLinks}
+        hint={ta.sectionTrackedLinksHint}
+        right={
+          <Link
+            href="/admin/links"
+            className="text-[11px] font-semibold text-gold transition-colors hover:text-gold-hi"
+          >
+            {ta.trackedLinksManage}
+          </Link>
+        }
       >
-        <Histogram bars={d.depthHistogram} />
+        <TrackedLinksTable rows={trackedLinks} t={t} />
       </Section>
+
+      {/* Time series */}
+      <Section
+        title={ta.sectionTrend}
+        hint={`${rangeLabel} · ${ta.granularityToken(filters.granularity)}`}
+      >
+        <TimeSeriesChart
+          series={d.series}
+          granularity={filters.granularity}
+          freeMode={!paymentsOn}
+        />
+      </Section>
+
+      {/* Trial preview depth (paid mode — previews don't exist in free mode) */}
+      {paymentsOn ? (
+        <Section
+          title={ta.sectionTrialPreviewDepth}
+          hint={ta.sectionTrialPreviewDepthHint}
+        >
+          <Histogram bars={d.depthHistogram} />
+        </Section>
+      ) : null}
+
+      {/* Per-show depth (free mode) */}
+      {freeShowDepth.map((s) => (
+        <Section
+          key={s.showSlug}
+          title={ta.showDepthTitle(s.showTitle)}
+          hint={ta.showDepthHint(s.started, rangeLabel)}
+        >
+          <Histogram bars={s.depth} />
+          <p className="mt-3 text-[10px] leading-relaxed text-white/35">
+            {ta.showDepthBarsNote} {ta.showDepthPlayed(s.played.toLocaleString())}
+          </p>
+        </Section>
+      ))}
 
       {/* Engagement + Top shows */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Section
-          title={ta.sectionSubscriberEngagement}
-          hint={ta.sectionSubscriberEngagementHint}
+          title={
+            paymentsOn
+              ? ta.sectionSubscriberEngagement
+              : ta.sectionSignedInEngagement
+          }
+          hint={
+            paymentsOn
+              ? ta.sectionSubscriberEngagementHint
+              : ta.sectionSignedInEngagementHint
+          }
         >
           <div className="grid grid-cols-2 gap-3">
             <KpiTile
@@ -512,22 +678,22 @@ function MuxPanel({
   );
 }
 
-function CampaignTable({
-  rows,
-  t,
-}: {
-  rows: {
-    source: string | null;
-    medium: string | null;
-    campaign: string | null;
-    trials: number;
-    walled: number;
-    signups: number;
-    activeSubs: number;
-    mrr: number;
-  }[];
-  t: AdminDict;
-}) {
+type CampaignRows = {
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  trials: number;
+  walled: number;
+  signups: number;
+  activeSubs: number;
+  mrr: number;
+  viewers: number;
+  played: number;
+  deep: number;
+  depthSum: number;
+}[];
+
+function CampaignTable({ rows, t }: { rows: CampaignRows; t: AdminDict }) {
   const ta = t.analytics;
   if (rows.length === 0) {
     return (
@@ -631,22 +797,197 @@ function CampaignTable({
   );
 }
 
+// Free-mode campaign table: engagement columns instead of the dead
+// Subs / MRR / Wall% ones — sessions, played %, average episode depth,
+// 2+-episode share and (first-touch) signups per campaign.
+function FreeCampaignTable({ rows, t }: { rows: CampaignRows; t: AdminDict }) {
+  const ta = t.analytics;
+  if (rows.length === 0) {
+    return (
+      <p className="py-6 text-center text-sm text-white/55">
+        {ta.campaignTableEmpty}
+      </p>
+    );
+  }
+  const sorted = [...rows].sort((a, b) => b.trials - a.trials);
+  return (
+    <div className="-mx-5 overflow-x-auto">
+      <table className="w-full min-w-[680px] border-collapse text-sm">
+        <thead>
+          <tr className="text-[10px] uppercase tracking-[0.08em] text-white/45">
+            <th className="px-5 py-2 text-left font-semibold">
+              {ta.tableColCampaign}
+            </th>
+            <th className="px-3 py-2 text-left font-semibold">
+              {ta.tableColSourceMedium}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tableColSessions}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tableColPlayedPct}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tableColAvgEps}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tableColDeepPct}
+            </th>
+            <th className="px-5 py-2 text-right font-semibold">
+              {ta.tableColSignups}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((r) => {
+            const label = campaignLabel(r.source, r.medium, r.campaign);
+            return (
+              <tr
+                key={`${label.source}|${label.medium}|${label.campaign}`}
+                className="border-t border-white/[0.05]"
+              >
+                <td className="px-5 py-3 align-top">
+                  <span
+                    className={
+                      label.isDirect
+                        ? "font-mono text-xs text-white/45"
+                        : "text-sm font-semibold text-white"
+                    }
+                  >
+                    {label.campaign}
+                  </span>
+                </td>
+                <td className="px-3 py-3 align-top text-xs text-white/55">
+                  {label.source}
+                  <span className="text-white/30"> · </span>
+                  {label.medium}
+                </td>
+                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
+                  {r.trials.toLocaleString()}
+                </td>
+                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
+                  {r.trials > 0
+                    ? `${Math.round((r.played / r.trials) * 100)}%`
+                    : "—"}
+                </td>
+                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
+                  {r.played > 0 ? (r.depthSum / r.played).toFixed(1) : "—"}
+                </td>
+                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
+                  {r.trials > 0
+                    ? `${Math.round((r.deep / r.trials) * 100)}%`
+                    : "—"}
+                </td>
+                <td className="px-5 py-3 text-right align-top font-mono text-xs text-white/75">
+                  {r.signups.toLocaleString()}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="mt-3 px-5 text-[10px] leading-relaxed text-white/35">
+        {ta.campaignFreeNote}
+      </p>
+    </div>
+  );
+}
+
+function TrackedLinksTable({
+  rows,
+  t,
+}: {
+  rows: TrackedLinkRow[];
+  t: AdminDict;
+}) {
+  const ta = t.analytics;
+  if (rows.length === 0) {
+    return (
+      <p className="py-6 text-center text-sm text-white/55">
+        {ta.trackedLinksEmpty}
+      </p>
+    );
+  }
+  return (
+    <div className="-mx-5 overflow-x-auto">
+      <table className="w-full min-w-[680px] border-collapse text-sm">
+        <thead>
+          <tr className="text-[10px] uppercase tracking-[0.08em] text-white/45">
+            <th className="px-5 py-2 text-left font-semibold">{ta.tlColName}</th>
+            <th className="px-3 py-2 text-left font-semibold">
+              {ta.tlColTarget}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tlColSessions}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tlColPlayed}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tlColSignups}
+            </th>
+            <th className="px-3 py-2 text-right font-semibold">
+              {ta.tlColAllTime}
+            </th>
+            <th className="px-5 py-2 text-right font-semibold" />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((l) => (
+            <tr key={l.id} className="border-t border-white/[0.05]">
+              <td className="px-5 py-3 align-top">
+                <p className="text-sm font-semibold text-white">{l.name}</p>
+                <p className="mt-0.5 font-mono text-[11px] text-white/40">
+                  {l.source} · {l.medium} · {l.campaign}
+                </p>
+              </td>
+              <td className="px-3 py-3 align-top font-mono text-xs text-white/55">
+                {l.targetPath}
+              </td>
+              <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
+                {l.sessions.toLocaleString()}
+              </td>
+              <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
+                {l.played.toLocaleString()}
+              </td>
+              <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
+                {l.signups.toLocaleString()}
+              </td>
+              <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
+                {l.allTimeSessions.toLocaleString()}
+              </td>
+              <td className="px-5 py-3 text-right align-top">
+                <CopyButton value={l.url} name={l.name} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Section({
   title,
   hint,
+  right,
   children,
 }: {
   title: string;
   hint?: string;
+  right?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5">
       <div className="mb-4 flex items-baseline justify-between gap-3">
         <h2 className="text-sm font-bold text-white">{title}</h2>
-        {hint ? (
-          <span className="text-right text-[11px] text-white/45">{hint}</span>
-        ) : null}
+        <div className="flex items-baseline gap-3">
+          {hint ? (
+            <span className="text-right text-[11px] text-white/45">{hint}</span>
+          ) : null}
+          {right}
+        </div>
       </div>
       {children}
     </section>

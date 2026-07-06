@@ -41,6 +41,7 @@ export const ru = {
     adminBadge: "Админ",
     shows: "Сериалы",
     analytics: "Аналитика",
+    trackedLinks: "Ссылки",
     backToApp: "← Вернуться на сайт",
   },
   showsList: {
@@ -247,6 +248,66 @@ export const ru = {
     efDepthLabel: "Глубина бесплатного уровня · сессии, дошедшие до эпизода N",
     efDepthNote:
       "Глубина — позиция самого дальнего начатого эпизода за сессию (монотонная запись), не досмотр. Привязка к аккаунту: при обычной регистрации — по trial-cookie с IP-фолбэком (может слегка завышаться в общих сетях), при pay-first покупке — только по точному токену (может занижаться, если webview потерял cookie).",
+    // ---- Бесплатный режим: органическая воронка (PAYMENTS_ENABLED не задан) ----
+    freeModeBadge: "бесплатный режим",
+    kpiFreeSessions: "Сессии просмотра",
+    // «браузеров» — уникальные trial-cookie за период (одна кука может
+    // открыть несколько сериалов → сессий больше, чем браузеров).
+    kpiFreeSessionsSub: (viewers: number) =>
+      `${viewers.toLocaleString()} ${ruPlural(viewers, ["браузер", "браузера", "браузеров"])}`,
+    kpiPlayed: "Начали смотреть",
+    kpiPctOfSessions: (pct: number | string) => `${pct}% сессий`,
+    kpiEngaged2: "2+ эпизода",
+    kpiAvgDepth: "Эпизодов за сессию",
+    kpiAvgDepthSub: "среди начавших смотреть",
+    sectionOrganicFunnel: "Органическая воронка",
+    sectionOrganicFunnelHint:
+      "анонимные сессии просмотра за период · без стен и оплат",
+    ofSessions: "Сессии",
+    ofSessionsHint:
+      "Строка trial_sessions (браузер × сериал), создаётся при старте плеера",
+    ofPlayed: "Начали смотреть",
+    ofPlayedHint: "Есть сохранённая позиция — кадры реально рендерились",
+    ofEngaged2: "Дошли до 2-го эпизода",
+    ofEngaged2Hint: "Самый дальний начатый эпизод ≥ 2",
+    ofEngaged3: "Дошли до 3-го эпизода",
+    ofEngaged3Hint: "Самый дальний начатый эпизод ≥ 3",
+    organicDepthNote: (avg: number | string) =>
+      `В среднем ${avg} эп. на сессию среди начавших смотреть. Число сессий — нижняя граница: лимит 10 минтов на (IP, сериал) в час молча отбрасывает трекинг в горячих сетях (CGNAT, webview), а до согласия на cookies в ЕС метки не пишутся.`,
+    sectionSources: "Источники трафика",
+    sourcesBySourceLabel: "Сессии по источникам",
+    sourcesEmpty:
+      "Размеченного трафика пока нет — создайте отслеживаемую ссылку и поделитесь ею.",
+    sourceSessionsCount: (n: number) =>
+      `${n.toLocaleString()} ${ruPlural(n, ["сессия", "сессии", "сессий"])}`,
+    sourceRowSub: (viewers: number) =>
+      `${viewers.toLocaleString()} ${ruPlural(viewers, ["браузер", "браузера", "браузеров"])}`,
+    tableColSessions: "Сессии",
+    tableColPlayedPct: "Начали",
+    tableColAvgEps: "Эп./сессия",
+    tableColDeepPct: "2+ эп.",
+    campaignFreeNote:
+      "Сессии — анонимные сессии просмотра с выбранной моделью атрибуции; «(direct)» — без UTM-меток (органика, вводы вручную и клики до согласия на cookies в ЕС). Регистрации — аккаунты, чьё касание по выбранной модели совпало с кампанией.",
+    sectionTrackedLinks: "Отслеживаемые ссылки",
+    sectionTrackedLinksHint: "по первому касанию · за выбранный период",
+    trackedLinksManage: "Управлять ссылками →",
+    trackedLinksEmpty:
+      "Ссылок пока нет. Создайте первую в разделе «Ссылки» — и делитесь ею в соцсетях.",
+    tlColName: "Ссылка",
+    tlColTarget: "Куда ведёт",
+    tlColSessions: "Сессии",
+    tlColPlayed: "Начали",
+    tlColSignups: "Регистрации",
+    tlColAllTime: "Всё время",
+    showDepthTitle: (title: string) => `Глубина · ${title}`,
+    showDepthHint: (started: number, range: string) =>
+      `${started.toLocaleString()} ${ruPlural(started, ["сессия", "сессии", "сессий"])} · ${range}`,
+    showDepthPlayed: (n: number | string) => `начали смотреть: ${n}`,
+    showDepthBarsNote:
+      "Сессии, дошедшие до эпизода N (кумулятивно, по самому дальнему начатому эпизоду).",
+    sectionSignedInEngagement: "Вовлечённость · вошедшие зрители",
+    sectionSignedInEngagementHint:
+      "watch_progress: зрители с аккаунтом (в бесплатном режиме — любой вошедший) · всё время",
   },
   showNew: {
     backToShows: "Сериалы",
@@ -463,6 +524,9 @@ export const ru = {
   timeSeriesChart: {
     metricTrials: "Превью",
     metricFree: "Бесплатные",
+    // Ярлык той же метрики kind='episodes' в бесплатном режиме — там это
+    // просто «сессии», слова «бесплатные» и «превью» не несут смысла.
+    metricSessions: "Сессии",
     metricSignups: "Регистрации",
     metricConversions: "Конверсии",
     metricNewSubs: "Новые подписки",
@@ -495,6 +559,71 @@ export const ru = {
     error: "Ошибка",
     processing: "Обработка",
   },
+  links: {
+    eyebrow: "Маркетинг",
+    heading: "Отслеживаемые ссылки",
+    sub: "Ссылки с UTM-метками для соцсетей: дашборд покажет, откуда пришли зрители и как глубоко они смотрят.",
+    formKicker: "Новая ссылка",
+    formTitle: "Сгенерировать ссылку",
+    nameLabel: "Название",
+    namePlaceholder: "Июльский рил в IG",
+    nameHint: "Видно только в админке — в саму ссылку не попадает.",
+    targetLabel: "Куда ведёт",
+    targetHome: "Главная страница",
+    targetWatch: (title: string) => `Плеер — ${title}`,
+    targetShow: (title: string) => `Страница сериала — ${title}`,
+    targetCustom: "Свой путь…",
+    customPathLabel: "Путь",
+    customPathPlaceholder: "/watch/moy-serial",
+    customPathHint:
+      "Начинается с «/», без ?, # и домена — метки добавятся автоматически.",
+    sourceLabel: "Источник · utm_source",
+    sourceCustom: "Другой…",
+    sourceCustomPlaceholder: "pinterest",
+    mediumLabel: "Канал · utm_medium",
+    mediumHint: "«social» — органика в соцсетях, «paid» — платная реклама.",
+    campaignLabel: "Кампания · utm_campaign",
+    campaignPlaceholder: "ig-reel-0715",
+    campaignHint:
+      "Уникальное имя на пост или размещение — так виден вклад каждого.",
+    aliasNote:
+      "Значения приводятся к канону автоматически: строчные, только [a-z0-9_-]; instagram → ig, facebook и meta → fb.",
+    previewLabel: "Ссылка получится такой",
+    // Подставляется в copyAria как имя ссылки для кнопки под предпросмотром.
+    previewCopyName: "предпросмотр",
+    submit: "Создать ссылку",
+    submitPending: "Создаём…",
+    createdOk: "Ссылка создана — скопируйте её из таблицы ниже.",
+    errNameRequired: "Укажите название.",
+    errTargetInvalid:
+      "Путь должен начинаться с «/» и не содержать ?, # или домен.",
+    errUtmRequired:
+      "Источник, канал и кампания обязательны — и не должны быть пустыми после нормализации.",
+    errDuplicate:
+      "Активная ссылка с такой комбинацией source · medium · campaign уже есть — дайте кампании другое имя.",
+    errShowNotFound: "Сериал не найден.",
+    errUnknown: "Не получилось создать ссылку. Попробуйте ещё раз.",
+    tableKicker: "Ссылки",
+    tableTitle: "Все ссылки",
+    tableHint:
+      "Сессии — по первому касанию: браузеры, чей первый размеченный визит пришёл с меток ссылки.",
+    colName: "Название",
+    colTarget: "Куда ведёт",
+    colSessions30: "Сессии · 30 дн.",
+    colPlayed: "Начали",
+    colSignups: "Регистрации",
+    colAllTime: "Всё время",
+    colCreated: "Создана",
+    copy: "Копировать",
+    copied: "Скопировано",
+    copyAria: (name: string) => `Скопировать ссылку «${name}»`,
+    archive: "В архив",
+    archiveConfirm: (name: string) =>
+      `Убрать «${name}» в архив? Сессии по её меткам останутся в аналитике; комбинацию меток можно будет использовать снова.`,
+    empty: "Ссылок пока нет — создайте первую выше.",
+    consentNote:
+      "В ЕС метки пишутся только после согласия на cookies, поэтому часть кликов оседает в «(direct)». Вне ЕС метки пишутся с первого визита.",
+  },
 };
 
 export type AdminDict = typeof ru;
@@ -511,6 +640,7 @@ export const en: AdminDict = {
     adminBadge: "Admin",
     shows: "Shows",
     analytics: "Analytics",
+    trackedLinks: "Links",
     backToApp: "← Back to app",
   },
   showsList: {
@@ -696,6 +826,66 @@ export const en: AdminDict = {
     efDepthLabel: "Free-tier depth · sessions reaching episode N",
     efDepthNote:
       "Depth is the furthest episode position a session started (write-monotonic), not completion. Account linking: classic signups use the trial cookie with an IP-bucket fallback (can slightly over-attribute on shared networks); pay-first purchases link by exact token only (can under-attribute when a webview dropped the cookie).",
+    // ---- Free mode: organic funnel (PAYMENTS_ENABLED unset) ----
+    freeModeBadge: "free mode",
+    kpiFreeSessions: "Watch sessions",
+    // “browsers” = distinct trial cookies in range (one cookie can open
+    // several shows → sessions exceed browsers).
+    kpiFreeSessionsSub: (viewers: number) =>
+      `${viewers.toLocaleString()} browser${viewers === 1 ? "" : "s"}`,
+    kpiPlayed: "Started watching",
+    kpiPctOfSessions: (pct: number | string) => `${pct}% of sessions`,
+    kpiEngaged2: "2+ episodes",
+    kpiAvgDepth: "Episodes per session",
+    kpiAvgDepthSub: "among sessions that played",
+    sectionOrganicFunnel: "Organic funnel",
+    sectionOrganicFunnelHint:
+      "anonymous watch sessions in range · no walls, no payments",
+    ofSessions: "Sessions",
+    ofSessionsHint:
+      "trial_sessions row (browser × show), minted when the player starts",
+    ofPlayed: "Started watching",
+    ofPlayedHint: "Has a saved position — frames actually rendered",
+    ofEngaged2: "Reached episode 2",
+    ofEngaged2Hint: "Furthest episode started ≥ 2",
+    ofEngaged3: "Reached episode 3",
+    ofEngaged3Hint: "Furthest episode started ≥ 3",
+    organicDepthNote: (avg: number | string) =>
+      `Avg ${avg} episodes per session among those that played. Session counts are a floor: the 10-mints-per-(IP, show)-hour cap silently drops tracking on hot networks (CGNAT, webviews), and EU visitors carry no UTM cookies before consent.`,
+    sectionSources: "Traffic sources",
+    sourcesBySourceLabel: "Sessions by source",
+    sourcesEmpty:
+      "No tagged traffic yet — create a tracked link and share it.",
+    sourceSessionsCount: (n: number) =>
+      `${n.toLocaleString()} session${n === 1 ? "" : "s"}`,
+    sourceRowSub: (viewers: number) =>
+      `${viewers.toLocaleString()} browser${viewers === 1 ? "" : "s"}`,
+    tableColSessions: "Sessions",
+    tableColPlayedPct: "Played",
+    tableColAvgEps: "Eps/session",
+    tableColDeepPct: "2+ eps",
+    campaignFreeNote:
+      "Sessions are anonymous watch sessions under the selected attribution model; “(direct)” means no UTM tags (organic, hand-typed URLs and pre-consent EU clicks). Signups are accounts whose touch under the selected model matched the campaign.",
+    sectionTrackedLinks: "Tracked links",
+    sectionTrackedLinksHint: "first-touch · selected range",
+    trackedLinksManage: "Manage links →",
+    trackedLinksEmpty:
+      "No links yet. Create one under “Links” and share it on social.",
+    tlColName: "Link",
+    tlColTarget: "Target",
+    tlColSessions: "Sessions",
+    tlColPlayed: "Played",
+    tlColSignups: "Signups",
+    tlColAllTime: "All time",
+    showDepthTitle: (title: string) => `Depth · ${title}`,
+    showDepthHint: (started: number, range: string) =>
+      `${started.toLocaleString()} session${started === 1 ? "" : "s"} · ${range}`,
+    showDepthPlayed: (n: number | string) => `started watching: ${n}`,
+    showDepthBarsNote:
+      "Sessions that reached episode N (cumulative, by furthest episode started).",
+    sectionSignedInEngagement: "Engagement · signed-in viewers",
+    sectionSignedInEngagementHint:
+      "watch_progress: viewers with an account (any signed-in user while free mode is on) · all time",
   },
   showNew: {
     backToShows: "Shows",
@@ -911,6 +1101,9 @@ export const en: AdminDict = {
   timeSeriesChart: {
     metricTrials: "Trials",
     metricFree: "Free tier",
+    // Same kind='episodes' metric relabeled for free mode — there it is
+    // simply “sessions”; “free tier” and “previews” carry no meaning.
+    metricSessions: "Sessions",
     metricSignups: "Signups",
     metricConversions: "Conversions",
     metricNewSubs: "New subs",
@@ -942,6 +1135,71 @@ export const en: AdminDict = {
     ready: "Ready",
     error: "Error",
     processing: "Processing",
+  },
+  links: {
+    eyebrow: "Marketing",
+    heading: "Tracked links",
+    sub: "UTM-tagged links for social posts: the dashboard shows where viewers came from and how deep they watch.",
+    formKicker: "New link",
+    formTitle: "Generate a link",
+    nameLabel: "Name",
+    namePlaceholder: "July IG reel",
+    nameHint: "Admin-only label — it never appears in the link itself.",
+    targetLabel: "Target",
+    targetHome: "Home page",
+    targetWatch: (title: string) => `Player — ${title}`,
+    targetShow: (title: string) => `Show page — ${title}`,
+    targetCustom: "Custom path…",
+    customPathLabel: "Path",
+    customPathPlaceholder: "/watch/my-show",
+    customPathHint:
+      "Starts with “/”, no ?, # or domain — the tags are appended automatically.",
+    sourceLabel: "Source · utm_source",
+    sourceCustom: "Other…",
+    sourceCustomPlaceholder: "pinterest",
+    mediumLabel: "Medium · utm_medium",
+    mediumHint: "“social” for organic posts, “paid” for ads.",
+    campaignLabel: "Campaign · utm_campaign",
+    campaignPlaceholder: "ig-reel-0715",
+    campaignHint:
+      "A unique name per post or placement — that’s what makes each one measurable.",
+    aliasNote:
+      "Values are canonicalized automatically: lowercase, [a-z0-9_-] only; instagram → ig, facebook and meta → fb.",
+    previewLabel: "Your link will be",
+    // Interpolated into copyAria as the link name for the preview's copy button.
+    previewCopyName: "preview",
+    submit: "Create link",
+    submitPending: "Creating…",
+    createdOk: "Link created — copy it from the table below.",
+    errNameRequired: "Name is required.",
+    errTargetInvalid:
+      "The path must start with “/” and contain no ?, # or domain.",
+    errUtmRequired:
+      "Source, medium and campaign are required — and must survive normalization.",
+    errDuplicate:
+      "An active link with this source · medium · campaign combination already exists — pick a different campaign name.",
+    errShowNotFound: "Show not found.",
+    errUnknown: "Couldn’t create the link. Try again.",
+    tableKicker: "Links",
+    tableTitle: "All links",
+    tableHint:
+      "Sessions are first-touch: browsers whose first tagged visit carried this link’s tags.",
+    colName: "Name",
+    colTarget: "Target",
+    colSessions30: "Sessions · 30d",
+    colPlayed: "Played",
+    colSignups: "Signups",
+    colAllTime: "All time",
+    colCreated: "Created",
+    copy: "Copy",
+    copied: "Copied",
+    copyAria: (name: string) => `Copy link “${name}”`,
+    archive: "Archive",
+    archiveConfirm: (name: string) =>
+      `Archive “${name}”? Sessions matched to its tags stay in analytics; the tag combination becomes reusable.`,
+    empty: "No links yet — create the first one above.",
+    consentNote:
+      "In the EU, tags persist only after cookie consent, so some clicks land in “(direct)”. Outside the EU tags are written on first visit.",
   },
 };
 

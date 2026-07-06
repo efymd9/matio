@@ -53,11 +53,16 @@ export function AnalyticsFilters({
   shows,
   channels,
   campaigns,
+  paymentsOn = true,
 }: {
   filters: AnalyticsFilters;
   shows: { slug: string; title: string }[];
   channels: string[];
   campaigns: string[];
+  // Free mode hides the subscription-status scope — the donut it drives
+  // isn't rendered there (paymentsEnabled() is server-only; threaded as a
+  // prop per the free-pivot rule).
+  paymentsOn?: boolean;
 }) {
   const t = useAdminT();
   const router = useRouter();
@@ -217,20 +222,22 @@ export function AnalyticsFilters({
             </select>
           </Labeled>
 
-          {/* Status scope */}
-          <Labeled label={t.analyticsFilters.subsLabel}>
-            <select
-              value={filters.status}
-              onChange={(e) =>
-                patch({ status: e.target.value === "ag" ? null : e.target.value })
-              }
-              className={select}
-            >
-              <option value="ag">{t.analyticsFilters.statusAccessGranting}</option>
-              <option value="active">{t.analyticsFilters.statusActiveOnly}</option>
-              <option value="all">{t.analyticsFilters.statusAll}</option>
-            </select>
-          </Labeled>
+          {/* Status scope (paid mode only — scopes the status-mix donut) */}
+          {paymentsOn ? (
+            <Labeled label={t.analyticsFilters.subsLabel}>
+              <select
+                value={filters.status}
+                onChange={(e) =>
+                  patch({ status: e.target.value === "ag" ? null : e.target.value })
+                }
+                className={select}
+              >
+                <option value="ag">{t.analyticsFilters.statusAccessGranting}</option>
+                <option value="active">{t.analyticsFilters.statusActiveOnly}</option>
+                <option value="all">{t.analyticsFilters.statusAll}</option>
+              </select>
+            </Labeled>
+          ) : null}
 
           {/* Attribution toggle */}
           <div className="flex items-center gap-1 rounded-lg bg-white/[0.04] p-1">

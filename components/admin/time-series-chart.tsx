@@ -27,6 +27,15 @@ const METRICS: { key: MetricKey; labelKey: MetricLabelKey }[] = [
   { key: "newSubs", labelKey: "metricNewSubs" },
 ];
 
+// Free mode: previews / conversions / new subs receive no new data (see the
+// free-pivot rule), so the toggle offers only the two live series. The `free`
+// series is relabeled "Sessions" — in free mode it IS the traffic metric,
+// not a tier.
+const METRICS_FREE: { key: MetricKey; labelKey: MetricLabelKey }[] = [
+  { key: "free", labelKey: "metricSessions" },
+  { key: "signups", labelKey: "metricSignups" },
+];
+
 function fmtBucket(key: string, gran: string): string {
   // key is "YYYY-MM-DD HH:MM:SS" (UTC). Trim to the useful precision.
   const [date, time] = key.split(" ");
@@ -38,12 +47,15 @@ function fmtBucket(key: string, gran: string): string {
 export function TimeSeriesChart({
   series,
   granularity,
+  freeMode = false,
 }: {
   series: SeriesPoint[];
   granularity: string;
+  freeMode?: boolean;
 }) {
   const t = useAdminT();
-  const [metric, setMetric] = useState<MetricKey>("trials");
+  const metrics = freeMode ? METRICS_FREE : METRICS;
+  const [metric, setMetric] = useState<MetricKey>(metrics[0].key);
   const values = series.map((p) => p[metric]);
   const max = Math.max(...values, 1);
   const total = values.reduce((a, b) => a + b, 0);
@@ -52,7 +64,7 @@ export function TimeSeriesChart({
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-1 rounded-lg bg-white/[0.04] p-1">
-          {METRICS.map((m) => (
+          {metrics.map((m) => (
             <button
               key={m.key}
               type="button"

@@ -19,7 +19,10 @@ import { Icon } from "@/components/site/icon";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import { getOrSyncCurrentUser } from "@/lib/admin";
-import { readAttributionCookies } from "@/lib/attribution";
+import {
+  applyUserAttribution,
+  readAttributionCookies,
+} from "@/lib/attribution";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
@@ -239,6 +242,16 @@ export default async function WatchPage({
       // this link existing.
       await getOrSyncCurrentUser();
       await linkTrialSessionsToCurrentUser();
+      // Free mode only: /subscribe — the historical applyUserAttribution
+      // call site — redirects home while payments are off, so without this
+      // no account would ever get first/last-touch stamped and every signup
+      // would read "(direct)" in the per-campaign tables. The watch page is
+      // where signed-in users actually land from tracked links. Paid mode
+      // keeps the /subscribe-only stamping unchanged (free-pivot rule: the
+      // flag branches at surfaces, and this surface IS the free funnel).
+      if (!paymentsOn) {
+        await applyUserAttribution(userId);
+      }
 
       // Signup-completion events (Meta Lead/CompleteRegistration + PostHog
       // signup_completed) historically fired on /subscribe; this flow

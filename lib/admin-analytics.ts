@@ -28,6 +28,8 @@ import {
 import { db } from "@/db";
 import {
   episodes,
+  type MarketingLink,
+  marketingLinks,
   seasons,
   shows,
   subscriptions,
@@ -36,6 +38,8 @@ import {
   watchProgress,
 } from "@/db/schema";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
+import { SITE_URL } from "@/lib/seo";
+import { buildTrackedUrl } from "@/lib/tracked-links";
 
 // ---------------------------------------------------------------------------
 // Data layer for /admin/analytics. The page is a server component that parses
@@ -388,6 +392,14 @@ export type CampaignRow = {
   signups: number;
   activeSubs: number;
   mrr: number;
+  // Free/organic engagement cut (populated from the trials rows; the paid
+  // table ignores them): distinct cookies, sessions that rendered frames,
+  // sessions that reached episode 2+, and the furthest-position sum over
+  // played sessions (avg depth = depthSum / played).
+  viewers: number;
+  played: number;
+  deep: number;
+  depthSum: number;
 };
 
 type TripleRow = {
@@ -398,6 +410,11 @@ type TripleRow = {
   // Sessions that reached a decision wall (preview paywall ≥55s, or the
   // free tier's sign-up wall). Only set on the trials rows.
   walled?: number;
+  // Free-funnel engagement aggregates. Only set on the trials rows.
+  viewers?: number;
+  played?: number;
+  deep?: number;
+  depthSum?: number;
   // Subs actually paying the recurring $38 now (status active/past_due, i.e.
   // excluding mid-$1-trial `trialing` rows). Only set on the subs rows; drives
   // MRR so a 3-day $1 trial that hasn't converted isn't credited as $38 MRR.
@@ -418,7 +435,20 @@ function mergeCampaignRows(
     const key = campaignKey(source, medium, campaign);
     let row = map.get(key);
     if (!row) {
-      row = { source, medium, campaign, trials: 0, walled: 0, signups: 0, activeSubs: 0, mrr: 0 };
+      row = {
+        source,
+        medium,
+        campaign,
+        trials: 0,
+        walled: 0,
+        signups: 0,
+        activeSubs: 0,
+        mrr: 0,
+        viewers: 0,
+        played: 0,
+        deep: 0,
+        depthSum: 0,
+      };
       map.set(key, row);
     }
     return row;
@@ -427,6 +457,10 @@ function mergeCampaignRows(
     const row = upsert(r.source, r.medium, r.campaign);
     row.trials += Number(r.n);
     row.walled += Number(r.walled ?? 0);
+    row.viewers += Number(r.viewers ?? 0);
+    row.played += Number(r.played ?? 0);
+    row.deep += Number(r.deep ?? 0);
+    row.depthSum += Number(r.depthSum ?? 0);
   }
   for (const r of signupsRows) upsert(r.source, r.medium, r.campaign).signups += Number(r.n);
   for (const r of subsRows) {
@@ -479,7 +513,14 @@ async function loadLastFreePositions(): Promise<Map<string, number>> {
 
 export type DashboardData = Awaited<ReturnType<typeof loadDashboard>>;
 
-export async function loadDashboard(f: AnalyticsFilters) {
+// `paymentsOn` mirrors lib/free-mode.ts:paymentsEnabled() (server-only there,
+// threaded here as a param so this module stays testable). In free mode the
+// paid-funnel queries are stubbed to zeros instead of executed — previews,
+// conversions, new subs, status mix and cancellations receive no new data
+// while payments are off (see the free-pivot rule in CLAUDE.md), so running
+// ~12 extra range scans per render would buy nothing — and the free-funnel
+// aggregates below run in their place.
+export async function loadDashboard(f: AnalyticsFilters, paymentsOn = true) {
   // Resolve the show filter to an id (avoids joins on the trial queries) and
   // provide the dropdown options.
   const showsList = await db
@@ -637,6 +678,10 @@ export async function loadDashboard(f: AnalyticsFilters) {
     // dropdown options
     channelRows,
     campaignRows,
+    // free/organic funnel (free mode only)
+    freeAggCur,
+    freeAggPrev,
+    sourceRollupRows,
   ] = await Promise.all([
     // signups current
     db.select({ n: count() }).from(users).where(and(...userConds(f.from, f.to))),
@@ -644,31 +689,39 @@ export async function loadDashboard(f: AnalyticsFilters) {
     // free-tier rows aren't 60s-capped and would flood every step. avgDepth
     // LEASTs at 60: ~10% of preview rows exceed the cap (seek / buffered
     // playback past token expiry) and were inflating the average.
-    db
-      .select({
-        previews: count(),
-        played: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.lastPositionSeconds} > 0)::int`,
-        nearCap: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.lastPositionSeconds} >= 55)::int`,
-        convertedPreviews: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.converted})::int`,
-        avgDepth: sql<number>`COALESCE(AVG(LEAST(${trialSessions.lastPositionSeconds}, 60)), 0)`,
-      })
-      .from(trialSessions)
-      .where(and(...trialConds(f.from, f.to, "preview"))),
+    paymentsOn
+      ? db
+          .select({
+            previews: count(),
+            played: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.lastPositionSeconds} > 0)::int`,
+            nearCap: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.lastPositionSeconds} >= 55)::int`,
+            convertedPreviews: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.converted})::int`,
+            avgDepth: sql<number>`COALESCE(AVG(LEAST(${trialSessions.lastPositionSeconds}, 60)), 0)`,
+          })
+          .from(trialSessions)
+          .where(and(...trialConds(f.from, f.to, "preview")))
+      : Promise.resolve([
+          { previews: 0, played: 0, nearCap: 0, convertedPreviews: 0, avgDepth: 0 },
+        ]),
     // conversion cohort (distinct session) current — P6 fix. All kinds:
     // free-tier sessions convert through the signup wall, previews through
     // the paywall; both are real session→paid conversions.
-    db
-      .select({
-        started: countDistinct(trialSessions.sessionToken),
-        converted: sql<number>`COUNT(DISTINCT ${trialSessions.sessionToken}) FILTER (WHERE ${trialSessions.converted})::int`,
-      })
-      .from(trialSessions)
-      .where(and(...trialConds(f.from, f.to))),
+    paymentsOn
+      ? db
+          .select({
+            started: countDistinct(trialSessions.sessionToken),
+            converted: sql<number>`COUNT(DISTINCT ${trialSessions.sessionToken}) FILTER (WHERE ${trialSessions.converted})::int`,
+          })
+          .from(trialSessions)
+          .where(and(...trialConds(f.from, f.to)))
+      : Promise.resolve([{ started: 0, converted: 0 }]),
     // new subs current
-    db
-      .select({ n: count() })
-      .from(subscriptions)
-      .where(and(...newSubConds(f.from, f.to))),
+    paymentsOn
+      ? db
+          .select({ n: count() })
+          .from(subscriptions)
+          .where(and(...newSubConds(f.from, f.to)))
+      : Promise.resolve([{ n: 0 }]),
     // ---- previous window ----
     f.prevFrom && f.prevTo
       ? db
@@ -676,19 +729,19 @@ export async function loadDashboard(f: AnalyticsFilters) {
           .from(users)
           .where(and(...userConds(f.prevFrom, f.prevTo)))
       : Promise.resolve([{ n: 0 }]),
-    f.prevFrom && f.prevTo
+    paymentsOn && f.prevFrom && f.prevTo
       ? db
           .select({ n: count() })
           .from(trialSessions)
           .where(and(...trialConds(f.prevFrom, f.prevTo, "preview")))
       : Promise.resolve([{ n: 0 }]),
-    f.prevFrom && f.prevTo
+    paymentsOn && f.prevFrom && f.prevTo
       ? db
           .select({ n: count() })
           .from(subscriptions)
           .where(and(...newSubConds(f.prevFrom, f.prevTo)))
       : Promise.resolve([{ n: 0 }]),
-    f.prevFrom && f.prevTo
+    paymentsOn && f.prevFrom && f.prevTo
       ? db
           .select({
             converted: sql<number>`COUNT(DISTINCT ${trialSessions.sessionToken}) FILTER (WHERE ${trialSessions.converted})::int`,
@@ -697,49 +750,59 @@ export async function loadDashboard(f: AnalyticsFilters) {
           .where(and(...trialConds(f.prevFrom, f.prevTo)))
       : Promise.resolve([{ converted: 0 }]),
     // ---- snapshots ----
-    db
-      .select({ n: count() })
-      .from(subscriptions)
-      .where(
-        and(
-          eq(subscriptions.status, "active"),
-          ...subAttrConds,
-        ),
-      ),
-    db
-      .select({ n: count() })
-      .from(subscriptions)
-      .where(
-        and(
-          sql`${subscriptions.status} IN ('active','trialing','past_due')`,
-          ...subAttrConds,
-        ),
-      ),
+    paymentsOn
+      ? db
+          .select({ n: count() })
+          .from(subscriptions)
+          .where(
+            and(
+              eq(subscriptions.status, "active"),
+              ...subAttrConds,
+            ),
+          )
+      : Promise.resolve([{ n: 0 }]),
+    paymentsOn
+      ? db
+          .select({ n: count() })
+          .from(subscriptions)
+          .where(
+            and(
+              sql`${subscriptions.status} IN ('active','trialing','past_due')`,
+              ...subAttrConds,
+            ),
+          )
+      : Promise.resolve([{ n: 0 }]),
     // status mix donut — the one place the "Subs" filter scopes.
-    db
-      .select({ status: subscriptions.status, n: count() })
-      .from(subscriptions)
-      .where(
-        and(
-          ...(statusSet
-            ? [inArray(subscriptions.status, [...statusSet])]
-            : []),
-          ...subAttrConds,
-        ) ?? sql`true`,
-      )
-      .groupBy(subscriptions.status),
-    db
-      .select({ n: count() })
-      .from(subscriptions)
-      .where(
-        and(
-          eq(subscriptions.status, "canceled"),
-          gte(subscriptions.updatedAt, f.from),
-          lte(subscriptions.updatedAt, f.to),
-          ...subAttrConds,
+    paymentsOn
+      ? db
+          .select({ status: subscriptions.status, n: count() })
+          .from(subscriptions)
+          .where(
+            and(
+              ...(statusSet
+                ? [inArray(subscriptions.status, [...statusSet])]
+                : []),
+              ...subAttrConds,
+            ) ?? sql`true`,
+          )
+          .groupBy(subscriptions.status)
+      : Promise.resolve(
+          [] as { status: (typeof subscriptions.$inferSelect)["status"]; n: number }[],
         ),
-      ),
-    f.prevFrom && f.prevTo
+    paymentsOn
+      ? db
+          .select({ n: count() })
+          .from(subscriptions)
+          .where(
+            and(
+              eq(subscriptions.status, "canceled"),
+              gte(subscriptions.updatedAt, f.from),
+              lte(subscriptions.updatedAt, f.to),
+              ...subAttrConds,
+            ),
+          )
+      : Promise.resolve([{ n: 0 }]),
+    paymentsOn && f.prevFrom && f.prevTo
       ? db
           .select({ n: count() })
           .from(subscriptions)
@@ -758,14 +821,16 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .from(users)
       .where(and(...userConds(f.from, f.to)))
       .groupBy(bucketExpr(users.createdAt, f.granularity)),
-    db
-      .select({
-        bucket: bucketExpr(trialSessions.startedAt, f.granularity),
-        n: count(),
-      })
-      .from(trialSessions)
-      .where(and(...trialConds(f.from, f.to, "preview")))
-      .groupBy(bucketExpr(trialSessions.startedAt, f.granularity)),
+    paymentsOn
+      ? db
+          .select({
+            bucket: bucketExpr(trialSessions.startedAt, f.granularity),
+            n: count(),
+          })
+          .from(trialSessions)
+          .where(and(...trialConds(f.from, f.to, "preview")))
+          .groupBy(bucketExpr(trialSessions.startedAt, f.granularity))
+      : Promise.resolve([] as { bucket: string; n: number }[]),
     db
       .select({
         bucket: bucketExpr(trialSessions.startedAt, f.granularity),
@@ -774,31 +839,37 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .from(trialSessions)
       .where(and(...trialConds(f.from, f.to, "episodes")))
       .groupBy(bucketExpr(trialSessions.startedAt, f.granularity)),
-    db
-      .select({
-        bucket: bucketExpr(trialSessions.startedAt, f.granularity),
-        n: sql<number>`COUNT(DISTINCT ${trialSessions.sessionToken}) FILTER (WHERE ${trialSessions.converted})::int`,
-      })
-      .from(trialSessions)
-      .where(and(...trialConds(f.from, f.to)))
-      .groupBy(bucketExpr(trialSessions.startedAt, f.granularity)),
-    db
-      .select({
-        bucket: bucketExpr(subscriptions.createdAt, f.granularity),
-        n: count(),
-      })
-      .from(subscriptions)
-      .where(and(...newSubConds(f.from, f.to)))
-      .groupBy(bucketExpr(subscriptions.createdAt, f.granularity)),
+    paymentsOn
+      ? db
+          .select({
+            bucket: bucketExpr(trialSessions.startedAt, f.granularity),
+            n: sql<number>`COUNT(DISTINCT ${trialSessions.sessionToken}) FILTER (WHERE ${trialSessions.converted})::int`,
+          })
+          .from(trialSessions)
+          .where(and(...trialConds(f.from, f.to)))
+          .groupBy(bucketExpr(trialSessions.startedAt, f.granularity))
+      : Promise.resolve([] as { bucket: string; n: number }[]),
+    paymentsOn
+      ? db
+          .select({
+            bucket: bucketExpr(subscriptions.createdAt, f.granularity),
+            n: count(),
+          })
+          .from(subscriptions)
+          .where(and(...newSubConds(f.from, f.to)))
+          .groupBy(bucketExpr(subscriptions.createdAt, f.granularity))
+      : Promise.resolve([] as { bucket: string; n: number }[]),
     // ---- trial depth histogram (10s buckets, capped at 60; previews only) ----
-    db
-      .select({
-        bucket: sql<number>`LEAST(${trialSessions.lastPositionSeconds} / 10, 6)::int`,
-        n: count(),
-      })
-      .from(trialSessions)
-      .where(and(...trialConds(f.from, f.to, "preview")))
-      .groupBy(sql`LEAST(${trialSessions.lastPositionSeconds} / 10, 6)`),
+    paymentsOn
+      ? db
+          .select({
+            bucket: sql<number>`LEAST(${trialSessions.lastPositionSeconds} / 10, 6)::int`,
+            n: count(),
+          })
+          .from(trialSessions)
+          .where(and(...trialConds(f.from, f.to, "preview")))
+          .groupBy(sql`LEAST(${trialSessions.lastPositionSeconds} / 10, 6)`)
+      : Promise.resolve([] as { bucket: number; n: number }[]),
     // ---- engagement (subscribers) ----
     db
       .select({
@@ -854,9 +925,23 @@ export async function loadDashboard(f: AnalyticsFilters) {
         campaign: tT.campaign,
         n: count(),
         walled: sql<number>`COUNT(*) FILTER (WHERE ${walledCond})::int`,
+        // Free/organic engagement columns (see CampaignRow). Same GROUP BY,
+        // marginal cost — computed in both modes so the one query serves the
+        // paid table (ignores them) and the free table alike.
+        viewers: countDistinct(trialSessions.sessionToken),
+        played: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.furthestEpisodeNumber} >= 1 OR ${trialSessions.lastPositionSeconds} > 0)::int`,
+        deep: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.furthestEpisodeNumber} >= 2)::int`,
+        depthSum: sql<number>`COALESCE(SUM(${trialSessions.furthestEpisodeNumber}) FILTER (WHERE ${trialSessions.furthestEpisodeNumber} >= 1), 0)::int`,
       })
       .from(trialSessions)
-      .where(and(...trialConds(f.from, f.to)))
+      // Paid mode keeps the documented both-kinds "Sessions" semantics; free
+      // mode scopes to kind='episodes' so every column (incl. Sessions)
+      // matches the KPI row / funnel / sources population on the same screen
+      // — and paid-era preview rows (furthest always 0) can't dilute the
+      // Avg-depth / 2+-eps columns on ranges reaching before 2026-07-04.
+      .where(
+        and(...trialConds(f.from, f.to, paymentsOn ? undefined : "episodes")),
+      )
       .groupBy(tT.source, tT.medium, tT.campaign),
     db
       .select({ source: uT.source, medium: uT.medium, campaign: uT.campaign, n: count() })
@@ -869,22 +954,24 @@ export async function loadDashboard(f: AnalyticsFilters) {
     // Sess→sub ratio divide two different populations). `paying` excludes
     // mid-$1-trial rows so the campaign MRR isn't inflated by trials that
     // haven't reached their day-3 $38 charge (see mergeCampaignRows).
-    db
-      .select({
-        source: sT.source,
-        medium: sT.medium,
-        campaign: sT.campaign,
-        n: count(),
-        paying: sql<number>`COUNT(*) FILTER (WHERE ${subscriptions.status} IN ('active','past_due'))::int`,
-      })
-      .from(subscriptions)
-      .where(
-        and(
-          inArray(subscriptions.status, [...ACCESS_GRANTING_STATUSES]),
-          ...newSubConds(f.from, f.to),
-        ),
-      )
-      .groupBy(sT.source, sT.medium, sT.campaign),
+    paymentsOn
+      ? db
+          .select({
+            source: sT.source,
+            medium: sT.medium,
+            campaign: sT.campaign,
+            n: count(),
+            paying: sql<number>`COUNT(*) FILTER (WHERE ${subscriptions.status} IN ('active','past_due'))::int`,
+          })
+          .from(subscriptions)
+          .where(
+            and(
+              inArray(subscriptions.status, [...ACCESS_GRANTING_STATUSES]),
+              ...newSubConds(f.from, f.to),
+            ),
+          )
+          .groupBy(sT.source, sT.medium, sT.campaign)
+      : Promise.resolve([] as TripleRow[]),
     // ---- channel dropdown options (distinct sources, all-time) ----
     db
       .selectDistinct({ source: tSrc })
@@ -895,6 +982,63 @@ export async function loadDashboard(f: AnalyticsFilters) {
       .selectDistinct({ campaign: tCmp })
       .from(trialSessions)
       .where(sql`${tCmp} IS NOT NULL`),
+    // ---- free/organic funnel aggregates (free mode only) --------------------
+    // kind='episodes' only — the same population as the trend chart's `free`
+    // series, so the KPI value and its sparkline can never disagree. Preview
+    // rows are a paid-era artifact and stay on the paid dashboard.
+    paymentsOn
+      ? Promise.resolve([
+          {
+            sessions: 0,
+            viewers: 0,
+            played: 0,
+            engaged2: 0,
+            engaged3: 0,
+            depthSum: 0,
+            linked: 0,
+          },
+        ])
+      : db
+          .select({
+            sessions: count(),
+            viewers: countDistinct(trialSessions.sessionToken),
+            // `played` unions the positional high-water mark with the raw
+            // playhead: kind='episodes' rows always advance furthest on the
+            // first save, but a sub-10s bounce can die before it.
+            played: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.furthestEpisodeNumber} >= 1 OR ${trialSessions.lastPositionSeconds} > 0)::int`,
+            engaged2: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.furthestEpisodeNumber} >= 2)::int`,
+            engaged3: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.furthestEpisodeNumber} >= 3)::int`,
+            depthSum: sql<number>`COALESCE(SUM(${trialSessions.furthestEpisodeNumber}) FILTER (WHERE ${trialSessions.furthestEpisodeNumber} >= 1), 0)::int`,
+            linked: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.userId} IS NOT NULL)::int`,
+          })
+          .from(trialSessions)
+          .where(and(...trialConds(f.from, f.to, "episodes"))),
+    !paymentsOn && f.prevFrom && f.prevTo
+      ? db
+          .select({
+            sessions: count(),
+            played: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.furthestEpisodeNumber} >= 1 OR ${trialSessions.lastPositionSeconds} > 0)::int`,
+            engaged2: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.furthestEpisodeNumber} >= 2)::int`,
+          })
+          .from(trialSessions)
+          .where(and(...trialConds(f.prevFrom, f.prevTo, "episodes")))
+      : Promise.resolve([{ sessions: 0, played: 0, engaged2: 0 }]),
+    // Sessions-by-source rollup for the free dashboard's sources panel.
+    paymentsOn
+      ? Promise.resolve(
+          [] as { source: string | null; n: number; viewers: number }[],
+        )
+      : db
+          .select({
+            source: tSrc,
+            n: count(),
+            viewers: countDistinct(trialSessions.sessionToken),
+          })
+          .from(trialSessions)
+          .where(and(...trialConds(f.from, f.to, "episodes")))
+          .groupBy(tSrc)
+          .orderBy(desc(count()))
+          .limit(12),
   ]);
 
   // Assemble -----------------------------------------------------------------
@@ -962,11 +1106,13 @@ export async function loadDashboard(f: AnalyticsFilters) {
       campaignCond(uCmp, f.campaign),
     ].filter((x): x is SQL => Boolean(x));
   const [guestSignupsCur, guestSignupsPrev] = await Promise.all([
-    db
-      .select({ n: count() })
-      .from(users)
-      .where(and(...guestSignupConds(f.from, f.to))),
-    f.prevFrom && f.prevTo
+    paymentsOn
+      ? db
+          .select({ n: count() })
+          .from(users)
+          .where(and(...guestSignupConds(f.from, f.to)))
+      : Promise.resolve([{ n: 0 }]),
+    paymentsOn && f.prevFrom && f.prevTo
       ? db
           .select({ n: count() })
           .from(users)
@@ -1030,6 +1176,36 @@ export async function loadDashboard(f: AnalyticsFilters) {
     })),
     statusMix: statusMixRows.map((r) => ({ status: r.status, n: Number(r.n) })),
     campaign,
+    // Free/organic funnel block (zeros in paid mode — the free dashboard is
+    // the only reader). `linkedSignIns` counts sessions later seen signed-in
+    // (trial_sessions.user_id linkage from the watch page), a floor on
+    // session→account conversion.
+    free: {
+      sessions: {
+        value: Number(freeAggCur[0].sessions),
+        prev: Number(freeAggPrev[0].sessions),
+      },
+      viewers: Number(freeAggCur[0].viewers),
+      played: {
+        value: Number(freeAggCur[0].played),
+        prev: Number(freeAggPrev[0].played),
+      },
+      engaged2: {
+        value: Number(freeAggCur[0].engaged2),
+        prev: Number(freeAggPrev[0].engaged2),
+      },
+      engaged3: Number(freeAggCur[0].engaged3),
+      avgDepth:
+        Number(freeAggCur[0].played) > 0
+          ? Number(freeAggCur[0].depthSum) / Number(freeAggCur[0].played)
+          : 0,
+      linkedSignIns: Number(freeAggCur[0].linked),
+    },
+    sources: sourceRollupRows.map((r) => ({
+      source: r.source,
+      sessions: Number(r.n),
+      viewers: Number(r.viewers),
+    })),
   };
 }
 
@@ -1249,4 +1425,260 @@ export async function loadEpisodeFunnels(
     });
   }
   return out;
+}
+
+// ---- free/organic per-show depth (free-mode dashboard) ----------------------
+
+export type FreeShowDepth = {
+  showSlug: string;
+  showTitle: string;
+  started: number;
+  played: number;
+  readyEpisodes: number;
+  // Cumulative positional reach: sessions whose furthest 1-based position
+  // >= N, for N = 1..min(readyEpisodes, 12). Monotonically falling.
+  depth: { label: string; n: number }[];
+};
+
+// Per-show viewing depth for the free dashboard. Unlike loadEpisodeFunnels
+// this does NOT gate on tier-configured episodes — in free mode every show
+// plays as the free tier and accumulates kind='episodes' sessions, so every
+// show with traffic in range gets a card (the tier config is dormant while
+// payments are off).
+export async function loadFreeShowDepth(
+  f: AnalyticsFilters,
+): Promise<FreeShowDepth[]> {
+  const tSrc = trialSource(f.attribution);
+  const tCmp =
+    f.attribution === "first"
+      ? trialSessions.attributionFirstCampaign
+      : trialSessions.attributionLastCampaign;
+  const conds: SQL[] = [
+    eq(trialSessions.kind, "episodes"),
+    gte(trialSessions.startedAt, f.from),
+    lte(trialSessions.startedAt, f.to),
+    channelCond(tSrc, f.channel),
+    campaignCond(tCmp, f.campaign),
+  ].filter((x): x is SQL => Boolean(x));
+
+  const [showRows, readyCountRows, depthRows] = await Promise.all([
+    db
+      .select({ id: shows.id, slug: shows.slug, title: shows.title })
+      .from(shows)
+      .where(isNull(shows.deletedAt)),
+    db
+      .select({ showId: seasons.showId, n: count() })
+      .from(episodes)
+      .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+      .where(eq(episodes.status, "ready"))
+      .groupBy(seasons.showId),
+    db
+      .select({
+        showId: trialSessions.showId,
+        furthest: trialSessions.furthestEpisodeNumber,
+        n: count(),
+      })
+      .from(trialSessions)
+      .where(and(...conds))
+      .groupBy(trialSessions.showId, trialSessions.furthestEpisodeNumber),
+  ]);
+
+  const readyByShow = new Map(readyCountRows.map((r) => [r.showId, Number(r.n)]));
+  const depthByShow = new Map<string, { furthest: number; n: number }[]>();
+  for (const r of depthRows) {
+    const list = depthByShow.get(r.showId) ?? [];
+    list.push({ furthest: Number(r.furthest), n: Number(r.n) });
+    depthByShow.set(r.showId, list);
+  }
+
+  const scoped =
+    f.show === "all" ? showRows : showRows.filter((s) => s.slug === f.show);
+
+  const out: FreeShowDepth[] = [];
+  for (const s of scoped) {
+    const rows = depthByShow.get(s.id);
+    if (!rows || rows.length === 0) continue;
+    const started = rows.reduce((acc, r) => acc + r.n, 0);
+    const played = rows.reduce(
+      (acc, r) => (r.furthest >= 1 ? acc + r.n : acc),
+      0,
+    );
+    const readyEpisodes = readyByShow.get(s.id) ?? 0;
+    // 12-bar cap keeps a long catalog show renderable; the tail positions
+    // collapse into the last bar's ">= N" semantics anyway (cumulative).
+    const maxPos = Math.min(readyEpisodes, 12);
+    const depth = Array.from({ length: maxPos }, (_, i) => {
+      const pos = i + 1;
+      const reached = rows.reduce(
+        (acc, r) => (r.furthest >= pos ? acc + r.n : acc),
+        0,
+      );
+      return { label: `E${pos}`, n: reached };
+    });
+    out.push({
+      showSlug: s.slug,
+      showTitle: s.title,
+      started,
+      played,
+      readyEpisodes,
+      depth,
+    });
+  }
+  return out.sort((a, b) => b.started - a.started);
+}
+
+// ---- tracked links (/admin/links + dashboard panel) -------------------------
+
+export type TrackedLinkRow = {
+  id: string;
+  name: string;
+  targetPath: string;
+  source: string;
+  medium: string;
+  campaign: string;
+  createdAt: Date;
+  url: string;
+  // In-range engagement, matched on the FIRST-touch triple.
+  sessions: number;
+  viewers: number;
+  played: number;
+  // Accounts created in range whose first-touch triple matches (clerk_signup
+  // origin, same scope as the Signups KPI).
+  signups: number;
+  allTimeSessions: number;
+};
+
+// Tracked-link performance. A link owns no click data — it is joined to
+// traffic purely by its normalized UTM triple against the FIRST-touch
+// attribution snapshot on trial_sessions / users (first-touch = the campaign
+// that opened the relationship, the right cut for "which share link brought
+// people in"). The dashboard's first/last toggle deliberately does not apply
+// here; sessions from browsers that already carried an older first-touch
+// cookie credit that older campaign (90-day write-if-absent semantics).
+export async function loadTrackedLinks(range: {
+  from: Date;
+  to: Date;
+}): Promise<TrackedLinkRow[]> {
+  let links: MarketingLink[];
+  try {
+    links = await db
+      .select()
+      .from(marketingLinks)
+      .where(isNull(marketingLinks.archivedAt))
+      .orderBy(desc(marketingLinks.createdAt));
+  } catch (e) {
+    // 42P01 = relation does not exist: the code deployed before migration
+    // 0020 ran. Degrade to an empty panel (same bar as the Mux Data section
+    // — an optional panel must never take down the whole dashboard) instead
+    // of 500ing every KPI on /admin/analytics.
+    if ((e as { code?: string }).code === "42P01") {
+      console.error(
+        "loadTrackedLinks: marketing_links table missing — run pnpm db:migrate",
+      );
+      return [];
+    }
+    throw e;
+  }
+  if (links.length === 0) return [];
+
+  const firstTriple = {
+    source: trialSessions.attributionFirstSource,
+    medium: trialSessions.attributionFirstMedium,
+    campaign: trialSessions.attributionFirstCampaign,
+  };
+  // Attributed rows only — a link triple is fully non-null, so unattributed
+  // sessions can never match and would only bloat the group set. Scoped to
+  // kind='episodes': the panel sits on a dashboard whose every free-mode
+  // number is episodes-kind, and an archived triple reclaimed by a new link
+  // must not inherit paid-era preview traffic in its counts.
+  const attributed = and(
+    isNotNull(trialSessions.attributionFirstSource),
+    eq(trialSessions.kind, "episodes"),
+  )!;
+
+  const [inRangeRows, allTimeRows, signupRows] = await Promise.all([
+    db
+      .select({
+        source: firstTriple.source,
+        medium: firstTriple.medium,
+        campaign: firstTriple.campaign,
+        n: count(),
+        viewers: countDistinct(trialSessions.sessionToken),
+        played: sql<number>`COUNT(*) FILTER (WHERE ${trialSessions.furthestEpisodeNumber} >= 1 OR ${trialSessions.lastPositionSeconds} > 0)::int`,
+      })
+      .from(trialSessions)
+      .where(
+        and(
+          attributed,
+          gte(trialSessions.startedAt, range.from),
+          lte(trialSessions.startedAt, range.to),
+        ),
+      )
+      .groupBy(firstTriple.source, firstTriple.medium, firstTriple.campaign),
+    db
+      .select({
+        source: firstTriple.source,
+        medium: firstTriple.medium,
+        campaign: firstTriple.campaign,
+        n: count(),
+      })
+      .from(trialSessions)
+      .where(attributed)
+      .groupBy(firstTriple.source, firstTriple.medium, firstTriple.campaign),
+    db
+      .select({
+        source: users.attributionFirstSource,
+        medium: users.attributionFirstMedium,
+        campaign: users.attributionFirstCampaign,
+        n: count(),
+      })
+      .from(users)
+      .where(
+        and(
+          isNotNull(users.attributionFirstSource),
+          eq(users.signupOrigin, "clerk_signup"),
+          gte(users.createdAt, range.from),
+          lte(users.createdAt, range.to),
+        ),
+      )
+      .groupBy(
+        users.attributionFirstSource,
+        users.attributionFirstMedium,
+        users.attributionFirstCampaign,
+      ),
+  ]);
+
+  const inRange = new Map(
+    inRangeRows.map((r) => [campaignKey(r.source, r.medium, r.campaign), r]),
+  );
+  const allTime = new Map(
+    allTimeRows.map((r) => [campaignKey(r.source, r.medium, r.campaign), r]),
+  );
+  const signups = new Map(
+    signupRows.map((r) => [campaignKey(r.source, r.medium, r.campaign), r]),
+  );
+
+  return links.map((l) => {
+    const key = campaignKey(l.utmSource, l.utmMedium, l.utmCampaign);
+    const cur = inRange.get(key);
+    return {
+      id: l.id,
+      name: l.name,
+      targetPath: l.targetPath,
+      source: l.utmSource,
+      medium: l.utmMedium,
+      campaign: l.utmCampaign,
+      createdAt: l.createdAt,
+      url: buildTrackedUrl(SITE_URL, l.targetPath, {
+        source: l.utmSource,
+        medium: l.utmMedium,
+        campaign: l.utmCampaign,
+      }),
+      sessions: cur ? Number(cur.n) : 0,
+      viewers: cur ? Number(cur.viewers) : 0,
+      played: cur ? Number(cur.played) : 0,
+      signups: Number(signups.get(key)?.n ?? 0),
+      allTimeSessions: Number(allTime.get(key)?.n ?? 0),
+    };
+  });
 }
