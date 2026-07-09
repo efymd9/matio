@@ -14,6 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getDict();
   return {
     title: t.legal.privacyTitle,
+    description: t.legal.privacyDescription,
     alternates: { canonical: canonicalUrl("/privacy") },
     robots: { index: true, follow: true },
   };

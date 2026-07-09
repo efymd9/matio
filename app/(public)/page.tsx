@@ -12,6 +12,7 @@ import { getPublishedShows } from "@/lib/catalog";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
+import { catalogItemListJsonLd, jsonLdScript } from "@/lib/structured-data";
 import { TRIAL_DURATION_SECONDS } from "@/lib/trial";
 // The hero auto-plays a muted preview of the featured show's first episode.
 // The signed JWT we mint here ends up in the HTML, so anyone can extract it
@@ -147,8 +148,24 @@ export default async function HomePage() {
   const flaggedNew = published.filter((s) => s.justReleased);
   const justReleased = flaggedNew.length > 0 ? flaggedNew : published;
 
+  // Machine-readable catalog (ItemList of TVSeries stubs) — the entry point
+  // AI answer engines read to learn what Matio offers. Organization + WebSite
+  // come from the root layout; this adds the content layer.
+  const catalogLd = catalogItemListJsonLd(
+    published.map((s) => ({
+      slug: s.slug,
+      title: s.title,
+      description: s.description,
+      image: s.heroImageUrl ?? s.posterImageUrl,
+    })),
+  );
+
   return (
     <main className="bg-background">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLdScript(catalogLd) }}
+      />
       <HeroBanner
         title={featured.title}
         description={featured.description}

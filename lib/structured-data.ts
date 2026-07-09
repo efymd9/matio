@@ -103,6 +103,50 @@ export function websiteJsonLd(): JsonLd {
   };
 }
 
+// Homepage catalog (/) as a machine-readable list. Without it, crawlers and
+// AI answer engines have to scrape the rendered rails to learn what Matio
+// offers; this hands them the catalog directly. Each element is a TVSeries
+// stub whose @id matches the full node emitted on its own /shows/[slug]
+// page, so both resolve to one entity across pages.
+export function catalogItemListJsonLd(
+  items: {
+    slug: string;
+    title: string;
+    description?: string | null;
+    image?: string | null;
+  }[],
+): JsonLd {
+  return {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    "@id": `${SITE_URL}/#catalog`,
+    name: `${SITE_NAME} catalogue`,
+    numberOfItems: items.length,
+    itemListElement: items.map((it, i) => {
+      const url = `${SITE_URL}/shows/${it.slug}`;
+      return {
+        "@type": "ListItem",
+        position: i + 1,
+        item: {
+          "@type": "TVSeries",
+          "@id": `${url}#series`,
+          url,
+          name: it.title,
+          description: it.description ?? undefined,
+          // Same absolutization rule as tvSeriesJsonLd — JSON-LD has no
+          // metadataBase resolution, so legacy same-origin paths must be
+          // made absolute here.
+          image: it.image
+            ? /^https?:\/\//i.test(it.image)
+              ? it.image
+              : canonicalUrl(it.image)
+            : undefined,
+        },
+      };
+    }),
+  };
+}
+
 export function breadcrumbJsonLd(items: { name: string; url: string }[]): JsonLd {
   return {
     "@context": "https://schema.org",
@@ -187,6 +231,10 @@ export function tvSeriesJsonLd(input: TvSeriesInput): JsonLd {
     isAccessibleForFree: input.isAccessibleForFree,
     actor: input.actors?.map((a) => ({
       "@type": "Person",
+      // Must match personJsonLd's @id (`${url}#person`) or the show's actor
+      // reference and the /actors/[slug] Person node read as two disconnected
+      // entities instead of one.
+      "@id": `${a.url}#person`,
       name: a.name,
       url: a.url,
     })),

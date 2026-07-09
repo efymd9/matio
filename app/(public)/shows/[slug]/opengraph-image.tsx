@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
 import { getShowBySlug } from "@/lib/show-query";
+import { SITE_NAME } from "@/lib/seo";
 import { en } from "@/lib/i18n/dictionaries";
 
 // Per-show OG card: the show title over its hero art (when public), with the
@@ -13,9 +14,38 @@ import { en } from "@/lib/i18n/dictionaries";
 // which needs Node TCP sockets. ImageResponse works in both runtimes.
 export const runtime = "nodejs";
 
-export const alt = en.metadata.siteTitle;
+// generateImageMetadata makes Next try to SSG this route ([__metadata_id__]
+// becomes ● in the build). Keep it request-rendered so replaced show artwork
+// shows up in unfurls without a redeploy.
+export const dynamic = "force-dynamic";
+
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
+
+// Per-show og:image:alt / twitter:image:alt. A static `alt` export can't see
+// params, so every show unfurl used to read as the generic site title;
+// generateImageMetadata is the file convention's dynamic-alt hook (still one
+// image per show — a single entry).
+export async function generateImageMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+  // Build-time page-data collection probes this route with no params — the
+  // guard keeps that probe from issuing a DB query with an undefined slug
+  // (postgres-js throws UNDEFINED_VALUE and fails the build). At request
+  // time slug is always present.
+  const show = slug ? await getShowBySlug(slug) : null;
+  return [
+    {
+      id: "card",
+      alt: show ? `${show.title} — ${SITE_NAME}` : en.metadata.siteTitle,
+      size,
+      contentType,
+    },
+  ];
+}
 
 // Only public hosts are safe as a crawler-facing background: signed Mux
 // thumbnails 403, and arbitrary hosts aren't in the next/image allowlist.

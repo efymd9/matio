@@ -10,7 +10,7 @@ import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
 import { getShowBySlug } from "@/lib/show-query";
-import { SITE_URL, canonicalUrl } from "@/lib/seo";
+import { SITE_URL, canonicalUrl, metaDescription } from "@/lib/seo";
 import {
   breadcrumbJsonLd,
   jsonLdScript,
@@ -40,11 +40,14 @@ export async function generateMetadata({
   const url = canonicalUrl(`/shows/${slug}`);
   // Null-description shows otherwise ship with NO meta description; synthesize
   // a unique, genre-varied line (anti-thin-content) instead of a constant.
-  const description =
+  // metaDescription() collapses the DB synopsis's raw \r\n breaks and
+  // truncates to snippet length — the JSON-LD keeps the full text.
+  const description = metaDescription(
     show.description ??
-    (paymentsEnabled()
-      ? t.showDetail.synopsisFallback(show.title, show.genre)
-      : t.showDetail.synopsisFallbackFree(show.title, show.genre));
+      (paymentsEnabled()
+        ? t.showDetail.synopsisFallback(show.title, show.genre)
+        : t.showDetail.synopsisFallbackFree(show.title, show.genre)),
+  );
   return {
     title: t.showDetail.watchOnlineTitle(show.title),
     description,

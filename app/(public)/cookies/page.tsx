@@ -14,6 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getDict();
   return {
     title: t.legal.cookiesTitle,
+    description: t.legal.cookiesDescription,
     alternates: { canonical: canonicalUrl("/cookies") },
     robots: { index: true, follow: true },
   };

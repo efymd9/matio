@@ -7,7 +7,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { actors, showActors, shows } from "@/db/schema";
 import { getDict } from "@/lib/i18n/server";
-import { SITE_URL, canonicalUrl } from "@/lib/seo";
+import { SITE_URL, canonicalUrl, metaDescription } from "@/lib/seo";
 import {
   breadcrumbJsonLd,
   jsonLdScript,
@@ -42,7 +42,9 @@ export async function generateMetadata({
   const { t } = await getDict();
   if (!actor) return { title: t.actorPage.notFound };
   const url = canonicalUrl(`/actors/${slug}`);
-  const description = actor.bio ?? t.actorPage.metaDescription(actor.name);
+  const description = metaDescription(
+    actor.bio ?? t.actorPage.metaDescription(actor.name),
+  );
   return {
     title: t.actorPage.metaTitle(actor.name),
     description,

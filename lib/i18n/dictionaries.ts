@@ -388,6 +388,12 @@ export const es = {
     termsTitle: "Términos del servicio",
     privacyTitle: "Política de privacidad",
     cookiesTitle: "Política de cookies",
+    termsDescription:
+      "Términos del servicio de Matio: uso de la plataforma, cuentas, contenido y facturación.",
+    privacyDescription:
+      "Cómo Matio recoge, usa y protege tus datos personales, y qué derechos tienes.",
+    cookiesDescription:
+      "Qué cookies usa Matio, para qué sirven y cómo gestionar tu consentimiento.",
   },
 };
 
@@ -765,6 +771,12 @@ export const en: Dict = {
     termsTitle: "Terms of Service",
     privacyTitle: "Privacy Policy",
     cookiesTitle: "Cookie Policy",
+    termsDescription:
+      "Matio's Terms of Service: using the platform, accounts, content and billing.",
+    privacyDescription:
+      "How Matio collects, uses and protects your personal data, and the rights you have.",
+    cookiesDescription:
+      "The cookies Matio uses, what they are for and how to manage your consent.",
   },
 };
 

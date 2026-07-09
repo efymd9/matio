@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies, headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
@@ -31,6 +32,16 @@ import {
   isTrialActive,
   linkTrialSessionsToCurrentUser,
 } from "@/lib/trial";
+
+// Belt-and-braces noindex. /watch is Disallowed in robots.txt (crawling it
+// costs trial-session machinery), but a disallow alone still allows URL-only
+// indexing from external links — and it stops crawlers from ever reading the
+// inherited index:true meta, leaving the two signals contradicting each
+// other. Declare the real intent here so they agree if the disallow is ever
+// lifted. The canonical crawl surface for a show is /shows/[slug].
+export const metadata: Metadata = {
+  robots: { index: false, follow: true },
+};
 
 export default async function WatchPage({
   params,

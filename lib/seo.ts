@@ -24,3 +24,17 @@ export function canonicalUrl(path: string): string {
   if (path === "/" || path === "") return SITE_URL;
   return `${SITE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
+
+// Meta-description sanitizer for DB-sourced copy. Admin-entered synopses
+// carry raw \r\n paragraph breaks which would otherwise be emitted verbatim
+// inside the <meta content> attribute; collapse all whitespace runs and
+// truncate on a word boundary at ~160 chars (the practical SERP snippet
+// budget). JSON-LD descriptions deliberately stay full-length — only the
+// meta tag needs this.
+export function metaDescription(text: string, max = 160): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= max) return collapsed;
+  const cut = collapsed.slice(0, max - 1);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > 60 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
