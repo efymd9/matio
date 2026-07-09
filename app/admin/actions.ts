@@ -1,16 +1,19 @@
 "use server";
 
 import { del } from "@vercel/blob";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import {
+  actors,
   episodeAccess,
   episodes,
   seasons,
+  showActors,
   shows,
   type EpisodeAccess,
+  type NewActor,
   type NewShow,
 } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin";
@@ -440,6 +443,192 @@ export async function deleteEpisode(
   if (!chain) throw new Error("Episode not in this season/show");
   await db.delete(episodes).where(eq(episodes.id, id));
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
+}
+
+// ---------- virtual actors ----------
+
+// Shared validation for the create/update actor forms. Returns the column
+// values; throws on a bad name/slug — same fail-loud style as the show
+// actions (messages are masked in prod anyway).
+function actorValues(formData: FormData): NewActor {
+  const name = str(formData, "name");
+  const slug = str(formData, "slug");
+  if (!name) throw new Error("Name is required");
+  if (!slug) throw new Error("Slug is required");
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    throw new Error("Slug must be lowercase letters, numbers, and hyphens");
+  }
+  return {
+    name,
+    slug,
+    tagline: str(formData, "tagline") || null,
+    bio: str(formData, "bio") || null,
+    avatarImageUrl: str(formData, "avatarImageUrl") || null,
+  };
+}
+
+export async function createActor(formData: FormData) {
+  await requireAdmin();
+  const [created] = await db
+    .insert(actors)
+    .values(actorValues(formData))
+    .returning({ id: actors.id });
+  revalidatePath("/admin/actors");
+  redirect(`/admin/actors/${created.id}`);
+}
+
+export async function updateActor(id: string, formData: FormData) {
+  await requireAdmin();
+  const values = actorValues(formData);
+
+  // Snapshot the current avatar so a replaced/cleared Blob object gets
+  // cleaned up, same as show artwork.
+  const [prev] = await db
+    .select({ avatarImageUrl: actors.avatarImageUrl })
+    .from(actors)
+    .where(eq(actors.id, id))
+    .limit(1);
+
+  await db.update(actors).set(values).where(eq(actors.id, id));
+
+  if (prev) {
+    await deleteOrphanedBlob(prev.avatarImageUrl, values.avatarImageUrl ?? null);
+  }
+
+  revalidatePath("/admin/actors");
+  revalidatePath(`/admin/actors/${id}`);
+}
+
+// Hard delete (unlike shows' soft delete): an actor carries no playback or
+// billing state, and the show_actors FK cascades, so the row disappears
+// from every show's cast in the same statement.
+export async function deleteActor(id: string) {
+  await requireAdmin();
+  const [prev] = await db
+    .select({ avatarImageUrl: actors.avatarImageUrl })
+    .from(actors)
+    .where(eq(actors.id, id))
+    .limit(1);
+
+  await db.delete(actors).where(eq(actors.id, id));
+
+  if (prev) await deleteOrphanedBlob(prev.avatarImageUrl, null);
+
+  revalidatePath("/admin/actors");
+  redirect("/admin/actors");
+}
+
+// ---------- show cast (show_actors) ----------
+
+export async function addActorToShow(showId: string, formData: FormData) {
+  await requireAdmin();
+
+  const actorId = str(formData, "actorId");
+  if (!actorId) throw new Error("Pick an actor to add");
+
+  // Verify both sides exist (the actor select is admin-rendered, but the
+  // server can't trust a form post) before linking.
+  const [actor] = await db
+    .select({ id: actors.id })
+    .from(actors)
+    .where(eq(actors.id, actorId))
+    .limit(1);
+  if (!actor) throw new Error("Actor not found");
+  const [show] = await db
+    .select({ id: shows.id })
+    .from(shows)
+    .where(and(eq(shows.id, showId), isNull(shows.deletedAt)))
+    .limit(1);
+  if (!show) throw new Error("Show not found");
+
+  // Append at the end of the current order. max(position)+1 computed in
+  // the insert itself so two quick adds can't race to the same slot in a
+  // way that breaks anything worse than a tied position (ties are stable:
+  // the cast query orders by (position, name)).
+  const [{ next }] = await db
+    .select({
+      next: sql<number>`coalesce(max(${showActors.position}), 0) + 1`,
+    })
+    .from(showActors)
+    .where(eq(showActors.showId, showId));
+
+  await db
+    .insert(showActors)
+    .values({
+      showId,
+      actorId,
+      characterName: str(formData, "characterName") || null,
+      position: next,
+    })
+    // Already in the cast → keep the existing row (and its character name).
+    .onConflictDoNothing();
+
+  revalidatePath(`/admin/shows/${showId}`);
+}
+
+export async function updateCastCharacter(
+  showId: string,
+  actorId: string,
+  formData: FormData,
+) {
+  await requireAdmin();
+  await db
+    .update(showActors)
+    .set({ characterName: str(formData, "characterName") || null })
+    .where(
+      and(eq(showActors.showId, showId), eq(showActors.actorId, actorId)),
+    );
+  revalidatePath(`/admin/shows/${showId}`);
+}
+
+export async function removeActorFromShow(showId: string, actorId: string) {
+  await requireAdmin();
+  await db
+    .delete(showActors)
+    .where(
+      and(eq(showActors.showId, showId), eq(showActors.actorId, actorId)),
+    );
+  revalidatePath(`/admin/shows/${showId}`);
+}
+
+// Swap the row with its neighbour in display order. Rewrites BOTH rows'
+// positions to dense ranks inside one transaction, so legacy ties/gaps
+// self-heal as rows get moved.
+export async function moveCastMember(
+  showId: string,
+  actorId: string,
+  direction: "up" | "down",
+) {
+  await requireAdmin();
+  await db.transaction(async (tx) => {
+    const cast = await tx
+      .select({ actorId: showActors.actorId })
+      .from(showActors)
+      .innerJoin(actors, eq(showActors.actorId, actors.id))
+      .where(eq(showActors.showId, showId))
+      .orderBy(asc(showActors.position), asc(actors.name));
+
+    const from = cast.findIndex((c) => c.actorId === actorId);
+    if (from === -1) return;
+    const to = direction === "up" ? from - 1 : from + 1;
+    if (to < 0 || to >= cast.length) return;
+
+    const order = cast.map((c) => c.actorId);
+    [order[from], order[to]] = [order[to], order[from]];
+
+    for (let i = 0; i < order.length; i++) {
+      await tx
+        .update(showActors)
+        .set({ position: i + 1 })
+        .where(
+          and(
+            eq(showActors.showId, showId),
+            eq(showActors.actorId, order[i]),
+          ),
+        );
+    }
+  });
+  revalidatePath(`/admin/shows/${showId}`);
 }
 
 // ---------- Mux ----------

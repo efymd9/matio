@@ -91,6 +91,18 @@ export const es = {
       `${title}: serie original de Matio${
         genre.length ? ` · ${genre.join(", ")}` : ""
       }. Míralo gratis en streaming.`,
+    castTitle: "Actores virtuales",
+    castAs: (c: string) => `como ${c}`,
+    castViewProfile: "Ver perfil →",
+  },
+  actorPage: {
+    notFound: "No encontrado",
+    virtualActor: "Actor virtual",
+    appearsIn: "Aparece en",
+    noShowsYet: "Todavía no aparece en ninguna serie.",
+    metaTitle: (name: string) => `${name} — Actor virtual`,
+    metaDescription: (name: string) =>
+      `${name}: actor virtual de Matio. Biografía y series en las que aparece.`,
   },
   watch: {
     comingSoonTitle: "Próximamente",
@@ -458,6 +470,18 @@ export const en: Dict = {
       `${title}: an original Matio series${
         genre.length ? ` · ${genre.join(", ")}` : ""
       }. Watch it free online.`,
+    castTitle: "Virtual actors",
+    castAs: (c: string) => `as ${c}`,
+    castViewProfile: "View profile →",
+  },
+  actorPage: {
+    notFound: "Not found",
+    virtualActor: "Virtual actor",
+    appearsIn: "Appears in",
+    noShowsYet: "Not in any shows yet.",
+    metaTitle: (name: string) => `${name} — Virtual actor`,
+    metaDescription: (name: string) =>
+      `${name}: a Matio virtual actor. Bio and the shows they appear in.`,
   },
   watch: {
     comingSoonTitle: "Coming soon",

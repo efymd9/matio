@@ -36,7 +36,7 @@ export function ImageUploadField({
   name: string;
   value: string;
   onChange: (v: string) => void;
-  ratio: "poster" | "hero";
+  ratio: "poster" | "hero" | "avatar";
   hint: string;
 }) {
   const t = useAdminT();
@@ -66,8 +66,12 @@ export function ImageUploadField({
     try {
       // Sanitise the filename for a clean pathname; the server adds a random
       // suffix (addRandomSuffix) so this never collides or overwrites.
+      // The prefix must stay in lockstep with UPLOAD_PATH in
+      // app/api/admin/upload-image/route.ts — the token issuer pins it.
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "-");
-      const result = await upload(`shows/${ratio}-${safeName}`, file, {
+      const pathPrefix =
+        ratio === "avatar" ? "actors/avatar" : `shows/${ratio}`;
+      const result = await upload(`${pathPrefix}-${safeName}`, file, {
         access: "public",
         handleUploadUrl: "/api/admin/upload-image",
         contentType: file.type,
@@ -87,7 +91,9 @@ export function ImageUploadField({
   const boxRatio =
     ratio === "poster"
       ? "aspect-[2/3] w-full max-w-[200px]"
-      : "aspect-video w-full";
+      : ratio === "avatar"
+        ? "aspect-square w-full max-w-[200px]"
+        : "aspect-video w-full";
 
   return (
     <div className="space-y-2.5">
@@ -185,7 +191,7 @@ export function ImageUploadField({
 
         {/* Aspect-ratio chip */}
         <span className="pointer-events-none absolute right-2 top-2 rounded-[3px] bg-black/60 px-1.5 py-0.5 font-mono text-[9px] text-cream/70 backdrop-blur-md">
-          {ratio === "poster" ? "2:3" : "≈21:9"}
+          {ratio === "poster" ? "2:3" : ratio === "avatar" ? "1:1" : "≈21:9"}
         </span>
       </label>
 

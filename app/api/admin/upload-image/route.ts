@@ -26,11 +26,12 @@ const ALLOWED_CONTENT_TYPES = [
 // would be a mistake (a stray video file, say).
 const MAX_BYTES = 15 * 1024 * 1024;
 
-// The client requests a token for `shows/<poster|hero>-<filename>`. The
+// The client requests a token for `shows/<poster|hero>-<filename>` (show
+// artwork) or `actors/avatar-<filename>` (virtual-actor avatars). The
 // pathname is embedded verbatim into the issued client token, so we pin it
 // here — otherwise an admin-session caller could mint a token for any path
 // in the store. addRandomSuffix then makes the final key unique on top.
-const UPLOAD_PATH = /^shows\/(?:poster|hero)-[A-Za-z0-9._-]+$/;
+const UPLOAD_PATH = /^(?:shows\/(?:poster|hero)|actors\/avatar)-[A-Za-z0-9._-]+$/;
 
 export async function POST(request: Request): Promise<NextResponse> {
   // Parse inside the try so a malformed/probe POST returns the same

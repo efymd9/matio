@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { episodes, seasons } from "@/db/schema";
+import { actors, episodes, seasons, showActors } from "@/db/schema";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
@@ -17,6 +17,7 @@ import {
   tvSeriesJsonLd,
 } from "@/lib/structured-data";
 import { ViewContentPixel } from "@/components/site/view-content-pixel";
+import { ActorChip } from "@/components/site/actor-chip";
 import { Icon } from "@/components/site/icon";
 import { MetaDot } from "@/components/site/meta-dot";
 import { ShareButton } from "@/components/site/share-button";
@@ -96,6 +97,22 @@ export default async function ShowDetailPage({
     .where(eq(seasons.showId, show.id))
     .orderBy(asc(seasons.number));
 
+  // Virtual-actor cast, in the admin-set display order; (position, name)
+  // keeps legacy position ties stable — same rule the admin panel uses.
+  const cast = await db
+    .select({
+      slug: actors.slug,
+      name: actors.name,
+      tagline: actors.tagline,
+      bio: actors.bio,
+      avatarImageUrl: actors.avatarImageUrl,
+      characterName: showActors.characterName,
+    })
+    .from(showActors)
+    .innerJoin(actors, eq(showActors.actorId, actors.id))
+    .where(eq(showActors.showId, show.id))
+    .orderBy(asc(showActors.position), asc(actors.name));
+
   const seasonIds = showSeasons.map((s) => s.id);
   const rawEpisodes =
     seasonIds.length === 0
@@ -166,6 +183,10 @@ export default async function ShowDetailPage({
     isAccessibleForFree:
       readyEpisodes.length > 0 &&
       (!paymentsOn || readyEpisodes.every((e) => e.access === "free")),
+    actors: cast.map((m) => ({
+      name: m.name,
+      url: canonicalUrl(`/actors/${m.slug}`),
+    })),
     seasons: showSeasons.map((s) => ({
       number: s.number,
       name: s.title,
@@ -303,6 +324,42 @@ export default async function ShowDetailPage({
                 {show.description}
               </p>
             )}
+          </div>
+        </section>
+      )}
+
+      {/* Virtual actors */}
+      {cast.length > 0 && (
+        <section className="px-6 pb-10 tablet:px-10 xl:px-14">
+          <div className="mx-auto flex max-w-5xl flex-col gap-4">
+            <div className="flex items-center gap-2">
+              <span
+                aria-hidden
+                className="h-0.5 w-3.5 shrink-0 rounded-[1px] bg-rust xl:w-[18px]"
+              />
+              <h2 className="font-display text-base uppercase tracking-[0.12em] text-gold xl:text-xl">
+                {t.showDetail.castTitle}
+              </h2>
+            </div>
+            <ul className="flex flex-wrap gap-x-4 gap-y-6 tablet:gap-x-6">
+              {cast.map((m) => (
+                <li key={m.slug}>
+                  <ActorChip
+                    href={`/actors/${m.slug}`}
+                    name={m.name}
+                    characterLabel={
+                      m.characterName
+                        ? t.showDetail.castAs(m.characterName)
+                        : null
+                    }
+                    tagline={m.tagline}
+                    bio={m.bio}
+                    avatarUrl={m.avatarImageUrl}
+                    viewProfileLabel={t.showDetail.castViewProfile}
+                  />
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
       )}

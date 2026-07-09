@@ -37,6 +37,12 @@ export default async function AdminLayout({
               {t.nav.shows}
             </Link>
             <Link
+              href="/admin/actors"
+              className="text-sm font-medium text-cream/65 transition-colors hover:text-cream"
+            >
+              {t.nav.actors}
+            </Link>
+            <Link
               href="/admin/analytics"
               className="text-sm font-medium text-cream/65 transition-colors hover:text-cream"
             >

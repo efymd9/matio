@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, notInArray } from "drizzle-orm";
 import { db } from "@/db";
-import { seasons, shows } from "@/db/schema";
+import { actors, seasons, showActors, shows } from "@/db/schema";
 import { Icon } from "@/components/site/icon";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import { ShowForm } from "@/components/admin/show-form";
@@ -10,11 +10,15 @@ import { Input } from "@/components/ui/input";
 import { getAdminDict } from "@/lib/i18n/admin-server";
 import type { AdminDict } from "@/lib/i18n/admin-dictionaries";
 import {
+  addActorToShow,
   createSeason,
   deleteSeason,
+  moveCastMember,
+  removeActorFromShow,
   setFeaturedShow,
   softDeleteShow,
   unsetFeaturedShow,
+  updateCastCharacter,
   updateShow,
 } from "@/app/admin/actions";
 
@@ -39,6 +43,28 @@ export default async function EditShowPage({
     .from(seasons)
     .where(eq(seasons.showId, show.id))
     .orderBy(asc(seasons.number));
+
+  // Cast in admin-set display order; (position, name) so legacy position
+  // ties stay stable. Same ordering rule the public show page uses.
+  const cast = await db
+    .select({
+      actorId: actors.id,
+      name: actors.name,
+      tagline: actors.tagline,
+      avatarImageUrl: actors.avatarImageUrl,
+      characterName: showActors.characterName,
+    })
+    .from(showActors)
+    .innerJoin(actors, eq(showActors.actorId, actors.id))
+    .where(eq(showActors.showId, show.id))
+    .orderBy(asc(showActors.position), asc(actors.name));
+
+  const castIds = cast.map((c) => c.actorId);
+  const availableActors = await db
+    .select({ id: actors.id, name: actors.name })
+    .from(actors)
+    .where(castIds.length ? notInArray(actors.id, castIds) : undefined)
+    .orderBy(asc(actors.name));
 
   const isPublished = show.status === "published";
 
@@ -210,6 +236,194 @@ export default async function EditShowPage({
             {t.showEdit.add}
           </button>
         </form>
+      </Panel>
+
+      {/* Virtual actors (cast) */}
+      <Panel
+        kicker={t.showEdit.castKicker}
+        title={t.showEdit.castTitle}
+        right={
+          <span className="font-mono text-xs text-cream/45">
+            {t.showEdit.castCount(cast.length)}
+          </span>
+        }
+      >
+        <div className="space-y-2">
+          {cast.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-white/10 py-6 text-center text-sm text-cream/45">
+              {t.showEdit.noCastYet}
+            </p>
+          ) : (
+            cast.map((member, i) => (
+              <div
+                key={member.actorId}
+                className="flex flex-wrap items-center gap-3 rounded-lg border border-white/[0.07] bg-black/20 px-4 py-3"
+              >
+                <div className="relative size-9 shrink-0 overflow-hidden rounded-full border border-white/10 bg-black/40">
+                  {member.avatarImageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={member.avatarImageUrl}
+                      alt=""
+                      aria-hidden
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-cream/25">
+                      {member.name.slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <Link
+                    href={`/admin/actors/${member.actorId}`}
+                    className="text-sm font-semibold text-cream hover:text-gold"
+                  >
+                    {member.name}
+                  </Link>
+                  {member.tagline ? (
+                    <p className="truncate text-[11px] text-cream/45">
+                      {member.tagline}
+                    </p>
+                  ) : null}
+                </div>
+                {/* Per-row character-name form: submits on blur-away via the
+                    save button; separate from the reorder/remove forms. */}
+                <form
+                  action={updateCastCharacter.bind(
+                    null,
+                    show.id,
+                    member.actorId,
+                  )}
+                  className="flex items-center gap-2"
+                >
+                  <Input
+                    name="characterName"
+                    defaultValue={member.characterName ?? ""}
+                    placeholder={t.showEdit.characterPlaceholder}
+                    aria-label={t.showEdit.characterAria(member.name)}
+                    className="h-8 w-44 text-xs"
+                  />
+                  <button
+                    type="submit"
+                    className="inline-flex h-8 items-center rounded-md border border-white/15 px-2.5 text-xs font-semibold text-cream/80 transition-colors hover:bg-white/[0.06] hover:text-cream"
+                  >
+                    {t.showEdit.saveCharacter}
+                  </button>
+                </form>
+                <div className="flex items-center gap-1">
+                  <form
+                    action={moveCastMember.bind(
+                      null,
+                      show.id,
+                      member.actorId,
+                      "up",
+                    )}
+                  >
+                    <button
+                      type="submit"
+                      disabled={i === 0}
+                      aria-label={t.showEdit.moveUpAria(member.name)}
+                      className="inline-flex size-8 items-center justify-center rounded-md border border-white/15 text-cream/70 transition-colors hover:bg-white/[0.06] hover:text-cream disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <span aria-hidden className="text-xs">↑</span>
+                    </button>
+                  </form>
+                  <form
+                    action={moveCastMember.bind(
+                      null,
+                      show.id,
+                      member.actorId,
+                      "down",
+                    )}
+                  >
+                    <button
+                      type="submit"
+                      disabled={i === cast.length - 1}
+                      aria-label={t.showEdit.moveDownAria(member.name)}
+                      className="inline-flex size-8 items-center justify-center rounded-md border border-white/15 text-cream/70 transition-colors hover:bg-white/[0.06] hover:text-cream disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <span aria-hidden className="text-xs">↓</span>
+                    </button>
+                  </form>
+                </div>
+                <form
+                  action={removeActorFromShow.bind(
+                    null,
+                    show.id,
+                    member.actorId,
+                  )}
+                >
+                  <ConfirmDeleteButton
+                    message={t.showEdit.removeCastConfirm(member.name)}
+                  >
+                    {t.showEdit.removeFromCast}
+                  </ConfirmDeleteButton>
+                </form>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="mt-4 border-t border-white/[0.06] pt-4">
+          {availableActors.length === 0 ? (
+            <p className="text-xs text-cream/45">
+              {cast.length === 0
+                ? t.showEdit.noActorsExistHint
+                : t.showEdit.allActorsAdded}{" "}
+              <Link
+                href="/admin/actors"
+                className="font-semibold text-gold hover:brightness-110"
+              >
+                {t.showEdit.manageActorsLink}
+              </Link>
+            </p>
+          ) : (
+            <form
+              action={addActorToShow.bind(null, show.id)}
+              className="flex flex-wrap items-center gap-2"
+            >
+              {/* Native <select>: this panel is server-rendered (no client
+                  state), and a styled native control beats pulling the
+                  client Select in for a plain form post. */}
+              <select
+                name="actorId"
+                required
+                defaultValue=""
+                aria-label={t.showEdit.selectActorAria}
+                className="h-8 rounded-md border border-white/15 bg-black/40 px-2.5 text-xs font-semibold text-cream/85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/60"
+              >
+                <option value="" disabled>
+                  {t.showEdit.selectActorPlaceholder}
+                </option>
+                {availableActors.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+              <Input
+                name="characterName"
+                placeholder={t.showEdit.characterPlaceholder}
+                aria-label={t.showEdit.characterAddAria}
+                className="h-8 w-44 text-xs"
+              />
+              <button
+                type="submit"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-white px-4 text-sm font-bold text-black transition-colors hover:bg-white/90"
+              >
+                <Icon name="plus" size={14} color="#0f0a07" />
+                {t.showEdit.addToCast}
+              </button>
+              <Link
+                href="/admin/actors"
+                className="ml-auto text-xs font-semibold text-gold hover:brightness-110"
+              >
+                {t.showEdit.manageActorsLink}
+              </Link>
+            </form>
+          )}
+        </div>
       </Panel>
 
       {/* Danger zone */}

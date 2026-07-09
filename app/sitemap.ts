@@ -1,4 +1,7 @@
 import type { MetadataRoute } from "next";
+import { and, eq, isNull } from "drizzle-orm";
+import { db } from "@/db";
+import { actors, showActors, shows } from "@/db/schema";
 import { getPublishedShows } from "@/lib/catalog";
 import { SITE_URL } from "@/lib/seo";
 
@@ -18,6 +21,16 @@ const LAUNCH_DATE = new Date("2026-05-27T00:00:00Z");
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const published = await getPublishedShows();
+
+  // Virtual-actor profiles — only actors credited on ≥1 published show, so
+  // an unattached (or drafts-only) actor never surfaces as a thin indexed
+  // page. Distinct because an actor can appear in several published shows.
+  const publishedActors = await db
+    .selectDistinct({ slug: actors.slug, updatedAt: actors.updatedAt })
+    .from(actors)
+    .innerJoin(showActors, eq(showActors.actorId, actors.id))
+    .innerJoin(shows, eq(showActors.showId, shows.id))
+    .where(and(eq(shows.status, "published"), isNull(shows.deletedAt)));
 
   // Real, verifiable home lastmod = the newest catalog change (shows.updatedAt
   // bumps on edit). Google ignores <changefreq>/<priority> and only trusts an
@@ -44,6 +57,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: s.updatedAt ?? catalogLastMod,
       changeFrequency: "weekly" as const,
       priority: 0.8,
+    })),
+    ...publishedActors.map((a) => ({
+      url: `${SITE_URL}/actors/${a.slug}`,
+      lastModified: a.updatedAt,
+      changeFrequency: "monthly" as const,
+      priority: 0.4,
     })),
     // Legal pages: lastModified intentionally OMITTED. They're DRAFT pending
     // counsel review, so any hard-coded date would soon be wrong/stale — and

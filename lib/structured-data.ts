@@ -15,8 +15,10 @@ import { SITE_NAME, SITE_URL, canonicalUrl } from "./seo";
 //     robots-disallowed /watch), and paywalled-content markup isn't defined
 //     for VideoObject. Subscription gating is expressed honestly via
 //     isAccessibleForFree on the TVSeries / TVEpisode CreativeWork entities.
-//   - No aggregateRating / review / actor / director — the data model has
-//     none; inventing them to chase a richer card is structured-data spam.
+//   - No aggregateRating / review / director — the data model has none;
+//     inventing them to chase a richer card is structured-data spam.
+//     (actor IS emitted since 2026-07-09: the cast of virtual actors is real
+//     admin-entered data, marked up as Person nodes pointing at /actors/*.)
 
 type JsonLd = Record<string, unknown>;
 
@@ -114,6 +116,28 @@ export function breadcrumbJsonLd(items: { name: string; url: string }[]): JsonLd
   };
 }
 
+// Virtual-actor profile (/actors/[slug]). Person is the schema.org type the
+// TVSeries `actor` references resolve to; the @id matches the URL emitted
+// there so the two nodes link up.
+export function personJsonLd(input: {
+  slug: string;
+  name: string;
+  description?: string | null;
+  image?: string | null;
+}): JsonLd {
+  const url = `${SITE_URL}/actors/${input.slug}`;
+  return {
+    "@context": "https://schema.org",
+    "@type": "Person",
+    "@id": `${url}#person`,
+    url,
+    name: input.name,
+    description: input.description ?? undefined,
+    image: input.image ?? undefined,
+    worksFor: { "@id": ORG_ID },
+  };
+}
+
 export type SeriesEpisodeInput = {
   number: number;
   name: string;
@@ -140,6 +164,9 @@ export type TvSeriesInput = {
   // false when ≥1 ready episode requires a subscription/sign-in; true only
   // when every ready episode is the free tier (don't lie about gating).
   isAccessibleForFree: boolean;
+  // Virtual actors credited on the show, in display order. Optional — prune()
+  // drops the property entirely for cast-less shows.
+  actors?: { name: string; url: string }[];
 };
 
 export function tvSeriesJsonLd(input: TvSeriesInput): JsonLd {
@@ -158,6 +185,11 @@ export function tvSeriesJsonLd(input: TvSeriesInput): JsonLd {
     image: input.images.map((u) => (/^https?:\/\//i.test(u) ? u : canonicalUrl(u))),
     genre: input.genre,
     isAccessibleForFree: input.isAccessibleForFree,
+    actor: input.actors?.map((a) => ({
+      "@type": "Person",
+      name: a.name,
+      url: a.url,
+    })),
     productionCompany: { "@id": ORG_ID },
     publisher: { "@id": ORG_ID },
     numberOfSeasons: input.numberOfSeasons || undefined,
