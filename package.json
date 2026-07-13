@@ -45,6 +45,7 @@
     "posthog-node": "^5.35.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "resend": "^6.17.2",
     "server-only": "^0.0.1",
     "shadcn": "^4.7.0",
     "stripe": "^22.1.1",

@@ -201,6 +201,29 @@ CLI equivalent for step 1: `vercel blob create-store <name>` (note: `create-stor
 
 **next/image**: `*.public.blob.vercel-storage.com` is allowlisted in `next.config.ts` `images.remotePatterns` — a single-level wildcard covers any store id.
 
+## Resend (email)
+
+**Used for**: transactional email — the "new episode" reminder notifications viewers request via the series-end overlay. Nothing else: Stripe receipts and Clerk auth codes are sent by those services themselves.
+
+**SDK**: `resend@6` (lazy client in `lib/resend.ts`, same pattern as Stripe/Mux).
+
+**Env vars**:
+| Name | Where to get it |
+|---|---|
+| `RESEND_API_KEY` | Resend dashboard → API Keys → create with **Sending access** only. Secret, runtime-read. Blank → email off: the capture form still stores addresses in `show_reminders`; the admin send panel shows a connect hint. |
+| `RESEND_FROM` (optional) | Sender override; defaults to `Matio <updates@matio.tv>`. The domain must be verified in Resend. |
+| `RESEND_REPLY_TO` (optional) | Reply-To override; defaults to `hello@matio.tv` (the real PrivateEmail mailbox). |
+
+**Setup** (one-time):
+1. Create the Resend account → **Domains → Add Domain** → `matio.tv`, region **eu-west-1** (Ireland). Region only affects where mail is routed from; Resend account data stays US-hosted regardless — the privacy policy names Resend Inc. (US) with SCCs accordingly.
+2. Add the DNS records Resend shows at **Namecheap** (DNS = registrar-servers.com): a DKIM TXT at `resend._domainkey.matio.tv`, plus MX + SPF TXT on `send.matio.tv` (bounce/Return-Path subdomain). These touch neither the root SPF (`spf.privateemail.com` — the hello@ mailbox) nor Clerk's `clk*` records.
+3. Recommended while in there: add a starter DMARC record at `_dmarc.matio.tv` — `v=DMARC1; p=none; rua=mailto:hello@matio.tv;` (none exists today; monitor first, tighten later).
+4. Wait for the domain to verify, create the API key, then `vercel env add RESEND_API_KEY production` (+ `.env.local`) and redeploy.
+
+**Sending model**: admin-triggered only — the "Episode reminders" panel on the show edit page claims pending `show_reminders` rows by stamping `notified_at` and batch-sends (≤100/call) with per-recipient locale, unsubscribe footer link, and RFC 8058 one-click `List-Unsubscribe` headers. A failed batch un-claims its rows. See the "Episode reminder emails" rule in CLAUDE.md.
+
+**Limits**: free tier 100 emails/day, 3,000/month, 1 domain; API ~5 req/s. Pro ($20/mo, 50k included) removes the daily cap.
+
 ## Meta (Pixel + Conversions API)
 
 **Used for**: advertising measurement for Facebook/Instagram campaigns. Browser **Meta Pixel** (top-of-funnel events) + server-side **Conversions API** (the reliable Purchase signal). Both are **gated on marketing consent** — nothing fires until the visitor accepts marketing cookies in the banner, consistent with the existing attribution gate.
@@ -278,6 +301,7 @@ Leave all three blank to keep PostHog entirely off — both the client provider 
 | Neon | `db/index.ts`, `db/schema/*.ts`, `drizzle.config.ts`, `drizzle/` |
 | Vercel | platform-only; see [operations.md](./operations.md#deploy) |
 | Vercel Blob | `app/api/admin/upload-image/route.ts` (token issuer), `components/admin/image-upload-field.tsx` (drag-and-drop client), `app/admin/actions.ts:deleteOrphanedBlob` (cleanup on replace/clear), `next.config.ts` (remotePatterns) |
+| Resend | `lib/resend.ts`, `lib/reminder-email.ts`, `lib/email-unsubscribe.ts`, `app/admin/reminder-actions.ts`, `components/admin/reminders-panel.tsx`, `components/watch/series-end-overlay.tsx`, `app/watch/actions.ts:subscribeToShowReminder`, `app/(public)/unsubscribe/`, `app/api/email/unsubscribe/route.ts` |
 | Meta | `lib/meta-pixel-events.ts`, `lib/meta-capi.ts`, `lib/capi-identity.ts`, `components/site/meta-pixel.tsx`, `components/site/view-content-pixel.tsx`, `components/site/complete-registration-pixel.tsx`, `app/subscribe/{actions.ts,submit-button.tsx,page.tsx}`, `app/api/webhooks/stripe/route.ts`, `proxy.ts` |
 | PostHog | `components/site/posthog-provider.tsx`, `lib/posthog-events.ts`, `lib/posthog-server.ts`, `app/api/webhooks/stripe/route.ts`, `next.config.ts` (rewrite), `proxy.ts` (matcher exclusion) |
 | Google Analytics | `components/site/google-analytics.tsx`, `lib/ga-events.ts`, `app/layout.tsx` (mount) |

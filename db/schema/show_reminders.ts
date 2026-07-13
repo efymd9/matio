@@ -14,14 +14,16 @@ import { users } from "./users";
 // SeriesEndOverlay (components/watch/series-end-overlay.tsx) when a
 // viewer finishes the last episode of a show and asks to be notified.
 //
-// Resend isn't wired yet, so this is a passive intent ledger:
-// `notified_at` stays NULL until the future "send reminders" job runs
-// (it'll claim a batch by stamping `notified_at = now()` in the same
-// transaction it dispatches the email — same idempotency pattern as
-// stripe_events).
+// Dispatched via Resend from the admin "notify waiting viewers" panel
+// (app/admin/reminder-actions.ts): the send action claims batches by
+// stamping `notified_at = now()` before dispatching and reverts the
+// stamp on a failed batch — `notified_at IS NULL` always means
+// "still owed an email". Unsubscribing (lib/email-unsubscribe.ts)
+// hard-deletes every row for the email address.
 //
 // userId is nullable so non-subscribers and trial users can sign up
-// too. The (show_id, email) unique constraint dedupes repeat submits.
+// too. The (show_id, email) unique constraint dedupes repeat submits;
+// the conflict path re-arms notified_at (see subscribeToShowReminder).
 export const showReminders = pgTable(
   "show_reminders",
   {
@@ -37,6 +39,17 @@ export const showReminders = pgTable(
     userId: text("user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    // Site locale at capture time — the reminder email is rendered in
+    // this language. Rows predating the column (form was hidden then,
+    // so realistically none) default to the site-default English.
+    locale: text("locale").notNull().default("en"),
+    // HMAC'd client IP (same hashClientIp as trial_sessions — never raw
+    // IPs) for the capture rate limit: the submit action counts rows
+    // created per (ip_hash, last hour) and rejects past the cap, so an
+    // anonymous attacker can't flood the ledger with garbage addresses
+    // that the admin send would then blast through Resend. Nullable —
+    // rows predating the column.
+    ipHash: text("ip_hash"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -56,6 +69,8 @@ export const showReminders = pgTable(
     index("show_reminders_show_id_pending_idx")
       .on(t.showId, t.createdAt)
       .where(sql`notified_at IS NULL`),
+    // Capture rate limit scan: rows created per (ip_hash, last hour).
+    index("show_reminders_ip_hash_created_idx").on(t.ipHash, t.createdAt),
   ],
 );
 

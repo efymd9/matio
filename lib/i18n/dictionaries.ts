@@ -177,10 +177,7 @@ export const es = {
     kicker: "Eso es todo · por ahora",
     headline: (showTitle: string) =>
       `Gracias por ver ${showTitle}.`,
-    // No "déjanos tu email" while the capture form is hidden (Resend not
-    // wired) — the overlay is now the universal series-end sheet, so the
-    // copy must not ask for input that has no field.
-    body: "El próximo episodio está en producción y se estrenará pronto.",
+    body: "El próximo episodio está en producción y se estrenará pronto. Déjanos tu email y te avisamos cuando esté listo.",
     emailLabel: "Correo electrónico",
     emailPlaceholder: "tu@email.com",
     submitCta: "Avísame",
@@ -190,7 +187,23 @@ export const es = {
     dismissAria: "Cerrar aviso",
     privacyNote: "Solo lo usaremos para avisar del próximo episodio.",
     errorInvalidEmail: "Ese correo no parece válido. Inténtalo de nuevo.",
+    errorRateLimited:
+      "Demasiados intentos desde tu red. Inténtalo de nuevo en un rato.",
     errorGeneric: "Algo salió mal. Inténtalo de nuevo.",
+  },
+  unsubscribe: {
+    metaTitle: "Darse de baja",
+    heading: "Darse de baja",
+    confirmBody: (email: string) =>
+      `¿Quieres dejar de recibir avisos de nuevos episodios en ${email}?`,
+    confirmCta: "Sí, darme de baja",
+    doneHeading: "Listo",
+    doneBody:
+      "Hemos eliminado tu correo. No volveremos a enviarte avisos de episodios.",
+    invalidHeading: "Enlace no válido",
+    invalidBody:
+      "Este enlace de baja no es válido. Escríbenos a hello@matio.tv y nos encargamos.",
+    backHome: "Volver al inicio",
   },
   paywall: {
     previewComplete: "Vista previa terminada",
@@ -562,10 +575,7 @@ export const en: Dict = {
     kicker: "That's all · for now",
     headline: (showTitle: string) =>
       `Thanks for watching ${showTitle}.`,
-    // No "leave your email" while the capture form is hidden (Resend not
-    // wired) — the overlay is now the universal series-end sheet, so the
-    // copy must not ask for input that has no field.
-    body: "The next episode is in production and will be out soon.",
+    body: "The next episode is in production and will be out soon. Leave your email and we'll let you know the moment it drops.",
     emailLabel: "Email",
     emailPlaceholder: "you@email.com",
     submitCta: "Notify me",
@@ -575,7 +585,23 @@ export const en: Dict = {
     dismissAria: "Dismiss reminder",
     privacyNote: "We'll only use this to tell you about the next episode.",
     errorInvalidEmail: "That email doesn't look right. Try again?",
+    errorRateLimited:
+      "Too many attempts from your network. Try again in a bit.",
     errorGeneric: "Something went wrong. Please try again.",
+  },
+  unsubscribe: {
+    metaTitle: "Unsubscribe",
+    heading: "Unsubscribe",
+    confirmBody: (email: string) =>
+      `Stop receiving new-episode notifications for ${email}?`,
+    confirmCta: "Yes, unsubscribe",
+    doneHeading: "Done",
+    doneBody:
+      "We've removed your email. You won't get any more episode notifications.",
+    invalidHeading: "Invalid link",
+    invalidBody:
+      "This unsubscribe link isn't valid. Email hello@matio.tv and we'll take care of it.",
+    backHome: "Back to home",
   },
   paywall: {
     previewComplete: "Preview complete",

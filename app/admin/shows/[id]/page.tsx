@@ -1,12 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, asc, eq, isNull, notInArray } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { actors, seasons, showActors, shows } from "@/db/schema";
+import {
+  actors,
+  episodes,
+  seasons,
+  showActors,
+  showReminders,
+  shows,
+} from "@/db/schema";
 import { Icon } from "@/components/site/icon";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
+import { RemindersPanel } from "@/components/admin/reminders-panel";
 import { ShowForm } from "@/components/admin/show-form";
 import { Input } from "@/components/ui/input";
+import { resendConfigured } from "@/lib/resend";
 import { getAdminDict } from "@/lib/i18n/admin-server";
 import type { AdminDict } from "@/lib/i18n/admin-dictionaries";
 import {
@@ -65,6 +74,34 @@ export default async function EditShowPage({
     .from(actors)
     .where(castIds.length ? notInArray(actors.id, castIds) : undefined)
     .orderBy(asc(actors.name));
+
+  // Reminder backlog for the "Episode reminders" panel: how many
+  // addresses still wait for an email vs. already got one.
+  const [reminderCounts] = await db
+    .select({
+      pending: sql<number>`count(*) filter (where ${showReminders.notifiedAt} is null)`.mapWith(
+        Number,
+      ),
+      sent: sql<number>`count(*) filter (where ${showReminders.notifiedAt} is not null)`.mapWith(
+        Number,
+      ),
+    })
+    .from(showReminders)
+    .where(eq(showReminders.showId, show.id));
+
+  // Ready episodes for the announce picker, newest first (the default
+  // selection should be the episode that just dropped).
+  const readyEpisodes = await db
+    .select({
+      id: episodes.id,
+      number: episodes.number,
+      title: episodes.title,
+      seasonNumber: seasons.number,
+    })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .where(and(eq(seasons.showId, show.id), eq(episodes.status, "ready")))
+    .orderBy(desc(seasons.number), desc(episodes.number));
 
   const isPublished = show.status === "published";
 
@@ -424,6 +461,33 @@ export default async function EditShowPage({
             </form>
           )}
         </div>
+      </Panel>
+
+      {/* Episode reminders — dispatch the show_reminders backlog */}
+      <Panel
+        kicker={t.reminders.kicker}
+        title={t.reminders.title}
+        right={
+          <span className="font-mono text-xs text-cream/45">
+            {t.reminders.pendingBadge(reminderCounts?.pending ?? 0)}
+          </span>
+        }
+      >
+        <RemindersPanel
+          showId={show.id}
+          isPublished={isPublished}
+          configured={resendConfigured()}
+          pendingCount={reminderCounts?.pending ?? 0}
+          sentCount={reminderCounts?.sent ?? 0}
+          episodes={readyEpisodes.map((ep) => ({
+            id: ep.id,
+            label: t.reminders.episodeOption(
+              ep.seasonNumber,
+              ep.number,
+              ep.title,
+            ),
+          }))}
+        />
       </Panel>
 
       {/* Danger zone */}

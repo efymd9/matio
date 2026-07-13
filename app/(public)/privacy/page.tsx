@@ -104,8 +104,8 @@ function PrivacyEn() {
           </li>
           <li>
             <strong>Communications</strong> — emails you send us, support
-            conversations, and (when wired) transactional email such as
-            receipts and security notices.
+            conversations, and transactional email such as the new-episode
+            notifications you ask for.
           </li>
           <li>
             <strong>Technical data</strong> — IP address, browser user-agent,
@@ -178,6 +178,12 @@ function PrivacyEn() {
           <li>
             <strong>Neon Inc.</strong> (US, EU region for our database) — our
             Postgres database is hosted on AWS Frankfurt (eu-central-1). SCCs.
+          </li>
+          <li>
+            <strong>Resend Inc.</strong> (US, EU region for email delivery) —
+            transactional email: the new-episode notifications you ask for.
+            We share the email address you submitted and the show it relates
+            to; every email carries an unsubscribe link. SCCs.
           </li>
           <li>
             <strong>Meta Platforms Ireland Ltd</strong> (Ireland, with
@@ -373,8 +379,8 @@ function PrivacyEs() {
           </li>
           <li>
             <strong>Comunicaciones</strong>: los correos que nos envías,
-            conversaciones de soporte y correos transaccionales (recibos,
-            avisos de seguridad) cuando estén activados.
+            conversaciones de soporte y correos transaccionales, como los
+            avisos de nuevos episodios que solicitas.
           </li>
           <li>
             <strong>Datos técnicos</strong>: dirección IP, agente del navegador
@@ -451,6 +457,13 @@ function PrivacyEs() {
           <li>
             <strong>Neon Inc.</strong> (EE. UU., región europea para nuestra
             base de datos) — Postgres alojado en AWS Fráncfort (eu-central-1).
+            CCT.
+          </li>
+          <li>
+            <strong>Resend Inc.</strong> (EE. UU., región europea para el
+            envío) — correo transaccional: los avisos de nuevos episodios que
+            solicitas. Compartimos la dirección de correo que dejaste y la
+            serie a la que se refiere; cada correo incluye un enlace de baja.
             CCT.
           </li>
           <li>

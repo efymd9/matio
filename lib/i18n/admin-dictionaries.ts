@@ -696,6 +696,36 @@ export const ru = {
     consentNote:
       "В ЕС метки пишутся только после согласия на cookies, поэтому часть кликов оседает в «(direct)». Вне ЕС метки пишутся с первого визита.",
   },
+  reminders: {
+    kicker: "Рассылка",
+    title: "Напоминания о новых эпизодах",
+    pendingBadge: (n: number) =>
+      `${n} ${ruPlural(n, ["адрес ждёт", "адреса ждут", "адресов ждут"])}`,
+    description:
+      "Зрители, оставившие почту после финала. Выберите вышедший эпизод — каждому уйдёт письмо со ссылкой на него.",
+    episodeAria: "Эпизод для рассылки",
+    episodeOption: (s: number, e: number, title: string | null) =>
+      `S${s} · E${e}${title ? ` — ${title}` : ""}`,
+    confirmSend: (n: number) =>
+      `Отправить письмо ${n} ${ruPlural(n, ["адресу", "адресам", "адресам"])}?`,
+    sendCta: "Отправить",
+    sendPending: "Отправляем…",
+    sentOk: (n: number) =>
+      `Отправлено ${n} ${ruPlural(n, ["письмо", "письма", "писем"])}.`,
+    noPending:
+      "Пока никто не ждёт письма. Форма показывается зрителям после финального эпизода сериала.",
+    sentSoFar: (n: number) => `Всего отправлено: ${n}`,
+    notConfigured:
+      "Resend не подключён — задайте RESEND_API_KEY, чтобы отправлять письма. Адреса при этом продолжают сохраняться.",
+    publishFirst:
+      "Сначала опубликуйте сериал — письмо ведёт на публичную страницу просмотра.",
+    noEpisodes: "Нет готовых эпизодов для рассылки.",
+    errorEpisodeInvalid: "Эпизод не найден или ещё не готов.",
+    errorNoPending: "Нет адресов, ожидающих письма.",
+    errorSendFailed:
+      "Resend вернул ошибку — часть писем могла не уйти. Проверьте дашборд Resend и попробуйте ещё раз.",
+    errorUnknown: "Что-то пошло не так. Попробуйте ещё раз.",
+  },
 };
 
 export type AdminDict = typeof ru;
@@ -1341,6 +1371,35 @@ export const en: AdminDict = {
     empty: "No links yet — create the first one above.",
     consentNote:
       "In the EU, tags persist only after cookie consent, so some clicks land in “(direct)”. Outside the EU tags are written on first visit.",
+  },
+  reminders: {
+    kicker: "Email",
+    title: "Episode reminders",
+    pendingBadge: (n: number) =>
+      `${n} ${n === 1 ? "address waiting" : "addresses waiting"}`,
+    description:
+      "Viewers who left their email after the finale. Pick the episode that just dropped — each gets an email linking straight to it.",
+    episodeAria: "Episode to announce",
+    episodeOption: (s: number, e: number, title: string | null) =>
+      `S${s} · E${e}${title ? ` — ${title}` : ""}`,
+    confirmSend: (n: number) =>
+      `Send the reminder email to ${n} ${n === 1 ? "address" : "addresses"}?`,
+    sendCta: "Send",
+    sendPending: "Sending…",
+    sentOk: (n: number) => `Sent ${n} ${n === 1 ? "email" : "emails"}.`,
+    noPending:
+      "Nobody is waiting for an email yet. The capture form shows after a show's final episode.",
+    sentSoFar: (n: number) => `Sent so far: ${n}`,
+    notConfigured:
+      "Resend isn't connected — set RESEND_API_KEY to send email. Addresses keep being collected meanwhile.",
+    publishFirst:
+      "Publish the show first — the email links to the public watch page.",
+    noEpisodes: "No ready episodes to announce.",
+    errorEpisodeInvalid: "Episode not found or not ready.",
+    errorNoPending: "No addresses waiting for an email.",
+    errorSendFailed:
+      "Resend returned an error — some emails may not have gone out. Check the Resend dashboard and try again.",
+    errorUnknown: "Something went wrong. Try again.",
   },
 };
 

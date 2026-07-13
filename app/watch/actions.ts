@@ -1,8 +1,8 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { cookies } from "next/headers";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { cookies, headers } from "next/headers";
 import { db } from "@/db";
 import {
   episodes,
@@ -13,6 +13,7 @@ import {
   watchProgress,
 } from "@/db/schema";
 import { paymentsEnabled } from "@/lib/free-mode";
+import { getLocale } from "@/lib/i18n/server";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
   getOrderedReadyEpisodeIds,
@@ -21,6 +22,8 @@ import {
 import {
   TRIAL_COOKIE,
   TRIAL_DURATION_SECONDS,
+  getClientIp,
+  hashClientIp,
   stampSignupWall,
 } from "@/lib/trial";
 
@@ -211,13 +214,21 @@ const EMAIL_MAX_LEN = 254; // RFC 3696 — full address upper bound
 
 export type ShowReminderResult =
   | { ok: true }
-  | { ok: false; reason: "invalid_email" | "invalid_show" };
+  | { ok: false; reason: "invalid_email" | "invalid_show" | "rate_limited" };
+
+// New capture rows allowed per (hashed IP, rolling hour). Real viewers
+// submit once per show; the cap exists so an anonymous attacker can't
+// flood show_reminders with garbage addresses that the admin send would
+// then blast through Resend (bounces poison sender reputation).
+const REMINDER_RATELIMIT_PER_HOUR = 10;
 
 // Records an email-reminder request for a show. Called from the
 // SeriesEndOverlay when a viewer asks to be notified about the next
 // episode. Idempotent on (show_id, email) via the unique constraint —
 // the duplicate path returns ok=true so the UI shows the success state
-// either way (no information leak about who already subscribed).
+// either way (no information leak about who already subscribed). A
+// resubmit RE-ARMS the reminder (notified_at back to NULL): "notify me"
+// after an already-dispatched episode means the NEXT one.
 //
 // Anonymous and trial users can submit; the user_id column is filled in
 // when an auth context is available, NULL otherwise. We don't gate on
@@ -260,17 +271,48 @@ export async function subscribeToShowReminder(input: {
     .limit(1);
   if (!show) return { ok: false, reason: "invalid_show" };
 
-  // Best-effort link to the user when auth is available. The column is
-  // nullable and the row is identified by (show_id, email), so a later
-  // signed-in resubmission with the same email will hit the unique
-  // constraint and be deduped without us needing to backfill user_id.
+  // Rate limit NEW rows per (hashed IP, rolling hour) — count-then-insert
+  // is soft (parallel requests can slightly overshoot) but this is an
+  // anti-flood bound, not an exact quota. Same trusted-header + HMAC
+  // hashing as the trial rate limit; no raw IPs stored.
+  const ipHash = hashClientIp(getClientIp({ headers: await headers() }));
+  const [recent] = await db
+    .select({ n: sql<number>`count(*)`.mapWith(Number) })
+    .from(showReminders)
+    .where(
+      and(
+        eq(showReminders.ipHash, ipHash),
+        gt(showReminders.createdAt, new Date(Date.now() - 60 * 60 * 1000)),
+      ),
+    );
+  if ((recent?.n ?? 0) >= REMINDER_RATELIMIT_PER_HOUR) {
+    return { ok: false, reason: "rate_limited" };
+  }
+
+  // Best-effort link to the user when auth is available.
   const { userId } = await auth();
 
+  // Snapshot the site locale so the reminder email renders in the
+  // language the viewer was watching in.
+  const locale = await getLocale();
+
+  // Conflict path (same show + email) UPDATES instead of no-oping: it
+  // re-arms notified_at (a post-send resubmit means "tell me about the
+  // NEXT one" — DoNothing silently orphaned those viewers), refreshes
+  // the locale to the most recent choice, and backfills user_id when a
+  // previously-anonymous subscriber resubmits signed-in. created_at and
+  // ip_hash keep their original values — the rate limit counts row
+  // creation, not resubmits.
   await db
     .insert(showReminders)
-    .values({ showId: show.id, email, userId: userId ?? null })
-    .onConflictDoNothing({
+    .values({ showId: show.id, email, userId: userId ?? null, locale, ipHash })
+    .onConflictDoUpdate({
       target: [showReminders.showId, showReminders.email],
+      set: {
+        notifiedAt: null,
+        locale,
+        userId: sql`coalesce(${userId ?? null}, ${showReminders.userId})`,
+      },
     });
 
   return { ok: true };
