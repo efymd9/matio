@@ -66,7 +66,15 @@ const THUMBNAIL_TTL_SECONDS = 60 * 60; // 1h — covers most session lengths
 export function muxThumbnailUrl(
   playbackId: string,
   playbackPolicy: "public" | "signed" | string | null,
-  opts: { time?: number; width?: number; height?: number } = {},
+  opts: {
+    time?: number;
+    width?: number;
+    height?: number;
+    // Override for consumers whose image is fetched long after minting —
+    // the reminder email's hero still (Gmail's image proxy can fetch days
+    // after send). Page renders keep the 1h default.
+    ttlSeconds?: number;
+  } = {},
 ): string {
   const params = new URLSearchParams();
   if (opts.width) params.set("width", String(opts.width));
@@ -77,7 +85,10 @@ export function muxThumbnailUrl(
   // a black frame from the fade-in.
   if (opts.time === undefined) params.set("fit_mode", "smartcrop");
   if (playbackPolicy === "signed") {
-    params.set("token", signMuxThumbnailToken(playbackId, THUMBNAIL_TTL_SECONDS));
+    params.set(
+      "token",
+      signMuxThumbnailToken(playbackId, opts.ttlSeconds ?? THUMBNAIL_TTL_SECONDS),
+    );
   }
   const qs = params.toString();
   return `https://image.mux.com/${playbackId}/thumbnail.jpg${qs ? `?${qs}` : ""}`;

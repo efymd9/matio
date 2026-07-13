@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { episodes, seasons, showReminders, shows } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin";
 import { unsubscribeUrls } from "@/lib/email-unsubscribe";
+import { muxThumbnailUrl } from "@/lib/mux-token";
 import { renderShowReminderEmail } from "@/lib/reminder-email";
 import {
   emailFrom,
@@ -68,9 +69,14 @@ export async function sendShowReminders(
       .select({
         episodeNumber: episodes.number,
         episodeTitle: episodes.title,
+        episodeDescription: episodes.description,
+        episodeDuration: episodes.durationSeconds,
+        muxPlaybackId: episodes.muxPlaybackId,
+        muxPlaybackPolicy: episodes.muxPlaybackPolicy,
         seasonNumber: seasons.number,
         showTitle: shows.title,
         showSlug: shows.slug,
+        showGenre: shows.genre,
       })
       .from(episodes)
       .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
@@ -94,6 +100,18 @@ export async function sendShowReminders(
     // id — same param SignupWall uses). UTM triple is normalizeUtm-clean
     // so the attribution pipeline can segment email-driven sessions.
     const watchUrl = `${origin}/watch/${target.showSlug}?ep=${episodeId}&utm_source=email&utm_medium=email&utm_campaign=show-reminder`;
+
+    // Hero still: signed Mux thumbnail at the design's 2× size. Long TTL
+    // because mail-client image proxies fetch on open, potentially days
+    // after send — a frame still is acceptable exposure for that window
+    // (the 1h ceiling in CLAUDE.md governs PLAYBACK tokens, not stills).
+    const heroImageUrl = target.muxPlaybackId
+      ? muxThumbnailUrl(target.muxPlaybackId, target.muxPlaybackPolicy, {
+          width: 1200,
+          height: 680,
+          ttlSeconds: 90 * 24 * 60 * 60,
+        })
+      : null;
 
     let sent = 0;
     for (let i = 0; i < MAX_BATCHES; i++) {
@@ -142,8 +160,13 @@ export async function sendShowReminders(
           seasonNumber: target.seasonNumber,
           episodeNumber: target.episodeNumber,
           episodeTitle: target.episodeTitle,
+          genre: target.showGenre,
+          durationSeconds: target.episodeDuration,
+          logline: target.episodeDescription,
+          heroImageUrl,
           watchUrl,
           unsubscribePageUrl: page,
+          siteUrl: origin,
         });
         return {
           from: emailFrom(),
