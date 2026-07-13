@@ -9,7 +9,7 @@ const WORDMARK_HEIGHT = 1228;
 const WORDMARK_RATIO = WORDMARK_WIDTH / WORDMARK_HEIGHT;
 
 // Brand wordmark — the ONLY logo used in page chrome (header/footer/player
-// watermark). The dark-red "M" blob mark is reserved for the favicon / app
+// watermark). The gold "M" blob mark is reserved for the favicon / app
 // icons and never appears next to the wordmark.
 //
 // `size` is the rendered height in px (≈20–24 header, ≈16 footer).
