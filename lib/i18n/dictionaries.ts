@@ -246,6 +246,11 @@ export const es = {
         : `Crea una cuenta gratis y desbloquea ${n} episodios más al instante.`,
     bodyNoCount:
       "Crea una cuenta gratis para seguir viendo y guardar tu progreso en todas las series.",
+    // Signup-gate variant (REQUIRE_SIGNUP): greets a viewer who hasn't
+    // watched anything yet — no "continúa"/"más episodios" framing.
+    gateKicker: "Mira gratis",
+    gateBody:
+      "Crea una cuenta gratis para empezar a ver y guardar tu progreso en todas las series.",
     signUpCta: "Crear cuenta gratis",
     alreadyMember: "¿Ya tienes cuenta?",
     signInLink: "Inicia sesión",
@@ -643,6 +648,9 @@ export const en: Dict = {
         : `Create a free account and instantly unlock ${n} more episodes.`,
     bodyNoCount:
       "Create a free account to keep watching and save your progress across every series.",
+    gateKicker: "Watch for free",
+    gateBody:
+      "Create a free account to start watching and save your progress across every series.",
     signUpCta: "Create free account",
     alreadyMember: "Already have an account?",
     signInLink: "Sign in",

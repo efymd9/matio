@@ -8,7 +8,7 @@ import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { readAttributionCookiesFromRequest } from "@/lib/attribution";
 import { showHasTierGating } from "@/lib/episode-access";
-import { paymentsEnabled } from "@/lib/free-mode";
+import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
@@ -117,7 +117,17 @@ export async function GET(req: NextRequest) {
   // keeps the anonymous funnel tracking + its best-effort rate-limit
   // semantics). Both existing branches already never 403 for their
   // audience, so the paywall/signup/trial paths below become unreachable.
-  const access = paymentsEnabled() ? row.access : userId ? "member" : "free";
+  //
+  // Signup gate (REQUIRE_SIGNUP=1, free mode only): anonymous requests are
+  // coerced to the member tier too, so they land on the 403
+  // `signup_required` branch below — belt-and-braces behind the watch
+  // page's member-tier presentation (the player never fetches for a locked
+  // episode; this catches direct/scripted requests).
+  const access = paymentsEnabled()
+    ? row.access
+    : userId || signupRequired()
+      ? "member"
+      : "free";
 
   if (access === "free") {
     // Funnel tracking row (kind='episodes') — minted on the first free

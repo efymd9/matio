@@ -12,7 +12,7 @@ import {
   trialSessions,
   watchProgress,
 } from "@/db/schema";
-import { paymentsEnabled } from "@/lib/free-mode";
+import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { getLocale } from "@/lib/i18n/server";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
@@ -156,7 +156,14 @@ export async function saveTrialPosition(
   // Free pivot: with payments off every episode is anonymously playable as
   // the free tier, so every save takes the full-tracking branch (no 60s
   // cap, no member/tier-gating rejects) — mirrors the token route.
-  const access = paymentsEnabled() ? row.access : "free";
+  // Signup gate: anonymous playback doesn't exist, so an anonymous save is
+  // by definition forged/stale — coerce to member (reject, no write),
+  // mirroring the token route's coercion.
+  const access = paymentsEnabled()
+    ? row.access
+    : signupRequired()
+      ? "member"
+      : "free";
   if (access === "free") {
     const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
     const position = orderedIds.indexOf(episodeId) + 1;

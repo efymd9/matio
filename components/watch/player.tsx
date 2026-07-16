@@ -172,6 +172,7 @@ export function Player({
   autoplay = true,
   payFirst = false,
   freeMode = false,
+  signupGate = false,
   orientation = "horizontal",
 }: {
   episodes: PlayerEpisode[];
@@ -195,6 +196,11 @@ export function Player({
   // 403 involved, so the flag must reach this component to route those
   // moments to the neutral series-end overlay instead.
   freeMode?: boolean;
+  // Signup gate (server-read, signupRequired()): anonymous visitors see the
+  // SignupWall before any playback. Only swaps the wall's copy to the
+  // "watch for free" variant — the locking itself rides the member-tier
+  // presentation the watch page applies.
+  signupGate?: boolean;
   // Show's video shape — vertical shows get the portrait chrome on mobile.
   orientation?: ShowOrientation;
 }) {
@@ -327,6 +333,7 @@ export function Player({
       userEmail={userEmail}
       payFirst={payFirst}
       freeMode={freeMode}
+      signupGate={signupGate}
       orientation={orientation}
     />
   );
@@ -353,6 +360,7 @@ function EpisodePlayback({
   userEmail,
   payFirst,
   freeMode,
+  signupGate,
   orientation,
 }: {
   current: PlayerEpisode;
@@ -375,6 +383,7 @@ function EpisodePlayback({
   userEmail?: string | null;
   payFirst?: boolean;
   freeMode?: boolean;
+  signupGate?: boolean;
   orientation: ShowOrientation;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -1117,6 +1126,7 @@ function EpisodePlayback({
         }
         memberCount={memberCount}
         backdropThumbnailUrl={current.thumbnailUrl}
+        gate={signupGate}
       />
     );
   }

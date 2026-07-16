@@ -24,7 +24,7 @@ import {
   applyUserAttribution,
   readAttributionCookies,
 } from "@/lib/attribution";
-import { paymentsEnabled } from "@/lib/free-mode";
+import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
   TRIAL_COOKIE,
@@ -126,7 +126,15 @@ export default async function WatchPage({
   // via isEpisodeLocked, so neutralizing the tiers here (not just the token
   // route) is load-bearing. The legacy 60s-trial branch and the
   // expired-trial redirect below become unreachable.
+  //
+  // Signup gate (REQUIRE_SIGNUP=1, free mode only): anonymous visitors get
+  // the episodes presented as the MEMBER tier instead — every episode reads
+  // locked in mode="free", so the player renders the SignupWall full-surface
+  // with zero token fetches (the same prop-driven path a member-tier deep
+  // link takes in paid mode). Signed-in viewers are in mode="member" where
+  // the member tier is unlocked, so they play everything unchanged.
   const paymentsOn = paymentsEnabled();
+  const signupGate = signupRequired();
   const gated = !paymentsOn || ordered.some((e) => e.access !== "subscriber");
 
   const playable: PlayerEpisode[] = ordered
@@ -153,7 +161,11 @@ export default async function WatchPage({
         introStartSeconds: e.introStartSeconds,
         introEndSeconds: e.introEndSeconds,
         thumbnailUrl,
-        tier: paymentsOn ? e.access : ("free" as const),
+        tier: paymentsOn
+          ? e.access
+          : signupGate
+            ? ("member" as const)
+            : ("free" as const),
       };
     });
 
@@ -322,7 +334,9 @@ export default async function WatchPage({
         <Player
           mode="free"
           orientation={show.orientation}
-          autoplay={autoplay}
+          // Gate sessions render the SignupWall before any playback — skip
+          // the muted-autoplay capability probe they could never use.
+          autoplay={signupGate ? false : autoplay}
           showId={show.id}
           showSlug={show.slug}
           showTitle={show.title}
@@ -332,6 +346,7 @@ export default async function WatchPage({
           userEmail={userEmail}
           payFirst={payFirst}
           freeMode={!paymentsOn}
+          signupGate={signupGate}
         />
       </WatchShell>
     );

@@ -27,6 +27,7 @@ export function SignupWall({
   episodeNumber,
   memberCount,
   backdropThumbnailUrl,
+  gate = false,
 }: {
   showSlug: string;
   showId: string;
@@ -43,6 +44,11 @@ export function SignupWall({
   // Current episode's Mux thumbnail, passed by the player. Full-bleed
   // backdrop when present; falls back to a tone gradient otherwise.
   backdropThumbnailUrl?: string | null;
+  // Signup-gate pivot (REQUIRE_SIGNUP): the wall greets a viewer who hasn't
+  // watched anything yet, so the "keep watching" / "unlock N more episodes"
+  // copy gives way to the "watch for free" variant. Everything else —
+  // Clerk redirect-back, analytics, layout — is identical.
+  gate?: boolean;
 }) {
   const t = useT();
 
@@ -54,9 +60,12 @@ export function SignupWall({
       capturePostHog("signup_wall_shown", {
         show_slug: showSlug,
         episode_number: episodeNumber,
+        // Segments the signup-gate pivot's wall impressions (shown on
+        // land, pre-playback) from the end-of-free-tier wall.
+        gate,
       });
     });
-  }, [showId, showSlug, episodeNumber]);
+  }, [showId, showSlug, episodeNumber, gate]);
 
   const watchHref = `/watch/${showSlug}?ep=${encodeURIComponent(targetEpisodeId)}`;
 
@@ -119,15 +128,17 @@ export function SignupWall({
       {/* Bottom block */}
       <div className="relative z-10 mt-auto flex flex-col gap-3.5 pb-[max(env(safe-area-inset-bottom),1.875rem)] pl-[max(env(safe-area-inset-left),1.5rem)] pr-[max(env(safe-area-inset-right),1.5rem)]">
         <span className="self-start rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
-          {t.signupWall.kicker}
+          {gate ? t.signupWall.gateKicker : t.signupWall.kicker}
         </span>
         <h2 className="font-display text-4xl uppercase leading-[1.02] tracking-[0.01em] text-cream">
           {t.signupWall.headline}
         </h2>
         <p className="text-[13px] leading-[1.6] text-cream/72">
-          {memberCount > 0
-            ? t.signupWall.body(memberCount)
-            : t.signupWall.bodyNoCount}
+          {gate
+            ? t.signupWall.gateBody
+            : memberCount > 0
+              ? t.signupWall.body(memberCount)
+              : t.signupWall.bodyNoCount}
         </p>
 
         <Show when="signed-out">
