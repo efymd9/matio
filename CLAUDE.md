@@ -105,7 +105,9 @@ components/
                            #   posters, hero, logo, meta-pixel (consent-gated
                            #   loader), view-content-pixel,
                            #   complete-registration-pixel,
-                           #   posthog-provider (consent-gated, dynamic import)
+                           #   posthog-provider (consent-gated, dynamic import),
+                           #   social-icon (filled brand glyphs for the footer
+                           #   social row)
   watch/                   # player, paywall, playback-status, overlays
                            #   (series-end-overlay captures reminder emails
                            #   into show_reminders — see "Episode reminder
@@ -187,6 +189,10 @@ lib/
                            #   -client/-actions/-shared): admin-panel-only
                            #   ru/en locale, Russian default — see "Admin
                            #   locale" rule
+  social-links.ts          # official social profiles (2 TikToks es/en, IG,
+                           #   YT, FB) — single source for the footer row
+                           #   (locale-matched TikTok), Organization sameAs,
+                           #   and llms.txt; universal, canonical clean URLs
   utm.ts                   # normalizeUtm() — shared UTM canonicalization
                            #   (trim+lowercase+strip; universal, app + PostHog)
   utils.ts                 # cn() from shadcn

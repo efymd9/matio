@@ -1,6 +1,7 @@
 import { getPublishedShows } from "@/lib/catalog";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { SITE_URL } from "@/lib/seo";
+import { ALL_SOCIAL_PROFILES } from "@/lib/social-links";
 
 // /llms.txt — the emerging convention (llmstxt.org) for handing AI answer
 // engines a curated, high-signal map of the site instead of making them
@@ -48,6 +49,10 @@ export async function GET() {
     `- [Terms of Service](${SITE_URL}/terms)`,
     `- [Privacy Policy](${SITE_URL}/privacy)`,
     `- [Cookie Policy](${SITE_URL}/cookies)`,
+    "",
+    "## Official profiles",
+    "",
+    ...ALL_SOCIAL_PROFILES.map((p) => `- ${p.label}: ${p.url}`),
     "",
     "## Notes for crawlers",
     "",

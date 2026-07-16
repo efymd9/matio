@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { COOKIE_PREFS_EVENT } from "@/lib/cookie-consent";
-import { useT } from "@/lib/i18n/client";
+import { useLocale, useT } from "@/lib/i18n/client";
+import { socialProfilesForLocale } from "@/lib/social-links";
 import { MatioLogo } from "./matio-logo";
+import { SocialIcon } from "./social-icon";
 
 // Site-wide footer. Hidden on /watch (fullscreen player) and /admin
 // (own layout). Carries the three legal links — required for live
@@ -26,7 +28,9 @@ export function SiteFooter({
 
 function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
   const t = useT();
+  const locale = useLocale();
   const year = new Date().getFullYear();
+  const socials = socialProfilesForLocale(locale);
 
   return (
     <footer className="border-t border-rust/30 bg-espresso pl-[max(env(safe-area-inset-left),1.5rem)] pr-[max(env(safe-area-inset-right),1.5rem)] sm:pl-[max(env(safe-area-inset-left),3rem)] sm:pr-[max(env(safe-area-inset-right),3rem)]">
@@ -40,6 +44,25 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
           <p className="text-[9px] font-bold uppercase tracking-[0.28em] text-gold/75 xl:text-[10px]">
             {t.footer.tagline}
           </p>
+          <ul
+            aria-label={t.footer.followUs}
+            className="flex items-center gap-4 pt-2"
+          >
+            {socials.map((s) => (
+              <li key={s.url}>
+                <a
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={s.label}
+                  title={s.label}
+                  className="block rounded-xs text-cream/50 transition-colors hover:text-gold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold/60"
+                >
+                  <SocialIcon platform={s.platform} size={18} />
+                </a>
+              </li>
+            ))}
+          </ul>
           <p className="hidden text-[11px] text-cream/35 tablet:block tablet:pb-[max(env(safe-area-inset-bottom),0px)] xl:hidden xl:pb-0">
             {t.footer.copyright(year)}
           </p>

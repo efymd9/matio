@@ -1,6 +1,7 @@
 import "server-only";
 
 import { SITE_NAME, SITE_URL, canonicalUrl } from "./seo";
+import { ALL_SOCIAL_PROFILES } from "./social-links";
 
 // JSON-LD structured data builders. The Next.js Metadata API has no JSON-LD
 // field, so these produce plain schema.org objects that callers embed via a
@@ -86,8 +87,9 @@ export function organizationJsonLd(): JsonLd {
       addressLocality: "Nottingham",
       addressCountry: "GB",
     },
-    // sameAs intentionally omitted — no confirmed official profiles yet; never
-    // ship placeholder/dead links.
+    // Official profiles (footer + llms.txt list the same URLs — keep all
+    // three surfaces sourced from lib/social-links so they never drift).
+    sameAs: ALL_SOCIAL_PROFILES.map((p) => p.url),
   };
 }
 
