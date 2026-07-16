@@ -78,6 +78,42 @@ An `Error` thrown from a Server Action (or during an RSC render) reaches the cli
 - Any client `catch` that displays `err.message` (e.g. the admin upload widget) shows the useless generic text in prod, even though it shows the real message in dev. If the admin needs to *act* on the error, **return** a structured `{ error: string }` from the action instead of throwing — returned values aren't redacted.
 - The real message only exists server-side. Find it in Vercel runtime logs (filter `level=error` around the timestamp; the log line contains the full message even when a viewer truncates it — full-text search still matches the hidden part). This is how the Mux "Free plan is limited to 10 assets" 400 behind a generic toast was diagnosed (2026-06-03).
 
+## React 19 form actions
+
+### `<form action={fn}>` resets every uncontrolled field when the action completes — including error returns
+
+React 19 schedules an **unconditional** `form.reset()` (`requestFormReset`) the
+moment a function form action is dispatched — a `useActionState` dispatch
+included. It fires whether the action succeeds or returns a validation-error
+state, reverting every uncontrolled input/select/checkbox to its
+`defaultValue`. For a create form that means the user's typed values are wiped
+right as the inline error renders (verified empirically against react-dom
+19.2.6: `startHostTransition` wraps the action as
+`requestFormReset(formFiber); return action(formData)`).
+
+The fix used by the admin show/actor forms: don't pass the dispatch as
+`action`. Submit manually — no reset is scheduled on this path:
+
+```tsx
+const [state, formAction, pending] = useActionState(action, { status: "idle" });
+<form onSubmit={(e) => {
+  e.preventDefault();
+  const formData = new FormData(e.currentTarget);
+  startTransition(() => formAction(formData));
+}}>
+```
+
+Native constraint validation (`required`, `pattern`) still runs before the
+submit event fires. Two knock-ons: `useFormStatus` reads nothing on this path
+(there is no form action) — take `pending` from `useActionState`'s third slot
+instead; and progressive enhancement (no-JS submit) is lost, which is fine for
+the admin panel.
+
+Related: `required` alone accepts a whitespace-only value, while our server
+actions `trim()` before validating — pair it with `pattern=".*\S.*"` on
+must-not-be-blank text inputs or the server sees `""` where the browser saw a
+"filled" field.
+
 ## React 19 hooks rules
 
 `eslint-config-next@16` ships `eslint-plugin-react-hooks@5+`, which adds two rules that flag patterns that were idiomatic in React 18 and earlier. Both fail the Vercel build by default (Next runs ESLint during `next build`).
@@ -691,6 +727,16 @@ import { buttonVariants } from "@/components/ui/button";
 No `tailwind.config.{js,ts}`. Theme + color tokens live in `app/globals.css` under `@theme inline { ... }`. `@import "tailwindcss";` at the top of the CSS file.
 
 ## Drizzle 0.45
+
+### Driver errors are wrapped — `.code` is NOT on the thrown error
+
+Drizzle 0.44+ wraps every driver failure in `DrizzleQueryError`; the original
+`PostgresError` (with `.code`, e.g. `23505` unique_violation) sits on
+`e.cause`. A `catch (e) { if ((e as any).code === "23505") … }` silently never
+matches (verified live against Neon 2026-07-16 — the tracked-links duplicate
+catch had exactly this latent bug). Use `isUniqueViolation` from
+`lib/db-errors.ts`, which walks the cause chain; add sibling helpers there for
+any other pg codes we ever need.
 
 ### Multi-column conflict targets
 

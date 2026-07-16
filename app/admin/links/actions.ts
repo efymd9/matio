@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { marketingLinks, shows } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin";
+import { isUniqueViolation } from "@/lib/db-errors";
 import {
   canonicalizeTargetPath,
   canonicalizeUtmTriple,
@@ -108,8 +109,10 @@ export async function createMarketingLink(
       createdBy: admin.id,
     });
   } catch (e) {
-    // 23505 = the unique index caught a concurrent duplicate.
-    if ((e as { code?: string }).code === "23505") {
+    // The partial unique index caught a concurrent duplicate. Checked via
+    // isUniqueViolation — the code sits on the DrizzleQueryError's cause,
+    // not the error itself, so the old direct `.code` check never matched.
+    if (isUniqueViolation(e)) {
       return { status: "error", code: "duplicate" };
     }
     console.error("createMarketingLink failed", e);

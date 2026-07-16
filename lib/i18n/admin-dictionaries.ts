@@ -472,6 +472,7 @@ export const ru = {
     secondsHint: "секунды",
     skipIntroPlaceholderStart: "напр. 5",
     skipIntroPlaceholderEnd: "напр. 60",
+    introRangeError: "«Конец» должен быть больше «Начала».",
     skipIntroExplain:
       "Пока воспроизведение в этом промежутке, плеер показывает кнопку «Пропустить заставку», а по нажатию перематывает к точке «Конец».",
     savingPending: "Сохранение…",
@@ -576,6 +577,20 @@ export const ru = {
     saving: "Сохранение…",
     createShow: "Создать сериал",
     saveChanges: "Сохранить изменения",
+  },
+  // Копия для типизированных кодов ошибок AdminFormState (createShow /
+  // updateShow / createActor / updateActor в app/admin/actions.ts) — тот же
+  // приём, что и links.err*: понятная ошибка в форме вместо общей страницы
+  // «Что-то пошло не так».
+  formErrors: {
+    titleRequired: "Укажите название.",
+    nameRequired: "Укажите имя.",
+    slugRequired: "Укажите slug.",
+    slugInvalid:
+      "Slug — только строчные латинские буквы, цифры и дефисы.",
+    slugTaken: "Такой slug уже занят — выберите другой.",
+    unknown: "Не удалось сохранить. Попробуйте ещё раз.",
+    notSaved: "Не сохранено",
   },
   statusSelect: {
     draft: "Черновик",
@@ -1148,6 +1163,7 @@ export const en: AdminDict = {
     secondsHint: "seconds",
     skipIntroPlaceholderStart: "e.g. 5",
     skipIntroPlaceholderEnd: "e.g. 60",
+    introRangeError: "Intro end must be after intro start.",
     skipIntroExplain:
       "The player shows a “Skip intro” pill while playback is in this window and seeks to End on click.",
     savingPending: "Saving…",
@@ -1252,6 +1268,18 @@ export const en: AdminDict = {
     saving: "Saving…",
     createShow: "Create show",
     saveChanges: "Save changes",
+  },
+  // Copy for the typed AdminFormState error codes (createShow / updateShow /
+  // createActor / updateActor in app/admin/actions.ts) — same pattern as
+  // links.err*: an inline form error instead of the generic error page.
+  formErrors: {
+    titleRequired: "Title is required.",
+    nameRequired: "Name is required.",
+    slugRequired: "Slug is required.",
+    slugInvalid: "Slug must be lowercase letters, numbers, and hyphens.",
+    slugTaken: "That slug is already taken — pick another.",
+    unknown: "Couldn’t save. Try again.",
+    notSaved: "Not saved",
   },
   statusSelect: {
     draft: "Draft",

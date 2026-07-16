@@ -1,14 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { useFormStatus } from "react-dom";
+import { startTransition, useActionState, useState } from "react";
 import { useAdminT } from "@/lib/i18n/admin-client";
 import { Icon } from "@/components/site/icon";
+import { FormErrorBanner } from "@/components/admin/form-error-banner";
 import { ImageUploadField } from "@/components/admin/image-upload-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { SLUG_PATTERN, slugify } from "@/lib/slug";
+import type { AdminFormState } from "@/app/admin/actions";
 
 export type ActorFormValues = {
   name: string;
@@ -29,27 +31,44 @@ export const EMPTY_ACTOR_FORM: ActorFormValues = {
 // Unified create/edit form for virtual actors — the same shape as ShowForm
 // (shared by /admin/actors/new and /admin/actors/[id] so the surfaces can't
 // drift). The avatar URL is controlled state so the upload preview updates;
-// everything else is uncontrolled and read from FormData on submit.
+// the slug is controlled for auto-slugify; everything else is uncontrolled
+// and read from FormData on submit.
 export function ActorForm({
   action,
   defaultValues,
   mode,
   cancelHref,
 }: {
-  action: (formData: FormData) => void | Promise<void>;
+  action: (prev: AdminFormState, formData: FormData) => Promise<AdminFormState>;
   defaultValues: ActorFormValues;
   mode: "create" | "edit";
   cancelHref?: string;
 }) {
   const t = useAdminT();
+  const [state, formAction, pending] = useActionState<AdminFormState, FormData>(
+    action,
+    { status: "idle" },
+  );
   const [avatar, setAvatar] = useState(defaultValues.avatarImageUrl);
   const [dirty, setDirty] = useState(false);
+  // Same auto-slugify contract as ShowForm: create mode tracks the name
+  // until the slug is hand-edited; clearing re-enables tracking.
+  const [slug, setSlug] = useState(defaultValues.slug);
+  const [slugTouched, setSlugTouched] = useState(mode === "edit");
 
   return (
     <form
-      action={action}
+      // Manual dispatch instead of action={formAction} — see ShowForm:
+      // React 19 resets uncontrolled fields when a <form action>
+      // completes, even on an error return; dispatching inside our own
+      // transition preserves the admin's typed values.
+      onSubmit={(e) => {
+        e.preventDefault();
+        const formData = new FormData(e.currentTarget);
+        startTransition(() => formAction(formData));
+        setDirty(false);
+      }}
       onInput={() => setDirty(true)}
-      onSubmit={() => setDirty(false)}
       className="space-y-5 pb-28"
     >
       <Panel
@@ -63,7 +82,14 @@ export function ActorForm({
               name="name"
               defaultValue={defaultValues.name}
               required
+              // required alone accepts a whitespace-only value that the
+              // server trims to "" — demand one non-space character here.
+              pattern=".*\S.*"
+              title={t.formErrors.nameRequired}
               placeholder={t.actorForm.namePlaceholder}
+              onChange={(e) => {
+                if (!slugTouched) setSlug(slugify(e.target.value));
+              }}
             />
           </Field>
           <Field
@@ -75,8 +101,16 @@ export function ActorForm({
             <Input
               id="slug"
               name="slug"
-              defaultValue={defaultValues.slug}
+              value={slug}
+              onChange={(e) => {
+                setSlug(e.target.value);
+                setSlugTouched(e.target.value.trim() !== "");
+              }}
               required
+              // Blocks submit in the browser with a native message — the
+              // server's slug_invalid answer is the fallback, not the UX.
+              pattern={SLUG_PATTERN}
+              title={t.actorForm.slugHint}
               placeholder={t.actorForm.slugPlaceholder}
               className="font-mono sm:w-64"
             />
@@ -122,7 +156,15 @@ export function ActorForm({
         />
       </Panel>
 
-      <SaveBar dirty={dirty} mode={mode} cancelHref={cancelHref} />
+      <FormErrorBanner state={state} />
+
+      <SaveBar
+        dirty={dirty}
+        error={state.status === "error"}
+        pending={pending}
+        mode={mode}
+        cancelHref={cancelHref}
+      />
     </form>
   );
 }
@@ -178,23 +220,33 @@ function Field({
 
 function SaveBar({
   dirty,
+  error,
+  pending,
   mode,
   cancelHref,
 }: {
   dirty: boolean;
+  error: boolean;
+  pending: boolean;
   mode: "create" | "edit";
   cancelHref?: string;
 }) {
   const t = useAdminT();
+  // Priority: editing again ("unsaved") beats a stale error label.
+  const statusLabel = dirty
+    ? t.showForm.unsavedChanges
+    : error
+      ? t.formErrors.notSaved
+      : t.showForm.allChangesSaved;
   return (
     <div className="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-espresso-2/90 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:px-5">
       <span className="flex items-center gap-2 text-xs text-cream/50">
         <span
           className={`inline-block size-1.5 rounded-full ${
-            dirty ? "bg-gold" : "bg-white/25"
+            dirty ? "bg-gold" : error ? "bg-rust" : "bg-white/25"
           }`}
         />
-        {dirty ? t.showForm.unsavedChanges : t.showForm.allChangesSaved}
+        {statusLabel}
       </span>
       <div className="flex items-center gap-2">
         {cancelHref ? (
@@ -205,15 +257,22 @@ function SaveBar({
             {t.showForm.cancel}
           </Link>
         ) : null}
-        <SaveButton mode={mode} />
+        <SaveButton mode={mode} pending={pending} />
       </div>
     </div>
   );
 }
 
-function SaveButton({ mode }: { mode: "create" | "edit" }) {
+// pending comes from useActionState's isPending — useFormStatus can't see
+// the manual dispatch (there is no <form action>), it would always be false.
+function SaveButton({
+  mode,
+  pending,
+}: {
+  mode: "create" | "edit";
+  pending: boolean;
+}) {
   const t = useAdminT();
-  const { pending } = useFormStatus();
   return (
     <button
       type="submit"

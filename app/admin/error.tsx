@@ -1,10 +1,12 @@
 "use client";
 
-// Admin-specific error boundary. Plenty of admin server actions throw
-// (validation errors in createShow / updateShow / season + episode CRUD,
-// Mux upload failures, etc.) — they used to bubble to a white screen.
-// Now they land here with the action's Error.message surfaced inline so
-// the admin can see what went wrong and try again without losing context.
+// Admin-specific error boundary — the last resort for unexpected throws
+// (forged-post integrity guards, Mux upload failures, transient DB/API
+// errors). NOT for form validation: in production builds Next.js masks a
+// thrown Error's message behind a digest, so anything an admin can trip
+// by typing must return a typed error code rendered inline in the form
+// instead (AdminFormState in app/admin/actions.ts, CreateLinkState in
+// app/admin/links/actions.ts). Error.message renders inline in dev only.
 
 import { useEffect } from "react";
 import Link from "next/link";

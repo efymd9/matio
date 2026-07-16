@@ -199,6 +199,10 @@ export default async function SeasonPage({
                 id="ep-title"
                 name="title"
                 required
+                // required alone accepts a whitespace-only value; the server
+                // trims to "" and throws (masked in prod) — block it here.
+                pattern=".*\S.*"
+                title={t.formErrors.titleRequired}
                 placeholder={t.season.episodeTitlePlaceholder}
               />
             </Field>

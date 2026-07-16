@@ -18,7 +18,9 @@ import {
 } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin";
 import { CATALOG_TAG } from "@/lib/catalog";
+import { isUniqueViolation } from "@/lib/db-errors";
 import { getMux } from "@/lib/mux";
+import { isValidSlug } from "@/lib/slug";
 
 // Bust the home/sitemap catalog cache (lib/catalog.ts:getPublishedShows).
 // Called after any show mutation that can change which rows have
@@ -89,97 +91,130 @@ function checkbox(formData: FormData, key: string): boolean {
 
 // ---------- shows ----------
 
-export async function createShow(formData: FormData) {
-  await requireAdmin();
+// Validation failures return typed codes (mapped to localized copy in the
+// client forms via useActionState) instead of throwing — a thrown Error's
+// message is masked in production builds, so an admin typing an uppercase
+// slug used to get the generic error boundary with zero explanation
+// (incident 2026-07-16, REF 4219756871). Same pattern as the tracked-links
+// actions. Shared by the show and actor forms.
+export type AdminFormErrorCode =
+  | "title_required"
+  | "name_required"
+  | "slug_required"
+  | "slug_invalid"
+  | "slug_taken"
+  | "unknown";
 
+export type AdminFormState =
+  | { status: "idle" }
+  | { status: "ok" }
+  | { status: "error"; code: AdminFormErrorCode };
+
+function showValues(
+  formData: FormData,
+): { ok: true; values: NewShow } | { ok: false; code: AdminFormErrorCode } {
   const title = str(formData, "title");
   const slug = str(formData, "slug");
-  if (!title) throw new Error("Title is required");
-  if (!slug) throw new Error("Slug is required");
-  if (!/^[a-z0-9-]+$/.test(slug)) {
-    throw new Error("Slug must be lowercase letters, numbers, and hyphens");
-  }
+  if (!title) return { ok: false, code: "title_required" };
+  if (!slug) return { ok: false, code: "slug_required" };
+  if (!isValidSlug(slug)) return { ok: false, code: "slug_invalid" };
 
-  const status = str(formData, "status") === "published" ? "published" : "draft";
-  const orientation =
-    str(formData, "orientation") === "vertical" ? "vertical" : "horizontal";
-
-  const values: NewShow = {
-    title,
-    slug,
-    description: str(formData, "description") || null,
-    posterImageUrl: str(formData, "posterImageUrl") || null,
-    heroImageUrl: str(formData, "heroImageUrl") || null,
-    genre: parseGenre(formData),
-    status,
-    orientation,
-    justReleased: checkbox(formData, "justReleased"),
-    popularNow: checkbox(formData, "popularNow"),
+  return {
+    ok: true,
+    values: {
+      title,
+      slug,
+      description: str(formData, "description") || null,
+      posterImageUrl: str(formData, "posterImageUrl") || null,
+      heroImageUrl: str(formData, "heroImageUrl") || null,
+      genre: parseGenre(formData),
+      status: str(formData, "status") === "published" ? "published" : "draft",
+      orientation:
+        str(formData, "orientation") === "vertical" ? "vertical" : "horizontal",
+      justReleased: checkbox(formData, "justReleased"),
+      popularNow: checkbox(formData, "popularNow"),
+    },
   };
+}
 
-  const [created] = await db.insert(shows).values(values).returning({ id: shows.id });
+export async function createShow(
+  _prev: AdminFormState,
+  formData: FormData,
+): Promise<AdminFormState> {
+  await requireAdmin();
+
+  const parsed = showValues(formData);
+  if (!parsed.ok) return { status: "error", code: parsed.code };
+
+  let createdId: string;
+  try {
+    const [created] = await db
+      .insert(shows)
+      .values(parsed.values)
+      .returning({ id: shows.id });
+    createdId = created.id;
+  } catch (e) {
+    if (isUniqueViolation(e)) return { status: "error", code: "slug_taken" };
+    console.error("createShow failed", e);
+    return { status: "error", code: "unknown" };
+  }
 
   revalidatePath("/");
   bustCatalog();
   revalidatePath("/admin");
-  redirect(`/admin/shows/${created.id}`);
+  // redirect() throws NEXT_REDIRECT — it must stay outside the try above.
+  redirect(`/admin/shows/${createdId}`);
 }
 
-export async function updateShow(id: string, formData: FormData) {
+export async function updateShow(
+  id: string,
+  _prev: AdminFormState,
+  formData: FormData,
+): Promise<AdminFormState> {
   await requireAdmin();
 
-  const title = str(formData, "title");
-  const slug = str(formData, "slug");
-  if (!title) throw new Error("Title is required");
-  if (!slug) throw new Error("Slug is required");
-  if (!/^[a-z0-9-]+$/.test(slug)) {
-    throw new Error("Slug must be lowercase letters, numbers, and hyphens");
-  }
+  const parsed = showValues(formData);
+  if (!parsed.ok) return { status: "error", code: parsed.code };
 
-  const status = str(formData, "status") === "published" ? "published" : "draft";
-  const orientation =
-    str(formData, "orientation") === "vertical" ? "vertical" : "horizontal";
+  try {
+    // Snapshot the current artwork so we can clean up any Blob object that's
+    // being replaced or cleared by this edit (see deleteOrphanedBlob).
+    const [prev] = await db
+      .select({
+        posterImageUrl: shows.posterImageUrl,
+        heroImageUrl: shows.heroImageUrl,
+      })
+      .from(shows)
+      .where(and(eq(shows.id, id), isNull(shows.deletedAt)))
+      .limit(1);
 
-  const posterImageUrl = str(formData, "posterImageUrl") || null;
-  const heroImageUrl = str(formData, "heroImageUrl") || null;
+    await db
+      .update(shows)
+      .set(parsed.values)
+      .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
 
-  // Snapshot the current artwork so we can clean up any Blob object that's
-  // being replaced or cleared by this edit (see deleteOrphanedBlob).
-  const [prev] = await db
-    .select({
-      posterImageUrl: shows.posterImageUrl,
-      heroImageUrl: shows.heroImageUrl,
-    })
-    .from(shows)
-    .where(and(eq(shows.id, id), isNull(shows.deletedAt)))
-    .limit(1);
-
-  await db
-    .update(shows)
-    .set({
-      title,
-      slug,
-      description: str(formData, "description") || null,
-      posterImageUrl,
-      heroImageUrl,
-      genre: parseGenre(formData),
-      status,
-      orientation,
-      justReleased: checkbox(formData, "justReleased"),
-      popularNow: checkbox(formData, "popularNow"),
-    })
-    .where(and(eq(shows.id, id), isNull(shows.deletedAt)));
-
-  // After the row is safely updated, drop any now-unreferenced Blob artwork.
-  if (prev) {
-    await deleteOrphanedBlob(prev.posterImageUrl, posterImageUrl);
-    await deleteOrphanedBlob(prev.heroImageUrl, heroImageUrl);
+    // After the row is safely updated, drop any now-unreferenced Blob artwork.
+    if (prev) {
+      await deleteOrphanedBlob(
+        prev.posterImageUrl,
+        parsed.values.posterImageUrl ?? null,
+      );
+      await deleteOrphanedBlob(
+        prev.heroImageUrl,
+        parsed.values.heroImageUrl ?? null,
+      );
+    }
+  } catch (e) {
+    if (isUniqueViolation(e)) return { status: "error", code: "slug_taken" };
+    console.error("updateShow failed", e);
+    return { status: "error", code: "unknown" };
   }
 
   revalidatePath("/");
   bustCatalog();
   revalidatePath("/admin");
   revalidatePath(`/admin/shows/${id}`);
+  return { status: "ok" };
 }
 
 // Atomic "only one featured at a time": flips the target to true and
@@ -447,56 +482,91 @@ export async function deleteEpisode(
 
 // ---------- virtual actors ----------
 
-// Shared validation for the create/update actor forms. Returns the column
-// values; throws on a bad name/slug — same fail-loud style as the show
-// actions (messages are masked in prod anyway).
-function actorValues(formData: FormData): NewActor {
+// Shared validation for the create/update actor forms. Typed error codes
+// instead of throws, same as showValues — see the AdminFormState note.
+function actorValues(
+  formData: FormData,
+): { ok: true; values: NewActor } | { ok: false; code: AdminFormErrorCode } {
   const name = str(formData, "name");
   const slug = str(formData, "slug");
-  if (!name) throw new Error("Name is required");
-  if (!slug) throw new Error("Slug is required");
-  if (!/^[a-z0-9-]+$/.test(slug)) {
-    throw new Error("Slug must be lowercase letters, numbers, and hyphens");
-  }
+  if (!name) return { ok: false, code: "name_required" };
+  if (!slug) return { ok: false, code: "slug_required" };
+  if (!isValidSlug(slug)) return { ok: false, code: "slug_invalid" };
   return {
-    name,
-    slug,
-    tagline: str(formData, "tagline") || null,
-    bio: str(formData, "bio") || null,
-    avatarImageUrl: str(formData, "avatarImageUrl") || null,
+    ok: true,
+    values: {
+      name,
+      slug,
+      tagline: str(formData, "tagline") || null,
+      bio: str(formData, "bio") || null,
+      avatarImageUrl: str(formData, "avatarImageUrl") || null,
+    },
   };
 }
 
-export async function createActor(formData: FormData) {
+export async function createActor(
+  _prev: AdminFormState,
+  formData: FormData,
+): Promise<AdminFormState> {
   await requireAdmin();
-  const [created] = await db
-    .insert(actors)
-    .values(actorValues(formData))
-    .returning({ id: actors.id });
+
+  const parsed = actorValues(formData);
+  if (!parsed.ok) return { status: "error", code: parsed.code };
+
+  let createdId: string;
+  try {
+    const [created] = await db
+      .insert(actors)
+      .values(parsed.values)
+      .returning({ id: actors.id });
+    createdId = created.id;
+  } catch (e) {
+    if (isUniqueViolation(e)) return { status: "error", code: "slug_taken" };
+    console.error("createActor failed", e);
+    return { status: "error", code: "unknown" };
+  }
+
   revalidatePath("/admin/actors");
-  redirect(`/admin/actors/${created.id}`);
+  // redirect() throws NEXT_REDIRECT — it must stay outside the try above.
+  redirect(`/admin/actors/${createdId}`);
 }
 
-export async function updateActor(id: string, formData: FormData) {
+export async function updateActor(
+  id: string,
+  _prev: AdminFormState,
+  formData: FormData,
+): Promise<AdminFormState> {
   await requireAdmin();
-  const values = actorValues(formData);
 
-  // Snapshot the current avatar so a replaced/cleared Blob object gets
-  // cleaned up, same as show artwork.
-  const [prev] = await db
-    .select({ avatarImageUrl: actors.avatarImageUrl })
-    .from(actors)
-    .where(eq(actors.id, id))
-    .limit(1);
+  const parsed = actorValues(formData);
+  if (!parsed.ok) return { status: "error", code: parsed.code };
 
-  await db.update(actors).set(values).where(eq(actors.id, id));
+  try {
+    // Snapshot the current avatar so a replaced/cleared Blob object gets
+    // cleaned up, same as show artwork.
+    const [prev] = await db
+      .select({ avatarImageUrl: actors.avatarImageUrl })
+      .from(actors)
+      .where(eq(actors.id, id))
+      .limit(1);
 
-  if (prev) {
-    await deleteOrphanedBlob(prev.avatarImageUrl, values.avatarImageUrl ?? null);
+    await db.update(actors).set(parsed.values).where(eq(actors.id, id));
+
+    if (prev) {
+      await deleteOrphanedBlob(
+        prev.avatarImageUrl,
+        parsed.values.avatarImageUrl ?? null,
+      );
+    }
+  } catch (e) {
+    if (isUniqueViolation(e)) return { status: "error", code: "slug_taken" };
+    console.error("updateActor failed", e);
+    return { status: "error", code: "unknown" };
   }
 
   revalidatePath("/admin/actors");
   revalidatePath(`/admin/actors/${id}`);
+  return { status: "ok" };
 }
 
 // Hard delete (unlike shows' soft delete): an actor carries no playback or

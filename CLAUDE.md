@@ -142,6 +142,12 @@ lib/
                            #   (tag 'catalog'); shared by / + /sitemap.xml
   cookie-consent.ts        # cookie_consent parse/serialize, banner helpers
                            #   (universal — imported by proxy.ts AND banner)
+  slug.ts                  # SLUG_PATTERN/isValidSlug/slugify (RU translit) —
+                           #   universal; one charset rule for the admin
+                           #   forms' pattern attr + server validation
+  db-errors.ts             # isUniqueViolation — walks e.cause (Drizzle 0.44+
+                           #   wraps PostgresError; .code is NOT on the
+                           #   thrown error). Use this, never e.code directly
   mux.ts                   # lazy Mux SDK client
   mux-token.ts             # RS256 JWT signer for signed playback
   stripe.ts                # lazy Stripe SDK client
@@ -267,6 +273,7 @@ scripts/
 - Don't `db:push` against production — use `db:generate` + `db:migrate` so changes are tracked.
 - Don't read `subscription.current_period_end` or `invoice.subscription` off the Stripe object root — both moved in 2024+ API. See [gotchas](./docs/gotchas.md#stripe-api-2024-moves).
 - Don't put `asChild` on shadcn `Button` — there is no such prop. Use `buttonVariants()` on the Link instead.
+- Don't `throw new Error` for typable validation in admin form server actions — production masks the message behind a digest, so the admin gets the generic error page with zero explanation (the 2026-07-16 slug incident). Return typed codes rendered inline by the form (`AdminFormState` in `app/admin/actions.ts`, `CreateLinkState` in `app/admin/links/actions.ts`); reserve throws for forged-post integrity guards a real UI flow can't reach.
 - Don't drive critical-path UI state with CSS `:has()` (or Tailwind's `group-has-[*]:` variants) — iOS Safari < 15.4 silently no-ops the selector, leaving older iPhones with unselectable plans / invisible toggles. Use `peer-*:` (sibling combinator, Safari 3+) or React-controlled state. See [gotchas → cross-browser CSS](./docs/gotchas.md#cross-browser-css-ios-safari--154).
 - Don't add a new `oklch()` color to `globals.css` without a hex/rgb fallback **declared first** (double-declaration pattern). Safari < 15.4 can't parse `oklch()` and drops the line entirely — without the fallback the whole dark theme collapses to default light on older iPhones.
 - Don't pin UI to the bottom of the player / page without `pb-[max(env(safe-area-inset-bottom),...)]`. `viewport-fit=cover` is set via `viewport` export in `app/layout.tsx`, so the inset values are non-zero on notched iPhones — collisions with the home indicator are a 30-second fix when authored, an UX bug otherwise.

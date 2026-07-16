@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import { FormSubmitButton } from "@/components/admin/form-submit-button";
+import { IntroRangeFields } from "@/components/admin/intro-range-fields";
 import { UploadWidget } from "@/components/admin/upload-widget";
 import {
   AdminPageHeader,
@@ -187,6 +188,10 @@ export default async function EditEpisodePage({
                 name="title"
                 defaultValue={episode.title}
                 required
+                // required alone accepts a whitespace-only value; the server
+                // trims to "" and throws (masked in prod) — block it here.
+                pattern=".*\S.*"
+                title={t.formErrors.titleRequired}
               />
             </Field>
           </div>
@@ -216,38 +221,10 @@ export default async function EditEpisodePage({
                 {t.episode.skipIntroBlankHint}
               </span>
             </div>
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <Field
-                label={t.episode.fieldStart}
-                htmlFor="introStartSeconds"
-                hint={t.episode.secondsHint}
-              >
-                <Input
-                  id="introStartSeconds"
-                  name="introStartSeconds"
-                  type="number"
-                  min={0}
-                  step={1}
-                  placeholder={t.episode.skipIntroPlaceholderStart}
-                  defaultValue={episode.introStartSeconds ?? ""}
-                />
-              </Field>
-              <Field
-                label={t.episode.fieldEnd}
-                htmlFor="introEndSeconds"
-                hint={t.episode.secondsHint}
-              >
-                <Input
-                  id="introEndSeconds"
-                  name="introEndSeconds"
-                  type="number"
-                  min={1}
-                  step={1}
-                  placeholder={t.episode.skipIntroPlaceholderEnd}
-                  defaultValue={episode.introEndSeconds ?? ""}
-                />
-              </Field>
-            </div>
+            <IntroRangeFields
+              defaultStart={episode.introStartSeconds}
+              defaultEnd={episode.introEndSeconds}
+            />
             <p className="mt-2.5 text-[11px] leading-relaxed text-white/45">
               {t.episode.skipIntroExplain}
             </p>

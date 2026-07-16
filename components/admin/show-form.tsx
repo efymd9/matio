@@ -1,16 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { useFormStatus } from "react-dom";
+import { startTransition, useActionState, useState } from "react";
 import { useAdminT } from "@/lib/i18n/admin-client";
 import { Icon } from "@/components/site/icon";
+import { FormErrorBanner } from "@/components/admin/form-error-banner";
 import { ImageUploadField } from "@/components/admin/image-upload-field";
 import { StatusSelect } from "@/components/admin/status-select";
 import { OrientationSelect } from "@/components/admin/orientation-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { SLUG_PATTERN, slugify } from "@/lib/slug";
+import type { AdminFormState } from "@/app/admin/actions";
 
 export type ShowFormValues = {
   title: string;
@@ -44,29 +46,52 @@ export const EMPTY_SHOW_FORM: ShowFormValues = {
 // this component is purely presentational + the live-preview state.
 //
 // Poster/hero URLs are controlled state so the artwork previews update
-// as you type. Everything else is uncontrolled (defaultValue) — cheaper,
-// and the values are read from the FormData on submit anyway.
+// as you type; the slug is controlled for auto-slugify. Everything else
+// is uncontrolled (defaultValue) — cheaper, and the values are read from
+// the FormData on submit anyway.
 export function ShowForm({
   action,
   defaultValues,
   mode,
   cancelHref,
 }: {
-  action: (formData: FormData) => void | Promise<void>;
+  action: (prev: AdminFormState, formData: FormData) => Promise<AdminFormState>;
   defaultValues: ShowFormValues;
   mode: "create" | "edit";
   cancelHref?: string;
 }) {
   const t = useAdminT();
+  const [state, formAction, pending] = useActionState<AdminFormState, FormData>(
+    action,
+    { status: "idle" },
+  );
   const [poster, setPoster] = useState(defaultValues.posterImageUrl);
   const [hero, setHero] = useState(defaultValues.heroImageUrl);
   const [dirty, setDirty] = useState(false);
+  // In create mode the slug tracks the title until the admin edits the
+  // slug by hand; clearing the slug re-enables tracking. Edit mode never
+  // auto-syncs — a slug change means new public URLs and must stay
+  // deliberate.
+  const [slug, setSlug] = useState(defaultValues.slug);
+  const [slugTouched, setSlugTouched] = useState(mode === "edit");
 
   return (
     <form
-      action={action}
+      // Manual dispatch instead of action={formAction}: React 19 resets
+      // every uncontrolled field to its defaultValue when a <form action>
+      // completes — INCLUDING when the action returns a validation error
+      // (requestFormReset is unconditional on that path). The admin's
+      // typed values must survive an error return, so we submit through
+      // the useActionState dispatch inside our own transition, where no
+      // reset is scheduled. Native constraint validation (required,
+      // pattern) still runs before the submit event fires.
+      onSubmit={(e) => {
+        e.preventDefault();
+        const formData = new FormData(e.currentTarget);
+        startTransition(() => formAction(formData));
+        setDirty(false);
+      }}
       onInput={() => setDirty(true)}
-      onSubmit={() => setDirty(false)}
       className="space-y-5 pb-28"
     >
       <Panel
@@ -80,7 +105,14 @@ export function ShowForm({
               name="title"
               defaultValue={defaultValues.title}
               required
+              // required alone accepts a whitespace-only value that the
+              // server trims to "" — demand one non-space character here.
+              pattern=".*\S.*"
+              title={t.formErrors.titleRequired}
               placeholder={t.showForm.titlePlaceholder}
+              onChange={(e) => {
+                if (!slugTouched) setSlug(slugify(e.target.value));
+              }}
             />
           </Field>
           <Field
@@ -92,8 +124,16 @@ export function ShowForm({
             <Input
               id="slug"
               name="slug"
-              defaultValue={defaultValues.slug}
+              value={slug}
+              onChange={(e) => {
+                setSlug(e.target.value);
+                setSlugTouched(e.target.value.trim() !== "");
+              }}
               required
+              // Blocks submit in the browser with a native message — the
+              // server's slug_invalid answer is the fallback, not the UX.
+              pattern={SLUG_PATTERN}
+              title={t.showForm.slugHint}
               placeholder={t.showForm.slugPlaceholder}
               className="font-mono sm:w-64"
             />
@@ -195,7 +235,15 @@ export function ShowForm({
         </div>
       </Panel>
 
-      <SaveBar dirty={dirty} mode={mode} cancelHref={cancelHref} />
+      <FormErrorBanner state={state} />
+
+      <SaveBar
+        dirty={dirty}
+        error={state.status === "error"}
+        pending={pending}
+        mode={mode}
+        cancelHref={cancelHref}
+      />
     </form>
   );
 }
@@ -290,23 +338,33 @@ function CheckCard({
 
 function SaveBar({
   dirty,
+  error,
+  pending,
   mode,
   cancelHref,
 }: {
   dirty: boolean;
+  error: boolean;
+  pending: boolean;
   mode: "create" | "edit";
   cancelHref?: string;
 }) {
   const t = useAdminT();
+  // Priority: editing again ("unsaved") beats a stale error label.
+  const statusLabel = dirty
+    ? t.showForm.unsavedChanges
+    : error
+      ? t.formErrors.notSaved
+      : t.showForm.allChangesSaved;
   return (
     <div className="sticky bottom-4 z-20 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-espresso-2/90 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:px-5">
       <span className="flex items-center gap-2 text-xs text-cream/50">
         <span
           className={`inline-block size-1.5 rounded-full ${
-            dirty ? "bg-gold" : "bg-white/25"
+            dirty ? "bg-gold" : error ? "bg-rust" : "bg-white/25"
           }`}
         />
-        {dirty ? t.showForm.unsavedChanges : t.showForm.allChangesSaved}
+        {statusLabel}
       </span>
       <div className="flex items-center gap-2">
         {cancelHref ? (
@@ -317,15 +375,22 @@ function SaveBar({
             {t.showForm.cancel}
           </Link>
         ) : null}
-        <SaveButton mode={mode} />
+        <SaveButton mode={mode} pending={pending} />
       </div>
     </div>
   );
 }
 
-function SaveButton({ mode }: { mode: "create" | "edit" }) {
+// pending comes from useActionState's isPending — useFormStatus can't see
+// the manual dispatch (there is no <form action>), it would always be false.
+function SaveButton({
+  mode,
+  pending,
+}: {
+  mode: "create" | "edit";
+  pending: boolean;
+}) {
   const t = useAdminT();
-  const { pending } = useFormStatus();
   return (
     <button
       type="submit"
