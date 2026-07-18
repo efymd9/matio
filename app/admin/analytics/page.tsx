@@ -1,63 +1,75 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import {
-  campaignLabel,
-  DIRECT_BUCKET,
-  loadDashboard,
-  loadEpisodeFunnels,
-  loadFreeShowDepth,
-  loadSignupFunnelDb,
-  loadTrackedLinks,
-  parseFilters,
-  type AnalyticsFilters as Filters,
-  type TrackedLinkRow,
-} from "@/lib/admin-analytics";
-import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
-import { getMuxData, muxTimeframeForDays } from "@/lib/mux-data";
-import { getSignupFunnelStats, signupFunnelWindow } from "@/lib/posthog-query";
-import { AnalyticsFilters } from "@/components/admin/analytics-filters";
-import { TimeSeriesChart } from "@/components/admin/time-series-chart";
-import { CopyButton } from "@/components/admin/copy-button";
-import {
-  BarList,
-  Donut,
-  FunnelChart,
-  Histogram,
-  KpiTile,
-} from "@/components/admin/charts";
+  loadContentTable,
+  loadCountryOptions,
+  loadPulse,
+  loadReleaseStats,
+  loadRetentionCurve,
+  loadSourceGeoMatrix,
+  loadSpecFunnel,
+  loadSpecGeo,
+  loadSpecKpis,
+  loadWatchTimeWidget,
+  parseSpecFilters,
+  shapeReleaseRetention,
+  type ContentRow,
+  type SpecFilters,
+} from "@/lib/admin-analytics-v2";
+import { paymentsEnabled } from "@/lib/free-mode";
 import { getAdminDict } from "@/lib/i18n/admin-server";
-import type { AdminDict } from "@/lib/i18n/admin-dictionaries";
-
-// Reading searchParams forces dynamic rendering — the dashboard always reflects
-// the live DB + current filter URL.
-export const dynamic = "force-dynamic";
+import { FunnelChart, KpiTile } from "@/components/admin/charts";
+import {
+  DurationCompletionPlot,
+  PulseChart,
+  RetentionCurveChart,
+} from "@/components/admin/spec-charts";
+import { SpecAnalyticsFilters } from "@/components/admin/spec-filters";
+import { WorldMap } from "@/components/admin/world-map";
+import { WORLD_TILE_GRID } from "@/lib/world-map-grid";
+import { LegacyDashboard } from "./legacy-dashboard";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-// Range preset → analytics dict key. Keys stay at module scope; the labels are
-// resolved at render time from the admin dictionary.
-const RANGE_LABEL_KEY: Record<
-  string,
-  keyof Pick<
-    AdminDict["analytics"],
-    | "rangeLast24Hours"
-    | "rangeLast7Days"
-    | "rangeLast30Days"
-    | "rangeLast90Days"
-    | "rangeAllTime"
-    | "rangeCustom"
-  >
-> = {
-  "24h": "rangeLast24Hours",
-  "7d": "rangeLast7Days",
-  "30d": "rangeLast30Days",
-  "90d": "rangeLast90Days",
-  all: "rangeAllTime",
-  custom: "rangeCustom",
-};
+export const dynamic = "force-dynamic";
 
-function pct(part: number, whole: number): string {
-  return whole > 0 ? `${Math.round((part / whole) * 100)}` : "0";
+const COUNTRY_NAMES: Record<string, string> = Object.fromEntries(
+  Object.entries(WORLD_TILE_GRID).map(([iso, t]) => [iso, t.name]),
+);
+
+function countryName(iso: string | null | undefined, unknownLabel: string) {
+  if (!iso) return unknownLabel;
+  return COUNTRY_NAMES[iso] ?? iso;
+}
+
+function fmtPctOrDash(v: number | null, dash: string): string {
+  return v == null ? dash : `${v < 10 ? v.toFixed(1) : Math.round(v)}%`;
+}
+
+function fmtMmSs(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// Serialize the current filter state back into a query string, with a
+// patch — used by the episode-table links so selecting a curve keeps the
+// period/source/geo intact.
+function qs(f: SpecFilters, patch: Record<string, string | null>): string {
+  const params = new URLSearchParams();
+  if (f.preset !== "30d") params.set("range", f.preset);
+  if (f.customFrom) params.set("from", f.customFrom);
+  if (f.customTo) params.set("to", f.customTo);
+  if (f.source !== "all") params.set("src", f.source);
+  if (f.country !== "all") params.set("geo", f.country);
+  if (f.window !== 7) params.set("w", String(f.window));
+  if (f.episode) params.set("ep", f.episode);
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) params.delete(k);
+    else params.set(k, v);
+  }
+  const s = params.toString();
+  return s ? `?${s}` : "?";
 }
 
 export default async function AnalyticsPage({
@@ -65,1026 +77,549 @@ export default async function AnalyticsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
+  // Paid mode keeps the untouched legacy dashboard (dormant while the
+  // free pivot holds — the spec'd page below is the free-mode dashboard).
+  if (paymentsEnabled()) {
+    return <LegacyDashboard searchParams={searchParams} />;
+  }
+
   const { t } = await getAdminDict();
-  const ta = t.analytics;
-  // Free pivot: with payments off the dashboard reorganizes around the
-  // organic funnel (sessions → depth → signups). Paid panels aren't deleted
-  // — they render again the moment PAYMENTS_ENABLED=1 comes back.
-  const paymentsOn = paymentsEnabled();
-  // Signup gate (REQUIRE_SIGNUP): anonymous playback stopped minting
-  // trial_sessions rows on 2026-07-16, so the organic-funnel panels stop
-  // filling — the flag drives the explanatory note on that panel.
-  const signupGateOn = signupRequired();
+  const ts = t.analyticsSpec;
   const sp = await searchParams;
-  const filters = parseFilters(sp, new Date());
-  const [d, episodeFunnels, trackedLinks, freeShowDepth] = await Promise.all([
-    loadDashboard(filters, paymentsOn),
-    // Tier-gated episode funnels describe walls that don't exist in free
-    // mode; the per-show depth cards below replace them there.
-    paymentsOn ? loadEpisodeFunnels(filters) : Promise.resolve([]),
-    loadTrackedLinks({ from: filters.from, to: filters.to }),
-    paymentsOn ? Promise.resolve([]) : loadFreeShowDepth(filters),
-  ]);
-  const k = d.kpis;
-
-  const rangeKey = RANGE_LABEL_KEY[filters.preset];
-  const rangeLabel = rangeKey ? ta[rangeKey] : ta.rangeSelected;
-  const touchLabel =
-    filters.attribution === "first" ? ta.touchFirst : ta.touchLast;
-  const showLabel =
-    filters.show === "all"
-      ? null
-      : (d.showsList.find((s) => s.slug === filters.show)?.title ?? filters.show);
-  const channelLabel = filters.channel === "all" ? null : filters.channel;
-  const campaignFilterLabel =
-    filters.campaign === "all" ? null : filters.campaign;
-
-  // Sparklines from the time series (period-scoped flow metrics).
-  const sparkTrials = d.series.map((p) => p.trials);
-  const sparkSignups = d.series.map((p) => p.signups);
-  const sparkConversions = d.series.map((p) => p.conversions);
-  const sparkFree = d.series.map((p) => p.free);
+  const f = parseSpecFilters(sp, new Date());
+  const countries = await loadCountryOptions();
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gold">
-            {ta.eyebrow}
+            {ts.eyebrow}
           </p>
-          <h1 className="mt-1 flex items-center gap-3 text-3xl font-extrabold tracking-tight text-cream">
-            {ta.heading}
-            {!paymentsOn ? (
-              <span className="rounded-full bg-gold/15 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-gold">
-                {ta.freeModeBadge}
-              </span>
-            ) : null}
+          <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-cream">
+            {ts.heading}
           </h1>
           <p className="mt-1 text-sm text-cream/55">
-            {rangeLabel}
-            {/* Resolved absolute window so a bookmarked relative-range URL
-                shows its actual dates; skipped for all-time (the 2020 floor
-                is an implementation detail, not a data boundary). */}
-            {filters.preset !== "all"
-              ? ` (${filters.from.toISOString().slice(0, 10)} → ${filters.to.toISOString().slice(0, 10)})`
+            {`${f.from.toISOString().slice(0, 10)} → ${f.to.toISOString().slice(0, 10)}`}
+            {f.source !== "all" ? ` · ${f.source}` : ""}
+            {f.country !== "all"
+              ? ` · ${countryName(f.country, ts.geoUnknown)}`
               : ""}
-            {showLabel ? ` · ${showLabel}` : ""}
-            {channelLabel ? ` · ${channelLabel}` : ""}
-            {campaignFilterLabel ? ` · ${campaignFilterLabel}` : ""}
-            {` · ${touchLabel}`}
           </p>
         </div>
+        <p className="max-w-xs text-right text-[11px] leading-snug text-cream/40">
+          {ts.ledgerNote}
+        </p>
       </div>
 
-      {/* Filter bar */}
-      <AnalyticsFilters
-        filters={filters}
-        shows={d.showsList.map((s) => ({ slug: s.slug, title: s.title }))}
-        channels={d.channelOptions}
-        campaigns={d.campaignOptions}
-        paymentsOn={paymentsOn}
+      <SpecAnalyticsFilters
+        filters={f}
+        countries={countries}
+        countryNames={COUNTRY_NAMES}
       />
 
-      {/* KPI row */}
-      {paymentsOn ? (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-          <KpiTile
-            label={ta.kpiSignups}
-            value={k.signups.value.toLocaleString()}
-            current={k.signups.value}
-            prev={k.signups.prev}
-            spark={sparkSignups}
-            sub={ta.kpiSignupsSub(rangeLabel)}
-          />
-          <KpiTile
-            label={ta.kpiTrialPreviews}
-            value={k.trialPreviews.value.toLocaleString()}
-            current={k.trialPreviews.value}
-            prev={k.trialPreviews.prev}
-            spark={sparkTrials}
-            sub={rangeLabel}
-          />
-          <KpiTile
-            label={ta.kpiConversions}
-            value={k.conversions.value.toLocaleString()}
-            current={k.conversions.value}
-            prev={k.conversions.prev}
-            spark={sparkConversions}
-            sub={ta.kpiConversionsSub}
-          />
-          <KpiTile
-            label={ta.kpiTrialToPaid}
-            value={`${k.conversionRate.toFixed(1)}%`}
-            sub={ta.kpiSessionsSub(k.conversionConverted, k.conversionStarted)}
-          />
-          <KpiTile
-            label={ta.kpiMrr}
-            value={`$${k.mrr.toLocaleString()}`}
-            sub={`${ta.kpiActiveSub(k.activeSubs)}${k.servicedSubs !== k.activeSubs ? ` · ${ta.kpiServicedSub(k.servicedSubs)}` : ""}`}
-          />
-          <KpiTile
-            label={ta.kpiNewSubs}
-            value={k.newSubs.value.toLocaleString()}
-            current={k.newSubs.value}
-            prev={k.newSubs.prev}
-            // Break out how many new subs came via the pay-first guest checkout —
-            // those accounts are excluded from the Signups KPI by design, so this
-            // is where they surface on the dashboard.
-            sub={
-              k.guestSignups.value > 0
-                ? ta.kpiNewSubsGuestSub(rangeLabel, k.guestSignups.value)
-                : rangeLabel
-            }
-          />
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
-          <KpiTile
-            label={ta.kpiFreeSessions}
-            value={d.free.sessions.value.toLocaleString()}
-            current={d.free.sessions.value}
-            prev={d.free.sessions.prev}
-            spark={sparkFree}
-            sub={ta.kpiFreeSessionsSub(d.free.viewers)}
-          />
-          <KpiTile
-            label={ta.kpiPlayed}
-            value={d.free.played.value.toLocaleString()}
-            current={d.free.played.value}
-            prev={d.free.played.prev}
-            sub={ta.kpiPctOfSessions(pct(d.free.played.value, d.free.sessions.value))}
-          />
-          <KpiTile
-            label={ta.kpiEngaged2}
-            value={d.free.engaged2.value.toLocaleString()}
-            current={d.free.engaged2.value}
-            prev={d.free.engaged2.prev}
-            sub={ta.kpiPctOfSessions(pct(d.free.engaged2.value, d.free.sessions.value))}
-          />
-          <KpiTile
-            label={ta.kpiAvgDepth}
-            value={d.free.avgDepth.toFixed(1)}
-            sub={ta.kpiAvgDepthSub}
-          />
-          <KpiTile
-            label={ta.kpiSignups}
-            value={k.signups.value.toLocaleString()}
-            current={k.signups.value}
-            prev={k.signups.prev}
-            spark={sparkSignups}
-            sub={rangeLabel}
-          />
-        </div>
-      )}
+      <Suspense fallback={<RowSkeleton n={4} />}>
+        <KpiRow f={f} />
+      </Suspense>
 
-      {/* Signup-gate funnel — its own Suspense island: the PostHog query API
-          is an external HTTP call (3.5s-bounded in lib/posthog-query.ts) and
-          must never gate the DB-backed sections, same contract as the Mux
-          panel below. Rendered whenever payments are off: once REQUIRE_SIGNUP
-          stops minting trial_sessions rows (2026-07-16) the anonymous top of
-          funnel exists only in PostHog. */}
-      {!paymentsOn ? (
-        <Suspense
-          fallback={
-            <Section title={ta.sectionSignupFunnel}>
-              <div className="h-28 animate-pulse rounded-lg bg-white/[0.04]" />
-            </Section>
-          }
-        >
-          <SignupFunnelSection filters={filters} />
-        </Suspense>
-      ) : null}
+      <Suspense fallback={<SectionSkeleton title={ts.sectionPulse} />}>
+        <PulseSection f={f} />
+      </Suspense>
 
-      {/* Funnel + (status mix | sources) */}
-      {paymentsOn ? (
-        <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-          <Section
-            title={ta.sectionAcquisitionFunnel}
-            hint={ta.sectionAcquisitionFunnelHint}
-          >
-            <FunnelChart
-              steps={[
-                {
-                  label: ta.funnelPreviewsStarted,
-                  value: d.funnel.previews,
-                  hint: ta.funnelPreviewsStartedHint,
-                },
-                {
-                  label: ta.funnelPlayed,
-                  value: d.funnel.played,
-                  hint: ta.funnelPlayedHint,
-                },
-                {
-                  label: ta.funnelReachedPaywall,
-                  value: d.funnel.nearCap,
-                  hint: ta.funnelReachedPaywallHint,
-                },
-                {
-                  label: ta.funnelConverted,
-                  value: d.funnel.converted,
-                  hint: ta.funnelConvertedHint,
-                },
-              ]}
-            />
-            <p className="mt-4 text-[10px] leading-relaxed text-white/35">
-              {ta.funnelDepthNote(d.funnel.avgDepth)}
-            </p>
-          </Section>
+      <Suspense fallback={<SectionSkeleton title={ts.sectionFunnel} />}>
+        <FunnelSection f={f} />
+      </Suspense>
 
-          <Section
-            title={ta.sectionSubscriptions}
-            hint={ta.sectionSubscriptionsHintMix(filterScopeLabel(filters.status, ta))}
-          >
-            <Donut
-              segments={d.statusMix.map((s) => ({ label: s.status, value: s.n }))}
-            />
-            <div className="mt-4">
-              <KpiTile
-                label={ta.kpiCancellations}
-                value={k.cancellations.value.toLocaleString()}
-                current={k.cancellations.value}
-                prev={k.cancellations.prev}
-                goodWhenDown
-                sub={ta.kpiCancellationsSub(rangeLabel)}
-              />
-            </div>
-          </Section>
-        </div>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
-          <Section
-            title={ta.sectionOrganicFunnel}
-            hint={ta.sectionOrganicFunnelHint}
-          >
-            <FunnelChart
-              steps={[
-                {
-                  label: ta.ofSessions,
-                  value: d.free.sessions.value,
-                  hint: ta.ofSessionsHint,
-                },
-                {
-                  label: ta.ofPlayed,
-                  value: d.free.played.value,
-                  hint: ta.ofPlayedHint,
-                },
-                {
-                  label: ta.ofEngaged2,
-                  value: d.free.engaged2.value,
-                  hint: ta.ofEngaged2Hint,
-                },
-                {
-                  label: ta.ofEngaged3,
-                  value: d.free.engaged3,
-                  hint: ta.ofEngaged3Hint,
-                },
-              ]}
-            />
-            <p className="mt-4 text-[10px] leading-relaxed text-white/35">
-              {ta.organicDepthNote(d.free.avgDepth.toFixed(1))}
-            </p>
-            {signupGateOn ? (
-              <p className="mt-2 text-[10px] leading-relaxed text-[#f5c451]/80">
-                {ta.ofGateNote}
-              </p>
-            ) : null}
-          </Section>
+      <Suspense fallback={<SectionSkeleton title={ts.sectionGeo} />}>
+        <GeoSection f={f} />
+      </Suspense>
 
-          <Section
-            title={ta.sectionSources}
-            hint={`${touchLabel} · ${rangeLabel}`}
-          >
-            <BarList
-              items={d.sources.map((s) => ({
-                label: s.source ?? DIRECT_BUCKET,
-                value: s.sessions,
-                sub: ta.sourceRowSub(s.viewers),
-              }))}
-              format={(n) => ta.sourceSessionsCount(n)}
-              emptyLabel={ta.sourcesEmpty}
-            />
-          </Section>
-        </div>
-      )}
+      <Suspense fallback={<SectionSkeleton title={ts.sectionMatrix} />}>
+        <MatrixSection f={f} />
+      </Suspense>
 
-      {/* Episode-gated funnels (one card per gated show — paid mode only) */}
-      {episodeFunnels.map((ef) => (
-        <Section
-          key={ef.showSlug}
-          title={ta.episodeFunnelTitle(ef.showTitle)}
-          hint={ta.episodeFunnelHint(ef.freeCount, ef.memberCount, rangeLabel)}
-        >
-          <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-            <div>
-              {/* Stage shape adapts to the show's tier config: with no
-                  member episodes (e.g. thunder-lady post pay-first retier)
-                  the wall after the free tier IS the subscription paywall,
-                  and the two member-tier stages would read a hard 0 forever
-                  beneath a nonzero "Subscribed" — an impossible-looking
-                  funnel — so they are dropped and the wall stage relabeled. */}
-              <FunnelChart
-                steps={[
-                  {
-                    label: ta.efStarted,
-                    value: ef.started,
-                    hint: ta.efStartedHint,
-                  },
-                  ef.memberCount > 0
-                    ? {
-                        label: ta.efWallHit,
-                        value: ef.wallHit,
-                        hint: ta.efWallHitHint,
-                      }
-                    : {
-                        label: ta.efPaywallDirect,
-                        value: ef.wallHit,
-                        hint: ta.efPaywallDirectHint,
-                      },
-                  {
-                    label: ta.efSignedUp,
-                    value: ef.signedUp,
-                    hint: ta.efSignedUpHint,
-                  },
-                  ...(ef.memberCount > 0
-                    ? [
-                        {
-                          label: ta.efMemberWatchers,
-                          value: ef.memberWatchers,
-                          hint: ta.efMemberWatchersHint,
-                        },
-                        {
-                          label: ta.efPaywallHit,
-                          value: ef.paywallHit,
-                          hint: ta.efPaywallHitHint,
-                        },
-                      ]
-                    : []),
-                  {
-                    label: ta.efSubscribed,
-                    value: ef.subscribed,
-                    hint: ta.efSubscribedHint,
-                  },
-                ]}
-              />
-              {ef.memberEpisodes.length > 0 ? (
-                <div className="mt-5">
-                  <p className="mb-2 text-[10px] uppercase tracking-[0.08em] text-white/45">
-                    {ta.efMemberEpisodesLabel}
-                  </p>
-                  <BarList
-                    items={ef.memberEpisodes.map((m) => ({
-                      label: m.label,
-                      value: m.viewers,
-                      sub: ta.efCompleted(m.completed),
-                    }))}
-                    format={(n) => ta.efViewers(n)}
-                    emptyLabel={ta.efNoMemberViews}
-                  />
-                </div>
-              ) : null}
-            </div>
-            <div>
-              <p className="mb-2 text-[10px] uppercase tracking-[0.08em] text-white/45">
-                {ta.efDepthLabel}
-              </p>
-              <Histogram bars={ef.depth} />
-              <p className="mt-3 text-[10px] leading-relaxed text-white/35">
-                {ta.efDepthNote}
-              </p>
-            </div>
-          </div>
-        </Section>
-      ))}
+      <Suspense fallback={<SectionSkeleton title={ts.sectionContent} />}>
+        <ContentSection f={f} />
+      </Suspense>
 
-      {/* Campaign table */}
-      <Section
-        title={ta.sectionChannelsCampaigns(touchLabel)}
-        hint={
-          filters.attribution === "first"
-            ? ta.sectionChannelsCampaignsHintFirst
-            : ta.sectionChannelsCampaignsHintLast
-        }
-      >
-        {paymentsOn ? (
-          <CampaignTable rows={d.campaign} t={t} />
-        ) : (
-          <FreeCampaignTable rows={d.campaign} t={t} />
-        )}
-      </Section>
-
-      {/* Tracked links (generator lives at /admin/links) */}
-      <Section
-        title={ta.sectionTrackedLinks}
-        hint={ta.sectionTrackedLinksHint}
-        right={
-          <Link
-            href="/admin/links"
-            className="text-[11px] font-semibold text-gold transition-colors hover:text-gold-hi"
-          >
-            {ta.trackedLinksManage}
-          </Link>
-        }
-      >
-        <TrackedLinksTable rows={trackedLinks} t={t} />
-      </Section>
-
-      {/* Time series */}
-      <Section
-        title={ta.sectionTrend}
-        hint={`${rangeLabel} · ${ta.granularityToken(filters.granularity)}`}
-      >
-        <TimeSeriesChart
-          series={d.series}
-          granularity={filters.granularity}
-          freeMode={!paymentsOn}
-        />
-      </Section>
-
-      {/* Trial preview depth (paid mode — previews don't exist in free mode) */}
-      {paymentsOn ? (
-        <Section
-          title={ta.sectionTrialPreviewDepth}
-          hint={ta.sectionTrialPreviewDepthHint}
-        >
-          <Histogram bars={d.depthHistogram} />
-        </Section>
-      ) : null}
-
-      {/* Per-show depth (free mode) */}
-      {freeShowDepth.map((s) => (
-        <Section
-          key={s.showSlug}
-          title={ta.showDepthTitle(s.showTitle)}
-          hint={ta.showDepthHint(s.started, rangeLabel)}
-        >
-          <Histogram bars={s.depth} />
-          <p className="mt-3 text-[10px] leading-relaxed text-white/35">
-            {ta.showDepthBarsNote} {ta.showDepthPlayed(s.played.toLocaleString())}
-          </p>
-        </Section>
-      ))}
-
-      {/* Engagement + Top shows */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Section
-          title={
-            paymentsOn
-              ? ta.sectionSubscriberEngagement
-              : ta.sectionSignedInEngagement
-          }
-          hint={
-            paymentsOn
-              ? ta.sectionSubscriberEngagementHint
-              : ta.sectionSignedInEngagementHint
-          }
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <KpiTile
-              label={ta.kpiCompletionRate}
-              value={`${d.engagement.completionRate.toFixed(0)}%`}
-              sub={ta.kpiCompletionRateSub(
-                d.engagement.completedRows,
-                d.engagement.watchRows,
-              )}
-              approx
-            />
-            <KpiTile
-              label={ta.kpiAvgPctWatched}
-              value={`${d.engagement.avgPctWatched.toFixed(0)}%`}
-              sub={ta.kpiSampleSize(d.engagement.watchRows)}
-              approx
-            />
-            <KpiTile
-              label={ta.kpiAvgPerViewer}
-              value={ta.minutes(d.engagement.avgMinPerViewer)}
-              sub={ta.kpiViewersCount(d.engagement.distinctViewers)}
-              approx
-            />
-            <KpiTile
-              label={ta.kpiWatchRows}
-              value={d.engagement.watchRows.toLocaleString()}
-              sub={ta.kpiWatchRowsSub}
-            />
-          </div>
-          <p className="mt-3 text-[10px] leading-relaxed text-white/35">
-            {ta.engagementApproxNote}
-          </p>
-        </Section>
-
-        <Section
-          title={ta.sectionTopShows}
-          hint={ta.sectionTopShowsHint}
-        >
-          <BarList
-            items={d.topShows.map((s) => ({
-              label: s.title,
-              href: `/shows/${s.slug}`,
-              value: s.seconds,
-              sub: ta.topShowsRowSub(
-                s.viewers,
-                s.plays > 0 ? Math.round((s.completed / s.plays) * 100) : 0,
-              ),
-            }))}
-            format={(sec) => ta.minutes(Math.round(sec / 60).toLocaleString())}
-            emptyLabel={ta.topShowsEmpty}
-          />
-        </Section>
-      </div>
-
-      {/* Mux real watch time — its own Suspense island: the Mux Data API is
-          an external HTTP call (3.5s-bounded in lib/mux-data.ts) and must
-          never gate the DB-backed sections above, which stream immediately. */}
-      <Suspense
-        fallback={
-          <Section title={ta.sectionWatchTimeMux}>
-            <div className="h-28 animate-pulse rounded-lg bg-white/[0.04]" />
-          </Section>
-        }
-      >
-        <MuxDataSection filters={filters} />
+      <Suspense fallback={<SectionSkeleton title={ts.sectionRelease} />}>
+        <ReleaseSection f={f} />
       </Suspense>
     </div>
   );
 }
 
-// Async server component behind its own Suspense boundary (see call site) —
-// mirrors MuxDataSection: the external PostHog call streams in behind the
-// DB-backed panels. Visitors/Wall come from PostHog (consent-gated floor);
-// Signups/Watching come from loadSignupFunnelDb — both range-only, no
-// attribution filters, so all four stages describe the same population.
-async function SignupFunnelSection({ filters }: { filters: Filters }) {
+// ---- Block 1: KPI row ------------------------------------------------------
+
+async function KpiRow({ f }: { f: SpecFilters }) {
   const { t } = await getAdminDict();
-  const ta = t.analytics;
-  // One shared rounded window (5-minute edges, cache-key-stable) for BOTH
-  // data sources so the PostHog and DB stages cover an identical time span.
-  const win = signupFunnelWindow(filters.from, filters.to);
-  const [ph, dbStages] = await Promise.all([
-    getSignupFunnelStats(win.from, win.to),
-    loadSignupFunnelDb(win),
+  const ts = t.analyticsSpec;
+  const k = await loadSpecKpis(f);
+  return (
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <KpiTile
+        label={ts.kpiVisits}
+        value={k.visits.current.toLocaleString()}
+        current={k.visits.current}
+        prev={k.visits.previous}
+      />
+      <KpiTile
+        label={ts.kpiRegistrations}
+        value={k.registrations.current.toLocaleString()}
+        current={k.registrations.current}
+        prev={k.registrations.previous}
+        sub={
+          k.registrations.conversion != null
+            ? ts.kpiConversion(fmtPctOrDash(k.registrations.conversion, ts.na))
+            : undefined
+        }
+      />
+      <KpiTile
+        label={ts.kpiNorthStar}
+        value={fmtPctOrDash(k.northStar.current, ts.na)}
+        current={k.northStar.current ?? 0}
+        prev={k.northStar.previous ?? 0}
+        sub={ts.kpiNorthStarSub(k.northStar.deepWatchers, k.northStar.newUsers)}
+      />
+      <KpiTile
+        label={ts.kpiReleaseRetention}
+        value={fmtPctOrDash(k.releaseRetention.current, ts.na)}
+        current={k.releaseRetention.current ?? 0}
+        prev={k.releaseRetention.previous ?? 0}
+        sub={ts.kpiReleaseRetentionSub(
+          k.releaseRetention.returned,
+          k.releaseRetention.finishers,
+        )}
+      />
+    </div>
+  );
+}
+
+// ---- Block 2: pulse --------------------------------------------------------
+
+async function PulseSection({ f }: { f: SpecFilters }) {
+  const { t } = await getAdminDict();
+  const ts = t.analyticsSpec;
+  const pulse = await loadPulse(f);
+  const net = pulse.netWeek.new - pulse.netWeek.lost;
+  const hasData = pulse.points.some(
+    (p) => p.wau > 0 || p.newUsers > 0 || p.lost > 0,
+  );
+  return (
+    <Section title={ts.sectionPulse} hint={ts.pulseHint(pulse.windowDays)}>
+      <div className="mb-3 flex items-baseline gap-3">
+        <p className="text-2xl font-extrabold tracking-tight text-cream">
+          {net > 0 ? `+${net}` : net}
+        </p>
+        <p className="text-sm text-cream/55">
+          {ts.pulseNetWeek(pulse.netWeek.new, pulse.netWeek.lost)}
+        </p>
+      </div>
+      {hasData ? (
+        <PulseChart
+          data={pulse}
+          labels={{
+            wau: ts.pulseWau(pulse.windowDays),
+            newUsers: ts.pulseNew,
+            returning: ts.pulseReturning,
+            lost: ts.pulseLost,
+            release: ts.pulseRelease,
+          }}
+        />
+      ) : (
+        <p className="py-8 text-center text-sm text-cream/55">{ts.freshNote}</p>
+      )}
+    </Section>
+  );
+}
+
+// ---- Block 3: full funnel --------------------------------------------------
+
+async function FunnelSection({ f }: { f: SpecFilters }) {
+  const { t } = await getAdminDict();
+  const ts = t.analyticsSpec;
+  const fu = await loadSpecFunnel(f);
+  return (
+    <Section title={ts.sectionFunnel} hint={ts.funnelHint}>
+      {fu.cohort === 0 ? (
+        <p className="py-8 text-center text-sm text-cream/55">{ts.freshNote}</p>
+      ) : (
+        <FunnelChart
+          steps={[
+            {
+              label: ts.fVisited,
+              value: fu.cohort,
+              hint: ts.fVisitedHint(fu.landedHome),
+            },
+            { label: ts.fShow, value: fu.showViewed },
+            { label: ts.fWall, value: fu.wallSeen },
+            { label: ts.fRegistered, value: fu.registered },
+            { label: ts.fStarted, value: fu.started },
+            { label: ts.f25, value: fu.d25 },
+            { label: ts.f50, value: fu.d50 },
+            { label: ts.f80, value: fu.d80 },
+            { label: ts.f100, value: fu.d100 },
+          ]}
+        />
+      )}
+    </Section>
+  );
+}
+
+// ---- Block 4: geo ----------------------------------------------------------
+
+async function GeoSection({ f }: { f: SpecFilters }) {
+  const { t } = await getAdminDict();
+  const ts = t.analyticsSpec;
+  const geo = await loadSpecGeo(f);
+  const rows = geo.rows.filter((r) => r.visits > 0 || r.registrations > 0);
+  return (
+    <Section title={ts.sectionGeo} hint={ts.geoHint}>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <WorldMap
+          data={geo.mapData}
+          emptyLabel={ts.geoEmpty}
+          formatValue={(n) => ts.geoMapValue(n)}
+        />
+        <div className="overflow-x-auto">
+          {rows.length === 0 ? (
+            <p className="py-8 text-center text-sm text-cream/55">
+              {ts.freshNote}
+            </p>
+          ) : (
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-white/10 text-[10px] uppercase tracking-wide text-cream/45">
+                  <th className="py-2 pr-3">{ts.thCountry}</th>
+                  <th className="py-2 pr-3 text-right">{ts.thVisits}</th>
+                  <th className="py-2 pr-3 text-right">{ts.thConversion}</th>
+                  <th className="py-2 pr-3 text-right">{ts.thCompletion}</th>
+                  <th className="py-2 text-right">{ts.thReleaseRet}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.slice(0, 12).map((r) => (
+                  <tr
+                    key={r.country || "unknown"}
+                    className="border-b border-white/[0.04]"
+                  >
+                    <td className="py-2 pr-3 font-semibold text-cream">
+                      {countryName(r.country || null, ts.geoUnknown)}
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-cream/70">
+                      {r.visits.toLocaleString()}
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-cream/70">
+                      {r.visits > 0
+                        ? fmtPctOrDash((r.registrations / r.visits) * 100, ts.na)
+                        : ts.na}
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-cream/70">
+                      {fmtPctOrDash(r.completionRate, ts.na)}
+                    </td>
+                    <td className="py-2 text-right font-mono text-cream/70">
+                      {fmtPctOrDash(r.releaseRetention, ts.na)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+// ---- Block 5: source × geo matrix ------------------------------------------
+
+async function MatrixSection({ f }: { f: SpecFilters }) {
+  const { t } = await getAdminDict();
+  const ts = t.analyticsSpec;
+  const m = await loadSourceGeoMatrix(f);
+  const cellByKey = new Map(m.cells.map((c) => [`${c.source}|${c.country}`, c]));
+  const sources = ["tiktok", "ig", "fb", "direct", "other"] as const;
+  const SOURCE_LABELS: Record<string, string> = {
+    tiktok: "TikTok",
+    ig: "Instagram",
+    fb: "Facebook",
+    direct: "Direct",
+    other: ts.sourceOther,
+  };
+  return (
+    <Section title={ts.sectionMatrix} hint={ts.matrixHint}>
+      {m.countries.length === 0 ? (
+        <p className="py-8 text-center text-sm text-cream/55">{ts.freshNote}</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-white/10 text-[10px] uppercase tracking-wide text-cream/45">
+                <th className="py-2 pr-3">{ts.thSource}</th>
+                {m.countries.map((c) => (
+                  <th key={c} className="px-2 py-2 text-right">
+                    {countryName(c, ts.geoUnknown)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sources.map((s) => (
+                <tr key={s} className="border-b border-white/[0.04]">
+                  <td className="py-2 pr-3 font-semibold text-cream">
+                    {SOURCE_LABELS[s]}
+                  </td>
+                  {m.countries.map((c) => {
+                    const cell = cellByKey.get(`${s}|${c}`);
+                    const deep = cell?.deepWatch ?? null;
+                    // Heat encodes the QUALITY signal (deep watch), the
+                    // numbers carry both values — color is redundant.
+                    const heat =
+                      deep == null ? 0 : Math.min(0.38, (deep / 100) * 0.45);
+                    return (
+                      <td
+                        key={c}
+                        className="px-2 py-2 text-right font-mono"
+                        style={{
+                          background:
+                            heat > 0
+                              ? `rgba(230, 179, 102, ${heat})`
+                              : undefined,
+                        }}
+                        title={
+                          cell
+                            ? `${SOURCE_LABELS[s]} · ${countryName(c, ts.geoUnknown)}: ${ts.matrixCellTitle(
+                                cell.visits,
+                                cell.registrations,
+                              )}`
+                            : undefined
+                        }
+                      >
+                        {cell && cell.visits > 0 ? (
+                          <span className="text-cream/85">
+                            {fmtPctOrDash(cell.regConversion, ts.na)}
+                            <span className="text-cream/40"> · </span>
+                            {fmtPctOrDash(deep, ts.na)}
+                          </span>
+                        ) : (
+                          <span className="text-cream/25">{ts.na}</span>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-[11px] text-cream/40">{ts.matrixCellHint}</p>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+// ---- Block 6: content ------------------------------------------------------
+
+async function ContentSection({ f }: { f: SpecFilters }) {
+  const { t } = await getAdminDict();
+  const ts = t.analyticsSpec;
+  const [rows, widget] = await Promise.all([
+    loadContentTable(f),
+    loadWatchTimeWidget(f),
   ]);
-  return (
-    <Section title={ta.sectionSignupFunnel} hint={ta.signupFunnelHint}>
-      {ph.status === "not_configured" ? (
-        <p className="py-6 text-center text-sm leading-relaxed text-white/55">
-          {ta.sfNotConnected1}{" "}
-          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
-            query:read
-          </code>{" "}
-          {ta.sfNotConnected2}{" "}
-          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
-            POSTHOG_PERSONAL_API_KEY
-          </code>{" "}
-          /{" "}
-          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
-            POSTHOG_PROJECT_ID
-          </code>
-          .
-        </p>
-      ) : ph.status === "error" ? (
-        <div className="py-6 text-center">
-          <p className="text-sm text-white/55">{ta.sfError}</p>
-          {/* Raw detail for diagnostics (key-scope hints, HTTP codes) —
-              deliberately small; the headline above is the localized copy. */}
-          <p className="mt-1 font-mono text-[10px] text-white/30">
-            {ph.message}
-          </p>
-        </div>
-      ) : (
-        <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-          <div>
-            <FunnelChart
-              steps={[
-                {
-                  label: ta.sfVisitors,
-                  value: ph.stats.visitors,
-                  hint: ta.sfVisitorsHint,
-                },
-                {
-                  label: ta.sfWall,
-                  value: ph.stats.wallViewers,
-                  hint: ta.sfWallHint,
-                },
-                {
-                  label: ta.sfSignups,
-                  value: dbStages.signups,
-                  hint: ta.sfSignupsHint,
-                },
-                {
-                  label: ta.sfWatching,
-                  value: dbStages.watchers,
-                  hint: ta.sfWatchingHint,
-                },
-              ]}
-            />
-            <p className="mt-4 text-[10px] leading-relaxed text-white/35">
-              {ta.sfConsentNote}
-            </p>
-          </div>
-          <div>
-            <p className="mb-2 text-[10px] uppercase tracking-[0.08em] text-white/45">
-              {ta.sfBySourceLabel}
-            </p>
-            <BarList
-              items={ph.stats.bySource.map((s) => ({
-                label: s.source,
-                value: s.visitors,
-                sub: ta.sfSourceRowSub(s.wall),
-              }))}
-              format={(n) => ta.sfVisitorsCount(n)}
-              emptyLabel={ta.sfBySourceEmpty}
-            />
-          </div>
-        </div>
-      )}
-    </Section>
-  );
-}
+  const selectedId =
+    f.episode ??
+    rows.reduce<ContentRow | null>(
+      (best, r) => (r.starts > (best?.starts ?? 0) ? r : best),
+      null,
+    )?.episodeId ??
+    null;
+  const curve = selectedId ? await loadRetentionCurve(selectedId, f) : null;
+  const plotItems = rows
+    .filter((r) => r.durationSeconds && r.starts > 0 && r.completionRate != null)
+    .map((r) => ({
+      label: `${r.showTitle} S${r.seasonNumber}E${r.episodeNumber}`,
+      durationMinutes: r.durationSeconds! / 60,
+      completionRate: r.completionRate!,
+    }));
 
-// Async server component so the external Mux Data fetch streams in behind
-// the rest of the dashboard (see the Suspense boundary at the call site).
-async function MuxDataSection({ filters }: { filters: Filters }) {
-  const { t } = await getAdminDict();
-  const ta = t.analytics;
-  const muxTf = muxTimeframeForDays(
-    (filters.to.getTime() - filters.from.getTime()) / (24 * 60 * 60 * 1000),
-  );
-  const mux = await getMuxData(muxTf.timeframe);
   return (
-    <Section
-      title={ta.sectionWatchTimeMux}
-      hint={ta.sectionWatchTimeMuxHint(muxWindowLabel(muxTf.timeframe, ta))}
-    >
-      {muxTf.clamped ? (
-        <p className="mb-3 rounded-lg border border-[#f5c451]/25 bg-[#f5c451]/[0.06] px-3 py-2 text-[11px] text-[#f5c451]">
-          {ta.muxClampedNotice}
-        </p>
-      ) : null}
-      {mux.status === "not_configured" ? (
-        <p className="py-6 text-center text-sm leading-relaxed text-white/55">
-          {ta.muxNotConnectedPrefix}{" "}
-          <span className="font-mono text-white/70">Mux Data: Read</span>{" "}
-          {ta.muxNotConnectedAs}{" "}
-          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
-            MUX_DATA_API_TOKEN_ID
-          </code>{" "}
-          /{" "}
-          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
-            MUX_DATA_API_TOKEN_SECRET
-          </code>
-          .
-        </p>
-      ) : mux.status === "no_data" ? (
-        <p className="py-6 text-center text-sm text-white/55">
-          {ta.muxNoData}
-        </p>
-      ) : mux.status === "error" ? (
-        <div className="py-6 text-center">
-          <p className="text-sm text-white/55">{ta.muxError}</p>
-          {/* Raw detail for diagnostics (token-permission hints, HTTP codes)
-              — deliberately small; the headline above is the localized copy. */}
-          <p className="mt-1 font-mono text-[10px] text-white/30">
-            {mux.message}
-          </p>
-        </div>
-      ) : (
-        <MuxPanel summary={mux.summary} byShow={mux.byShow} t={t} />
-      )}
-    </Section>
-  );
-}
-
-function MuxPanel({
-  summary,
-  byShow,
-  t,
-}: {
-  summary: { watchTimeMs: number; views: number; uniqueViewers: number };
-  byShow: { show: string; views: number; watchTimeMs: number }[];
-  t: AdminDict;
-}) {
-  const ta = t.analytics;
-  const hours = summary.watchTimeMs / 3_600_000;
-  const avgViewMin =
-    summary.views > 0 ? summary.watchTimeMs / summary.views / 60_000 : 0;
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <KpiTile
-          label={ta.kpiTotalWatchTime}
-          value={ta.hours(hours.toFixed(1))}
-          sub={ta.minutes(Math.round(summary.watchTimeMs / 60_000).toLocaleString())}
+    <Section title={ts.sectionContent} hint={ts.contentHint}>
+      {/* watch-time argument widget */}
+      <div className="mb-4 grid grid-cols-3 gap-3">
+        <MiniStat
+          label={ts.widgetAvgPerDay}
+          value={
+            widget.avgPerViewerDay != null
+              ? fmtMmSs(widget.avgPerViewerDay)
+              : ts.na
+          }
         />
-        <KpiTile label={ta.kpiViews} value={summary.views.toLocaleString()} />
-        <KpiTile
-          label={ta.kpiUniqueViewers}
-          value={summary.uniqueViewers.toLocaleString()}
+        <MiniStat
+          label={ts.widgetTotal}
+          value={`${(widget.totalWatchedSeconds / 3600).toFixed(1)}${ts.hoursSuffix}`}
         />
-        <KpiTile
-          label={ta.kpiAvgView}
-          value={ta.minutes(avgViewMin.toFixed(1))}
-          sub={ta.kpiAvgViewSub}
+        <MiniStat
+          label={ts.widgetViewerDays}
+          value={widget.viewerDays.toLocaleString()}
         />
       </div>
-      {byShow.length > 0 ? (
-        <BarList
-          items={byShow.slice(0, 10).map((s) => ({
-            label: s.show,
-            value: s.watchTimeMs,
-            sub: ta.muxByShowViews(s.views),
-          }))}
-          format={(ms) => ta.minutes(Math.round(ms / 60_000).toLocaleString())}
-        />
+
+      {rows.length === 0 ? (
+        <p className="py-8 text-center text-sm text-cream/55">{ts.freshNote}</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-white/10 text-[10px] uppercase tracking-wide text-cream/45">
+                <th className="py-2 pr-3">{ts.thEpisode}</th>
+                <th className="py-2 pr-3 text-right">{ts.thStarts}</th>
+                <th className="py-2 pr-3 text-right">{ts.thCompletionRate}</th>
+                <th className="py-2 pr-3 text-right">{ts.thAvgWatched}</th>
+                <th className="py-2 text-right">{ts.thRewatches}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => {
+                const selected = r.episodeId === selectedId;
+                return (
+                  <tr
+                    key={r.episodeId}
+                    className={`border-b border-white/[0.04] ${
+                      selected ? "bg-gold/[0.08]" : ""
+                    }`}
+                  >
+                    <td className="py-2 pr-3">
+                      <Link
+                        href={qs(f, { ep: r.episodeId })}
+                        scroll={false}
+                        className={`font-semibold transition-colors hover:text-gold ${
+                          selected ? "text-gold" : "text-cream"
+                        }`}
+                      >
+                        {r.showTitle} · S{r.seasonNumber}E{r.episodeNumber}{" "}
+                        <span className="text-cream/45">{r.title}</span>
+                      </Link>
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-cream/70">
+                      {r.starts.toLocaleString()}
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-cream/70">
+                      {fmtPctOrDash(r.completionRate, ts.na)}
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-cream/70">
+                      {fmtPctOrDash(r.avgWatchedPct, ts.na)}
+                    </td>
+                    <td className="py-2 text-right font-mono text-cream/70">
+                      {r.rewatchers.toLocaleString()}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {curve ? (
+        <div className="mt-5 grid gap-5 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <h3 className="mb-2 text-xs font-bold text-cream">
+              {ts.curveTitle(
+                `${curve.showTitle} · S${curve.seasonNumber}E${curve.episodeNumber} ${curve.title}`,
+              )}
+            </h3>
+            <RetentionCurveChart
+              curve={curve}
+              labels={{
+                yAxis: ts.curveYAxis,
+                views: ts.curveViews,
+                noData: ts.curveNoData,
+              }}
+            />
+          </div>
+          <div>
+            <h3 className="mb-2 text-xs font-bold text-cream">
+              {ts.durationPlotTitle}
+            </h3>
+            <DurationCompletionPlot
+              items={plotItems}
+              emptyLabel={ts.freshNote}
+            />
+          </div>
+        </div>
       ) : null}
-    </div>
+    </Section>
   );
 }
 
-type CampaignRows = {
-  source: string | null;
-  medium: string | null;
-  campaign: string | null;
-  trials: number;
-  walled: number;
-  signups: number;
-  activeSubs: number;
-  mrr: number;
-  viewers: number;
-  played: number;
-  deep: number;
-  depthSum: number;
-}[];
+// ---- Block 7: release retention per show -----------------------------------
 
-function CampaignTable({ rows, t }: { rows: CampaignRows; t: AdminDict }) {
-  const ta = t.analytics;
-  if (rows.length === 0) {
-    return (
-      <p className="py-6 text-center text-sm text-white/55">
-        {ta.campaignTableEmpty}
-      </p>
-    );
-  }
+async function ReleaseSection({ f }: { f: SpecFilters }) {
+  const { t } = await getAdminDict();
+  const ts = t.analyticsSpec;
+  const stats = await loadReleaseStats();
+  const showsData = shapeReleaseRetention(stats, f);
+  const withPairs = showsData.filter((s) => s.pairs.length > 0);
   return (
-    <div className="-mx-5 overflow-x-auto">
-      <table className="w-full min-w-[680px] border-collapse text-sm">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-[0.08em] text-white/45">
-            <th className="px-5 py-2 text-left font-semibold">
-              {ta.tableColCampaign}
-            </th>
-            <th className="px-3 py-2 text-left font-semibold">
-              {ta.tableColSourceMedium}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tableColTrials}
-            </th>
-            <th
-              className="px-3 py-2 text-right font-semibold"
-              title={ta.tableColWallTitle}
+    <Section title={ts.sectionRelease} hint={ts.releaseHint}>
+      {withPairs.length === 0 ? (
+        <p className="py-8 text-center text-sm text-cream/55">
+          {ts.releaseEmpty}
+        </p>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {withPairs.map((s) => (
+            <div
+              key={s.showId}
+              className="rounded-lg border border-white/[0.06] bg-white/[0.02] p-4"
             >
-              {ta.tableColWall}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tableColSignups}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tableColSubs}
-            </th>
-            <th
-              className="px-3 py-2 text-right font-semibold"
-              title={ta.tableColTrialToSubTitle}
-            >
-              {ta.tableColTrialToSub}
-            </th>
-            <th className="px-5 py-2 text-right font-semibold">
-              {ta.tableColMrr}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-            const label = campaignLabel(r.source, r.medium, r.campaign);
-            const t2s =
-              r.trials > 0 ? ((r.activeSubs / r.trials) * 100).toFixed(1) : "—";
-            return (
-              <tr
-                key={`${label.source}|${label.medium}|${label.campaign}`}
-                className="border-t border-white/[0.05]"
-              >
-                <td className="px-5 py-3 align-top">
-                  <span
-                    className={
-                      label.isDirect
-                        ? "font-mono text-xs text-white/45"
-                        : "text-sm font-semibold text-white"
-                    }
-                  >
-                    {label.campaign}
-                  </span>
-                </td>
-                <td className="px-3 py-3 align-top text-xs text-white/55">
-                  {label.source}
-                  <span className="text-white/30"> · </span>
-                  {label.medium}
-                </td>
-                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
-                  {r.trials.toLocaleString()}
-                </td>
-                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
-                  {r.trials > 0
-                    ? `${Math.round((r.walled / r.trials) * 100)}%`
-                    : "—"}
-                </td>
-                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
-                  {r.signups.toLocaleString()}
-                </td>
-                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
-                  {r.activeSubs.toLocaleString()}
-                </td>
-                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
-                  {t2s === "—" ? "—" : `${t2s}%`}
-                </td>
-                <td className="px-5 py-3 text-right align-top font-mono text-xs font-semibold text-white">
-                  ${r.mrr.toLocaleString()}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <p className="mt-3 px-5 text-[10px] leading-relaxed text-white/35">
-        {ta.campaignSessionsNote}
-      </p>
-    </div>
-  );
-}
-
-// Free-mode campaign table: engagement columns instead of the dead
-// Subs / MRR / Wall% ones — sessions, played %, average episode depth,
-// 2+-episode share and (first-touch) signups per campaign.
-function FreeCampaignTable({ rows, t }: { rows: CampaignRows; t: AdminDict }) {
-  const ta = t.analytics;
-  if (rows.length === 0) {
-    return (
-      <p className="py-6 text-center text-sm text-white/55">
-        {ta.campaignTableEmpty}
-      </p>
-    );
-  }
-  const sorted = [...rows].sort((a, b) => b.trials - a.trials);
-  return (
-    <div className="-mx-5 overflow-x-auto">
-      <table className="w-full min-w-[680px] border-collapse text-sm">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-[0.08em] text-white/45">
-            <th className="px-5 py-2 text-left font-semibold">
-              {ta.tableColCampaign}
-            </th>
-            <th className="px-3 py-2 text-left font-semibold">
-              {ta.tableColSourceMedium}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tableColSessions}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tableColPlayedPct}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tableColAvgEps}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tableColDeepPct}
-            </th>
-            <th className="px-5 py-2 text-right font-semibold">
-              {ta.tableColSignups}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r) => {
-            const label = campaignLabel(r.source, r.medium, r.campaign);
-            return (
-              <tr
-                key={`${label.source}|${label.medium}|${label.campaign}`}
-                className="border-t border-white/[0.05]"
-              >
-                <td className="px-5 py-3 align-top">
-                  <span
-                    className={
-                      label.isDirect
-                        ? "font-mono text-xs text-white/45"
-                        : "text-sm font-semibold text-white"
-                    }
-                  >
-                    {label.campaign}
-                  </span>
-                </td>
-                <td className="px-3 py-3 align-top text-xs text-white/55">
-                  {label.source}
-                  <span className="text-white/30"> · </span>
-                  {label.medium}
-                </td>
-                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
-                  {r.trials.toLocaleString()}
-                </td>
-                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
-                  {r.trials > 0
-                    ? `${Math.round((r.played / r.trials) * 100)}%`
-                    : "—"}
-                </td>
-                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
-                  {r.played > 0 ? (r.depthSum / r.played).toFixed(1) : "—"}
-                </td>
-                <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
-                  {r.trials > 0
-                    ? `${Math.round((r.deep / r.trials) * 100)}%`
-                    : "—"}
-                </td>
-                <td className="px-5 py-3 text-right align-top font-mono text-xs text-white/75">
-                  {r.signups.toLocaleString()}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <p className="mt-3 px-5 text-[10px] leading-relaxed text-white/35">
-        {ta.campaignFreeNote}
-      </p>
-    </div>
-  );
-}
-
-function TrackedLinksTable({
-  rows,
-  t,
-}: {
-  rows: TrackedLinkRow[];
-  t: AdminDict;
-}) {
-  const ta = t.analytics;
-  if (rows.length === 0) {
-    return (
-      <p className="py-6 text-center text-sm text-white/55">
-        {ta.trackedLinksEmpty}
-      </p>
-    );
-  }
-  return (
-    <div className="-mx-5 overflow-x-auto">
-      <table className="w-full min-w-[680px] border-collapse text-sm">
-        <thead>
-          <tr className="text-[10px] uppercase tracking-[0.08em] text-white/45">
-            <th className="px-5 py-2 text-left font-semibold">{ta.tlColName}</th>
-            <th className="px-3 py-2 text-left font-semibold">
-              {ta.tlColTarget}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tlColSessions}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tlColPlayed}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tlColSignups}
-            </th>
-            <th className="px-3 py-2 text-right font-semibold">
-              {ta.tlColAllTime}
-            </th>
-            <th className="px-5 py-2 text-right font-semibold" />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((l) => (
-            <tr key={l.id} className="border-t border-white/[0.05]">
-              <td className="px-5 py-3 align-top">
-                <p className="text-sm font-semibold text-white">{l.name}</p>
-                <p className="mt-0.5 font-mono text-[11px] text-white/40">
-                  {l.source} · {l.medium} · {l.campaign}
-                </p>
-              </td>
-              <td className="px-3 py-3 align-top font-mono text-xs text-white/55">
-                {l.targetPath}
-              </td>
-              <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
-                {l.sessions.toLocaleString()}
-              </td>
-              <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
-                {l.played.toLocaleString()}
-              </td>
-              <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/75">
-                {l.signups.toLocaleString()}
-              </td>
-              <td className="px-3 py-3 text-right align-top font-mono text-xs text-white/55">
-                {l.allTimeSessions.toLocaleString()}
-              </td>
-              <td className="px-5 py-3 text-right align-top">
-                <CopyButton value={l.url} name={l.name} />
-              </td>
-            </tr>
+              <p className="mb-2 text-sm font-bold text-cream">{s.showTitle}</p>
+              <ul className="space-y-2">
+                {s.pairs.map((p) => (
+                  <li key={p.label} className="text-xs">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-mono text-cream/70">{p.label}</span>
+                      <span className="font-mono text-cream/55">
+                        {p.pct != null
+                          ? `${Math.round(p.pct)}% (${p.returned}/${p.finishers})`
+                          : ts.na}
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                      <div
+                        className="h-full rounded-full bg-gold"
+                        style={{ width: `${Math.min(p.pct ?? 0, 100)}%` }}
+                      />
+                    </div>
+                    <p className="mt-0.5 text-[10px] text-cream/35">
+                      {p.nextTitle}
+                      {p.release
+                        ? ` · ${p.release.toISOString().slice(0, 10)}`
+                        : ""}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ))}
-        </tbody>
-      </table>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+// ---- Shared shells ---------------------------------------------------------
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/[0.06] bg-white/[0.03] p-3">
+      <p className="text-[10px] uppercase tracking-[0.08em] text-cream/50">
+        {label}
+      </p>
+      <p className="mt-1 text-lg font-extrabold tracking-tight text-cream">
+        {value}
+      </p>
     </div>
   );
 }
@@ -1092,44 +627,42 @@ function TrackedLinksTable({
 function Section({
   title,
   hint,
-  right,
   children,
 }: {
   title: string;
   hint?: string;
-  right?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-5">
       <div className="mb-4 flex items-baseline justify-between gap-3">
         <h2 className="text-sm font-bold text-white">{title}</h2>
-        <div className="flex items-baseline gap-3">
-          {hint ? (
-            <span className="text-right text-[11px] text-white/45">{hint}</span>
-          ) : null}
-          {right}
-        </div>
+        {hint ? (
+          <span className="text-right text-[11px] text-white/45">{hint}</span>
+        ) : null}
       </div>
       {children}
     </section>
   );
 }
 
-function filterScopeLabel(
-  status: string,
-  ta: AdminDict["analytics"],
-): string {
-  if (status === "active") return ta.scopeActiveOnly;
-  if (status === "all") return ta.scopeAllStatuses;
-  // Default 'ag' scope: the donut now genuinely filters to access-granting
-  // statuses, so the label must say so — "all statuses shown" here would
-  // hide the canceled slice while claiming completeness.
-  return ta.scopeAccessGranting;
+function SectionSkeleton({ title }: { title: string }) {
+  return (
+    <Section title={title}>
+      <div className="h-40 animate-pulse rounded-lg bg-white/[0.03]" />
+    </Section>
+  );
 }
 
-function muxWindowLabel(tf: string, ta: AdminDict["analytics"]): string {
-  if (tf === "24:hours") return ta.rangeLast24Hours;
-  if (tf === "7:days") return ta.rangeLast7Days;
-  return ta.rangeLast30Days;
+function RowSkeleton({ n }: { n: number }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      {Array.from({ length: n }, (_, i) => (
+        <div
+          key={i}
+          className="h-24 animate-pulse rounded-xl border border-white/[0.06] bg-white/[0.03]"
+        />
+      ))}
+    </div>
+  );
 }

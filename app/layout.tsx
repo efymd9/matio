@@ -10,6 +10,7 @@ import { CookieBanner } from "@/components/site/cookie-banner";
 import { MetaPixel } from "@/components/site/meta-pixel";
 import { PostHogProvider } from "@/components/site/posthog-provider";
 import { GoogleAnalytics } from "@/components/site/google-analytics";
+import { VisitBeacon } from "@/components/site/visit-beacon";
 import { UserMenu } from "@/components/site/user-menu";
 import { CONSENT_COOKIE, parseConsent } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
@@ -195,6 +196,11 @@ export default async function RootLayout({
                 the visitor accepts marketing cookies. Same initialConsent as
                 the other trackers; blank NEXT_PUBLIC_GA_MEASUREMENT_ID → off. */}
             <GoogleAnalytics initialConsent={initialConsent} />
+            {/* First-party visit beacon — consent-EXEMPT audience
+                measurement (strictly first-party, documented on /cookies).
+                Deliberately outside the consent gate the trackers above
+                live behind; skips /admin paths itself. */}
+            <VisitBeacon />
           </LocaleProvider>
         </body>
       </html>

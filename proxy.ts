@@ -1,7 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
+import { NextResponse, userAgent } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import {
@@ -24,6 +24,7 @@ import {
 } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { LEGACY_ALIAS_HOST, SITE_URL } from "@/lib/seo";
+import { VISITOR_COOKIE, VISITOR_COOKIE_MAX_AGE } from "@/lib/visitor-cookie";
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
 const isAuthRoute = createRouteMatcher(["/subscribe(.*)"]);
@@ -155,6 +156,33 @@ function applyMarketingCookies(req: NextRequest): NextResponse | null {
   return res;
 }
 
+// Mints the first-party audience-measurement cookie (matio_aid) when the
+// visitor doesn't have one yet. Consent-exempt first-party analytics — the
+// cookie itself is just a random UUID; all data lives server-side and is
+// written ONLY by the /api/t beacon (JS-executing browsers), never here.
+// Set once with a fixed 13-month life and deliberately never refreshed
+// (CNIL exempt-measurement guidance). Skips bots (no point minting for
+// crawlers), non-GET requests, and API/admin paths — page documents only.
+function applyVisitorCookie(
+  req: NextRequest,
+  res: NextResponse | null,
+): NextResponse | null {
+  if (req.method !== "GET") return res;
+  if (req.cookies.get(VISITOR_COOKIE)) return res;
+  const path = req.nextUrl.pathname;
+  if (path.startsWith("/api") || path.startsWith("/admin")) return res;
+  if (userAgent({ headers: req.headers }).isBot) return res;
+  const out = res ?? NextResponse.next();
+  out.cookies.set(VISITOR_COOKIE, crypto.randomUUID(), {
+    maxAge: VISITOR_COOKIE_MAX_AGE,
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: process.env.NODE_ENV === "production",
+  });
+  return out;
+}
+
 export default clerkMiddleware(async (auth, req) => {
   // Consolidate the legacy production alias onto the apex so it isn't indexed
   // as a duplicate origin. Vercel does NOT auto-noindex production
@@ -187,7 +215,7 @@ export default clerkMiddleware(async (auth, req) => {
     // middleware Set-Cookie survives the page's redirect('/'), so an ad
     // landing on /subscribe still gets its UTM/fbclid persisted.
     if (!paymentsEnabled()) {
-      return applyMarketingCookies(req) ?? undefined;
+      return applyVisitorCookie(req, applyMarketingCookies(req)) ?? undefined;
     }
     // Default the subscribe flow to sign-up rather than sign-in: most
     // visitors who reach /subscribe are first-timers about to create an
@@ -198,13 +226,13 @@ export default clerkMiddleware(async (auth, req) => {
     if (!userId) return redirectToSignUp({ returnBackUrl: req.url });
     // Attribution still captured for signed-in /subscribe visits — e.g.
     // a remarketing campaign that links a returning user straight here.
-    return applyMarketingCookies(req) ?? undefined;
+    return applyVisitorCookie(req, applyMarketingCookies(req)) ?? undefined;
   }
 
   // Catch-all: every other passthrough route captures attribution + _fbc. Ad
   // landings are nearly always /, /shows/*, or /watch/* — anything not
   // gated above.
-  return applyMarketingCookies(req) ?? undefined;
+  return applyVisitorCookie(req, applyMarketingCookies(req)) ?? undefined;
 });
 
 export const config = {

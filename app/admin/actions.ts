@@ -1,7 +1,7 @@
 "use server";
 
 import { del } from "@vercel/blob";
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
@@ -178,11 +178,14 @@ export async function updateShow(
 
   try {
     // Snapshot the current artwork so we can clean up any Blob object that's
-    // being replaced or cleared by this edit (see deleteOrphanedBlob).
+    // being replaced or cleared by this edit (see deleteOrphanedBlob) — and
+    // the current status so the release stamp below only fires on a real
+    // draft → published transition.
     const [prev] = await db
       .select({
         posterImageUrl: shows.posterImageUrl,
         heroImageUrl: shows.heroImageUrl,
+        status: shows.status,
       })
       .from(shows)
       .where(and(eq(shows.id, id), isNull(shows.deletedAt)))
@@ -203,6 +206,35 @@ export async function updateShow(
         prev.heroImageUrl,
         parsed.values.heroImageUrl ?? null,
       );
+    }
+
+    // Publishing releases every ready episode that hasn't been released
+    // yet: stamp released_at once (write-if-null — republishing later must
+    // not move existing release dates). Gated on the draft → published
+    // TRANSITION: a routine edit to an already-published show must not
+    // stamp now() onto old NULL-release episodes — their query-time
+    // fallback (first observed watch) is the more truthful date. Episodes
+    // uploaded AFTER publish get stamped by the Mux ready webhook instead;
+    // together the two writers define released_at = "first moment the
+    // episode was watchable by the public", which the analytics
+    // release-retention window keys on.
+    if (parsed.values.status === "published" && prev?.status !== "published") {
+      await db
+        .update(episodes)
+        .set({ releasedAt: new Date() })
+        .where(
+          and(
+            isNull(episodes.releasedAt),
+            eq(episodes.status, "ready"),
+            inArray(
+              episodes.seasonId,
+              db
+                .select({ id: seasons.id })
+                .from(seasons)
+                .where(eq(seasons.showId, id)),
+            ),
+          ),
+        );
     }
   } catch (e) {
     if (isUniqueViolation(e)) return { status: "error", code: "slug_taken" };

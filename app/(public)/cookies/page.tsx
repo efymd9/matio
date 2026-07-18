@@ -91,6 +91,13 @@ function CookiesEn() {
               category: "Strictly necessary",
             },
             {
+              name: "matio_aid",
+              purpose:
+                "First-party audience measurement. A random anonymous identifier we use to count unique visitors and which pages were viewed (home page, show pages, sign-up wall). First-party only — never shared with third parties, never used for advertising or cross-site tracking — so it needs no consent.",
+              expiry: "13 months (not refreshed)",
+              category: "Strictly necessary",
+            },
+            {
               name: "locale",
               purpose: "Remembers your language preference (Spanish / English).",
               expiry: "1 year",
@@ -261,6 +268,13 @@ function CookiesEs() {
               purpose:
                 "Controla tu vista previa gratuita de 60 segundos por serie para que no pueda reiniciarse recargando la página. Token aleatorio opaco, sin datos personales.",
               expiry: "1 año",
+              category: "Estrictamente necesaria",
+            },
+            {
+              name: "matio_aid",
+              purpose:
+                "Medición de audiencia de origen propio. Un identificador anónimo aleatorio que usamos para contar visitantes únicos y qué páginas se han visto (página de inicio, páginas de serie, muro de registro). Es exclusivamente de origen propio: nunca se comparte con terceros ni se utiliza para publicidad o seguimiento entre sitios, por lo que no requiere consentimiento.",
+              expiry: "13 meses (no se renueva)",
               category: "Estrictamente necesaria",
             },
             {

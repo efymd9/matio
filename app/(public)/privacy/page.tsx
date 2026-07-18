@@ -103,6 +103,20 @@ function PrivacyEn() {
             See the <Link href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</Link>.
           </li>
           <li>
+            <strong>First-party audience measurement</strong> — a strictly
+            first-party cookie (<code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">matio_aid</code>)
+            holding a random anonymous identifier lets us measure our own
+            audience: the days you visited, which pages you viewed (home page,
+            show pages, the sign-up wall), the marketing source / medium /
+            campaign and referrer of your first visit, and the country your
+            visit came from (derived from your IP — the raw IP address is never
+            stored against it). This is never shared with third parties and
+            never used for advertising or cross-site tracking. If you later
+            create an account, the identifier is linked to it so we can join
+            that first visit to your sign-up. You can delete the cookie at any
+            time in your browser settings.
+          </li>
+          <li>
             <strong>Communications</strong> — emails you send us, support
             conversations, and transactional email such as the new-episode
             notifications you ask for.
@@ -147,6 +161,15 @@ function PrivacyEn() {
             (site-traffic measurement).
             Lawful basis: <em>consent</em> — these run only after you accept
             marketing cookies in the banner, and stop if you withdraw consent.
+          </li>
+          <li>
+            <strong>First-party audience measurement</strong> (counting unique
+            visitors and understanding which pages are used, via the{" "}
+            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">matio_aid</code>{" "}
+            cookie). Lawful basis: <em>legitimate interests</em> — understanding
+            how our own service is used without third-party tracking. Because
+            this measurement stays strictly first-party and is never used for
+            advertising, it does not require consent.
           </li>
         </ul>
       </Section>
@@ -245,6 +268,11 @@ function PrivacyEn() {
           <li>
             <strong>Trial sessions</strong>: retained for 30 days for abuse
             analytics, then deleted or fully anonymised.
+          </li>
+          <li>
+            <strong>Audience-measurement data</strong>: the first-party
+            audience identifier and the data recorded against it are kept for
+            up to 25 months, then deleted or fully anonymised.
           </li>
           <li>
             <strong>Request and security logs</strong>: 30 days.
@@ -378,6 +406,21 @@ function PrivacyEs() {
             .
           </li>
           <li>
+            <strong>Medición de audiencia de origen propio</strong>: una cookie
+            exclusivamente de origen propio (<code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">matio_aid</code>)
+            con un identificador anónimo aleatorio nos permite medir nuestra
+            propia audiencia: los días en que nos visitaste, qué páginas viste
+            (página de inicio, páginas de serie, muro de registro), la fuente /
+            medio / campaña de marketing y el referente de tu primera visita, y
+            el país desde el que se realizó la visita (deducido de tu IP; la
+            dirección IP en claro nunca se almacena junto a él). Esto nunca se
+            comparte con terceros ni se utiliza para publicidad o seguimiento
+            entre sitios. Si más adelante creas una cuenta, el identificador se
+            vincula a ella para poder asociar esa primera visita con tu
+            registro. Puedes eliminar la cookie en cualquier momento desde la
+            configuración de tu navegador.
+          </li>
+          <li>
             <strong>Comunicaciones</strong>: los correos que nos envías,
             conversaciones de soporte y correos transaccionales, como los
             avisos de nuevos episodios que solicitas.
@@ -425,6 +468,16 @@ function PrivacyEs() {
             Base jurídica: <em>consentimiento</em>: solo se ejecutan tras
             aceptar las cookies de marketing en el banner y se detienen si
             retiras el consentimiento.
+          </li>
+          <li>
+            <strong>Medición de audiencia de origen propio</strong> (contar
+            visitantes únicos y entender qué páginas se utilizan, mediante la
+            cookie{" "}
+            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">matio_aid</code>).
+            Base jurídica: <em>interés legítimo</em> de comprender cómo se usa
+            nuestro propio servicio sin recurrir a seguimiento de terceros. Al
+            tratarse de una medición estrictamente de origen propio y no usarse
+            para publicidad, no requiere consentimiento.
           </li>
         </ul>
       </Section>
@@ -531,6 +584,12 @@ function PrivacyEs() {
           <li>
             <strong>Sesiones de prueba</strong>: 30 días para analítica de
             abuso, luego se eliminan o anonimizan por completo.
+          </li>
+          <li>
+            <strong>Datos de medición de audiencia</strong>: el identificador
+            de audiencia de origen propio y los datos registrados junto a él se
+            conservan hasta 25 meses, y después se eliminan o se anonimizan por
+            completo.
           </li>
           <li>
             <strong>Registros de petición y seguridad</strong>: 30 días.

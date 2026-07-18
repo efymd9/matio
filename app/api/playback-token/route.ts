@@ -11,6 +11,7 @@ import { showHasTierGating } from "@/lib/episode-access";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
+import { stampVisitorWallSeen } from "@/lib/visitor";
 import {
   TRIAL_COOKIE,
   TRIAL_DURATION_SECONDS,
@@ -207,6 +208,10 @@ export async function GET(req: NextRequest) {
         console.warn(`[playback-token] signup-wall stamp skipped: ${err}`);
       }
     }
+    // First-party visit ledger: mark "hit the sign-up wall today" on the
+    // browser's own visit row (deep-link path; the end-of-tier path stamps
+    // via markSignupWallShown). Reads its own cookie, never throws.
+    await stampVisitorWallSeen();
     logToken({ result: 403, mode: "free", showId: row.showId, episodeId });
     return NextResponse.json(
       { error: "Not authorized", reason: "signup_required" },

@@ -16,6 +16,12 @@ export const users = pgTable("users", {
   // they keep measuring pre-purchase intent — a guest account is created AT
   // purchase and would otherwise double-read the "New subs" metric.
   signupOrigin: text("signup_origin").notNull().default("clerk_signup"),
+  // ISO-3166-1 alpha-2, stamped once when the anonymous visitor row is
+  // merged into the account (visitors.country, falling back to the
+  // x-vercel-ip-country of the linking request). Country-level only — the
+  // geo/matrix panels on /admin/analytics slice registrations and
+  // completion by it. NULL for accounts that predate visitor tracking.
+  country: text("country"),
   // Per-campaign attribution captured from utm_* cookies on the user's first
   // authenticated touch (/subscribe page render). First-touch is set once
   // and never overwritten — it identifies the campaign that opened the

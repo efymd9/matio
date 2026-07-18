@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
-import { episodes } from "@/db/schema";
+import { episodes, seasons, shows } from "@/db/schema";
 import { getMux } from "@/lib/mux";
 
 // Webhooks need the raw body for signature verification + DB writes via
@@ -43,6 +43,31 @@ export async function POST(req: NextRequest) {
           status: "ready",
         })
         .where(eq(episodes.id, target.id));
+      // Release stamp (write-if-null): an episode landing ready on an
+      // already-published show is public from this moment — the analytics
+      // release-retention window keys on it. Uploads to draft shows get
+      // stamped later by the publish action instead. Separate targeted
+      // UPDATE so a re-encoded asset (ready fires again) can't move an
+      // existing release date.
+      await db
+        .update(episodes)
+        .set({ releasedAt: new Date() })
+        .where(
+          and(
+            eq(episodes.id, target.id),
+            isNull(episodes.releasedAt),
+            inArray(
+              episodes.seasonId,
+              db
+                .select({ id: seasons.id })
+                .from(seasons)
+                .innerJoin(shows, eq(seasons.showId, shows.id))
+                .where(
+                  and(eq(shows.status, "published"), isNull(shows.deletedAt)),
+                ),
+            ),
+          ),
+        );
     }
   } else if (event.type === "video.asset.errored") {
     const { id, passthrough } = event.data;

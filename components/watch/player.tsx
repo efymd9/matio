@@ -34,7 +34,12 @@ import { useT } from "@/lib/i18n/client";
 import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog } from "@/lib/posthog-events";
 import dynamic from "next/dynamic";
-import { saveTrialPosition, saveWatchProgress } from "@/app/watch/actions";
+import {
+  saveTrialPosition,
+  saveWatchProgress,
+  saveWatchSegments,
+} from "@/app/watch/actions";
+import { WATCH_SEGMENT_BUCKET_SECONDS } from "@/lib/watch-segments";
 
 const Paywall = dynamic(() => import("./paywall").then((m) => m.Paywall), {
   ssr: false,
@@ -868,6 +873,67 @@ function EpisodePlayback({
       window.removeEventListener("pagehide", flush);
     };
   }, [current.id, mode, playback]);
+
+  // Audience-retention segment tracking: mark each 10s bucket the playhead
+  // traverses, flush the accumulated set every ~20s (and on hide/ended/
+  // episode-change) to saveWatchSegments. All state is effect-local — a
+  // re-run for the next episode starts clean, and the cleanup's flush
+  // closes over the DEPARTING episode's id, so auto-advance (which swaps
+  // current.id without remounting the element) can never cross-write.
+  // Continuous playback marks a bucket once (lastMarked); a seek resets
+  // lastMarked so re-crossing counts again — that re-count is the rewatch
+  // peak on the admin retention curve, not a bug.
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || !playback) return;
+    const episodeId = current.id;
+    const pending = new Set<number>();
+    let lastMarked: number | null = null;
+
+    const flush = () => {
+      if (pending.size === 0) return;
+      const buckets = [...pending];
+      pending.clear();
+      void saveWatchSegments(episodeId, buckets).catch(() => {});
+    };
+    const onTimeUpdate = () => {
+      // Mid-auto-advance the element still holds the previous episode
+      // (snapshot trails current.id) — same guard as the progress flush.
+      if (el.paused || playback.episodeId !== episodeId) return;
+      const bucket = Math.floor(
+        (el.currentTime ?? 0) / WATCH_SEGMENT_BUCKET_SECONDS,
+      );
+      if (bucket !== lastMarked) {
+        pending.add(bucket);
+        lastMarked = bucket;
+      }
+    };
+    const onSeeking = () => {
+      lastMarked = null;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      flush();
+    }, 20_000);
+
+    el.addEventListener("timeupdate", onTimeUpdate);
+    el.addEventListener("seeking", onSeeking);
+    el.addEventListener("ended", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      clearInterval(interval);
+      el.removeEventListener("timeupdate", onTimeUpdate);
+      el.removeEventListener("seeking", onSeeking);
+      el.removeEventListener("ended", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [current.id, playback]);
 
   // Seek to resume position once the player has metadata for the episode.
   // This is the server-provided resume and applies only on the initial episode

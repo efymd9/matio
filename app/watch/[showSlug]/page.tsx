@@ -32,6 +32,7 @@ import {
   isTrialActive,
   linkTrialSessionsToCurrentUser,
 } from "@/lib/trial";
+import { linkVisitorToUser } from "@/lib/visitor";
 
 // Belt-and-braces noindex. /watch is Disallowed in robots.txt (crawling it
 // costs trial-session machinery), but a disallow alone still allows URL-only
@@ -235,6 +236,12 @@ export default async function WatchPage({
   const queryResume = resume ? Number(resume) : null;
 
   if (isSubscriber) {
+    // Subscribers exist in the users mirror by definition (the subscription
+    // row references it), so the visitor merge is safe here without the
+    // getOrSyncCurrentUser the member branch needs. Without this call a
+    // subscriber's browser never links its visit history and their
+    // users.country never stamps — the geo panels read them as unknown.
+    await linkVisitorToUser(userId!);
     return (
       <WatchShell>
         <Player
@@ -265,6 +272,11 @@ export default async function WatchPage({
       // this link existing.
       await getOrSyncCurrentUser();
       await linkTrialSessionsToCurrentUser();
+      // Merge the first-party anonymous visit history into the account
+      // ("склейка") + stamp users.country. First link wins; never throws.
+      // This surface is where fresh signups land from the wall redirect,
+      // so the visitor funnel's "registered" stage depends on it.
+      await linkVisitorToUser(userId);
       // Free mode only: /subscribe — the historical applyUserAttribution
       // call site — redirects home while payments are off, so without this
       // no account would ever get first/last-touch stamped and every signup
