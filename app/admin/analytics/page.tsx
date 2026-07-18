@@ -6,13 +6,15 @@ import {
   loadDashboard,
   loadEpisodeFunnels,
   loadFreeShowDepth,
+  loadSignupFunnelDb,
   loadTrackedLinks,
   parseFilters,
   type AnalyticsFilters as Filters,
   type TrackedLinkRow,
 } from "@/lib/admin-analytics";
-import { paymentsEnabled } from "@/lib/free-mode";
+import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { getMuxData, muxTimeframeForDays } from "@/lib/mux-data";
+import { getSignupFunnelStats, signupFunnelWindow } from "@/lib/posthog-query";
 import { AnalyticsFilters } from "@/components/admin/analytics-filters";
 import { TimeSeriesChart } from "@/components/admin/time-series-chart";
 import { CopyButton } from "@/components/admin/copy-button";
@@ -69,6 +71,10 @@ export default async function AnalyticsPage({
   // organic funnel (sessions → depth → signups). Paid panels aren't deleted
   // — they render again the moment PAYMENTS_ENABLED=1 comes back.
   const paymentsOn = paymentsEnabled();
+  // Signup gate (REQUIRE_SIGNUP): anonymous playback stopped minting
+  // trial_sessions rows on 2026-07-16, so the organic-funnel panels stop
+  // filling — the flag drives the explanatory note on that panel.
+  const signupGateOn = signupRequired();
   const sp = await searchParams;
   const filters = parseFilters(sp, new Date());
   const [d, episodeFunnels, trackedLinks, freeShowDepth] = await Promise.all([
@@ -232,6 +238,24 @@ export default async function AnalyticsPage({
         </div>
       )}
 
+      {/* Signup-gate funnel — its own Suspense island: the PostHog query API
+          is an external HTTP call (3.5s-bounded in lib/posthog-query.ts) and
+          must never gate the DB-backed sections, same contract as the Mux
+          panel below. Rendered whenever payments are off: once REQUIRE_SIGNUP
+          stops minting trial_sessions rows (2026-07-16) the anonymous top of
+          funnel exists only in PostHog. */}
+      {!paymentsOn ? (
+        <Suspense
+          fallback={
+            <Section title={ta.sectionSignupFunnel}>
+              <div className="h-28 animate-pulse rounded-lg bg-white/[0.04]" />
+            </Section>
+          }
+        >
+          <SignupFunnelSection filters={filters} />
+        </Suspense>
+      ) : null}
+
       {/* Funnel + (status mix | sources) */}
       {paymentsOn ? (
         <div className="grid gap-4 lg:grid-cols-[1.6fr_1fr]">
@@ -320,6 +344,11 @@ export default async function AnalyticsPage({
             <p className="mt-4 text-[10px] leading-relaxed text-white/35">
               {ta.organicDepthNote(d.free.avgDepth.toFixed(1))}
             </p>
+            {signupGateOn ? (
+              <p className="mt-2 text-[10px] leading-relaxed text-[#f5c451]/80">
+                {ta.ofGateNote}
+              </p>
+            ) : null}
           </Section>
 
           <Section
@@ -576,6 +605,99 @@ export default async function AnalyticsPage({
         <MuxDataSection filters={filters} />
       </Suspense>
     </div>
+  );
+}
+
+// Async server component behind its own Suspense boundary (see call site) —
+// mirrors MuxDataSection: the external PostHog call streams in behind the
+// DB-backed panels. Visitors/Wall come from PostHog (consent-gated floor);
+// Signups/Watching come from loadSignupFunnelDb — both range-only, no
+// attribution filters, so all four stages describe the same population.
+async function SignupFunnelSection({ filters }: { filters: Filters }) {
+  const { t } = await getAdminDict();
+  const ta = t.analytics;
+  // One shared rounded window (5-minute edges, cache-key-stable) for BOTH
+  // data sources so the PostHog and DB stages cover an identical time span.
+  const win = signupFunnelWindow(filters.from, filters.to);
+  const [ph, dbStages] = await Promise.all([
+    getSignupFunnelStats(win.from, win.to),
+    loadSignupFunnelDb(win),
+  ]);
+  return (
+    <Section title={ta.sectionSignupFunnel} hint={ta.signupFunnelHint}>
+      {ph.status === "not_configured" ? (
+        <p className="py-6 text-center text-sm leading-relaxed text-white/55">
+          {ta.sfNotConnected1}{" "}
+          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
+            query:read
+          </code>{" "}
+          {ta.sfNotConnected2}{" "}
+          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
+            POSTHOG_PERSONAL_API_KEY
+          </code>{" "}
+          /{" "}
+          <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">
+            POSTHOG_PROJECT_ID
+          </code>
+          .
+        </p>
+      ) : ph.status === "error" ? (
+        <div className="py-6 text-center">
+          <p className="text-sm text-white/55">{ta.sfError}</p>
+          {/* Raw detail for diagnostics (key-scope hints, HTTP codes) —
+              deliberately small; the headline above is the localized copy. */}
+          <p className="mt-1 font-mono text-[10px] text-white/30">
+            {ph.message}
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+          <div>
+            <FunnelChart
+              steps={[
+                {
+                  label: ta.sfVisitors,
+                  value: ph.stats.visitors,
+                  hint: ta.sfVisitorsHint,
+                },
+                {
+                  label: ta.sfWall,
+                  value: ph.stats.wallViewers,
+                  hint: ta.sfWallHint,
+                },
+                {
+                  label: ta.sfSignups,
+                  value: dbStages.signups,
+                  hint: ta.sfSignupsHint,
+                },
+                {
+                  label: ta.sfWatching,
+                  value: dbStages.watchers,
+                  hint: ta.sfWatchingHint,
+                },
+              ]}
+            />
+            <p className="mt-4 text-[10px] leading-relaxed text-white/35">
+              {ta.sfConsentNote}
+            </p>
+          </div>
+          <div>
+            <p className="mb-2 text-[10px] uppercase tracking-[0.08em] text-white/45">
+              {ta.sfBySourceLabel}
+            </p>
+            <BarList
+              items={ph.stats.bySource.map((s) => ({
+                label: s.source,
+                value: s.visitors,
+                sub: ta.sfSourceRowSub(s.wall),
+              }))}
+              format={(n) => ta.sfVisitorsCount(n)}
+              emptyLabel={ta.sfBySourceEmpty}
+            />
+          </div>
+        </div>
+      )}
+    </Section>
   );
 }
 

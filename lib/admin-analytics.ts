@@ -1682,3 +1682,49 @@ export async function loadTrackedLinks(range: {
     };
   });
 }
+
+// ---- signup-gate funnel (free mode; the panel above the organic funnel) -----
+
+// DB stages of the dashboard's "Signup funnel" panel. Under REQUIRE_SIGNUP
+// anonymous visits mint no trial_sessions rows, so the panel's top stages
+// come from PostHog (lib/posthog-query.ts) and only these two live in the DB.
+// Range-only on purpose: the PostHog stages know nothing about the
+// dashboard's show/channel/campaign filters, so the DB stages ignore them
+// too — all four stages must describe the same site-wide population or the
+// funnel lies.
+export async function loadSignupFunnelDb(range: {
+  from: Date;
+  to: Date;
+}): Promise<{ signups: number; watchers: number }> {
+  // Same population as the Signups KPI (pre-purchase accounts only).
+  const inRangeSignupConds = and(
+    gte(users.createdAt, range.from),
+    lte(users.createdAt, range.to),
+    eq(users.signupOrigin, "clerk_signup"),
+  );
+  const [signupRows, watcherRows] = await Promise.all([
+    db.select({ n: count() }).from(users).where(inRangeSignupConds),
+    // Watchers is a strict subset of the Signups stage — IN-RANGE signups
+    // that saved watch progress in range — so the funnel stays monotone.
+    // Pre-existing users' activity lives on the signed-in-engagement panel;
+    // counting it here would let stage 4 exceed stage 3 (FunnelChart clamps
+    // at 100% and would silently render a nonsensical funnel as valid).
+    db
+      .select({ n: countDistinct(watchProgress.userId) })
+      .from(watchProgress)
+      .where(
+        and(
+          gte(watchProgress.updatedAt, range.from),
+          lte(watchProgress.updatedAt, range.to),
+          inArray(
+            watchProgress.userId,
+            db.select({ id: users.id }).from(users).where(inRangeSignupConds),
+          ),
+        ),
+      ),
+  ]);
+  return {
+    signups: Number(signupRows[0].n),
+    watchers: Number(watcherRows[0].n),
+  };
+}

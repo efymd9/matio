@@ -360,6 +360,33 @@ export const ru = {
     sectionSignedInEngagement: "Вовлечённость · вошедшие зрители",
     sectionSignedInEngagementHint:
       "watch_progress: зрители с аккаунтом (в бесплатном режиме — любой вошедший) · всё время",
+    // ---- Воронка регистраций (REQUIRE_SIGNUP: анонимный просмотр закрыт,
+    // верх воронки живёт только в PostHog) ----
+    sectionSignupFunnel: "Воронка регистраций",
+    signupFunnelHint: "весь сайт · только период — фильтры не применяются",
+    sfVisitors: "Посетители",
+    sfVisitorsHint: "Уникальные посетители по PostHog ($pageview)",
+    sfWall: "Увидели стену регистрации",
+    sfWallHint: "Событие signup_wall_shown (PostHog), уникальные посетители",
+    sfSignups: "Зарегистрировались",
+    sfSignupsHint: "Аккаунты за период (clerk_signup) — из нашей БД",
+    sfWatching: "Начали смотреть после регистрации",
+    sfWatchingHint:
+      "Из зарегистрировавшихся за период — сохранили прогресс просмотра (watch_progress, БД)",
+    sfBySourceLabel: "Посетители по источникам (PostHog)",
+    sfBySourceEmpty: "Нет просмотров страниц за период.",
+    sfSourceRowSub: (wall: number) =>
+      `стену увидели: ${wall.toLocaleString()}`,
+    sfVisitorsCount: (n: number) =>
+      `${n.toLocaleString()} ${ruPlural(n, ["посетитель", "посетителя", "посетителей"])}`,
+    sfConsentNote:
+      "«Посетители» и «Стена» — персоны PostHog: считаются только браузеры с согласием на маркетинговые cookies (вне ЕС оно включено по умолчанию), поэтому это нижняя граница. «Зарегистрировались» и «Смотрели» — данные из нашей БД.",
+    sfNotConnected1:
+      "Панель не подключена. Создайте в PostHog personal API key со scope",
+    sfNotConnected2: "и задайте",
+    sfError: "Не удалось получить данные PostHog.",
+    ofGateNote:
+      "С 16.07.2026 включена обязательная регистрация (REQUIRE_SIGNUP): анонимные сессии больше не создаются, и эта воронка не пополняется. Живой верх воронки — в «Воронке регистраций» выше.",
   },
   showNew: {
     backToShows: "Сериалы",
@@ -1053,6 +1080,32 @@ export const en: AdminDict = {
     sectionSignedInEngagement: "Engagement · signed-in viewers",
     sectionSignedInEngagementHint:
       "watch_progress: viewers with an account (any signed-in user while free mode is on) · all time",
+    // ---- Signup funnel (REQUIRE_SIGNUP: anonymous playback gated, the top
+    // of funnel lives only in PostHog) ----
+    sectionSignupFunnel: "Signup funnel",
+    signupFunnelHint: "site-wide · range only — filters don't apply",
+    sfVisitors: "Visitors",
+    sfVisitorsHint: "Unique visitors per PostHog ($pageview)",
+    sfWall: "Saw the signup wall",
+    sfWallHint: "signup_wall_shown event (PostHog), unique visitors",
+    sfSignups: "Signed up",
+    sfSignupsHint: "Accounts created in range (clerk_signup) — from our DB",
+    sfWatching: "New signups who watched",
+    sfWatchingHint:
+      "Of the in-range signups — saved watch progress (watch_progress, DB)",
+    sfBySourceLabel: "Visitors by source (PostHog)",
+    sfBySourceEmpty: "No pageviews in range.",
+    sfSourceRowSub: (wall: number) => `saw the wall: ${wall.toLocaleString()}`,
+    sfVisitorsCount: (n: number) =>
+      `${n.toLocaleString()} visitor${n === 1 ? "" : "s"}`,
+    sfConsentNote:
+      "Visitors and Wall are PostHog persons: only browsers that consented to marketing cookies are counted (outside the EU consent defaults on), so they are a floor. Signed up and Watched come from our own DB.",
+    sfNotConnected1:
+      "Panel not connected. Create a PostHog personal API key with the",
+    sfNotConnected2: "scope and set",
+    sfError: "Couldn't fetch PostHog data.",
+    ofGateNote:
+      "Mandatory signup (REQUIRE_SIGNUP) has been on since 2026-07-16: anonymous sessions are no longer minted and this funnel stops filling. The live top of funnel is in “Signup funnel” above.",
   },
   showNew: {
     backToShows: "Shows",

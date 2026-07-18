@@ -25,7 +25,9 @@ export function normalizeUtm(
 // "instagram" → "ig") so source reporting doesn't fragment. Applied ONLY to
 // utm_source: medium ("paid" vs "paid_social") and campaign (a campaign could
 // legitimately be named "facebook") must keep their raw normalized value.
-const UTM_SOURCE_ALIASES: Record<string, string> = {
+// Exported so lib/posthog-query.ts can GENERATE its HogQL aliasing from this
+// exact table (transform(...)) — one source of truth, no second copy to drift.
+export const UTM_SOURCE_ALIASES: Record<string, string> = {
   facebook: "fb",
   meta: "fb",
   instagram: "ig",
