@@ -11,7 +11,7 @@ import { SOURCE_BUCKETS } from "@/lib/analytics-spec-shared";
 // (shareable, server-rendered); every control pushes a patched query and
 // the server components re-query. Native controls only.
 
-const PRESETS = ["7d", "30d", "90d"] as const;
+const PRESETS = ["24h", "7d", "30d", "90d"] as const;
 
 const SOURCE_LABELS: Record<string, string> = {
   tiktok: "TikTok",

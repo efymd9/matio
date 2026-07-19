@@ -65,7 +65,7 @@ import { SOURCE_BUCKETS, type SourceBucket } from "@/lib/analytics-spec-shared";
 
 // --- Filters ---------------------------------------------------------------
 
-export type SpecRangePreset = "7d" | "30d" | "90d" | "custom";
+export type SpecRangePreset = "24h" | "7d" | "30d" | "90d" | "custom";
 
 export type SpecFilters = {
   preset: SpecRangePreset;
@@ -122,10 +122,13 @@ export function parseSpecFilters(sp: RawParams, now: Date): SpecFilters {
     to = toParsed ? new Date(toParsed.getTime() + DAY_MS - 1) : now;
     if (to < from) to = new Date(from.getTime() + DAY_MS - 1);
   } else {
-    preset = rangeRaw === "7d" || rangeRaw === "90d" ? rangeRaw : "30d";
-    from = new Date(
-      now.getTime() - (preset === "7d" ? 7 : preset === "90d" ? 90 : 30) * DAY_MS,
-    );
+    preset =
+      rangeRaw === "24h" || rangeRaw === "7d" || rangeRaw === "90d"
+        ? rangeRaw
+        : "30d";
+    const presetDays =
+      preset === "24h" ? 1 : preset === "7d" ? 7 : preset === "90d" ? 90 : 30;
+    from = new Date(now.getTime() - presetDays * DAY_MS);
   }
 
   const len = to.getTime() - from.getTime();
