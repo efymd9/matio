@@ -7,7 +7,6 @@ import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { Icon } from "@/components/site/icon";
 import { TONE_GRADIENT } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
-import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 import { markSignupWallShown } from "@/app/watch/actions";
 
@@ -56,8 +55,10 @@ export function SignupWall({
   useEffect(() => {
     // Funnel stage 3, end-of-tier path (the deep-link path is stamped by
     // the token route's 403). Server-side write-once; safe to re-fire.
+    // No Meta event here: Lead means "finished the first episode" (fired
+    // by the player's ended handler), and wall impressions live in PostHog.
     void markSignupWallShown(showId);
-    const offPostHog = onPostHogReady(() => {
+    return onPostHogReady(() => {
       capturePostHog("signup_wall_shown", {
         show_slug: showSlug,
         episode_number: episodeNumber,
@@ -66,44 +67,6 @@ export function SignupWall({
         gate,
       });
     });
-
-    // Meta Lead = "prospect reached a conversion wall" (2026-07-19: extended
-    // from the subscription Paywall to this wall — under the signup gate the
-    // Paywall never renders, so Lead had gone fully dark and Meta saw nothing
-    // between PageView and CompleteRegistration). Deliberately the SAME
-    // once-per-browser localStorage key as components/watch/paywall.tsx:
-    // whichever wall a browser reaches first fires the one Lead — Lead
-    // approximates unique prospects, not impressions. The flag is set only
-    // AFTER the fire so a not-yet-loaded SDK doesn't burn it; consent stays
-    // enforced by the pixel-ready deferral (no consent → no fbq → no fire).
-    const leadKey = "matio:fb:lead";
-    let leadDone = false;
-    try {
-      leadDone = !!localStorage.getItem(leadKey);
-    } catch {
-      // Storage blocked (private mode): fire anyway.
-    }
-    const offPixel = leadDone
-      ? () => {}
-      : onPixelReady(() => {
-          trackPixel("Lead", {
-            // "signup_wall" (vs the Paywall's "paywall") so Events Manager
-            // breakdowns can tell the two walls apart on one event.
-            content_category: "signup_wall",
-            content_type: "product",
-            content_ids: [showSlug],
-          });
-          try {
-            localStorage.setItem(leadKey, "1");
-          } catch {
-            // ignore storage write failures
-          }
-        });
-
-    return () => {
-      offPostHog();
-      offPixel();
-    };
   }, [showId, showSlug, episodeNumber, gate]);
 
   const watchHref = `/watch/${showSlug}?ep=${encodeURIComponent(targetEpisodeId)}`;

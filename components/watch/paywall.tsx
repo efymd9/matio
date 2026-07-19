@@ -6,7 +6,6 @@ import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { OpenInBrowserHint } from "@/components/watch/open-in-browser-hint";
 import { TONE_GRADIENT } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
-import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 
 // Trial-end prompt. The conversion path is:
@@ -52,44 +51,16 @@ export function Paywall({
   const t = useT();
 
   useEffect(() => {
-    const offPostHog = onPostHogReady(() => {
+    // No Meta event here since 2026-07-19: Lead was remapped to "finished
+    // the first episode of a show" (fired by the player's ended handler,
+    // still once per browser via the shared matio:fb:lead flag). Paywall
+    // impressions live in PostHog only.
+    return onPostHogReady(() => {
       capturePostHog("paywall_shown", {
         show_slug: showSlug,
         wall: variant === "tier" ? "subscription" : "trial_end",
       });
     });
-
-    // Meta Lead = "reached the paywall" (2026-06-10 funnel mapping:
-    // ViewContent at play start → Lead here → InitiateCheckout at the CTA →
-    // Purchase from the webhook). Once per browser via the localStorage
-    // flag — Lead approximates unique prospects, not impressions; the flag
-    // is set only AFTER the fire so a not-yet-loaded SDK doesn't burn it.
-    const leadKey = "matio:fb:lead";
-    let leadDone = false;
-    try {
-      leadDone = !!localStorage.getItem(leadKey);
-    } catch {
-      // Storage blocked (private mode): fire anyway.
-    }
-    const offPixel = leadDone
-      ? () => {}
-      : onPixelReady(() => {
-          trackPixel("Lead", {
-            content_category: "paywall",
-            content_type: "product",
-            content_ids: [showSlug],
-          });
-          try {
-            localStorage.setItem(leadKey, "1");
-          } catch {
-            // ignore storage write failures
-          }
-        });
-
-    return () => {
-      offPostHog();
-      offPixel();
-    };
   }, [showSlug, variant]);
 
   const params = new URLSearchParams({ show: showSlug });

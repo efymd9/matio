@@ -1538,6 +1538,40 @@ function EpisodePlayback({
           }
         }}
         onEnded={() => {
+          // Meta Lead = "finished the first episode of a show" (2026-07-19
+          // remap; earlier homes — the subscription Paywall, briefly the
+          // SignupWall — no longer fire it). A completed first episode is
+          // the hooked-viewer signal, the browser-side twin of the
+          // dashboard's North-Star deep-watch metric. Fires before the
+          // advance/overlay branches below so every end-path counts (auto-
+          // advance, series end, wall). Once per browser via the historical
+          // matio:fb:lead flag — Lead ≈ unique hooked prospects, not
+          // finishes; the flag is set only AFTER the fire so a not-yet-
+          // loaded SDK doesn't burn it, and consent stays enforced by the
+          // pixel-ready deferral (no consent → no fbq → no fire).
+          if (currentPosition === 1) {
+            const leadKey = "matio:fb:lead";
+            let leadDone = false;
+            try {
+              leadDone = !!localStorage.getItem(leadKey);
+            } catch {
+              // Storage blocked (private mode): fire anyway.
+            }
+            if (!leadDone) {
+              onPixelReady(() => {
+                trackPixel("Lead", {
+                  content_category: "first_episode_finished",
+                  content_type: "product",
+                  content_ids: [showSlug],
+                });
+                try {
+                  localStorage.setItem(leadKey, "1");
+                } catch {
+                  // ignore storage write failures
+                }
+              });
+            }
+          }
           const el = videoRef.current;
           if (el) {
             const t = Math.floor(el.duration ?? 0);
