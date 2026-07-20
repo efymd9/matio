@@ -3,12 +3,11 @@ import { unstable_cache } from "next/cache";
 import { DIRECT_BUCKET } from "@/lib/admin-analytics";
 import { UTM_SOURCE_ALIASES } from "@/lib/utm";
 
-// Server-side PostHog HogQL client for the admin dashboard's signup-funnel
-// panel. Plain fetch + Bearer auth (no SDK) — same bounded-external-call
-// contract as lib/mux-data.ts. Since the signup gate (REQUIRE_SIGNUP=1,
-// 2026-07-16) anonymous visits write NO trial_sessions rows, PostHog is the
-// only place the anonymous top of funnel (visitors, signup-wall impressions)
-// exists; this module reads those aggregates back for /admin/analytics.
+// Server-side PostHog HogQL client. Plain fetch + Bearer auth (no SDK) —
+// same bounded-external-call contract as lib/mux-data.ts. Two consumers:
+// the legacy dashboard's signup-funnel panel (dormant, paid mode) and
+// lib/posthog-sessions.ts (/admin/analytics/sessions), which imports the
+// exported config/hogTs/runHogQL primitives.
 //
 // Requires a PostHog **personal API key** with the query:read scope — the
 // public phc_… project key (NEXT_PUBLIC_POSTHOG_KEY) cannot run queries —
@@ -64,7 +63,9 @@ export type SignupFunnelResult =
   | { status: "not_configured" }
   | { status: "error"; message: string };
 
-function getConfig(): { key: string; projectId: string } | null {
+export type PosthogQueryConfig = { key: string; projectId: string };
+
+export function getPosthogQueryConfig(): PosthogQueryConfig | null {
   const key = process.env.POSTHOG_PERSONAL_API_KEY;
   const projectId = process.env.POSTHOG_PROJECT_ID;
   if (!key || !projectId) return null;
@@ -89,12 +90,12 @@ export function signupFunnelWindow(
 
 // 'YYYY-MM-DD HH:MM:SS' for HogQL toDateTime — the project timezone is UTC,
 // so the ISO slice is already in the right zone.
-function hogTs(d: Date): string {
+export function hogTs(d: Date): string {
   return d.toISOString().slice(0, 19).replace("T", " ");
 }
 
-async function runHogQL(
-  cfg: { key: string; projectId: string },
+export async function runHogQL(
+  cfg: PosthogQueryConfig,
   query: string,
 ): Promise<unknown[][]> {
   const res = await fetch(
@@ -133,7 +134,7 @@ async function fetchStats(
   fromTs: string,
   toTs: string,
 ): Promise<SignupFunnelStats> {
-  const cfg = getConfig();
+  const cfg = getPosthogQueryConfig();
   if (!cfg || cfg.projectId !== projectId) {
     throw new Error("PostHog query API not configured");
   }
@@ -180,7 +181,7 @@ export async function getSignupFunnelStats(
   from: Date,
   to: Date,
 ): Promise<SignupFunnelResult> {
-  const cfg = getConfig();
+  const cfg = getPosthogQueryConfig();
   if (!cfg) return { status: "not_configured" };
   const win = signupFunnelWindow(from, to);
   try {

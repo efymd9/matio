@@ -24,6 +24,7 @@ import {
   PulseChart,
   RetentionCurveChart,
 } from "@/components/admin/spec-charts";
+import { AnalyticsTabs } from "@/components/admin/analytics-tabs";
 import { SpecAnalyticsFilters } from "@/components/admin/spec-filters";
 import { WorldMap } from "@/components/admin/world-map";
 import { WORLD_TILE_GRID } from "@/lib/world-map-grid";
@@ -111,6 +112,8 @@ export default async function AnalyticsPage({
           {ts.ledgerNote}
         </p>
       </div>
+
+      <AnalyticsTabs active="overview" />
 
       <SpecAnalyticsFilters
         filters={f}
