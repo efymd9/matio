@@ -4,12 +4,8 @@ import {
   loadRecentSessions,
   parseSessionsParams,
   sessionReplayUrl,
-  SESSIONS_DEFAULT_LIMIT,
-  SESSIONS_DEFAULT_RANGE,
   SESSIONS_MAX_LIMIT,
-  SESSIONS_RANGES,
   type SessionEvent,
-  type SessionsRange,
   type SessionSummary,
 } from "@/lib/posthog-sessions";
 import { getAdminDict } from "@/lib/i18n/admin-server";
@@ -22,20 +18,6 @@ type SessionsDict = AdminDict["analyticsSessions"];
 // Live feed — every render re-reads PostHog (60s-cached in the data layer).
 export const dynamic = "force-dynamic";
 
-const RANGE_LABELS: Record<SessionsRange, string> = {
-  "24h": "24h",
-  "7d": "7d",
-  "30d": "30d",
-};
-
-function rangeHref(range: SessionsRange, limit?: number): string {
-  const params = new URLSearchParams();
-  if (range !== SESSIONS_DEFAULT_RANGE) params.set("range", range);
-  if (limit && limit !== SESSIONS_DEFAULT_LIMIT) params.set("n", String(limit));
-  const s = params.toString();
-  return s ? `/admin/analytics/sessions?${s}` : "/admin/analytics/sessions";
-}
-
 export default async function SessionsPage({
   searchParams,
 }: {
@@ -44,7 +26,7 @@ export default async function SessionsPage({
   const { t } = await getAdminDict();
   const td = t.analyticsSessions;
   const sp = await searchParams;
-  const { range, limit } = parseSessionsParams(sp);
+  const { limit } = parseSessionsParams(sp);
 
   return (
     <div className="space-y-6">
@@ -63,27 +45,10 @@ export default async function SessionsPage({
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <AnalyticsTabs active="sessions" />
-        <div className="flex overflow-hidden rounded-lg border border-white/10">
-          {SESSIONS_RANGES.map((p) => (
-            <Link
-              key={p}
-              href={rangeHref(p)}
-              className={`px-3 py-1.5 text-xs font-bold transition-colors ${
-                range === p
-                  ? "bg-gold text-gold-deep"
-                  : "bg-transparent text-cream/60 hover:text-cream"
-              }`}
-            >
-              {RANGE_LABELS[p]}
-            </Link>
-          ))}
-        </div>
-      </div>
+      <AnalyticsTabs active="sessions" />
 
       <Suspense fallback={<ListSkeleton title={td.listTitle} />}>
-        <SessionsSection td={td} range={range} limit={limit} />
+        <SessionsSection td={td} limit={limit} />
       </Suspense>
     </div>
   );
@@ -93,14 +58,12 @@ export default async function SessionsPage({
 
 async function SessionsSection({
   td,
-  range,
   limit,
 }: {
   td: SessionsDict;
-  range: SessionsRange;
   limit: number;
 }) {
-  const res = await loadRecentSessions(range, limit);
+  const res = await loadRecentSessions(limit);
 
   if (res.status === "not_configured") {
     return (
@@ -141,7 +104,7 @@ async function SessionsSection({
       {res.sessions.length >= limit && limit < SESSIONS_MAX_LIMIT ? (
         <div className="mt-4 text-center">
           <Link
-            href={rangeHref(range, Math.min(limit * 2, SESSIONS_MAX_LIMIT))}
+            href={`/admin/analytics/sessions?n=${Math.min(limit * 2, SESSIONS_MAX_LIMIT)}`}
             className="text-xs font-bold text-gold hover:underline"
           >
             {td.showMore}

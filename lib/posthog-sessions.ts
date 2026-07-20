@@ -47,11 +47,11 @@ const EVENT_LIST = TIMELINE_EVENTS.map((e) => `'${e}'`).join(", ");
 const SESSION_ID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export const SESSIONS_RANGES = ["24h", "7d", "30d"] as const;
-export type SessionsRange = (typeof SESSIONS_RANGES)[number];
-const RANGE_DAYS: Record<SessionsRange, number> = { "24h": 1, "7d": 7, "30d": 30 };
+// The feed is recency-ordered and limit-capped, so a user-facing range
+// filter adds nothing — the lookback is a fixed internal bound that keeps
+// the events scan finite.
+const SESSIONS_WINDOW_DAYS = 30;
 
-export const SESSIONS_DEFAULT_RANGE: SessionsRange = "7d";
 export const SESSIONS_DEFAULT_LIMIT = 50;
 export const SESSIONS_MAX_LIMIT = 400;
 // Display cap per expanded session — a pathological tab left open for hours
@@ -117,16 +117,12 @@ export type SessionsResult =
 
 export function parseSessionsParams(
   sp: Record<string, string | string[] | undefined>,
-): { range: SessionsRange; limit: number } {
-  const rawRange = typeof sp.range === "string" ? sp.range : "";
-  const range = (SESSIONS_RANGES as readonly string[]).includes(rawRange)
-    ? (rawRange as SessionsRange)
-    : SESSIONS_DEFAULT_RANGE;
+): { limit: number } {
   const rawN = typeof sp.n === "string" ? Number.parseInt(sp.n, 10) : NaN;
   const limit = Number.isFinite(rawN)
     ? Math.min(Math.max(rawN, 10), SESSIONS_MAX_LIMIT)
     : SESSIONS_DEFAULT_LIMIT;
-  return { range, limit };
+  return { limit };
 }
 
 /** PostHog UI deep link to the session's replay (recording existence is
@@ -295,7 +291,6 @@ const cachedFetchSessions = unstable_cache(
 );
 
 export async function loadRecentSessions(
-  range: SessionsRange,
   limit: number,
 ): Promise<SessionsResult> {
   const cfg = getPosthogQueryConfig();
@@ -304,7 +299,7 @@ export async function loadRecentSessions(
   // the revalidate period (same trick as signupFunnelWindow).
   const now = Date.now();
   const to = Math.ceil(now / ROUND_MS) * ROUND_MS;
-  const from = to - RANGE_DAYS[range] * 24 * 60 * 60 * 1000;
+  const from = to - SESSIONS_WINDOW_DAYS * 24 * 60 * 60 * 1000;
   try {
     return {
       status: "ok",
