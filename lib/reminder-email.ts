@@ -70,10 +70,10 @@ const COPY = {
   },
 } as const;
 
-// Postal identification in the footer — sender-identification requirement
-// (UK PECR / CAN-SPAM); matches the legal pages' sole-trader details.
-const SENDER_LINE =
-  "Matvei Dobrovolskii t/a Matio · 221 Derby Road, Nottingham, United Kingdom";
+// Sender identification in the footer (UK PECR); matches the legal pages'
+// sole-trader details. Street address deliberately omitted (sole trader's
+// home address — kept private).
+const SENDER_LINE = "Matvei Dobrovolskii t/a Matio · United Kingdom";
 const TAGLINE = "Story worlds. One studio.";
 
 function escapeHtml(s: string): string {

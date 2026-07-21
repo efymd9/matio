@@ -216,7 +216,7 @@ function CookiesEn() {
 
       <Section id="contact" title="5. Contact">
         <p>
-          Cookie questions: <strong>hello@matio.tv</strong>. See also our{" "}
+          Cookie questions: <strong>contact@matio.tv</strong>. See also our{" "}
           <Link href="/privacy" className="underline underline-offset-2 hover:text-white">
             Privacy Policy
           </Link>{" "}
@@ -402,7 +402,7 @@ function CookiesEs() {
 
       <Section id="contacto" title="5. Contacto">
         <p>
-          Consultas sobre cookies: <strong>hello@matio.tv</strong>. Consulta
+          Consultas sobre cookies: <strong>contact@matio.tv</strong>. Consulta
           también nuestra{" "}
           <Link href="/privacy" className="underline underline-offset-2 hover:text-white">
             Política de privacidad

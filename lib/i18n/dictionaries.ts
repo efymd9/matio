@@ -202,7 +202,7 @@ export const es = {
       "Hemos eliminado tu correo. No volveremos a enviarte avisos de episodios.",
     invalidHeading: "Enlace no válido",
     invalidBody:
-      "Este enlace de baja no es válido. Escríbenos a hello@matio.tv y nos encargamos.",
+      "Este enlace de baja no es válido. Escríbenos a contact@matio.tv y nos encargamos.",
     backHome: "Volver al inicio",
   },
   paywall: {
@@ -316,7 +316,7 @@ export const es = {
     codeSendFailed:
       "No pudimos enviar el código. Comprueba el correo o abre esta página en tu navegador.",
     codeWrong: "Código incorrecto o caducado. Inténtalo de nuevo.",
-    wrongEmail: "¿No es tu correo? Escríbenos a hello@matio.tv",
+    wrongEmail: "¿No es tu correo? Escríbenos a contact@matio.tv",
   },
   notFound: {
     code: "404",
@@ -373,9 +373,9 @@ export const es = {
     bodyStudioFree:
       "Estrenamos series originales pensadas para verse en cualquier momento. Todo el catálogo puede verse gratis, sin anuncios.",
     bodyWho:
-      "Matio es un proyecto de Matvei Dobrovolskii (empresario individual), con domicilio profesional en 221 Derby Road, Nottingham, Inglaterra y Gales.",
+      "Matio es un proyecto de Matvei Dobrovolskii (empresario individual), con sede en Inglaterra y Gales.",
     contactHeading: "Contacto",
-    contactBody: "Escríbenos a hello@matio.tv.",
+    contactBody: "Escríbenos a contact@matio.tv.",
     browseCta: "Explorar el catálogo",
   },
   footer: {
@@ -606,7 +606,7 @@ export const en: Dict = {
       "We've removed your email. You won't get any more episode notifications.",
     invalidHeading: "Invalid link",
     invalidBody:
-      "This unsubscribe link isn't valid. Email hello@matio.tv and we'll take care of it.",
+      "This unsubscribe link isn't valid. Email contact@matio.tv and we'll take care of it.",
     backHome: "Back to home",
   },
   paywall: {
@@ -716,7 +716,7 @@ export const en: Dict = {
     codeSendFailed:
       "We couldn't send the code. Check the email or open this page in your browser.",
     codeWrong: "Wrong or expired code. Please try again.",
-    wrongEmail: "Wrong email? Contact hello@matio.tv",
+    wrongEmail: "Wrong email? Contact contact@matio.tv",
   },
   notFound: {
     code: "404",
@@ -773,9 +773,9 @@ export const en: Dict = {
     bodyStudioFree:
       "We release original series made to be watched any time. The full catalogue is free to watch, ad-free.",
     bodyWho:
-      "Matio is a project by Matvei Dobrovolskii (sole trader), with a business address at 221 Derby Road, Nottingham, England & Wales.",
+      "Matio is a project by Matvei Dobrovolskii (sole trader), based in England & Wales.",
     contactHeading: "Contact",
-    contactBody: "Reach us at hello@matio.tv.",
+    contactBody: "Reach us at contact@matio.tv.",
     browseCta: "Browse the catalogue",
   },
   footer: {

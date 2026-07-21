@@ -212,12 +212,12 @@ CLI equivalent for step 1: `vercel blob create-store <name>` (note: `create-stor
 |---|---|
 | `RESEND_API_KEY` | Resend dashboard → API Keys → create with **Sending access** only. Secret, runtime-read. Blank → email off: the capture form still stores addresses in `show_reminders`; the admin send panel shows a connect hint. |
 | `RESEND_FROM` (optional) | Sender override; defaults to `Matio <updates@matio.tv>`. The domain must be verified in Resend. |
-| `RESEND_REPLY_TO` (optional) | Reply-To override; defaults to `hello@matio.tv` (the real PrivateEmail mailbox). |
+| `RESEND_REPLY_TO` (optional) | Reply-To override; defaults to `contact@matio.tv` (the public support address — must exist as a PrivateEmail mailbox/alias or replies bounce). |
 
 **Setup** (one-time):
 1. Create the Resend account → **Domains → Add Domain** → `matio.tv`, region **eu-west-1** (Ireland). Region only affects where mail is routed from; Resend account data stays US-hosted regardless — the privacy policy names Resend Inc. (US) with SCCs accordingly.
-2. Add the DNS records Resend shows at **Namecheap** (DNS = registrar-servers.com): a DKIM TXT at `resend._domainkey.matio.tv`, plus MX + SPF TXT on `send.matio.tv` (bounce/Return-Path subdomain). These touch neither the root SPF (`spf.privateemail.com` — the hello@ mailbox) nor Clerk's `clk*` records.
-3. Recommended while in there: add a starter DMARC record at `_dmarc.matio.tv` — `v=DMARC1; p=none; rua=mailto:hello@matio.tv;` (none exists today; monitor first, tighten later).
+2. Add the DNS records Resend shows at **Namecheap** (DNS = registrar-servers.com): a DKIM TXT at `resend._domainkey.matio.tv`, plus MX + SPF TXT on `send.matio.tv` (bounce/Return-Path subdomain). These touch neither the root SPF (`spf.privateemail.com` — the PrivateEmail mailbox) nor Clerk's `clk*` records.
+3. Recommended while in there: add a starter DMARC record at `_dmarc.matio.tv` — `v=DMARC1; p=none; rua=mailto:contact@matio.tv;` (none exists today; monitor first, tighten later — the rua mailbox must actually exist).
 4. Wait for the domain to verify, create the API key, then `vercel env add RESEND_API_KEY production` (+ `.env.local`) and redeploy.
 
 **Sending model**: admin-triggered only — the "Episode reminders" panel on the show edit page claims pending `show_reminders` rows by stamping `notified_at` and batch-sends (≤100/call) with per-recipient locale, unsubscribe footer link, and RFC 8058 one-click `List-Unsubscribe` headers. A failed batch un-claims its rows. See the "Episode reminder emails" rule in CLAUDE.md.

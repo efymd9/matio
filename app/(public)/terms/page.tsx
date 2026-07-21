@@ -90,7 +90,7 @@ function TermsEn() {
         <p>
           These Terms of Service (the &ldquo;Terms&rdquo;) form a binding agreement
           between you and Matvei Dobrovolskii trading as Matio (&ldquo;matio&rdquo;, &ldquo;we&rdquo;,
-          &ldquo;us&rdquo;), with a business address at 221 Derby Road, Nottingham, NG7 1QJ, United Kingdom. By creating an account
+          &ldquo;us&rdquo;), based in the United Kingdom. By creating an account
           or paying for a subscription, you confirm you have read, understood and
           accept these Terms. If you do not accept them, do not use the service.
         </p>
@@ -267,7 +267,7 @@ function TermsEn() {
 
       <Section id="contact" title="15. Contact">
         <p>
-          Questions about these Terms or the service: <strong>hello@matio.tv</strong>.
+          Questions about these Terms or the service: <strong>contact@matio.tv</strong>.
           See also the <Link href="/privacy" className="underline underline-offset-2 hover:text-white">Privacy Policy</Link>{" "}
           and{" "}
           <Link href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</Link>.
@@ -284,7 +284,7 @@ function TermsEs() {
         <p>
           Estos Términos del servicio (los &laquo;Términos&raquo;) constituyen un
           contrato vinculante entre tú y Matvei Dobrovolskii trading as Matio (&laquo;matio&raquo;,
-          &laquo;nosotros&raquo;), con domicilio en 221 Derby Road, Nottingham, NG7 1QJ, United Kingdom. Al crear
+          &laquo;nosotros&raquo;), con sede en el Reino Unido. Al crear
           una cuenta o pagar una suscripción, confirmas que has leído,
           comprendido y aceptado estos Términos. Si no los aceptas, no utilices
           el servicio.
@@ -475,7 +475,7 @@ function TermsEs() {
       <Section id="contacto" title="15. Contacto">
         <p>
           Para cualquier consulta sobre estos Términos o el servicio:{" "}
-          <strong>hello@matio.tv</strong>. Consulta también la{" "}
+          <strong>contact@matio.tv</strong>. Consulta también la{" "}
           <Link href="/privacy" className="underline underline-offset-2 hover:text-white">
             Política de privacidad
           </Link>{" "}

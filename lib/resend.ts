@@ -27,13 +27,13 @@ export function getResend(): Resend {
 }
 
 // Sender identity. updates@ keeps transactional sending separate from the
-// hello@ mailbox (Namecheap PrivateEmail); Reply-To routes human replies
-// back there. Env overrides exist so a domain/address change never needs
-// a code change.
+// support mailbox; Reply-To routes human replies to contact@ (the public
+// support address). Env overrides exist so a domain/address change never
+// needs a code change.
 export function emailFrom(): string {
   return process.env.RESEND_FROM ?? "Matio <updates@matio.tv>";
 }
 
 export function emailReplyTo(): string {
-  return process.env.RESEND_REPLY_TO ?? "hello@matio.tv";
+  return process.env.RESEND_REPLY_TO ?? "contact@matio.tv";
 }

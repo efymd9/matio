@@ -75,16 +75,14 @@ export function organizationJsonLd(): JsonLd {
     // Raster logo (Google's Organization-logo guidance prefers a crawlable
     // PNG ≥112×112). Absolute so it's fetchable from any origin.
     logo: `${SITE_URL}/icon-512.png`,
-    email: "hello@matio.tv",
+    email: "contact@matio.tv",
     contactPoint: {
       "@type": "ContactPoint",
-      email: "hello@matio.tv",
+      email: "contact@matio.tv",
       contactType: "customer support",
     },
     address: {
       "@type": "PostalAddress",
-      streetAddress: "221 Derby Road",
-      addressLocality: "Nottingham",
       addressCountry: "GB",
     },
     // Official profiles (footer + llms.txt list the same URLs — keep all
