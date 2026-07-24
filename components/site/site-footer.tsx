@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { COOKIE_PREFS_EVENT } from "@/lib/cookie-consent";
 import { useLocale, useT } from "@/lib/i18n/client";
 import { socialProfilesForLocale } from "@/lib/social-links";
+import { AlternateLanguageLink } from "./language-switcher";
 import { MatioLogo } from "./matio-logo";
 import { SocialIcon } from "./social-icon";
 
@@ -99,6 +100,11 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
               {t.footer.cookiePreferences}
             </button>
           </li>
+          {/* Crawlable link to this page's translation — see
+              AlternateLanguageLink. Renders null off the localized routes. */}
+          <li>
+            <AlternateLanguageLink className="transition-colors hover:text-cream" />
+          </li>
         </ul>
 
         {/* Tablet + desktop: two labeled columns. */}
@@ -112,6 +118,9 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
             <FooterLink href="/api/billing-portal">
               {t.footer.manage}
             </FooterLink>
+            <li>
+              <AlternateLanguageLink className="transition-colors hover:text-cream" />
+            </li>
           </FooterColumn>
           <FooterColumn heading={t.footer.sectionLegal}>
             <FooterLink href="/terms">{t.footer.terms}</FooterLink>

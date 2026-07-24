@@ -19,17 +19,95 @@ import type { Locale } from "@/lib/i18n/dictionaries";
 // background.
 //
 // SEO: the rows are real <a href> (Menu.LinkItem) pointing at the current
-// page's twin (/about ↔ /es/about), and the portal is keepMounted so those
-// hrefs sit in the server-rendered HTML. This is the ONLY in-page link to the
-// /es tree — without it Googlebot could reach Spanish solely through the
-// sitemap's hreflang annotations. Clicks are still intercepted: navigating to
-// the English URL while the locale cookie says `es` would just get 307'd back
-// by proxy.ts, so setLocale() writes the cookie first, then navigates.
+// page's twin (/about ↔ /es/about). The portal is keepMounted so they're in
+// the rendered DOM without opening the menu, but a portal emits nothing during
+// SSR — the HTML-only crawlable link is AlternateLanguageLink (below, used in
+// the footer). Clicks are intercepted in both: see useLocaleLinkHandler.
 const OPTIONS: Locale[] = ["es", "en"];
+
+// Flip to the other language, writing the cookie first. Shared by the header
+// dropdown and the footer link: navigating straight to an English URL while
+// the locale cookie says `es` would be 307'd back by proxy.ts, so the cookie
+// has to land before the navigation. Modified clicks fall through to the
+// browser's native new-tab handling.
+function useLocaleLinkHandler(next: Locale) {
+  const { setLocale } = useSetLocale();
+  return (event: React.MouseEvent) => {
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    setLocale(next);
+  };
+}
+
+// Plain, always-server-rendered <a> to the current page's translation — the
+// crawlable counterpart to the header dropdown. It has to exist outside the
+// menu because Base UI renders the popup through a React portal, and portals
+// emit NOTHING during SSR: the dropdown's hrefs only appear post-hydration, so
+// on their own they leave the /es tree reachable only via sitemap annotations.
+// Renders null on the non-localized surfaces (/watch, /subscribe), which have
+// no twin URL.
+export function AlternateLanguageLink({ className }: { className?: string }) {
+  const locale = useLocale();
+  const t = useT();
+  const pathname = usePathname();
+  const other: Locale = locale === "es" ? "en" : "es";
+  const onClick = useLocaleLinkHandler(other);
+  const { path: basePath } = stripLocalePrefix(pathname);
+  if (!isLocalizablePath(basePath)) return null;
+  return (
+    <a
+      href={localizedPath(basePath, other)}
+      hrefLang={other}
+      onClick={onClick}
+      className={className}
+    >
+      {t.language[other]}
+    </a>
+  );
+}
+
+function LocaleMenuRow({
+  option,
+  href,
+  active,
+  label,
+}: {
+  option: Locale;
+  href: string;
+  active: boolean;
+  label: string;
+}) {
+  const onClick = useLocaleLinkHandler(option);
+  return (
+    <Menu.LinkItem
+      href={href}
+      hrefLang={option}
+      aria-current={active ? "true" : undefined}
+      closeOnClick
+      onClick={onClick}
+      className="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 pl-7 text-sm font-medium text-cream/85 no-underline outline-none transition-colors data-[highlighted]:bg-cream/8 data-[highlighted]:text-cream"
+    >
+      {active && (
+        <span aria-hidden className="absolute left-2 inline-flex">
+          <Icon name="check" size={14} color="var(--color-gold)" />
+        </span>
+      )}
+      <span>{label}</span>
+    </Menu.LinkItem>
+  );
+}
 
 export function LanguageSwitcher() {
   const locale = useLocale();
-  const { setLocale, isPending } = useSetLocale();
+  const { isPending } = useSetLocale();
   const t = useT();
   const pathname = usePathname();
   // On the non-localized surfaces (/watch, /subscribe) there's no twin URL —
@@ -51,43 +129,23 @@ export function LanguageSwitcher() {
       >
         <span>{locale.toUpperCase()}</span>
       </Menu.Trigger>
-      {/* keepMounted: the hrefs below must exist in the server-rendered HTML
-          for crawlers, not only after the menu is opened. */}
+      {/* keepMounted so the rows' hrefs are in the RENDERED DOM without the
+          menu being opened (Googlebot renders JS). It does NOT put them in the
+          SSR HTML — this is a portal — which is why AlternateLanguageLink
+          exists in the footer. */}
       <Menu.Portal keepMounted>
         <Menu.Positioner sideOffset={6} align="end">
           <Menu.Popup
             className="z-50 min-w-[8.5rem] rounded-2xl border border-rust/30 bg-espresso-2/95 p-1 text-sm text-cream shadow-[0_18px_40px_-18px_rgba(0,0,0,0.6)] backdrop-blur-xl outline-none data-[open]:animate-in data-[open]:fade-in-0 data-[open]:zoom-in-95 data-[closed]:animate-out data-[closed]:fade-out-0 data-[closed]:zoom-out-95"
           >
             {OPTIONS.map((opt) => (
-              <Menu.LinkItem
+              <LocaleMenuRow
                 key={opt}
+                option={opt}
                 href={hrefFor(opt)}
-                hrefLang={opt}
-                aria-current={opt === locale ? "true" : undefined}
-                closeOnClick
-                onClick={(event) => {
-                  // Let the browser handle new-tab/modified clicks natively.
-                  if (
-                    event.button !== 0 ||
-                    event.metaKey ||
-                    event.ctrlKey ||
-                    event.shiftKey ||
-                    event.altKey
-                  ) {
-                    return;
-                  }
-                  event.preventDefault();
-                  setLocale(opt);
-                }}
-                className="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 pl-7 text-sm font-medium text-cream/85 no-underline outline-none transition-colors data-[highlighted]:bg-cream/8 data-[highlighted]:text-cream"
-              >
-                {opt === locale && (
-                  <span aria-hidden className="absolute left-2 inline-flex">
-                    <Icon name="check" size={14} color="var(--color-gold)" />
-                  </span>
-                )}
-                <span>{t.language[opt]}</span>
-              </Menu.LinkItem>
+                active={opt === locale}
+                label={t.language[opt]}
+              />
             ))}
           </Menu.Popup>
         </Menu.Positioner>
