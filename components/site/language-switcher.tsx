@@ -1,8 +1,10 @@
 "use client";
 
 import { Menu } from "@base-ui/react/menu";
+import { usePathname } from "next/navigation";
 import { Icon } from "./icon";
 import { useLocale, useSetLocale, useT } from "@/lib/i18n/client";
+import { isLocalizablePath, localizedPath, stripLocalePrefix } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 import type { Locale } from "@/lib/i18n/dictionaries";
 
@@ -15,12 +17,26 @@ import type { Locale } from "@/lib/i18n/dictionaries";
 // same tick the user clicks. The server action + router.refresh that
 // reconciles cookie state and async server components fires in the
 // background.
+//
+// SEO: the rows are real <a href> (Menu.LinkItem) pointing at the current
+// page's twin (/about ↔ /es/about), and the portal is keepMounted so those
+// hrefs sit in the server-rendered HTML. This is the ONLY in-page link to the
+// /es tree — without it Googlebot could reach Spanish solely through the
+// sitemap's hreflang annotations. Clicks are still intercepted: navigating to
+// the English URL while the locale cookie says `es` would just get 307'd back
+// by proxy.ts, so setLocale() writes the cookie first, then navigates.
 const OPTIONS: Locale[] = ["es", "en"];
 
 export function LanguageSwitcher() {
   const locale = useLocale();
   const { setLocale, isPending } = useSetLocale();
   const t = useT();
+  const pathname = usePathname();
+  // On the non-localized surfaces (/watch, /subscribe) there's no twin URL —
+  // the row self-links and the click handler does a cookie-only flip.
+  const { path: basePath } = stripLocalePrefix(pathname);
+  const hrefFor = (opt: Locale) =>
+    isLocalizablePath(basePath) ? localizedPath(basePath, opt) : pathname;
 
   return (
     <Menu.Root>
@@ -35,34 +51,44 @@ export function LanguageSwitcher() {
       >
         <span>{locale.toUpperCase()}</span>
       </Menu.Trigger>
-      <Menu.Portal>
+      {/* keepMounted: the hrefs below must exist in the server-rendered HTML
+          for crawlers, not only after the menu is opened. */}
+      <Menu.Portal keepMounted>
         <Menu.Positioner sideOffset={6} align="end">
           <Menu.Popup
             className="z-50 min-w-[8.5rem] rounded-2xl border border-rust/30 bg-espresso-2/95 p-1 text-sm text-cream shadow-[0_18px_40px_-18px_rgba(0,0,0,0.6)] backdrop-blur-xl outline-none data-[open]:animate-in data-[open]:fade-in-0 data-[open]:zoom-in-95 data-[closed]:animate-out data-[closed]:fade-out-0 data-[closed]:zoom-out-95"
           >
-            <Menu.RadioGroup
-              value={locale}
-              onValueChange={(next) => setLocale(next as Locale)}
-            >
-              {OPTIONS.map((opt) => (
-                <Menu.RadioItem
-                  key={opt}
-                  value={opt}
-                  closeOnClick
-                  className="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 pl-7 text-sm font-medium text-cream/85 outline-none transition-colors data-[highlighted]:bg-cream/8 data-[highlighted]:text-cream data-[checked]:text-cream"
-                >
-                  <Menu.RadioItemIndicator
-                    className="absolute left-2 inline-flex"
-                    render={
-                      <span aria-hidden>
-                        <Icon name="check" size={14} color="var(--color-gold)" />
-                      </span>
-                    }
-                  />
-                  <span>{t.language[opt]}</span>
-                </Menu.RadioItem>
-              ))}
-            </Menu.RadioGroup>
+            {OPTIONS.map((opt) => (
+              <Menu.LinkItem
+                key={opt}
+                href={hrefFor(opt)}
+                hrefLang={opt}
+                aria-current={opt === locale ? "true" : undefined}
+                closeOnClick
+                onClick={(event) => {
+                  // Let the browser handle new-tab/modified clicks natively.
+                  if (
+                    event.button !== 0 ||
+                    event.metaKey ||
+                    event.ctrlKey ||
+                    event.shiftKey ||
+                    event.altKey
+                  ) {
+                    return;
+                  }
+                  event.preventDefault();
+                  setLocale(opt);
+                }}
+                className="relative flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 pl-7 text-sm font-medium text-cream/85 no-underline outline-none transition-colors data-[highlighted]:bg-cream/8 data-[highlighted]:text-cream"
+              >
+                {opt === locale && (
+                  <span aria-hidden className="absolute left-2 inline-flex">
+                    <Icon name="check" size={14} color="var(--color-gold)" />
+                  </span>
+                )}
+                <span>{t.language[opt]}</span>
+              </Menu.LinkItem>
+            ))}
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
