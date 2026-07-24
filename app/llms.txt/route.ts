@@ -33,7 +33,7 @@ export async function GET() {
     `- Site: ${SITE_URL}`,
     "- Operated by: Matvei Dobrovolskii, trading as Matio (United Kingdom)",
     "- Contact: contact@matio.tv",
-    "- Site languages: English and Spanish, negotiated on one URL per page (no separate locale URLs)",
+    "- Site languages: English (default, at the bare path) and Spanish (under an /es prefix, e.g. /es/shows/<slug>); every page cross-links its translation via hreflang",
     "",
     "## Shows",
     "",

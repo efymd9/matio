@@ -8,14 +8,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { getDict } from "@/lib/i18n/server";
-import { canonicalUrl } from "@/lib/seo";
+import { localeAlternates } from "@/lib/seo";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { t } = await getDict();
+  const { locale, t } = await getDict();
   return {
     title: t.legal.privacyTitle,
     description: t.legal.privacyDescription,
-    alternates: { canonical: canonicalUrl("/privacy") },
+    alternates: localeAlternates("/privacy", locale),
     robots: { index: true, follow: true },
   };
 }

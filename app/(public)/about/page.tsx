@@ -2,18 +2,18 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { getDict } from "@/lib/i18n/server";
-import { canonicalUrl } from "@/lib/seo";
+import { localeAlternates } from "@/lib/seo";
 
 // Bilingual entity/E-E-A-T page. Restates the studio's name + business
 // address + contact, consistent with the legal pages and the Stripe public
 // details, giving Google a stable surface to attribute the Matio brand
 // (alongside the Organization JSON-LD already in the root layout).
 export async function generateMetadata(): Promise<Metadata> {
-  const { t } = await getDict();
+  const { locale, t } = await getDict();
   return {
     title: t.about.metaTitle,
     description: t.about.metaDescription,
-    alternates: { canonical: canonicalUrl("/about") },
+    alternates: localeAlternates("/about", locale),
     robots: { index: true, follow: true },
   };
 }

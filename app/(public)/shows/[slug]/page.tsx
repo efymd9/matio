@@ -10,7 +10,12 @@ import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
 import { getShowBySlug } from "@/lib/show-query";
-import { SITE_URL, canonicalUrl, metaDescription } from "@/lib/seo";
+import {
+  SITE_URL,
+  canonicalUrl,
+  localeAlternates,
+  metaDescription,
+} from "@/lib/seo";
 import {
   breadcrumbJsonLd,
   jsonLdScript,
@@ -35,9 +40,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const show = await getShowBySlug(slug);
-  const { t } = await getDict();
+  const { locale, t } = await getDict();
   if (!show) return { title: t.showDetail.notFound };
-  const url = canonicalUrl(`/shows/${slug}`);
+  const alternates = localeAlternates(`/shows/${slug}`, locale);
+  const url = alternates.canonical;
   // Null-description shows otherwise ship with NO meta description; synthesize
   // a unique, genre-varied line (anti-thin-content) instead of a constant.
   // metaDescription() collapses the DB synopsis's raw \r\n breaks and
@@ -51,7 +57,7 @@ export async function generateMetadata({
   return {
     title: t.showDetail.watchOnlineTitle(show.title),
     description,
-    alternates: { canonical: url },
+    alternates,
     openGraph: {
       type: "video.tv_show",
       url,

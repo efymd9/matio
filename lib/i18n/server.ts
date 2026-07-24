@@ -10,7 +10,7 @@ import {
   type Locale,
 } from "./dictionaries";
 import { negotiateLocale } from "./negotiate";
-import { LOCALE_COOKIE_NAME } from "./shared";
+import { LOCALE_COOKIE_NAME, URL_LOCALE_HEADER } from "./shared";
 
 // Re-exported under its historical name so server-side callers don't break.
 export const LOCALE_COOKIE = LOCALE_COOKIE_NAME;
@@ -30,12 +30,22 @@ export const LOCALE_COOKIE = LOCALE_COOKIE_NAME;
 // before — but it still must never be called inside an unstable_cache /
 // "use cache" scope (it would throw; no current caller does).
 export const getLocale = cache(async (): Promise<Locale> => {
-  const value = (await cookies()).get(LOCALE_COOKIE)?.value;
-  if (value && (SUPPORTED_LOCALES as readonly string[]).includes(value)) {
-    return value as Locale;
-  }
   try {
     const h = await headers();
+    // 1. URL-derived locale (the /es rewrite in proxy.ts stamps this). It's
+    //    authoritative so a Spanish URL always renders Spanish regardless of
+    //    the sticky cookie — otherwise canonical/hreflang would lie.
+    const urlLocale = h.get(URL_LOCALE_HEADER);
+    if (urlLocale && (SUPPORTED_LOCALES as readonly string[]).includes(urlLocale)) {
+      return urlLocale as Locale;
+    }
+    // 2. Explicit switcher choice (sticky preference for the non-localized
+    //    app surfaces: /watch, /subscribe, …).
+    const value = (await cookies()).get(LOCALE_COOKIE)?.value;
+    if (value && (SUPPORTED_LOCALES as readonly string[]).includes(value)) {
+      return value as Locale;
+    }
+    // 3. Accept-Language negotiation + geo tiebreak (persists nothing).
     return negotiateLocale(
       h.get("accept-language"),
       h.get("x-vercel-ip-country"),

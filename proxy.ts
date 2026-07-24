@@ -23,7 +23,19 @@ import {
   serializeConsent,
 } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
-import { LEGACY_ALIAS_HOST, SITE_URL } from "@/lib/seo";
+import { negotiateLocale } from "@/lib/i18n/negotiate";
+import {
+  LOCALE_COOKIE_MAX_AGE,
+  LOCALE_COOKIE_NAME,
+  URL_LOCALE_HEADER,
+} from "@/lib/i18n/shared";
+import {
+  isLocalizablePath,
+  LEGACY_ALIAS_HOST,
+  localizedPath,
+  SITE_URL,
+  stripLocalePrefix,
+} from "@/lib/seo";
 import { VISITOR_COOKIE, VISITOR_COOKIE_MAX_AGE } from "@/lib/visitor-cookie";
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
@@ -75,56 +87,92 @@ async function getUserRoleCached(userId: string): Promise<string | null> {
 //     (write-if-absent, 90-day life). _fbp is set by the pixel JS, never here.
 // Attribution + _fbc are written only when marketing consent is effective
 // (an explicit accept OR the geo default).
-function applyMarketingCookies(req: NextRequest): NextResponse | null {
+type MarketingDecision = {
+  autoGrant: boolean;
+  marketingOk: boolean;
+  incoming: ReturnType<typeof readAttributionFromSearchParams>;
+  hasAttribution: boolean;
+  fbclid: string | null;
+  needFbc: boolean;
+  // Serialized default-on consent record, present only when autoGrant.
+  consentRecord: string | null;
+};
+
+// Evaluate what marketing state this request warrants — split out from the
+// cookie writing so the normal pass-through path AND the /es rewrite path can
+// share one decision (an es ad landing on /es/shows/* must capture UTM/_fbc
+// and auto-grant consent exactly like a bare landing does).
+function evaluateMarketing(req: NextRequest): MarketingDecision {
   const existing = parseConsent(req.cookies.get(CONSENT_COOKIE)?.value);
   const country = req.headers.get("x-vercel-ip-country");
   // No prior choice + consent not legally required here → default marketing ON.
   const autoGrant = !existing && !marketingConsentRequired(country);
   const marketingOk = existing?.marketing === true || autoGrant;
-
   const incoming = readAttributionFromSearchParams(req.nextUrl.searchParams);
   const hasAttribution = hasAnyField(incoming);
   const fbclid = req.nextUrl.searchParams.get("fbclid");
   const needFbc = !!fbclid && !req.cookies.get(FBC_COOKIE);
+  const consentRecord = autoGrant
+    ? serializeConsent({
+        necessary: true,
+        marketing: true,
+        ts: Date.now(),
+        v: CONSENT_VERSION,
+      })
+    : null;
+  return {
+    autoGrant,
+    marketingOk,
+    incoming,
+    hasAttribution,
+    fbclid,
+    needFbc,
+    consentRecord,
+  };
+}
 
-  // Nothing to persist: not auto-granting, and either no consent or no params.
-  if (!autoGrant && (!marketingOk || (!hasAttribution && !needFbc))) {
-    return null;
-  }
-
-  const prod = process.env.NODE_ENV === "production";
-
-  let res: NextResponse;
-  if (autoGrant) {
-    // Persist the default-on consent AND forward it on the request so the
-    // layout's cookies() sees it on THIS request — banner hidden + pixel
-    // rendered on the very first page, not the next one.
-    const record = serializeConsent({
-      necessary: true,
-      marketing: true,
-      ts: Date.now(),
-      v: CONSENT_VERSION,
-    });
-    const headers = new Headers(req.headers);
+// Build the base response (pass-through or rewrite). Injects REQUEST headers
+// when the same render must see either the auto-granted consent cookie (banner
+// hidden + pixel on the very first page) or the URL-derived locale.
+function buildBaseResponse(
+  req: NextRequest,
+  d: MarketingDecision,
+  opts: { rewriteTo?: URL; localeHeader?: string } = {},
+): NextResponse {
+  const needHeaders = d.autoGrant || !!opts.localeHeader;
+  if (!needHeaders && !opts.rewriteTo) return NextResponse.next();
+  const headers = new Headers(req.headers);
+  if (opts.localeHeader) headers.set(URL_LOCALE_HEADER, opts.localeHeader);
+  if (d.autoGrant && d.consentRecord) {
     const cookieHeader = headers.get("cookie");
     headers.set(
       "cookie",
       (cookieHeader ? `${cookieHeader}; ` : "") +
-        `${CONSENT_COOKIE}=${encodeURIComponent(record)}`,
+        `${CONSENT_COOKIE}=${encodeURIComponent(d.consentRecord)}`,
     );
-    res = NextResponse.next({ request: { headers } });
-    res.cookies.set(CONSENT_COOKIE, record, {
+  }
+  return opts.rewriteTo
+    ? NextResponse.rewrite(opts.rewriteTo, { request: { headers } })
+    : NextResponse.next({ request: { headers } });
+}
+
+// Write the consent / attribution / _fbc cookies onto a response.
+function writeMarketingCookies(
+  res: NextResponse,
+  req: NextRequest,
+  d: MarketingDecision,
+): void {
+  const prod = process.env.NODE_ENV === "production";
+  if (d.autoGrant && d.consentRecord) {
+    res.cookies.set(CONSENT_COOKIE, d.consentRecord, {
       maxAge: CONSENT_MAX_AGE_SECONDS,
       sameSite: "lax",
       path: "/",
       secure: prod,
     });
-  } else {
-    res = NextResponse.next();
   }
-
-  if (marketingOk && hasAttribution) {
-    const payload = serializeAttribution(incoming);
+  if (d.marketingOk && d.hasAttribution) {
+    const payload = serializeAttribution(d.incoming);
     if (!req.cookies.get(ATTRIBUTION_FIRST_COOKIE)) {
       res.cookies.set(ATTRIBUTION_FIRST_COOKIE, payload, {
         maxAge: ATTRIBUTION_FIRST_MAX_AGE,
@@ -142,9 +190,8 @@ function applyMarketingCookies(req: NextRequest): NextResponse | null {
       secure: prod,
     });
   }
-
-  if (marketingOk && needFbc && fbclid) {
-    res.cookies.set(FBC_COOKIE, buildFbc(fbclid, Date.now()), {
+  if (d.marketingOk && d.needFbc && d.fbclid) {
+    res.cookies.set(FBC_COOKIE, buildFbc(d.fbclid, Date.now()), {
       maxAge: ATTRIBUTION_FIRST_MAX_AGE,
       sameSite: "lax",
       // Not httpOnly: the Meta Pixel reads _fbc client-side to attach to
@@ -153,7 +200,37 @@ function applyMarketingCookies(req: NextRequest): NextResponse | null {
       secure: prod,
     });
   }
+}
+
+function applyMarketingCookies(req: NextRequest): NextResponse | null {
+  const d = evaluateMarketing(req);
+  // Nothing to persist: not auto-granting, and either no consent or no params.
+  if (!d.autoGrant && (!d.marketingOk || (!d.hasAttribution && !d.needFbc))) {
+    return null;
+  }
+  const res = buildBaseResponse(req, d);
+  writeMarketingCookies(res, req, d);
   return res;
+}
+
+// Rewrite a Spanish subpath (/es/<base>) to its base route, stamping the locale
+// on the request so the components render Spanish. Runs the SAME marketing +
+// visitor cookie machinery as a bare landing, and sets the sticky locale cookie
+// so the non-localized app surfaces (/watch, /subscribe) also render Spanish.
+function applyLocalizedRewrite(req: NextRequest, basePath: string): NextResponse {
+  const url = req.nextUrl.clone();
+  url.pathname = basePath;
+  const d = evaluateMarketing(req);
+  const res = buildBaseResponse(req, d, { rewriteTo: url, localeHeader: "es" });
+  writeMarketingCookies(res, req, d);
+  res.cookies.set(LOCALE_COOKIE_NAME, "es", {
+    maxAge: LOCALE_COOKIE_MAX_AGE,
+    sameSite: "lax",
+    path: "/",
+    // httpOnly:false — mirrors the switcher cookie so client code reads it.
+    secure: process.env.NODE_ENV === "production",
+  });
+  return applyVisitorCookie(req, res) ?? res;
 }
 
 // Mints the first-party audience-measurement cookie (matio_aid) when the
@@ -197,6 +274,17 @@ export default clerkMiddleware(async (auth, req) => {
     );
   }
 
+  // Spanish subpath (/es/*): rewrite to the base route with the locale stamped
+  // on the request. Only the indexable public set is localized — anything else
+  // under /es (e.g. /es/admin) doesn't match isLocalizablePath, so it falls
+  // through and 404s rather than bypassing the gates below.
+  {
+    const { locale, path } = stripLocalePrefix(req.nextUrl.pathname);
+    if (locale === "es" && isLocalizablePath(path)) {
+      return applyLocalizedRewrite(req, path);
+    }
+  }
+
   if (isAdminRoute(req)) {
     const { userId, redirectToSignIn } = await auth();
     if (!userId) return redirectToSignIn({ returnBackUrl: req.url });
@@ -227,6 +315,33 @@ export default clerkMiddleware(async (auth, req) => {
     // Attribution still captured for signed-in /subscribe visits — e.g.
     // a remarketing campaign that links a returning user straight here.
     return applyVisitorCookie(req, applyMarketingCookies(req)) ?? undefined;
+  }
+
+  // Spanish-preferring humans on a bare (English) localizable URL → 307 to the
+  // /es twin so the URL matches the content and reinforces hreflang. Bots are
+  // NOT redirected, so the English page stays the indexed default at the bare
+  // path (Googlebot sends no Accept-Language → negotiateLocale → en anyway;
+  // this is belt-and-braces for AI/es-header crawlers).
+  if (
+    req.method === "GET" &&
+    isLocalizablePath(req.nextUrl.pathname) &&
+    !userAgent({ headers: req.headers }).isBot
+  ) {
+    const cookieLocale = req.cookies.get(LOCALE_COOKIE_NAME)?.value;
+    const wantsEs =
+      cookieLocale === "es" ||
+      (!cookieLocale &&
+        negotiateLocale(
+          req.headers.get("accept-language"),
+          req.headers.get("x-vercel-ip-country"),
+        ) === "es");
+    if (wantsEs) {
+      const url = req.nextUrl.clone();
+      url.pathname = localizedPath(req.nextUrl.pathname, "es");
+      // 307 preserves method + query, so ?utm_*/?fbclid ride along to the /es
+      // landing, where applyLocalizedRewrite captures them.
+      return NextResponse.redirect(url, 307);
+    }
   }
 
   // Catch-all: every other passthrough route captures attribution + _fbc. Ad

@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   DEFAULT_LOCALE,
   SUPPORTED_LOCALES,
@@ -16,7 +16,12 @@ import {
   type Locale,
 } from "./dictionaries";
 import { setLocale as setLocaleAction } from "./actions";
-import { LOCALE_COOKIE_NAME } from "./shared";
+import { LOCALE_COOKIE_MAX_AGE, LOCALE_COOKIE_NAME } from "./shared";
+import {
+  isLocalizablePath,
+  localizedPath,
+  stripLocalePrefix,
+} from "@/lib/seo";
 
 // We thread the locale string + a setter through React context. Each
 // component resolves the dictionary itself by calling dictFor(locale),
@@ -43,6 +48,7 @@ export function LocaleProvider({
   children: ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   // State, not just context value, so the language switcher can flip
   // the locale optimistically. Every consumer of useLocale / useT
   // re-renders instantly with the new dictionary; the server cookie +
@@ -73,15 +79,22 @@ export function LocaleProvider({
       // server action's Set-Cookie response somehow loses, the next
       // server render reads the new value. The cookie is httpOnly:false
       // by design (see lib/i18n/actions.ts).
-      document.cookie = `${LOCALE_COOKIE_NAME}=${next}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
-      // Reconcile with the server: action writes the canonical cookie
-      // + revalidates the layout, then router.refresh pulls fresh
-      // server-rendered chunks (async pages, generateMetadata, etc.).
+      document.cookie = `${LOCALE_COOKIE_NAME}=${next}; path=/; max-age=${LOCALE_COOKIE_MAX_AGE}; samesite=lax`;
+      // On an indexable public page the locale lives in the URL (bare = en,
+      // /es = es), so switching must NAVIGATE — a bare refresh would leave an
+      // /es URL rendering Spanish regardless of the new cookie (the URL wins
+      // in getLocale). Elsewhere (/watch, /subscribe) the cookie alone drives
+      // it, so refresh in place.
+      const { path: base } = stripLocalePrefix(pathname);
+      const target = isLocalizablePath(base) ? localizedPath(base, next) : null;
       setLocaleAction(next)
-        .then(() => router.refresh())
+        .then(() => {
+          if (target && target !== pathname) router.push(target);
+          else router.refresh();
+        })
         .finally(() => setIsPending(false));
     },
-    [locale, router],
+    [locale, pathname, router],
   );
 
   return (

@@ -7,7 +7,12 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { actors, showActors, shows } from "@/db/schema";
 import { getDict } from "@/lib/i18n/server";
-import { SITE_URL, canonicalUrl, metaDescription } from "@/lib/seo";
+import {
+  SITE_URL,
+  canonicalUrl,
+  localeAlternates,
+  metaDescription,
+} from "@/lib/seo";
 import {
   breadcrumbJsonLd,
   jsonLdScript,
@@ -39,16 +44,17 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const actor = await getActorBySlug(slug);
-  const { t } = await getDict();
+  const { locale, t } = await getDict();
   if (!actor) return { title: t.actorPage.notFound };
-  const url = canonicalUrl(`/actors/${slug}`);
+  const alternates = localeAlternates(`/actors/${slug}`, locale);
+  const url = alternates.canonical;
   const description = metaDescription(
     actor.bio ?? t.actorPage.metaDescription(actor.name),
   );
   return {
     title: t.actorPage.metaTitle(actor.name),
     description,
-    alternates: { canonical: url },
+    alternates,
     openGraph: {
       type: "profile",
       url,

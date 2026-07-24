@@ -16,7 +16,7 @@ import { CONSENT_COOKIE, parseConsent } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { LocaleProvider } from "@/lib/i18n/client";
 import { getDict } from "@/lib/i18n/server";
-import { SITE_URL } from "@/lib/seo";
+import { localeAlternates, SITE_URL } from "@/lib/seo";
 import {
   jsonLdScript,
   organizationJsonLd,
@@ -82,16 +82,16 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     description,
     applicationName: "matio",
-    // Self-referencing canonical pinned to the apex (not metadataBase, which
-    // is preview-host-overridable) so the four resolving hostnames + ?utm_*
-    // variants consolidate onto matio.tv. No alternates.languages: ES/EN share
-    // one URL, so hreflang would be self-referential and is structurally
-    // invalid here.
-    alternates: { canonical: SITE_URL },
+    // Canonical + hreflang for the home page. English lives at the apex bare
+    // path (canonical + x-default); Spanish at /es. Absolute apex URLs (not
+    // metadataBase, which is preview-host-overridable) so the resolving
+    // hostnames + ?utm_* variants consolidate onto matio.tv. Each localized
+    // page sets its own via localeAlternates(); this is the home entry.
+    alternates: localeAlternates("/", locale),
     openGraph: {
       type: "website",
       siteName: "matio",
-      url: SITE_URL,
+      url: locale === "es" ? `${SITE_URL}/es` : SITE_URL,
       title: t.metadata.siteTitle,
       description,
       // Social-platform locale hints only — Google ignores og:locale for

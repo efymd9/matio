@@ -15,6 +15,12 @@ import {
   parseAcceptLanguage,
   pickFromLanguageTags,
 } from "../lib/i18n/negotiate";
+import {
+  isLocalizablePath,
+  localeAlternates,
+  localizedPath,
+  stripLocalePrefix,
+} from "../lib/seo";
 
 let passed = 0;
 function eq(actual: unknown, expected: unknown, label: string) {
@@ -106,5 +112,56 @@ eq(
   "en",
   "non-string entries skipped, never throw (last-resort error boundary)",
 );
+
+// --- bilingual URL scheme (lib/seo.ts) -----------------------------------
+// stripLocalePrefix: split an incoming pathname into { locale, base path }.
+eq(stripLocalePrefix("/").locale, "en", "bare / -> en");
+eq(stripLocalePrefix("/").path, "/", "bare / base path");
+eq(stripLocalePrefix("/shows/x").locale, "en", "bare show -> en");
+eq(stripLocalePrefix("/es").locale, "es", "/es -> es");
+eq(stripLocalePrefix("/es").path, "/", "/es base path is home");
+eq(stripLocalePrefix("/es/shows/x").locale, "es", "/es/shows -> es");
+eq(stripLocalePrefix("/es/shows/x").path, "/shows/x", "/es/shows base path");
+eq(stripLocalePrefix("/espanol").locale, "en", "/espanol is NOT an es prefix");
+eq(stripLocalePrefix("/espanol").path, "/espanol", "/espanol untouched");
+
+// localizedPath: prefix a base path with the locale segment (en = identity).
+eq(localizedPath("/", "en"), "/", "en home identity");
+eq(localizedPath("/", "es"), "/es", "es home -> /es");
+eq(localizedPath("/shows/x", "en"), "/shows/x", "en show identity");
+eq(localizedPath("/shows/x", "es"), "/es/shows/x", "es show prefixed");
+
+// isLocalizablePath: only the indexable public set gets an /es twin. A crafted
+// /es/admin must NOT match (its stripped base is /admin) so it never rewrites
+// onto the gated route.
+eq(isLocalizablePath("/"), true, "home localizable");
+eq(isLocalizablePath("/about"), true, "about localizable");
+eq(isLocalizablePath("/shows/x"), true, "show localizable");
+eq(isLocalizablePath("/actors/y"), true, "actor localizable");
+eq(isLocalizablePath("/terms"), true, "terms localizable");
+eq(isLocalizablePath("/admin"), false, "admin NOT localizable");
+eq(isLocalizablePath("/watch/x"), false, "watch NOT localizable");
+eq(isLocalizablePath("/api/t"), false, "api NOT localizable");
+eq(isLocalizablePath("/subscribe"), false, "subscribe NOT localizable");
+eq(
+  isLocalizablePath(stripLocalePrefix("/es/admin").path),
+  false,
+  "/es/admin strips to /admin, not localizable (no gate bypass)",
+);
+
+// localeAlternates: reciprocal hreflang cluster; the page self-canonicalises.
+{
+  const en = localeAlternates("/shows/x", "en");
+  eq(en.canonical, "https://matio.tv/shows/x", "en show self-canonical");
+  eq(en.languages.en, "https://matio.tv/shows/x", "hreflang en");
+  eq(en.languages.es, "https://matio.tv/es/shows/x", "hreflang es");
+  eq(en.languages["x-default"], "https://matio.tv/shows/x", "x-default = en");
+  const es = localeAlternates("/shows/x", "es");
+  eq(es.canonical, "https://matio.tv/es/shows/x", "es show self-canonical");
+  eq(es.languages["x-default"], "https://matio.tv/shows/x", "es x-default = en");
+  const home = localeAlternates("/", "es");
+  eq(home.canonical, "https://matio.tv/es", "es home self-canonical");
+  eq(home.languages.en, "https://matio.tv", "home hreflang en = apex");
+}
 
 console.log(`locale-negotiation: ${passed} assertions passed`);

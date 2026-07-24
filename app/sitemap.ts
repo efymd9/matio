@@ -3,7 +3,19 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { actors, showActors, shows } from "@/db/schema";
 import { getPublishedShows } from "@/lib/catalog";
-import { SITE_URL } from "@/lib/seo";
+import { canonicalUrl, localizedPath, SITE_URL } from "@/lib/seo";
+
+// Reciprocal en/es/x-default hreflang cluster for one indexable route, listed
+// on its English entry. English is canonical + x-default; Spanish lives at /es.
+function hreflang(basePath: string): { languages: Record<string, string> } {
+  return {
+    languages: {
+      en: canonicalUrl(basePath),
+      es: canonicalUrl(localizedPath(basePath, "es")),
+      "x-default": canonicalUrl(basePath),
+    },
+  };
+}
 
 // XML sitemap for indexers. Includes only published, not-soft-deleted shows —
 // same filter the catalog applies. /watch, /subscribe, /admin and other gated
@@ -46,23 +58,27 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: catalogLastMod,
       changeFrequency: "daily",
       priority: 1,
+      alternates: hreflang("/"),
     },
     {
       url: `${SITE_URL}/about`,
       changeFrequency: "yearly",
       priority: 0.3,
+      alternates: hreflang("/about"),
     },
     ...published.map((s) => ({
       url: `${SITE_URL}/shows/${s.slug}`,
       lastModified: s.updatedAt ?? catalogLastMod,
       changeFrequency: "weekly" as const,
       priority: 0.8,
+      alternates: hreflang(`/shows/${s.slug}`),
     })),
     ...publishedActors.map((a) => ({
       url: `${SITE_URL}/actors/${a.slug}`,
       lastModified: a.updatedAt,
       changeFrequency: "monthly" as const,
       priority: 0.4,
+      alternates: hreflang(`/actors/${a.slug}`),
     })),
     // Legal pages: lastModified intentionally OMITTED. They're DRAFT pending
     // counsel review, so any hard-coded date would soon be wrong/stale — and
@@ -72,16 +88,19 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       url: `${SITE_URL}/terms`,
       changeFrequency: "monthly" as const,
       priority: 0.2,
+      alternates: hreflang("/terms"),
     },
     {
       url: `${SITE_URL}/privacy`,
       changeFrequency: "monthly" as const,
       priority: 0.2,
+      alternates: hreflang("/privacy"),
     },
     {
       url: `${SITE_URL}/cookies`,
       changeFrequency: "monthly" as const,
       priority: 0.2,
+      alternates: hreflang("/cookies"),
     },
   ];
 }
