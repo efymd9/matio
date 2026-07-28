@@ -163,17 +163,20 @@ export function parseSpecFilters(sp: RawParams, now: Date): SpecFilters {
 
 // First-visit traffic source, bucketed to the matrix rows. utm_source is
 // stored already normalized by normalizeUtmSource (facebook/meta → fb,
-// instagram → ig) — the extra aliases are defensive for hand-crafted URLs
-// that bypassed the beacon's normalization. Referrer fallback per the
-// spec's dictionary; our own domain (locale-switch reloads) reads direct.
+// instagram → ig, yt → youtube) — the extra aliases are defensive for
+// hand-crafted URLs that bypassed the beacon's normalization. Referrer
+// fallback per the spec's dictionary; our own domain (locale-switch reloads)
+// reads direct.
 const sourceBucketSql = sql<string>`CASE
   WHEN ${visitors.utmSource} = 'tiktok' THEN 'tiktok'
   WHEN ${visitors.utmSource} IN ('ig', 'instagram') THEN 'ig'
   WHEN ${visitors.utmSource} IN ('fb', 'facebook', 'meta') THEN 'fb'
+  WHEN ${visitors.utmSource} IN ('youtube', 'yt', 'youtube_shorts', 'shorts') THEN 'youtube'
   WHEN ${visitors.utmSource} IS NOT NULL THEN 'other'
   WHEN ${visitors.referrer} ILIKE '%tiktok.%' THEN 'tiktok'
   WHEN ${visitors.referrer} ILIKE '%instagram.%' THEN 'ig'
   WHEN ${visitors.referrer} ILIKE '%facebook.%' OR ${visitors.referrer} ILIKE '%fb.com%' OR ${visitors.referrer} ILIKE '%fb.watch%' THEN 'fb'
+  WHEN ${visitors.referrer} ILIKE '%youtube.%' OR ${visitors.referrer} ILIKE '%youtu.be%' OR ${visitors.referrer} ILIKE '%youtube-nocookie.%' THEN 'youtube'
   WHEN ${visitors.referrer} ILIKE '%matio.tv%' THEN 'direct'
   WHEN ${visitors.referrer} IS NULL OR ${visitors.referrer} = '' THEN 'direct'
   ELSE 'other'

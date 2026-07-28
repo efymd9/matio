@@ -16,6 +16,10 @@ import {
   type ContentRow,
   type SpecFilters,
 } from "@/lib/admin-analytics-v2";
+import {
+  SOURCE_BUCKETS,
+  SOURCE_BUCKET_LABELS,
+} from "@/lib/analytics-spec-shared";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { getAdminDict } from "@/lib/i18n/admin-server";
 import { FunnelChart, KpiTile } from "@/components/admin/charts";
@@ -341,12 +345,9 @@ async function MatrixSection({ f }: { f: SpecFilters }) {
   const ts = t.analyticsSpec;
   const m = await loadSourceGeoMatrix(f);
   const cellByKey = new Map(m.cells.map((c) => [`${c.source}|${c.country}`, c]));
-  const sources = ["tiktok", "ig", "fb", "direct", "other"] as const;
+  const sources = SOURCE_BUCKETS;
   const SOURCE_LABELS: Record<string, string> = {
-    tiktok: "TikTok",
-    ig: "Instagram",
-    fb: "Facebook",
-    direct: "Direct",
+    ...SOURCE_BUCKET_LABELS,
     other: ts.sourceOther,
   };
   return (

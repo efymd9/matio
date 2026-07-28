@@ -4,7 +4,10 @@ import { useCallback, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAdminT } from "@/lib/i18n/admin-client";
 import type { SpecFilters } from "@/lib/admin-analytics-v2";
-import { SOURCE_BUCKETS } from "@/lib/analytics-spec-shared";
+import {
+  SOURCE_BUCKETS,
+  SOURCE_BUCKET_LABELS,
+} from "@/lib/analytics-spec-shared";
 
 // Filter bar for the spec'd free-mode analytics dashboard. Same contract as
 // the legacy AnalyticsFilters: all state lives in the URL search params
@@ -12,14 +15,6 @@ import { SOURCE_BUCKETS } from "@/lib/analytics-spec-shared";
 // the server components re-query. Native controls only.
 
 const PRESETS = ["24h", "7d", "30d", "90d"] as const;
-
-const SOURCE_LABELS: Record<string, string> = {
-  tiktok: "TikTok",
-  ig: "Instagram",
-  fb: "Facebook",
-  direct: "Direct",
-  other: "Other",
-};
 
 export function SpecAnalyticsFilters({
   filters,
@@ -126,7 +121,7 @@ export function SpecAnalyticsFilters({
         <option value="all">{ts.filterAllSources}</option>
         {SOURCE_BUCKETS.map((s) => (
           <option key={s} value={s}>
-            {SOURCE_LABELS[s] ?? s}
+            {s === "other" ? ts.sourceOther : SOURCE_BUCKET_LABELS[s]}
           </option>
         ))}
       </select>

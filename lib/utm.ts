@@ -27,10 +27,14 @@ export function normalizeUtm(
 // legitimately be named "facebook") must keep their raw normalized value.
 // Exported so lib/posthog-query.ts can GENERATE its HogQL aliasing from this
 // exact table (transform(...)) — one source of truth, no second copy to drift.
+// "youtube" (not "yt") is the canonical spelling here because it's the value
+// the /admin/links source preset has always emitted — flipping the canonical
+// form would orphan every link already stored with it.
 export const UTM_SOURCE_ALIASES: Record<string, string> = {
   facebook: "fb",
   meta: "fb",
   instagram: "ig",
+  yt: "youtube",
 };
 
 export function normalizeUtmSource(
