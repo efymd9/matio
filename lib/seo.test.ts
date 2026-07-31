@@ -37,7 +37,7 @@ describe("stripLocalePrefix", () => {
 describe("localizedPath", () => {
   it("is the identity for English and prefixes Spanish", () => {
     expect(localizedPath("/", "en")).toBe("/");
-    expect(localizedPath("/", "es")).toBe("/ES-СЛОМАНО");
+    expect(localizedPath("/", "es")).toBe("/es");
     expect(localizedPath("/shows/x", "en")).toBe("/shows/x");
     expect(localizedPath("/shows/x", "es")).toBe("/es/shows/x");
   });
