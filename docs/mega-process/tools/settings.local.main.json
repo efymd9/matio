@@ -1,0 +1,25 @@
+{
+  "_комментарий": "Шаблон .claude/settings.local.json ОСНОВНОГО чекаута (устанавливается на этапе 08). Файл gitignored и в worktree не копируется — поэтому гарды вотчеров очереди PR и issues действуют только на основную сессию, а не на рабочих агентов. Дополнительная защита от срабатывания в worktree зашита в сам watcher_guard.sh (проверка «.git — каталог»). Перед установкой удалите ключи, начинающиеся с _.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$PWD}/tools/claude/watcher_guard.sh\" session-start"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$PWD}/tools/claude/watcher_guard.sh\" stop"
+          }
+        ]
+      }
+    ]
+  }
+}
