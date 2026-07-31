@@ -71,23 +71,91 @@ cd mobile && npm run lint
 cd mobile && npx expo start
 ```
 
+### The closed PR loop
+
+`"Делай #N"` is a self-sufficient command. Nobody relays messages between the
+owner and an agent, and nobody chases an agent for status.
+
+1. `gh issue view N` — work only on `spec:ready`. No spec → stop, comment in the
+   issue, ask for one. Do not invent the spec yourself.
+2. `tools/claude/board_status.sh N progress` — **immediately**, before writing
+   code. A task in flight that is not visible on the board does not exist.
+3. Branch from `origin/main`: `git fetch && git checkout -b feat/<slug> origin/main`.
+4. Build the whole vertical the spec asks for (server + UI, or app + API) in ONE
+   PR. A half-vertical is not reviewable.
+5. Open a PR with `Closes #N`.
+
+**The PR body is the agent's only channel to the reviewer.** The reviewer does
+not see the agent's session, and a report in the owner's chat is not a
+substitute. It must contain: what was done and why · how it was verified
+(commands, runs, devices) · the acceptance criteria answered **point by point** ·
+what was deliberately deferred, with the matching rows in `docs/registry.md`.
+
+**The reverse channel is the PR thread, not the issue.** An agent reads its
+issue once, when it picks the task up; anything written there afterwards is
+never seen. This is a mistake that has cost real downtime — an owner's decision
+sat unread in an issue while the work stood still.
+
+**Babysitting your own PR is mandatory.** Arm the watcher with the **Monitor**
+tool: `command='bash tools/claude/pr_babysit.sh'`, `persistent: true` — never
+via `Bash run_in_background` and never with `&`, because a process outside the
+harness cannot wake the session. Then react to what it reports: red CI → fix ·
+review comment → fix, push immediately, and answer in the thread · conflict or
+`behind` → `git fetch && git merge origin/main` + push · `MERGED` → the cleanup
+ritual. A deliberate pause (waiting on the owner) is declared by creating
+`.claude/babysit-paused`; the Stop hook blocks ending a turn on an open PR with
+a dead watcher.
+
+**Only the main session merges.** An agent never merges its own PR, and
+auto-merge is armed by the main session only, only after review.
+
+### Parallel instances (git worktrees)
+
+- One branch = one PR. A new branch always starts from a freshly fetched
+  `origin/main`.
+- After a merge, never commit to that same branch again — the squash "burned"
+  it. New work = new branch from `origin/main`.
+- A conflict with `main` is resolved by whoever arrives second, in their own
+  copy. Generated files are never merged by hand — they are regenerated.
+- **Hot shared points are edited by one instance at a time** — in this repo:
+  `lib/i18n/dictionaries.ts` (both locales in one file), `app/globals.css`
+  (design tokens), `db/schema/*` plus `drizzle/` (two agents each running
+  `pnpm db:generate` produce colliding migration numbers — coordinate, or the
+  second regenerates), and CLAUDE.md itself.
+- Never touch another instance's worktree.
+- **A bare worktree has no gitignored files**: no `node_modules`, no
+  `.env.local`, no `mobile/node_modules`. Copy them from the main checkout
+  (`/Users/matveidobrovolskii/dev/matio`) — do not invent env values, and do not
+  commit them.
+- Do not run two heavy builds (Next + Expo) in two worktrees at once — they
+  share one machine.
+- Writes to the shared memory are small and additive.
+
 ### Task tracker
 
 - Tasks live **only** in GitHub Issues; their status lives **only** on the
   Projects board (https://github.com/users/efymd9/projects/1). Not in chat, not
   in a notebook, not in someone's memory.
 - **`gh issue create` does NOT put the issue on the board.** Creating an issue
-  is always a pair of commands — create, then place it on the board. Stage 02
-  of the playbook installs `tools/claude/board_status.sh` for the second half;
-  until then the card is added by hand.
+  is always a pair of commands:
+
+  ```
+  gh issue create --title "…" --label "type:bug,domain:web,p2,by:agent-claude"
+  tools/claude/board_status.sh <N> backlog     # или tech | spec | progress | review | done
+  ```
+
+  Which backlog: `tech` for tech debt and infrastructure that needs no product
+  decision, `backlog` (product) for ideas and anything awaiting the owner. In
+  doubt — product, so the owner sees it.
+- A bug found in passing is never fixed silently: it becomes an issue with
+  labels, so it is visible on the board.
 - Every issue carries labels: `type:*` + `domain:*` + priority (`p1`/`p2`/`p3`)
   + authorship (`by:claude-code` for the main session, `by:agent-claude` for a
   worker agent). `spec:ready` means the spec is written and the task can be
   picked up; `needs:owner` means it is blocked on the owner personally.
-- A bug found in passing is not fixed silently — it becomes an issue with
-  labels, so it is visible on the board.
 - Specs are written on the owner's `"распиши #N"` command, to the template in
-  the `/spec` skill (arrives at stage 02).
+  the `/spec` skill. A spec whose acceptance criteria cannot be checked by a
+  command or a number is not a spec.
 
 ## Conventions
 

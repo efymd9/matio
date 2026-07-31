@@ -2,5 +2,34 @@
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true
+  },
+  "worktree": {
+    "baseRef": "fresh"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$PWD}/tools/claude/link_shared_memory.py\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$PWD}/tools/claude/babysit_guard.sh\" session-start"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$PWD}/tools/claude/babysit_guard.sh\" stop"
+          }
+        ]
+      }
+    ]
   }
 }
