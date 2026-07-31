@@ -26,6 +26,69 @@ Always check these before changing integrations or guessing API shapes:
 
 `PROJECT.md` is the original product spec — useful for build phases and product intent. Where it conflicts with this file or `docs/`, the latter wins.
 
+## How we work
+
+The development process itself is a playbook in [docs/mega-process/](./docs/mega-process/)
+(stages 01–10). It is being rolled out stage by stage; every stage is tracked as
+an issue on the board. What is already in force:
+
+### Core rules
+
+- **Scope = the task at hand.** Build what the spec asks for, not what a future
+  stage might want. No "while I'm here" features.
+- **Privacy.** User data (texts, content, profiles, emails) NEVER reaches logs,
+  the error tracker, or analytics events — only ids, statuses, durations. This
+  is the rule behind the hashed-IP and no-raw-PII patterns already in `lib/`.
+- **Minimal code.** No speculative abstractions, no layers for a second
+  implementation that does not exist. Edits are surgical: change what the task
+  needs, leave the rest alone.
+- **Loose ends are tracked, not remembered.** Any stub, placeholder, or
+  deliberately deferred piece gets a row in [docs/registry.md](./docs/registry.md)
+  in the SAME PR that introduces it.
+- **Process docs are LIVE documents.** Changed the process, the infrastructure,
+  or a threshold → update the corresponding skill in `.claude/skills/` in the
+  SAME PR. A stale map is worse than no map.
+- **Architectural decisions** with lasting consequences get an ADR — see
+  [docs/adr/README.md](./docs/adr/README.md).
+
+### Commands
+
+Web / server (pnpm, repo root):
+
+```
+pnpm lint          # eslint (mobile/ is excluded — it has its own toolchain)
+pnpm typecheck     # tsc --noEmit
+pnpm build         # next build
+pnpm test:locale   # locale-negotiation unit tests (the only suite today)
+pnpm db:generate   # drizzle-kit generate — new migration from schema changes
+pnpm db:migrate    # apply migrations (NEVER db:push against production)
+```
+
+Mobile (npm, `mobile/` — deliberately outside the pnpm workspace):
+
+```
+cd mobile && npm run lint
+cd mobile && npx expo start
+```
+
+### Task tracker
+
+- Tasks live **only** in GitHub Issues; their status lives **only** on the
+  Projects board (https://github.com/users/efymd9/projects/1). Not in chat, not
+  in a notebook, not in someone's memory.
+- **`gh issue create` does NOT put the issue on the board.** Creating an issue
+  is always a pair of commands — create, then place it on the board. Stage 02
+  of the playbook installs `tools/claude/board_status.sh` for the second half;
+  until then the card is added by hand.
+- Every issue carries labels: `type:*` + `domain:*` + priority (`p1`/`p2`/`p3`)
+  + authorship (`by:claude-code` for the main session, `by:agent-claude` for a
+  worker agent). `spec:ready` means the spec is written and the task can be
+  picked up; `needs:owner` means it is blocked on the owner personally.
+- A bug found in passing is not fixed silently — it becomes an issue with
+  labels, so it is visible on the board.
+- Specs are written on the owner's `"распиши #N"` command, to the template in
+  the `/spec` skill (arrives at stage 02).
+
 ## Conventions
 
 - All DB access goes through Drizzle. Never write raw SQL except in migrations.
