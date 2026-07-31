@@ -20,9 +20,11 @@ import { expect } from "vitest";
 //    it holds both the diffs and freshly regenerated Linux baselines. If the
 //    change was intended, download it and commit those PNGs in the SAME PR
 //    that changed the design. Never "regenerate until green".
+// ГРАБЛЯ (проверено в CI, прогон 30627486218): расхождение эталона приезжает
+// в лог как «Test timed out in 15000ms», а НЕ как «screenshot mismatch» —
+// матчер ретраит до таймаута теста, и передача ему собственного `timeout`
+// формулировку не меняет. Упал тест с golden() по таймауту — это почти
+// наверняка разошёлся эталон: смотрите артефакт `visual-baselines`, там дифф.
 export async function golden(element: HTMLElement, name: string) {
-  // Явный timeout: матчер ретраит до таймаута теста, и без этой строки
-  // расхождение приезжает в лог как «Test timed out in 15000ms» — сообщение,
-  // по которому невозможно понять, что упал именно голден.
-  await expect.element(element).toMatchScreenshot(name, { timeout: 3000 });
+  await expect.element(element).toMatchScreenshot(name);
 }
