@@ -136,6 +136,28 @@ auto-merge is armed by the main session only, only after review.
   share one machine.
 - Writes to the shared memory are small and additive.
 
+### Releases and commit conventions
+
+- **Commit messages are the changelog.** `fix:` → patch, `feat:` → minor,
+  `feat!:` / `BREAKING CHANGE:` → major, `docs:` shows up in the changelog,
+  `chore:`/`ci:`/`test:` stay hidden. Below 1.0.0 a `feat:` bumps the minor,
+  never the major.
+- **release-please** keeps a single open Release PR with the accumulated
+  changelog and version bump. Nobody commits into its branch, and auto-merge is
+  never armed on it. Merging it is a release: tag `vX.Y.Z` + GitHub Release —
+  and it happens only on the owner's explicit `"релизь"`. Ritual: the
+  `/release` skill.
+- **Merging to `main` deploys production.** There is no staging: Vercel builds
+  every PR as a preview, but previews have no database. So a green preview is
+  not proof that anything works — it only proves the build.
+- **`/api/healthz`** answers what is actually live: `curl -s
+  https://matio.tv/api/healthz | jq` returns status, version (from
+  `package.json`, bumped by release-please), the commit and the environment.
+- **Infrastructure is a live document too**: changed hosting, a vendor, CI, the
+  database or a domain → update the `/devops` skill in the SAME PR. A stale
+  infra map is read during an incident, which is exactly when being wrong costs
+  the most.
+
 ### Tests and coverage
 
 - **Runner: Vitest** (`vitest.config.mts`). Default environment is `node`; a

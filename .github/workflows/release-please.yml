@@ -1,0 +1,57 @@
+# Версионирование продукта. Бот читает conventional commits, накопившиеся в
+# main, и держит открытым ОДИН Release PR с changelog и бампом версии. Мерж
+# этого PR = релиз: тег vX.Y.Z + GitHub Release. Мержит только основная сессия
+# и только по слову владельца «релизь» (скилл /release).
+#
+# ПОЧЕМУ GitHub App, А НЕ ВСТРОЕННЫЙ GITHUB_TOKEN: PR, созданный
+# GITHUB_TOKEN, НЕ запускает workflow — защита GitHub от рекурсии. А в
+# ruleset protect-main чеки CI обязательны, значит Release PR без прогона CI
+# невозможно влить в принципе. Токен приложения этого ограничения не имеет.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Гард: без секретов приложения workflow не красный, а тихо пропускается.
+      # Печатаем ИМЕНА пустых секретов, а не факт «чего-то не хватает»:
+      # молчаливый пропуск без виновника стоил оригиналу четырёх холостых
+      # прогонов, прежде чем кто-то догадался, чего именно нет.
+      - name: Проверить секреты приложения
+        id: guard
+        env:
+          APP_ID: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+          APP_KEY: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+        run: |
+          missing=""
+          [ -n "$APP_ID" ]  || missing="$missing RELEASE_PLEASE_APP_ID"
+          [ -n "$APP_KEY" ] || missing="$missing RELEASE_PLEASE_APP_PRIVATE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::notice::release-please пропущен — не заданы секреты:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/create-github-app-token@v2
+        if: steps.guard.outputs.ready == 'true'
+        id: app-token
+        with:
+          app-id: ${{ secrets.RELEASE_PLEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+
+      - uses: googleapis/release-please-action@v4
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

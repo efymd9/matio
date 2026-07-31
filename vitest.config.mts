@@ -67,15 +67,14 @@ export default defineConfig({
       // RATCHET — these numbers move in one direction only. Raised coverage in
       // a PR? Raise the floor in the SAME PR. Lowering one is a review blocker.
       //
-      // Re-measured after the UI Lab landed — stories render real components in
-      // a browser, so component coverage rose on its own (statements
-      // 1.10 → 1.37, lines 1.04 → 1.33, functions 0.65 → 0.92, branches
-      // 1.21 → 1.64). Floors follow, rounded down.
+      // История движения: 1.10 (нулевой старт, этап 03) → 1.37 (истории Lab
+      // исполняют компоненты, этап 04) → 1.45 (тесты /api/healthz, этап 05).
+      // Полы идут следом, округлением вниз.
       thresholds: {
-        lines: 1.3,
-        functions: 0.9,
-        branches: 1.6,
-        statements: 1.3,
+        lines: 1.4,
+        functions: 1,
+        branches: 1.8,
+        statements: 1.4,
       },
     },
 

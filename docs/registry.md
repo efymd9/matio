@@ -11,4 +11,7 @@ close").
 
 | What | What it blocks | When to close |
 |---|---|---|
-| _(empty — add rows as loose ends appear)_ | | |
+| No staging environment: `main` deploys straight to matio.tv, and Vercel previews have no `DATABASE_URL` | Migrations and webhooks can only be exercised in production | Before the next migration that is not purely additive — see the tracking issue on the board |
+| No database backups of our own; we rely on Neon's PITR, which has never been restore-tested | An untested restore is a hope, not a backup | Stage 06 of `docs/mega-process/` |
+| `a11y` addon runs in `todo` mode — violations are visible in the Lab but do not fail CI | Nothing today; it is a gate that is deliberately off | After the existing components are cleaned up (see the design-system debt issue) |
+| Mobile app (`mobile/`) is not versioned by release-please — it lives outside `main` | Product and app versions will diverge once the app ships | When `feat/mobile-app` merges: add `mobile/app.json` to `extra-files` |

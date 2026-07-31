@@ -17,8 +17,11 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Loose design references — not part of the app bundle, not linted.
     "example_design/**",
-    // Coverage output (vitest): generated reporters, not our code.
+    // Build outputs of the test/Lab toolchain: generated bundles, not our
+    // code. `pnpm lab:build` followed by `pnpm lint` otherwise buries the
+    // real findings under a few hundred warnings from minified Storybook.
     "coverage/**",
+    "storybook-static/**",
     // Dot-directories aren't matched by a plain `dir/**` glob, and Expo
     // regenerates these on every build.
     "**/.expo/**",
