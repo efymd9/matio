@@ -160,6 +160,34 @@ auto-merge is armed by the main session only, only after review.
   is deliberately left to Vercel's own preview deployment; we do not pay twice
   for the same build.
 
+### UI
+
+- **Everything visual goes through tokens.** Colours, type and spacing come
+  from `app/globals.css` (`@theme`) and the core components — never from a
+  literal in a feature. `tools/qa/no-magic-styles.sh` runs in CI and fails with
+  the file and line; run it locally with `pnpm qa:styles`. A shade that does
+  not exist yet is added to `@theme` **and** to the token sheet in
+  `lab/tokens.stories.tsx` in the same PR.
+- **Lab-first.** A new or changed visible element appears in the UI Lab
+  **first**, in **at least five genuinely different** variants — five variants,
+  not one variant five times, and not a pixel copy of a reference. The owner
+  looks at them live on a device and picks one; only then does it land in the
+  product code, with the chosen values written into tokens and into the task's
+  spec. Iterating on UI inside the main codebase is how three rounds of review
+  get spent on something a one-minute look would have settled.
+- **Run the Lab**: `pnpm lab` (Storybook on :6006). Stories live next to their
+  components (`components/**/*.stories.tsx`); the gallery's own pages — the
+  token sheet, variant boards — live in `lab/`.
+- **Stories are tests.** Every story runs in real Chromium under
+  `pnpm test:stories`: it must render without throwing and its play function
+  must pass. A component without a story is a component nobody can look at.
+- **Goldens are decisions, not chores.** The gallery boards (variants, tones,
+  token sheet) are screenshot-compared. Baselines are per platform and only the
+  Linux ones are committed — CI is the arbiter, a macOS run only writes its own
+  gitignored `*-darwin.png`. When a golden fails, download the CI artifact
+  `visual-baselines`, look at the diff, and if the change was intended commit
+  the regenerated PNGs in the same PR. Never regenerate until green.
+
 ### Task tracker
 
 - Tasks live **only** in GitHub Issues; their status lives **only** on the
