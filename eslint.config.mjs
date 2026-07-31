@@ -14,6 +14,11 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Loose design references — not part of the app bundle, not linted.
     "example_design/**",
+    // Coverage output (vitest): generated reporters, not our code.
+    "coverage/**",
+    // Dot-directories aren't matched by a plain `dir/**` glob, and Expo
+    // regenerates these on every build.
+    "**/.expo/**",
   ]),
 ]);
 

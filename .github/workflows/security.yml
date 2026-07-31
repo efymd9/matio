@@ -1,0 +1,48 @@
+# Ночной скан: известные уязвимости в зависимостях + утёкшие секреты.
+#
+# Это СИГНАЛ, а не ворота PR. Красный прогон не блокирует мержи — он рождает
+# issue (type:bug + domain:infra + приоритет по влиянию), которую чинят
+# отдельным PR. Ворота на этом месте останавливали бы работу из-за уязвимости
+# в транзитивной зависимости, которую всё равно чинит апстрим.
+name: security
+
+on:
+  schedule:
+    - cron: '17 3 * * *'    # каждую ночь, 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deps:
+    name: зависимости (osv-scanner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Гоняем официальный образ, а не action: имя и интерфейс образа
+      # стабильны, а лишний слой сторонней обёртки здесь не нужен.
+      # Сканируются локфайлы обеих половин: pnpm-lock.yaml и mobile/package-lock.json.
+      - name: osv-scanner
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/src" \
+            ghcr.io/google/osv-scanner:latest \
+            scan source --recursive /src
+
+  secrets:
+    name: секреты в истории (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Секрет, удалённый следующим коммитом, остаётся в истории навсегда —
+          # сканировать надо ВСЮ историю, а не последний диф.
+          fetch-depth: 0
+
+      # ГРАБЛЯ из плейбука: gitleaks старее 8.25 молча игнорирует [[allowlists]]
+      # с condition=AND. Action тянет свежий бинарь; если когда-нибудь появится
+      # .gitleaks.toml с allowlist'ами — проверить версию в логе прогона.
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

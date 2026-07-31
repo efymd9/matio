@@ -1,0 +1,25 @@
+# Обновления зависимостей приезжают обычными PR — то есть проходят те же
+# ворота CI, что и наш код. Раз в неделю, чтобы не топить очередь ревью.
+version: 2
+updates:
+  # Веб-половина: pnpm-workspace в корне (экосистема npm покрывает pnpm-lock).
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["type:debt", "domain:infra", "p3"]
+
+  # Expo-приложение: свой package-lock.json, живёт вне pnpm-воркспейса.
+  - package-ecosystem: npm
+    directory: /mobile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: ["type:debt", "domain:mobile", "p3"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: ["type:debt", "domain:infra", "p3"]
