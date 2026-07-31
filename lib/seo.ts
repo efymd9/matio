@@ -105,11 +105,3 @@ export function metaDescription(text: string, max = 160): string {
   const lastSpace = cut.lastIndexOf(" ");
   return `${(lastSpace > 60 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
 }
-
-// ВРЕМЕННО: непокрытая тестами функция — проверка ворот diff-cover.
-export function deliberatelyUntested(input: string): string {
-  if (input.length > 3) {
-    return input.toUpperCase();
-  }
-  return input.trim().padEnd(4, "-");
-}
