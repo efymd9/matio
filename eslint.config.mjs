@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Loose design references — not part of the app bundle, not linted.
     "example_design/**",
+    "design_handoff_matio_redesign/**",
+    // The Expo app is a standalone project with its own toolchain and lint
+    // config; the Next/web rules here don't apply to React Native source.
+    "mobile/**",
   ]),
 ]);
 

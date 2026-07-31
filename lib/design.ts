@@ -10,14 +10,26 @@ export const TONE_KEYS: Tone[] = ["a", "b", "c", "d", "e", "f"];
 // All in the espresso/rust family; the first three come straight from the
 // design's fallback posters. Keep in sync with the .tone-* utilities in
 // globals.css.
-export const TONE_GRADIENT: Record<Tone, string> = {
-  a: "linear-gradient(160deg, #5c2416 0%, #170905 100%)",
-  b: "linear-gradient(160deg, #4a2c12 0%, #140a04 100%)",
-  c: "linear-gradient(160deg, #58321c 0%, #170b05 100%)",
-  d: "linear-gradient(160deg, #4d1f2a 0%, #150710 100%)",
-  e: "linear-gradient(160deg, #3f2a18 0%, #120b04 100%)",
-  f: "linear-gradient(160deg, #33201a 0%, #0f0806 100%)",
+//
+// Stored as ordered COLOR STOPS rather than CSS strings because React Native
+// has no CSS gradient syntax — the mobile app feeds these straight to
+// expo-linear-gradient while the web consumes the TONE_GRADIENT strings built
+// from them below. One source, two encodings; never hand-maintain both.
+export const TONE_STOPS: Record<Tone, readonly [string, string]> = {
+  a: ["#5c2416", "#170905"],
+  b: ["#4a2c12", "#140a04"],
+  c: ["#58321c", "#170b05"],
+  d: ["#4d1f2a", "#150710"],
+  e: ["#3f2a18", "#120b04"],
+  f: ["#33201a", "#0f0806"],
 };
+
+export const TONE_GRADIENT: Record<Tone, string> = Object.fromEntries(
+  TONE_KEYS.map((tone) => [
+    tone,
+    `linear-gradient(160deg, ${TONE_STOPS[tone][0]} 0%, ${TONE_STOPS[tone][1]} 100%)`,
+  ]),
+) as Record<Tone, string>;
 
 // Deterministic tone from any stable string (a show id or slug).
 // Same input → same tone, so the catalog reads consistently between renders.
@@ -38,3 +50,25 @@ export const DUOTONE_GRADIENT =
 
 export const ACCENT = "#e6b366";
 export const BG = "#0f0a07";
+
+// Full brand palette. Mirrors the CSS custom properties at the top of
+// app/globals.css (--color-espresso … --color-rust) and is the source the
+// mobile app imports — mobile/ resolves this file directly through Metro
+// watchFolders, so the app never re-types a hex value. If a token changes in
+// globals.css it must change here too.
+export const PALETTE = {
+  espresso: "#0f0a07",
+  espresso2: "#1a120c",
+  cream: "#f6efe4",
+  gold: "#e6b366",
+  goldHi: "#eec489",
+  goldLo: "#dfa557",
+  goldDeep: "#241205",
+  burgundy: "#8f2f1c",
+  rust: "#a8401f",
+} as const;
+
+// Cream at the two opacities the 8a spec uses for secondary/tertiary text.
+// Pre-composed because React Native has no CSS color-mix equivalent.
+export const INK_MUTED = "rgba(246,239,228,0.72)";
+export const INK_DIM = "rgba(246,239,228,0.5)";
