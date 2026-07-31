@@ -105,11 +105,13 @@ export default defineConfig({
             instances: [{ browser: "chromium" }],
             expect: {
               toMatchScreenshot: {
-                // Antialiasing noise is not a regression. 2% of pixels is
-                // wide enough to survive a GPU/driver hiccup and narrow
-                // enough to catch a shifted button or a changed colour.
+                // Подобрано опытом, а не на глаз: при 2% перекрашенная
+                // кнопка на широком холсте НЕ ловилась — её пиксели не
+                // набирали порога (доска из шести кнопок прошла зелёной с
+                // одной бордовой). 0.1% ловит обе доски и переживает шум
+                // сглаживания.
                 comparatorName: "pixelmatch",
-                comparatorOptions: { allowedMismatchedPixelRatio: 0.02 },
+                comparatorOptions: { allowedMismatchedPixelRatio: 0.001 },
               },
             },
           },

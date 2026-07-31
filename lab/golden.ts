@@ -16,11 +16,13 @@ import { expect } from "vitest";
 //    its own darwin baseline and passes — the real verdict comes from CI.
 //
 // 2. Updating a baseline is a DECISION, not a chore. When a golden fails,
-//    look at the diff artifact CI attaches to the run before deciding whether
-//    the change was intended. Then regenerate through the
-//    `visual-baselines` workflow (Actions → Run workflow), download its
-//    artifact and commit the PNGs in the SAME PR that changed the design.
-//    Never "regenerate until green".
+//    look at the `visual-baselines` artifact CI attaches to the failed run:
+//    it holds both the diffs and freshly regenerated Linux baselines. If the
+//    change was intended, download it and commit those PNGs in the SAME PR
+//    that changed the design. Never "regenerate until green".
 export async function golden(element: HTMLElement, name: string) {
-  await expect.element(element).toMatchScreenshot(name);
+  // Явный timeout: матчер ретраит до таймаута теста, и без этой строки
+  // расхождение приезжает в лог как «Test timed out in 15000ms» — сообщение,
+  // по которому невозможно понять, что упал именно голден.
+  await expect.element(element).toMatchScreenshot(name, { timeout: 3000 });
 }
