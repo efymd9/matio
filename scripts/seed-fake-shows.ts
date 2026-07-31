@@ -3,10 +3,28 @@ config({ path: ".env.local" });
 
 // Seeds the catalog with placeholder shows for layout/density testing. Every
 // row gets slug `demo-*` so they're trivial to wipe later
-// (`DELETE FROM shows WHERE slug LIKE 'demo-%'`). No seasons/episodes attach,
-// so visiting any of them renders the "Coming soon" branch on /watch.
+// (`DELETE FROM shows WHERE slug LIKE 'demo-%'`).
 // Idempotent on slug — re-running adds anything new and leaves existing rows
-// alone. Pass `--reset` to delete demo rows instead.
+// alone. Pass `--reset` to delete demo rows instead (seasons and episodes go
+// with them: both FKs cascade from `shows`).
+//
+// ONE demo show optionally gets a season with real, playable episodes — that's
+// what turns the staging bench from a catalog mock-up into something where the
+// player can actually be rehearsed (without it every `/watch/demo-*` renders
+// the "Coming soon" branch). Playback ids are PARAMETERS, never committed:
+//
+//   pnpm seed:fake-shows -- --playback-ids=abc123,def456:754
+//   SEED_PLAYBACK_IDS=abc123,def456:754 pnpm seed:fake-shows
+//
+// An entry is `<mux playback id>` or `<mux playback id>:<duration seconds>`.
+// Rows are pointers, not copies: staging and production reference the SAME Mux
+// assets by playback id, so nothing is uploaded and no asset-plan slot is
+// consumed (see issue #40). `mux_asset_id` is deliberately left NULL — the
+// bench must never own, re-upload or delete an asset it points at.
+//
+// Which demo show receives them: `--show=<slug>` / `SEED_EPISODE_SHOW`,
+// default the first entry below. The slug must start with `demo-` so seeded
+// episodes can never land on a real show.
 
 const FAKE_SHOWS: Array<{
   slug: string;
@@ -51,13 +69,61 @@ const FAKE_SHOWS: Array<{
   { slug: "demo-the-glass-lighthouse", title: "The Glass Lighthouse", description: "The keeper, the storm, and the light that's been answering back.", genre: ["drama"] },
 ];
 
+// Episodes seeded without an explicit duration get this. Real durations come
+// from Mux on a real upload; here the number only feeds the analytics
+// percentages, so a round placeholder is honest enough.
+const DEFAULT_EPISODE_DURATION_SECONDS = 600;
+
+type SeedEpisode = { playbackId: string; durationSeconds: number };
+
+function readArg(name: string): string | undefined {
+  const prefix = `--${name}=`;
+  const hit = process.argv.find((arg) => arg.startsWith(prefix));
+  return hit ? hit.slice(prefix.length) : undefined;
+}
+
+// `id` or `id:seconds`, comma-separated. Anything unparseable as a positive
+// duration falls back to the placeholder rather than writing a nonsense
+// number — a bad duration silently skews every retention percentage.
+function parsePlaybackIds(raw: string | undefined): SeedEpisode[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0)
+    .map((chunk) => {
+      const [playbackId, duration] = chunk.split(":");
+      const seconds = Number(duration);
+      return {
+        playbackId: playbackId.trim(),
+        durationSeconds:
+          Number.isFinite(seconds) && seconds > 0
+            ? Math.round(seconds)
+            : DEFAULT_EPISODE_DURATION_SECONDS,
+      };
+    })
+    .filter((episode) => episode.playbackId.length > 0);
+}
+
 async function main() {
   const reset = process.argv.includes("--reset");
+  const episodeSpecs = parsePlaybackIds(
+    readArg("playback-ids") ?? process.env.SEED_PLAYBACK_IDS,
+  );
+  const episodeShowSlug =
+    readArg("show") ?? process.env.SEED_EPISODE_SHOW ?? FAKE_SHOWS[0].slug;
+
+  if (episodeSpecs.length > 0 && !episodeShowSlug.startsWith("demo-")) {
+    console.error(
+      `Refusing to seed episodes onto "${episodeShowSlug}": only demo-* shows may receive seeded episodes.`,
+    );
+    process.exit(1);
+  }
 
   // Dynamic import so DATABASE_URL is populated before db/index loads it.
   const { db } = await import("../db/index.js");
-  const { shows } = await import("../db/schema/index.js");
-  const { eq, like } = await import("drizzle-orm");
+  const { shows, seasons, episodes } = await import("../db/schema/index.js");
+  const { and, eq, like } = await import("drizzle-orm");
 
   if (reset) {
     const removed = await db
@@ -107,6 +173,74 @@ async function main() {
 
   console.log(
     `Inserted ${inserted} demo show(s), skipped ${skipped} (slug already existed); re-flagged section membership across all demo rows.`,
+  );
+
+  if (episodeSpecs.length === 0) {
+    console.log(
+      "No playback ids given — episodes skipped (every demo show renders the \"Coming soon\" branch). Pass --playback-ids=<mux id>[,<mux id>:<seconds>] or set SEED_PLAYBACK_IDS to make one show playable.",
+    );
+    process.exit(0);
+  }
+
+  const [show] = await db
+    .select({ id: shows.id })
+    .from(shows)
+    .where(eq(shows.slug, episodeShowSlug))
+    .limit(1);
+
+  if (!show) {
+    console.error(
+      `Show "${episodeShowSlug}" not found — run the seed without --show first, or pick a slug from the list above.`,
+    );
+    process.exit(1);
+  }
+
+  await db
+    .insert(seasons)
+    .values({ showId: show.id, number: 1, title: "Season 1" })
+    .onConflictDoNothing({ target: [seasons.showId, seasons.number] });
+
+  const [season] = await db
+    .select({ id: seasons.id })
+    .from(seasons)
+    .where(and(eq(seasons.showId, show.id), eq(seasons.number, 1)))
+    .limit(1);
+
+  if (!season) {
+    console.error(`Failed to create season 1 for "${episodeShowSlug}".`);
+    process.exit(1);
+  }
+
+  for (const [i, spec] of episodeSpecs.entries()) {
+    // Re-running with different ids re-points the same episode numbers instead
+    // of piling up rows: the bench should converge on whatever you last passed.
+    // `access: 'free'` because the point of the bench is pressing play; retier
+    // per episode in the admin panel when rehearsing the walls.
+    const playable = {
+      muxPlaybackId: spec.playbackId,
+      muxPlaybackPolicy: "signed",
+      durationSeconds: spec.durationSeconds,
+      status: "ready" as const,
+      access: "free" as const,
+    };
+
+    await db
+      .insert(episodes)
+      .values({
+        seasonId: season.id,
+        number: i + 1,
+        title: `Episode ${i + 1}`,
+        releasedAt: new Date(),
+        ...playable,
+      })
+      .onConflictDoUpdate({
+        target: [episodes.seasonId, episodes.number],
+        set: playable,
+      });
+  }
+
+  console.log(
+    `Seeded season 1 of "${episodeShowSlug}" with ${episodeSpecs.length} playable episode(s) (signed playback, access=free). Watch: /watch/${episodeShowSlug}`,
   );
   process.exit(0);
 }

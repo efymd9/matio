@@ -120,8 +120,19 @@ Always idempotent (retries happen) — use `onConflictDoNothing` / `onConflictDo
 
 ## Deploy
 
+Production is deployed by **publishing a GitHub Release**, which runs
+`.github/workflows/deploy-production.yml` after the owner approves the
+`production` GitHub Environment. Merging to `main` deploys **staging**, not
+matio.tv. Ritual: the `/release` skill; map and emergency paths: `/devops`.
+
+The commands below describe what that workflow does under the hood (and what a
+break-glass manual deploy looks like) — `vercel --prod` from the owner's own
+machine is known to hang in BLOCKED state, so it is not the deploy path:
+
 ```bash
-vercel --prod --yes
+vercel pull --yes --environment=production
+vercel build --prod
+vercel deploy --prebuilt --prod
 ```
 
 Outputs a JSON object with the immutable deployment URL. Production aliases (`matio.tv` apex + `www.matio.tv` + legacy `matio-ten.vercel.app`) update automatically. The apex is the canonical surface — `www` 307-redirects to apex, so external integrations that don't follow redirects (Stripe / Mux / Clerk webhooks) **must** point at the apex form.
@@ -130,7 +141,8 @@ Outputs a JSON object with the immutable deployment URL. Production aliases (`ma
 
 ```bash
 echo -n "the-value" | vercel env add VAR_NAME production
-vercel --prod --yes
+# …then redeploy: publish a release, or re-run deploy-production via
+# Actions → deploy-production → Run workflow.
 ```
 
 To overwrite an existing var:
