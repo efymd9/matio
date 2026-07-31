@@ -2,6 +2,12 @@
 
 # dependencies
 /node_modules
+# Nested installs too (mobile/ has its own npm). The root pattern above is
+# anchored, and mobile/.gitignore only exists on the feat/mobile-app branch —
+# so on any main-based branch a plain `git add -A` would otherwise stage
+# ~62k files out of mobile/node_modules and mobile/.expo. Measured, not feared.
+node_modules/
+.expo/
 /.pnp
 .pnp.*
 .yarn/*

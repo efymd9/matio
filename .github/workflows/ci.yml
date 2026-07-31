@@ -1,0 +1,112 @@
+# Ворота качества для веб-половины продукта. Красный прогон = PR не вливается
+# (имена джоб добавлены в ruleset protect-main как required status checks).
+#
+# Чего здесь намеренно НЕТ: сборки. `next build` на каждый PR уже делает Vercel
+# своим preview-деплоем — второй раз платить теми же минутами не за что.
+#
+# Мобильное приложение (mobile/) собственных джоб пока не имеет: его код живёт
+# в невлитой ветке feat/mobile-app (issue #17). Появится в main — приедет и CI.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  # Новый пуш в PR отменяет устаревший прогон; на main не отменяем — там каждый
+  # коммит должен получить свой честный вердикт.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: web (lint · types · tests)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # для стики-коммента с покрытием
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # diff-cover сравнивает с origin/main — нужна история, а не срез.
+          fetch-depth: 0
+
+      - name: Подтянуть origin/main для сравнения
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
+      - uses: pnpm/action-setup@v4        # версия берётся из packageManager
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Линт
+        run: pnpm lint
+
+      - name: Типы
+        run: pnpm typecheck
+
+      - name: Тесты с покрытием
+        run: |
+          set -o pipefail
+          pnpm test:coverage 2>&1 | tee coverage-output.txt
+
+      # diff-cover: изменённые в PR строки обязаны быть покрыты ≥85%. Это и
+      # есть настоящие ворота — общий процент покрытия растёт медленно, а вот
+      # новый непротестированный код в проект больше не попадает.
+      - uses: actions/setup-python@v5
+        if: github.event_name == 'pull_request'
+        with:
+          python-version: '3.12'
+
+      - name: diff-cover (изменённые строки ≥85%)
+        if: github.event_name == 'pull_request'
+        run: |
+          pip install --quiet diff_cover
+          set -o pipefail
+          diff-cover coverage/cobertura-coverage.xml \
+            --compare-branch origin/main \
+            --fail-under 85 2>&1 | tee diff-cover-output.txt
+
+      - name: Собрать текст комментария
+        if: github.event_name == 'pull_request' && always()
+        run: |
+          {
+            echo '### Покрытие'
+            echo
+            echo '```'
+            sed -n '/Coverage summary/,/^=\{10,\}$/p' coverage-output.txt | head -20
+            echo '```'
+            if [ -f diff-cover-output.txt ]; then
+              echo
+              echo '### Изменённые строки (diff-cover, порог 85%)'
+              echo
+              echo '```'
+              tail -20 diff-cover-output.txt
+              echo '```'
+            fi
+          } > coverage-comment.md
+
+      # Стики-коммент: один и тот же комментарий ОБНОВЛЯЕТСЯ на каждый пуш,
+      # а не плодит ветку из двадцати одинаковых.
+      - uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request' && always()
+        with:
+          header: coverage
+          path: coverage-comment.md
+
+      - name: Артефакт покрытия
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7

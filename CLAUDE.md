@@ -59,7 +59,12 @@ Web / server (pnpm, repo root):
 pnpm lint          # eslint (mobile/ is excluded — it has its own toolchain)
 pnpm typecheck     # tsc --noEmit
 pnpm build         # next build
-pnpm test:locale   # locale-negotiation unit tests (the only suite today)
+pnpm test          # vitest run — the unit suite
+pnpm test:watch    # vitest in watch mode, while writing tests
+pnpm test:coverage # vitest run --coverage — what CI measures the ratchet against
+pnpm test:locale   # just the locale/URL suites (kept: referenced by docs + plans)
+                   # `pnpm typecheck` failing on .next/dev/types/validator.ts
+                   # means a stale .next from another branch — `rm -rf .next`.
 pnpm db:generate   # drizzle-kit generate — new migration from schema changes
 pnpm db:migrate    # apply migrations (NEVER db:push against production)
 ```
@@ -130,6 +135,30 @@ auto-merge is armed by the main session only, only after review.
 - Do not run two heavy builds (Next + Expo) in two worktrees at once — they
   share one machine.
 - Writes to the shared memory are small and additive.
+
+### Tests and coverage
+
+- **Runner: Vitest** (`vitest.config.mts`). Default environment is `node`; a
+  component test opts into jsdom with `/** @vitest-environment jsdom */` at the
+  top of the file. `mobile/` is a separate project and is excluded everywhere.
+- **The ratchet: thresholds only ever go up.** Raised coverage in a PR? Raise
+  the numbers in `vitest.config.mts` in the SAME PR. Lowering a threshold is a
+  review blocker, not a negotiation.
+- **diff-cover ≥85% on changed lines** (CI, `pull_request` only). This is the
+  gate that actually bites: the overall percentage climbs slowly, but new
+  untested code stops entering the project.
+- **A test must assert behaviour** — a result, a state, an error. A test that
+  merely executes lines to move a percentage is defective work and a reason to
+  send a PR back. Never weaken an existing assertion to make a suite pass.
+- **Untestable glue goes into `coverage.exclude` with a justification comment**,
+  not into a theatrical test. The current exclusions (drizzle output, one-shot
+  ops scripts, the Expo app) are documented in the config.
+- **Fake secrets in tests must look fake** (`sk-test-…`, `dummy`, `invalid`) —
+  otherwise the nightly gitleaks scan flags them and the finding costs a real
+  investigation.
+- CI runs lint → types → tests + coverage → diff-cover. The `next build` check
+  is deliberately left to Vercel's own preview deployment; we do not pay twice
+  for the same build.
 
 ### Task tracker
 
@@ -375,7 +404,8 @@ scripts/
                            #   product+price (STRIPE_PRICE_TRIAL_FEE). Archives
                            #   stale prices per plan on amount mismatch.
   check-subscription-dupes.ts # pnpm db:check-sub-dupes — pre-flight for 0008
-  test-locale-negotiation.ts # pnpm test:locale — unit tests for lib/i18n/negotiate.ts
+                           #   (locale tests moved to lib/i18n/negotiate.test.ts
+                           #    + lib/seo.test.ts — vitest, `pnpm test:locale`)
 ```
 
 ## Key business rules

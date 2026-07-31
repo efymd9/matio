@@ -437,7 +437,7 @@ Accept-Language header
                                               unknown/localhost → en
 ```
 
-The negotiation itself lives in `lib/i18n/negotiate.ts` — pure + universal (no `next/headers`), so the same matching rules serve `getLocale()`, the `global-error.tsx` boundary (which can't reach the failed layout's `LocaleProvider` and falls back cookie → `navigator.languages` → en), and `pnpm test:locale` (`scripts/test-locale-negotiation.ts`, ~53 assertions covering RFC 9110 q-values, q=0 exclusion, wildcard, hostile multi-KB headers, and the full ladder).
+The negotiation itself lives in `lib/i18n/negotiate.ts` — pure + universal (no `next/headers`), so the same matching rules serve `getLocale()`, the `global-error.tsx` boundary (which can't reach the failed layout's `LocaleProvider` and falls back cookie → `navigator.languages` → en), and `pnpm test:locale` (`lib/i18n/negotiate.test.ts` + `lib/seo.test.ts` under vitest, covering RFC 9110 q-values, q=0 exclusion, wildcard, hostile multi-KB headers, the full ladder and the bilingual URL helpers).
 
 Detection **persists nothing** — no cookie, no storage. It re-derives per request, so a user who changes their browser language self-heals on the next visit, and there is no ePrivacy/consent question (consent gates storage/access *on the device*; reading a header the browser already sent is neither — same posture as the no-storage `x-vercel-ip-country` read, worth knowing before "fixing" it by adding a cookie). The explicit switcher choice writes the `locale` cookie (1y), which short-circuits detection entirely.
 
