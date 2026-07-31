@@ -49,3 +49,12 @@ next-env.d.ts
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+*storybook.log
+storybook-static
+
+# Visual baselines: only the LINUX ones are committed — CI is the arbiter.
+# A macOS run writes its own *-darwin.png (different text rasterisation);
+# committing those would make the suite red for everyone else.
+**/__screenshots__/**/*-darwin.png
+.vitest-attachments/

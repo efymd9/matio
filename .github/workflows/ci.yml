@@ -54,10 +54,43 @@ jobs:
       - name: Типы
         run: pnpm typecheck
 
-      - name: Тесты с покрытием
+      # Дизайн-система: цветовой литерал в фиче — красный шаг с файлом и
+      # строкой. Обоснование и границы проверки — в шапке самого скрипта.
+      - name: Токены (запрет цветовых литералов)
+        run: ./tools/qa/no-magic-styles.sh
+
+      # Истории UI Lab гоняются в настоящем Chromium, поэтому нужен браузер.
+      # Ставим только chromium: остальные движки удвоили бы время без пользы —
+      # matio ловит кроссбраузерные различия не голденами, а правилами из
+      # docs/gotchas.md (Safari < 15.4 и т.д.).
+      - name: Браузер для UI Lab
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Тесты с покрытием (unit + истории Lab)
         run: |
           set -o pipefail
           pnpm test:coverage 2>&1 | tee coverage-output.txt
+
+      # Голден упал — отдать человеку то, по чему решение принимается: диффы
+      # и свежесгенерированные эталоны. CI на Linux, разработчик обычно на
+      # macOS, поэтому эталоны рождаются ЗДЕСЬ: скачал артефакт, посмотрел
+      # дифф, и если изменение намеренное — положил PNG в тот же PR.
+      - name: Перегенерировать эталоны для скачивания
+        if: failure()
+        env:
+          CI: ""   # иначе vitest отказывается писать отсутствующий эталон
+        run: pnpm exec vitest run --project storybook --update || true
+
+      - name: Артефакт голденов (эталоны + диффы)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines
+          path: |
+            **/__screenshots__/**
+            .vitest-attachments/**
+          retention-days: 14
+          if-no-files-found: ignore
 
       # diff-cover: изменённые в PR строки обязаны быть покрыты ≥85%. Это и
       # есть настоящие ворота — общий процент покрытия растёт медленно, а вот

@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:unit": "vitest run --project unit",
+    "test:stories": "vitest run --project storybook",
     "test:coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -22,7 +24,10 @@
     "test:locale": "vitest run lib/i18n/negotiate.test.ts lib/seo.test.ts",
     "backfill:mux-policy": "tsx scripts/backfill-mux-policy.ts",
     "seed:fake-shows": "tsx scripts/seed-fake-shows.ts",
-    "gen:icons": "bash scripts/gen-icons.sh"
+    "gen:icons": "bash scripts/gen-icons.sh",
+    "lab": "storybook dev -p 6006",
+    "lab:build": "storybook build",
+    "qa:styles": "./tools/qa/no-magic-styles.sh"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
@@ -73,6 +78,17 @@
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "storybook": "^10.5.5",
+    "@storybook/nextjs-vite": "^10.5.5",
+    "@chromatic-com/storybook": "^5.2.1",
+    "@storybook/addon-vitest": "^10.5.5",
+    "@storybook/addon-a11y": "^10.5.5",
+    "@storybook/addon-docs": "^10.5.5",
+    "@storybook/addon-mcp": "^0.7.0",
+    "vite": "^8.2.0",
+    "eslint-plugin-storybook": "^10.5.5",
+    "@vitest/browser-playwright": "4.1.10",
+    "playwright": "^1.62.1"
   }
 }
