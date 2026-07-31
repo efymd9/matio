@@ -43,6 +43,6 @@ jobs:
       # ГРАБЛЯ из плейбука: gitleaks старее 8.25 молча игнорирует [[allowlists]]
       # с condition=AND. Action тянет свежий бинарь; если когда-нибудь появится
       # .gitleaks.toml с allowlist'ами — проверить версию в логе прогона.
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
