@@ -147,12 +147,29 @@ auto-merge is armed by the main session only, only after review.
   never armed on it. Merging it is a release: tag `vX.Y.Z` + GitHub Release —
   and it happens only on the owner's explicit `"релизь"`. Ritual: the
   `/release` skill.
-- **Merging to `main` deploys production.** There is no staging: Vercel builds
-  every PR as a preview, but previews have no database. So a green preview is
-  not proof that anything works — it only proves the build.
+- **Merging to `main` deploys staging, not production.** Staging is the
+  training ground: its own Neon branch, its own keys, seeded data, no live
+  viewers. Production (`matio.tv`) is deployed by exactly one path — publishing
+  a GitHub Release fires `.github/workflows/deploy-production.yml`, whose job is
+  bound to the `production` GitHub Environment and therefore **stands and waits
+  for the owner to press approve**. "Релизь" is no longer just a version bump;
+  it is the only door into production. Vercel still builds every PR as a
+  preview, and a preview still has no database — green proves the build, nothing
+  more.
+  **Migrations go to staging first**: `pnpm db:migrate` against the staging
+  branch → check it there → only then production. Order and the emergency
+  manual deploy path live in the `/devops` skill.
+  *Transitional:* until the owner finishes the infrastructure switchover
+  (issue #40 — second Vercel project, Neon branch, prod project moved to the
+  `production` branch, `VERCEL_*` secrets), the deploy workflow is dormant
+  (its guard prints a `::notice::` and skips) and merging to `main` still
+  deploys production the old way.
 - **`/api/healthz`** answers what is actually live: `curl -s
   https://matio.tv/api/healthz | jq` returns status, version (from
   `package.json`, bumped by release-please), the commit and the environment.
+  The release workflow polls it after deploying and fails loudly when the live
+  version does not match the released tag — "released but not actually live" is
+  the failure this endpoint exists to catch.
 - **Infrastructure is a live document too**: changed hosting, a vendor, CI, the
   database or a domain → update the `/devops` skill in the SAME PR. A stale
   infra map is read during an incident, which is exactly when being wrong costs
@@ -538,4 +555,4 @@ scripts/
 - **FREE PIVOT (2026-07-04): `PAYMENTS_ENABLED` is deliberately UNSET in prod → the site is fully free** (see the "Free pivot" business rule for exact semantics). Merging the pivot code to main flipped prod to free on deploy — no env change needed (unset = free is the designed default). Open ops items that code can't do: (1) **cancel/pause the existing live Stripe subscriptions** in the Stripe dashboard (billing continues otherwise; the webhook will mirror the cancellations normally); (2) annotate PostHog + the admin dashboard mentally for grain era #5 (paid-funnel events flatline while free); (3) when/if re-enabling, follow the re-enable checklist in the business rule (env BEFORE redeploy, Stripe prices still present, legacy-show trial-row caveat).
 - **Signup gate — code shipped 2026-07-16, `REQUIRE_SIGNUP` NOT yet set anywhere**: flipping it on = `vercel env add REQUIRE_SIGNUP production` (value `1`) + redeploy (runtime read, no build guard; same bind-at-deploy semantics as `PAYMENTS_ENABLED`); removing the var + redeploy reverts to open free mode. When flipping, annotate PostHog (grain era #6: the anonymous organic funnel flatlines; `signup_wall_shown` with `gate:true` becomes the top-of-funnel event) and expect the admin dashboard's free-funnel panels to go dark for post-flip ranges (signups + watch_progress engagement remain live). The analytics-v2 redesign (2026-07-18, see "Analytics dashboard v2" rule) superseded the PostHog signup-funnel panel — `POSTHOG_PERSONAL_API_KEY`/`POSTHOG_PROJECT_ID` are NO longer needed for the live dashboard. Its deploy order: `pnpm db:migrate` (migration 0023 — additive tables/columns + watch_progress backfill) BEFORE the code deploy; the visit/watch ledgers accrue from the deploy moment.
 - **Resend email — code shipped 2026-07-13, live setup PENDING**: (1) create the Resend account and add domain `matio.tv`, region **eu-west-1** (region affects delivery routing only — Resend account data stays US-hosted regardless); (2) add the DNS records at Namecheap (DNS = registrar-servers.com): DKIM TXT at `resend._domainkey`, MX + SPF TXT on `send.matio.tv` — the root SPF (`spf.privateemail.com`, the PrivateEmail mailbox) and Clerk's `clk*` records are untouched, no conflicts; optionally add a starter DMARC `v=DMARC1; p=none; rua=mailto:contact@matio.tv;` at `_dmarc` (none exists today); (3) create a sending-only API key → `vercel env add RESEND_API_KEY production` (+ `.env.local`) and redeploy. Until then the series-end capture form stores addresses and the admin panel shows a connect hint — nothing breaks. Free tier: 100 emails/day, 3,000/mo, 1 domain (Pro $20/mo when the backlog outgrows it). Sender: `Matio <updates@matio.tv>`, replies route to contact@ (must exist as a PrivateEmail mailbox/alias).
-- GitHub auto-deploy IS wired: `git push origin main` triggers a production deployment (recent releases all shipped this way). CLI deploys (`vercel --prod`) from this machine get stuck in BLOCKED state — use the git-push path. `git push` is therefore BOTH source backup AND deploy.
+- GitHub auto-deploy IS wired. Target model (see "Releases and commit conventions"): merging to `main` deploys **staging**; production deploys only from a published GitHub Release, through `.github/workflows/deploy-production.yml`, after the owner approves the `production` GitHub Environment. **Until the owner finishes the vendor-panel half of issue #40** (second Vercel project, Neon branch, staging Mux signing key, `VERCEL_TOKEN`/`VERCEL_ORG_ID`/`VERCEL_PROJECT_ID` secrets, prod project switched from `main` to the `production` branch) the workflow is dormant — its guard prints a `::notice::` and skips — and `git push origin main` still deploys production the old way. CLI deploys (`vercel --prod`) from this machine get stuck in BLOCKED state; emergency deploy = re-running the workflow manually, or `git push --force origin <sha>:production` once the prod project follows that branch. `git push` remains the source backup either way.

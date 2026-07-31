@@ -1,0 +1,167 @@
+# Единственная дверь в прод. Мерж в `main` выкладывает staging; `matio.tv`
+# обновляется ТОЛЬКО отсюда — по опубликованному GitHub Release и только после
+# того, как владелец нажал кнопку подтверждения в Environment `production`.
+#
+# СПЯЩИЙ КОД до переключения инфраструктуры: пока продовый проект Vercel
+# слушает ветку `main`, а секретов нет, гард ниже печатает ::notice:: и тихо
+# пропускает выкладку. Ничего не ломается и ничего не деплоится само.
+#
+# ПОЧЕМУ CLI, А НЕ ПУШ В ВЕТКУ `production`. Продовый проект Vercel слушает
+# ветку `production` — именно это и отвязывает прод от мержа в `main`. Если бы
+# воркфлоу двигал эту ветку, Vercel собрал бы тот же коммит второй раз: две
+# продовые сборки в гонке за один алиас, и неизвестно, какая победит. Поэтому
+# ветку никто не двигает автоматически — она рычаг «разбить стекло», а выкладку
+# делает CLI из checkout'а релизного тега.
+#
+# АВАРИЙНЫЙ ПУТЬ, если автоматика сломалась (подробности — в скилле /devops):
+#   1. `workflow_dispatch` с input `ref` — тот же путь руками, любым тегом/SHA;
+#   2. умерли сами Actions → `git push --force origin <sha>:production`,
+#      продовый проект соберёт эту ветку своей git-интеграцией;
+#   3. откат без сборки → Vercel → Deployments → предыдущий прод → Promote.
+name: deploy-production
+
+on:
+  release:
+    types: [published]
+  # Ручной запуск обязателен: урок #38 — воркфлоу, который нельзя запустить
+  # руками, чинится только новым пушем. Здесь цена такой поломки — «нашли баг,
+  # а выложить фикс нечем».
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Тег, ветка или SHA для выкладки (пусто = ref запуска)"
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  # Прод выкладывается по одному. Идущий деплой НЕ отменяем: отменённый на
+  # середине деплой оставляет неизвестно что.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: выкладка matio.tv
+    runs-on: ubuntu-latest
+    # Механическая санкция владельца. С обязательным ревьюером в настройках
+    # Environment job встаёт и ждёт кнопки — без неё прод не едет. Пока правила
+    # не заданы (или Environment ещё не создан — GitHub создаст его сам при
+    # первом прогоне), job проходит насквозь и упирается в гард.
+    environment:
+      name: production
+      url: https://matio.tv
+    permissions:
+      contents: read
+    env:
+      # Релиз даёт тег; ручной запуск — либо явный ref, либо тот, из которого
+      # запущен. Порядок важен: на release-событии `inputs` пустой, на
+      # dispatch пустой `github.event.release`.
+      DEPLOY_REF: ${{ github.event.release.tag_name || inputs.ref || github.ref }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+    steps:
+      # Гард: секретов нет → воркфлоу не красный, а тихо пропускается. Печатаем
+      # ИМЕНА пустых секретов, а не факт «чего-то не хватает» (образец —
+      # release-please.yml: молчаливый пропуск без виновника стоил четырёх
+      # холостых прогонов, прежде чем кто-то догадался, чего именно нет).
+      - name: Проверить секреты Vercel
+        id: guard
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          missing=""
+          [ -n "$VERCEL_TOKEN" ]      || missing="$missing VERCEL_TOKEN"
+          [ -n "$VERCEL_ORG_ID" ]     || missing="$missing VERCEL_ORG_ID"
+          [ -n "$VERCEL_PROJECT_ID" ] || missing="$missing VERCEL_PROJECT_ID"
+          if [ -n "$missing" ]; then
+            echo "::notice::выкладка прода пропущена — не заданы секреты:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          # Выкладываем ровно то, что помечено релизом, а не «что сейчас в
+          # ветке»: между публикацией релиза и нажатием кнопки в main может
+          # уехать что угодно.
+          ref: ${{ env.DEPLOY_REF }}
+
+      - uses: pnpm/action-setup@v4        # версия берётся из packageManager
+        if: steps.guard.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          node-version-file: .nvmrc
+
+      # Мажор пиннут намеренно: продовая выкладка не должна менять поведение от
+      # того, что вендор выпустил новый CLI ночью. 53.x — то, чем деплоят с
+      # машины владельца.
+      - name: Vercel CLI
+        if: steps.guard.outputs.ready == 'true'
+        run: npm install --global vercel@53
+
+      # `vercel pull` забирает настройки проекта И продовые переменные
+      # окружения — без него сборка пойдёт без `NEXT_PUBLIC_*` (они
+      # запекаются в бандл) и без гарда цен Stripe из next.config.ts.
+      - name: Забрать продовое окружение проекта
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel pull --yes --environment=production
+
+      - name: Сборка
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel build --prod
+
+      # `--prebuilt` заливает уже собранный артефакт: Vercel не пересобирает и
+      # не может собрать «что-то другое», чем то, что здесь проверено.
+      - name: Выкладка
+        id: deploy
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          url=$(vercel deploy --prebuilt --prod)
+          echo "Задеплоено: $url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # Смоук вместо веры в зелёную галочку. «Релиз создан, но на сайте старая
+      # версия» — ровно тот отказ, ради которого заведён /api/healthz.
+      - name: Смоук /api/healthz
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          expected=""
+          if [ -n "$RELEASE_TAG" ]; then
+            # Тег вида matio-vX.Y.Z; healthz отдаёт голое X.Y.Z из package.json.
+            expected="${RELEASE_TAG##*v}"
+          fi
+          live=""
+          for _ in $(seq 1 20); do
+            live=$(curl -fsS --max-time 10 https://matio.tv/api/healthz | jq -r '.version' || true)
+            if [ -z "$expected" ] && [ -n "$live" ]; then break; fi
+            if [ -n "$expected" ] && [ "$live" = "$expected" ]; then break; fi
+            sleep 15
+          done
+          echo "Живая версия: ${live:-нет ответа}${expected:+ (ожидалась $expected)}"
+          if [ -z "$live" ]; then
+            echo "::error::прод не отвечает на /api/healthz после выкладки."
+            exit 1
+          fi
+          if [ -n "$expected" ] && [ "$live" != "$expected" ]; then
+            echo "::error::прод отвечает версией '${live}', а релиз — '${expected}'. Деплой не доехал или собран не тот коммит."
+            exit 1
+          fi
