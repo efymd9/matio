@@ -867,3 +867,19 @@ Reiterating because it's the highest-impact gotcha: existing Mux assets uploaded
 (Canary Islands → `ES` and Azores/Madeira → `PT` are already covered via their parent country code, so no action needed there.)
 
 Traffic from these is negligible, so it's left as-is for now. **Fix when convenient:** add the codes above to the `CONSENT_REQUIRED_COUNTRIES` set in `lib/cookie-consent.ts`, then redeploy. The gate already fails CLOSED for unknown/malformed geo — this is only about territories with a *valid* non-parent ISO code.
+
+## Vercel: sensitive env vars can't be pulled back
+
+`vercel env ls production` shows 34 of 42 variables as `Encrypted`. Those values
+are **write-only**: `vercel pull` returns them empty, by design. Since
+`NEXT_PUBLIC_*` are inlined into the bundle at build time, anything built
+outside Vercel ships with empty public keys.
+
+Incident #46 (2026-08-04): a CI build in a GitHub runner produced a deployment
+whose Clerk middleware threw `Missing publishableKey` on every request — 500 on
+the entire site, `/api/healthz` included, for ~12 minutes. Middleware runs on
+every request, so a missing build-time key is not a partial failure.
+
+**Rule: this project is built by Vercel, never by a runner.** The production
+deploy workflow uploads sources and lets Vercel build; `vercel build` and
+`--prebuilt` are not to be used here.
