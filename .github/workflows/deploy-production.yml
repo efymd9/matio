@@ -6,6 +6,17 @@
 # слушает ветку `main`, а секретов нет, гард ниже печатает ::notice:: и тихо
 # пропускает выкладку. Ничего не ломается и ничего не деплоится само.
 #
+# ПОЧЕМУ СОБИРАЕТ VERCEL, А НЕ РАННЕР. Инцидент 04.08.2026 (#46): сборка в
+# раннере через `vercel build` положила прод на ~12 минут. 34 из 42 продовых
+# переменных хранятся как Encrypted, а такие значения `vercel pull` НЕ отдаёт
+# обратно — они доступны только на запись. Сборка получила пустой
+# NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, запекла пустоту в бандл (NEXT_PUBLIC_*
+# инлайнятся на этапе сборки), и Clerk-мидлвар — он выполняется на КАЖДОМ
+# запросе — стал бросать «Missing publishableKey» на всех маршрутах, включая
+# /api/healthz. Собрать приложение вне Vercel невозможно в принципе, пока
+# значения намеренно нечитаемы. Поэтому: загружаем исходники, собирает Vercel
+# своим окружением — тем же, которым собирает сегодня.
+#
 # ПОЧЕМУ CLI, А НЕ ПУШ В ВЕТКУ `production`. Продовый проект Vercel слушает
 # ветку `production` — именно это и отвязывает прод от мержа в `main`. Если бы
 # воркфлоу двигал эту ветку, Vercel собрал бы тот же коммит второй раз: две
@@ -99,27 +110,17 @@ jobs:
           # уехать что угодно.
           ref: ${{ env.DEPLOY_REF }}
 
-      - uses: pnpm/action-setup@v4        # версия берётся из packageManager
-        if: steps.guard.outputs.ready == 'true'
-
-      - uses: actions/setup-node@v4
-        if: steps.guard.outputs.ready == 'true'
-        with:
-          node-version-file: .nvmrc
-
-      # Мажор пиннут намеренно: продовая выкладка не должна менять поведение от
-      # того, что вендор выпустил новый CLI ночью. 53.x — то, чем деплоят с
-      # машины владельца.
+      # Ни pnpm, ни Node в раннере не нужны: сборкой занимается Vercel.
+      # Мажор CLI пиннут намеренно — продовая выкладка не должна менять
+      # поведение оттого, что вендор выпустил новый CLI ночью.
       - name: Vercel CLI
         if: steps.guard.outputs.ready == 'true'
         run: npm install --global vercel@53
 
-      # Диагностика доступа ПЕРЕД pull. Без неё единственный симптом неверно
-      # заскоупленного токена — «Could not retrieve Project Settings», из
-      # которого невозможно понять, что не так: токен, id проекта или права.
-      # Проверено 04.08.2026: токен со скоупом личного аккаунта не видит
-      # командные проекты, и сообщение CLI об этом молчит. Шаг не валит
-      # прогон — он только объясняет следующий отказ.
+      # Диагностика доступа. Токен со скоупом личного аккаунта не видит
+      # командные проекты, а сообщения CLI об этом невнятны (стоило одного
+      # круга при настройке 04.08.2026). Шаг не валит прогон — он существует,
+      # чтобы следующий отказ доступа объяснял себя сам.
       - name: Диагностика доступа Vercel
         if: steps.guard.outputs.ready == 'true'
         continue-on-error: true
@@ -130,28 +131,24 @@ jobs:
           echo "Доступные команды:"
           vercel teams ls 2>&1 | tail -10
 
-      # `vercel pull` забирает настройки проекта И продовые переменные
-      # окружения — без него сборка пойдёт без `NEXT_PUBLIC_*` (они
-      # запекаются в бандл) и без гарда цен Stripe из next.config.ts.
-      - name: Забрать продовое окружение проекта
+      # Запоминаем, что сейчас на проде, ДО выкладки — это цель отката, если
+      # смоук не сойдётся. Без этого шага откат требует человека с ноутбуком.
+      - name: Запомнить текущий прод
+        id: prev
         if: steps.guard.outputs.ready == 'true'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: vercel pull --yes --environment=production
+        run: |
+          id=$(vercel inspect https://matio.tv 2>&1 | awk '$1 == "id" { print $2; exit }')
+          echo "Текущий продовый деплой: ${id:-неизвестен}"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
 
-      - name: Сборка
-        if: steps.guard.outputs.ready == 'true'
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: vercel build --prod
-
-      # `--prebuilt` заливает уже собранный артефакт: Vercel не пересобирает и
-      # не может собрать «что-то другое», чем то, что здесь проверено.
-      - name: Выкладка
+      # Исходники уезжают на Vercel, он собирает их СВОИМ окружением — с
+      # настоящими значениями Encrypted-переменных, которых у раннера нет и
+      # быть не может.
+      - name: Выкладка (сборка на стороне Vercel)
         id: deploy
         if: steps.guard.outputs.ready == 'true'
         env:
@@ -159,13 +156,18 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          url=$(vercel deploy --prebuilt --prod)
+          url=$(vercel deploy --prod --yes)
           echo "Задеплоено: $url"
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
       # Смоук вместо веры в зелёную галочку. «Релиз создан, но на сайте старая
       # версия» — ровно тот отказ, ради которого заведён /api/healthz.
+      #
+      # БЫСТРЫЙ ПРОВАЛ: 6 попыток по 10 с, а не 20 по 15. В инциденте #46 смоук
+      # ретраил пять минут, пока сайт отдавал 500, при откате в две секунды —
+      # плохой размен. Минуты хватает, чтобы алиас переключился.
       - name: Смоук /api/healthz
+        id: smoke
         if: steps.guard.outputs.ready == 'true'
         run: |
           expected=""
@@ -174,11 +176,11 @@ jobs:
             expected="${RELEASE_TAG##*v}"
           fi
           live=""
-          for _ in $(seq 1 20); do
+          for _ in $(seq 1 6); do
             live=$(curl -fsS --max-time 10 https://matio.tv/api/healthz | jq -r '.version' || true)
             if [ -z "$expected" ] && [ -n "$live" ]; then break; fi
             if [ -n "$expected" ] && [ "$live" = "$expected" ]; then break; fi
-            sleep 15
+            sleep 10
           done
           echo "Живая версия: ${live:-нет ответа}${expected:+ (ожидалась $expected)}"
           if [ -z "$live" ]; then
@@ -189,3 +191,24 @@ jobs:
             echo "::error::прод отвечает версией '${live}', а релиз — '${expected}'. Деплой не доехал или собран не тот коммит."
             exit 1
           fi
+
+      # Автооткат. Выкладка, которую смоук не подтвердил, откатывается САМА:
+      # человек может спать, а сайт лежать. Откат возвращает готовый артефакт,
+      # пересборки нет — в инциденте #46 это заняло две секунды.
+      - name: Откат, если смоук не сошёлся
+        if: failure() && steps.smoke.conclusion == 'failure' && steps.prev.outputs.id != ''
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          echo "::warning::смоук не сошёлся — откатываю прод на ${{ steps.prev.outputs.id }}"
+          vercel rollback "${{ steps.prev.outputs.id }}" --yes
+          for _ in $(seq 1 6); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://matio.tv/api/healthz || true)
+            echo "после отката /api/healthz: $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "::error::откат выполнен, но прод не отвечает 200 — нужен человек."
+          exit 1
