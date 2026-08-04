@@ -114,6 +114,22 @@ jobs:
         if: steps.guard.outputs.ready == 'true'
         run: npm install --global vercel@53
 
+      # Диагностика доступа ПЕРЕД pull. Без неё единственный симптом неверно
+      # заскоупленного токена — «Could not retrieve Project Settings», из
+      # которого невозможно понять, что не так: токен, id проекта или права.
+      # Проверено 04.08.2026: токен со скоупом личного аккаунта не видит
+      # командные проекты, и сообщение CLI об этом молчит. Шаг не валит
+      # прогон — он только объясняет следующий отказ.
+      - name: Диагностика доступа Vercel
+        if: steps.guard.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          echo "Токен принадлежит: $(vercel whoami 2>&1 | tail -1)"
+          echo "Доступные команды:"
+          vercel teams ls 2>&1 | tail -10
+
       # `vercel pull` забирает настройки проекта И продовые переменные
       # окружения — без него сборка пойдёт без `NEXT_PUBLIC_*` (они
       # запекаются в бандл) и без гарда цен Stripe из next.config.ts.
