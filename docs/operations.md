@@ -47,6 +47,19 @@ For dev branches, `pnpm db:push` is acceptable. **Never** run `db:push` against 
 
 The migrate command uses `drizzle.config.ts` which `dotenv`-loads `.env.local`. NOTICE messages about `schema "drizzle" already exists, skipping` are normal — they appear on every re-run.
 
+Migrations follow **expand-contract** (CLAUDE.md → "Data: migrations and backups"): a `DROP COLUMN` ships in a separate, later release than the code that stopped using the column.
+
+## DB backups
+
+Daily encrypted dump + monthly automatic restore probe. Nothing to run by hand day to day; the two commands worth knowing:
+
+```bash
+gh workflow run db-backup           # extra dump before a risky migration
+gh workflow run db-restore-check    # "are the backups actually alive?"
+```
+
+Restoring by hand, step by step: [runbooks/db-restore.md](./runbooks/db-restore.md). How the pieces fit together and which secrets are involved: the `/devops` skill, section «Бэкапы».
+
 ## Adding new routes
 
 Pick the right group:

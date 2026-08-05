@@ -175,6 +175,46 @@ auto-merge is armed by the main session only, only after review.
   infra map is read during an incident, which is exactly when being wrong costs
   the most.
 
+### Data: migrations and backups
+
+- **Migrations are expand-contract, always.** No DDL that breaks the previous
+  version of the code ships in the same release as that code. It is two
+  releases: *expand* — the new column is nullable or has a default and the code
+  writes both shapes; *contract* — the old shape is dropped, and only once the
+  expand deploy is READY. This is not theory in this repo: a `DROP COLUMN` that
+  travelled with its own code cost three minutes of production downtime on
+  2026-06-04, because Drizzle bakes the full column list into the build and a
+  `SELECT` over the vanished column throws. Adding is the mirror image —
+  migrate first, deploy second; dropping is migrate LAST.
+- **An index on a table that can grow states its trade-off in the migration.**
+  A plain `CREATE INDEX` holds a write lock for the entire build;
+  `CONCURRENTLY` does not, but cannot run inside a transaction (its own
+  migration file) and can leave an INVALID index behind if it fails. Either
+  choice is defensible; an unexplained choice is not — the reason goes in a
+  comment in the `.sql`.
+- **Mutations are idempotent.** A client retry — double tap, lost response,
+  webhook redelivery, a user reloading the success page — must never produce a
+  second row. Reuse the patterns already in the codebase instead of inventing
+  one: claim the vendor's event id before processing (`stripe_events.event_id`),
+  a natural unique key plus `ON CONFLICT DO UPDATE` (`show_reminders
+  (show_id, email)`, `watch_progress (user_id, episode_id)`), a partial unique
+  index for "at most one active" (`subscriptions … WHERE status IN (…)`), a
+  deterministic Stripe idempotency key for checkout sessions, and a claim-stamp
+  under `FOR UPDATE SKIP LOCKED` for batch dispatch (`show_reminders.notified_at`).
+  A new write path must be able to answer, in one sentence, what makes running
+  it twice safe.
+- **Backups are real, and the restore probe is what makes them real.**
+  `db-backup` (daily, 03:40 UTC) dumps production with the Postgres 18 client,
+  encrypts it with age and uploads it as a **private** Vercel Blob object;
+  `db-restore-check` (monthly) restores the newest dump into a clean Postgres 18
+  and runs smoke queries. Vercel Blob has no S3-style lifecycle rules, so the
+  35-day retention is executed by the script itself (`infra/backup/blob.ts
+  prune`) — never delete that step. The private age key exists in exactly two
+  places, the owner's password manager and the `BACKUP_AGE_SECRET_KEY` secret;
+  lose both and every dump is scrap. Restoring by hand:
+  [docs/runbooks/db-restore.md](./docs/runbooks/db-restore.md). Neon's PITR
+  stays as the fast "oops, deleted the wrong rows" layer, not as the backup.
+
 ### Tests and coverage
 
 - **Runner: Vitest** (`vitest.config.mts`). Default environment is `node`; a
@@ -473,6 +513,17 @@ scripts/
   check-subscription-dupes.ts # pnpm db:check-sub-dupes — pre-flight for 0008
                            #   (locale tests moved to lib/i18n/negotiate.test.ts
                            #    + lib/seo.test.ts — vitest, `pnpm test:locale`)
+infra/
+  backup/                  # DB backups (run by .github/workflows/db-backup.yml
+                           #   + db-restore-check.yml, not by the app)
+    backup_db.sh           #   pg_dump → age → private Vercel Blob → 35-day prune
+    restore_check.sh       #   newest dump → decrypt → pg_restore into a clean
+                           #     PG18 → smoke; fails on a STALE dump too
+    blob.ts                #   tsx CLI over @vercel/blob (put/latest/fetch/
+                           #     prune/selftest); Blob has no S3 lifecycle, so
+                           #     retention IS this script
+    retention.ts           #   pure prune rules (+ tests) — the one piece of
+                           #     backup logic whose bug DELETES objects
 ```
 
 ## Key business rules

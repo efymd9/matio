@@ -1,0 +1,147 @@
+# Ежемесячная проба восстановления: свежий дамп из Vercel Blob → расшифровка →
+# pg_restore в ЧИСТЫЙ Postgres 18 → smoke-запросы. Это единственное, что
+# отличает бэкап от лотереи: сам по себе дамп ничего не гарантирует, пока из
+# него хоть раз не подняли базу.
+#
+# Проба заодно сторожит db-backup: старый дамп валит её так же громко, как
+# битый (проверка свежести в restore_check.sh).
+name: db-restore-check
+
+on:
+  schedule:
+    # 1-го числа в 04:20 UTC — через сорок минут после ночного дампа, чтобы
+    # проба всегда работала со свежайшей копией.
+    - cron: "20 4 1 * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: db-restore-check
+  cancel-in-progress: false
+
+jobs:
+  restore-check:
+    name: восстановление из последнего дампа
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # эскалация p1-issue при провале планового прогона
+    env:
+      BACKUP_PREFIX: db-backups/production
+      # Дамп снимается ежедневно; сутки + запас. Больше — и проба перестанет
+      # ловить остановившийся db-backup, ради чего она наполовину и заведена.
+      MAX_DUMP_AGE_HOURS: "48"
+      RESTORE_DATABASE_URL: postgres://postgres:probe-only-in-ci@127.0.0.1:5432/restore_probe
+
+    # Чистый сервер ТОГО ЖЕ МАЖОРА, что боевой (Neon = Postgres 18). Проба на
+    # 16-м доказывала бы восстановимость в базу, которой у нас нет.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: probe-only-in-ci
+          POSTGRES_DB: restore_probe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      # Тот же гард, что в db-backup.yml, и по той же причине: имена пустых
+      # секретов в лог, мягкий пропуск на ручном запуске — и жёсткий провал на
+      # плановом, потому что «настроенная проба, которая молча не идёт» ничем
+      # не лучше отсутствующей.
+      - name: Проверить секреты
+        id: guard
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          BACKUP_AGE_SECRET_KEY: ${{ secrets.BACKUP_AGE_SECRET_KEY }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          missing=""
+          [ -n "$BLOB_READ_WRITE_TOKEN" ] || missing="$missing BLOB_READ_WRITE_TOKEN"
+          [ -n "$BACKUP_AGE_SECRET_KEY" ] || missing="$missing BACKUP_AGE_SECRET_KEY"
+          if [ -z "$missing" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$EVENT" = "schedule" ]; then
+            echo "::error::проба настроена, но у планового прогона нет секретов:$missing"
+            exit 1
+          fi
+          echo "::notice::db-restore-check пропущен — не заданы секреты:$missing"
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.ready == 'true'
+
+      - uses: pnpm/action-setup@v4
+        if: steps.guard.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Зависимости
+        if: steps.guard.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+
+      # Та же грабля, что в db-backup: обёртка /usr/bin/pg_restore берёт
+      # системного (16-го) клиента, а дамп снят 18-м — pg_restore младшего
+      # мажора его не прочитает. Пиннуем реальные бинарники; версию печатает
+      # сам скрипт.
+      - name: Клиенты Postgres 18 + age
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-18 age
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      # Артефактов у этой джобы нет и не будет: восстановленная база и
+      # расшифрованный дамп содержат персональные данные. Наружу выходит
+      # ровно одна строка — «OK: restore-проба пройдена (…)» с числами.
+      - name: Проба восстановления
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          BACKUP_AGE_SECRET_KEY: ${{ secrets.BACKUP_AGE_SECRET_KEY }}
+        run: ./infra/backup/restore_check.sh
+
+      - name: Завести p1-issue при провале планового прогона
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MARKER: "[db-restore-check] плановая проба восстановления упала"
+        run: |
+          body=$(printf '%s\n' \
+            "Плановая проба восстановления упала: $RUN_URL" \
+            "" \
+            "Это значит одно из двух, и оба — p1: либо дампы перестали" \
+            "сниматься (проверь \`db-backup\`), либо последний дамп не" \
+            "восстанавливается. Ручной путь и разбор — docs/runbooks/db-restore.md." \
+            "" \
+            "_Issue завёл воркфлоу; на доску её нужно положить руками:_" \
+            "\`tools/claude/board_status.sh <N> tech\`.")
+          num=$(gh issue list --state open --label domain:infra --limit 100 \
+            --json number,title \
+            --jq "[.[] | select(.title | contains(\"$MARKER\"))][0].number // empty")
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body "$body"
+            echo "::warning::дописал комментарий в уже открытую #$num"
+          else
+            gh issue create --title "$MARKER" \
+              --label "type:bug,domain:infra,p1,by:agent-claude" \
+              --body "$body"
+          fi
