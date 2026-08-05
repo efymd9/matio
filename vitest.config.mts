@@ -85,7 +85,10 @@ export default defineConfig({
           name: "unit",
           environment: "node",
           include: [
-            "{app,components,db,lib,tools}/**/*.{test,spec}.{ts,tsx}",
+            // `infra/` — скрипты эксплуатации (бэкапы). В покрытие они не
+            // входят (см. include выше), но чистые правила вроде ретеншена
+            // удаляют объекты хранилища, и проверять их обязательно.
+            "{app,components,db,infra,lib,tools}/**/*.{test,spec}.{ts,tsx}",
             "proxy.test.ts",
           ],
         },
