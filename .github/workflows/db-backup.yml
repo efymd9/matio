@@ -121,6 +121,11 @@ jobs:
         if: failure() && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
+          # GH_REPO обязателен: провалиться прогон может НА ГАРДЕ, то есть до
+          # checkout — тогда рабочего каталога с гитом нет, и `gh` без явного
+          # репозитория падает «not a git repository». Эскалация, которая сама
+          # не работает ровно в одном из двух сценариев провала, бесполезна.
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           MARKER: "[db-backup] плановый прогон упал"
         run: |

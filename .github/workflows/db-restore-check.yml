@@ -122,6 +122,10 @@ jobs:
         if: failure() && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
+          # GH_REPO обязателен: гард может уронить прогон ДО checkout, и тогда
+          # `gh` без явного репозитория падает «not a git repository» —
+          # эскалация молчала бы ровно в одном из двух сценариев провала.
+          GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           MARKER: "[db-restore-check] плановая проба восстановления упала"
         run: |
