@@ -39,7 +39,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: git fetch --no-tags origin main:refs/remotes/origin/main
 
-      - uses: pnpm/action-setup@v4        # версия берётся из packageManager
+      - uses: pnpm/action-setup@v6        # версия берётся из packageManager
 
       - uses: actions/setup-node@v4
         with:
