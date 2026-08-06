@@ -19,7 +19,7 @@ jobs:
     name: зависимости (osv-scanner)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Гоняем официальный образ, а не action: имя и интерфейс образа
       # стабильны, а лишний слой сторонней обёртки здесь не нужен.
@@ -34,7 +34,7 @@ jobs:
     name: секреты в истории (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Секрет, удалённый следующим коммитом, остаётся в истории навсегда —
           # сканировать надо ВСЮ историю, а не последний диф.
