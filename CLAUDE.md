@@ -136,6 +136,47 @@ auto-merge is armed by the main session only, only after review.
   share one machine.
 - Writes to the shared memory are small and additive.
 
+### Routine on autopilot (the `auto` label)
+
+The main session does not only dispatch work — it executes routine itself, with
+sub-agents (Agent tool, `isolation: "worktree"`), one worktree each.
+
+- **What qualifies**: `type:bug` and `type:debt` with **no new or changed
+  visible UI**. Never on autopilot: anything visible, product decisions, paid
+  actions, tearing down environments or data, and the Release PR. `p1` is
+  allowed but the owner is told the moment it starts, not in a digest.
+- **Who labels**: the main session at triage; a worker agent may label a bug it
+  files in passing when the routine nature is obvious. **Doubt = no label** — an
+  unlabelled task simply waits for a human decision, which costs nothing.
+- **Slot cap: 2 concurrent.** Slots are not remembered, they are computed from
+  the board (`auto` ∧ In progress). A slot is filled only by a task whose files
+  and modules do not overlap the active ones. Overlapping *logic* blocks;
+  purely additive neighbours (new independent config keys, new locale strings,
+  new registry rows) do not — the second one merges `origin/main` and the
+  conflict is trivial. Reading the rule too strictly keeps slots empty for
+  nothing.
+- **The sub-agent's prompt** says: work to the spec, open a PR with `Closes #N`,
+  **do not babysit** (the pipeline belongs to the main session), and here are
+  the bare-worktree traps (no gitignored files — copy `.env.local` from the main
+  checkout, run `pnpm install`).
+- **A silent sub-agent is a stuck sub-agent.** No PR and no questions for a long
+  stretch usually means it stopped at a fork and is waiting. Ping it with
+  SendMessage rather than waiting.
+- **Review comments go to the same sub-agent** via SendMessage — its context is
+  alive. A fresh agent would have to rediscover everything.
+- **Cleanup**: `python3 tools/claude/wt_janitor.py` (dry-run) / `--yes`. It
+  deletes a worktree only when it is provably safe: clean copy, a merged PR for
+  the branch, and the branch tip inside that PR. Note the subtlety it exists
+  for: a squash merge gives the merged commit a **new** SHA, so "is the tip an
+  ancestor of main" is always false — the janitor compares against
+  `refs/pull/<n>/head` instead.
+
+**Every piece of work is an issue — including emergency fixes.** During the
+2026-08-04 incident five PRs were opened with no issue behind them; the work
+existed, the board did not know about it. On autopilot that pattern turns into
+invisible fleets of sub-agents. File the issue first, even when the fix is
+urgent — it costs one command.
+
 ### Releases and commit conventions
 
 - **Commit messages are the changelog.** `fix:` → patch, `feat:` → minor,
