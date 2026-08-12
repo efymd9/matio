@@ -68,13 +68,14 @@ export default defineConfig({
       // a PR? Raise the floor in the SAME PR. Lowering one is a review blocker.
       //
       // История движения: 1.10 (нулевой старт, этап 03) → 1.37 (истории Lab
-      // исполняют компоненты, этап 04) → 1.45 (тесты /api/healthz, этап 05).
-      // Полы идут следом, округлением вниз.
+      // исполняют компоненты, этап 04) → 1.45 (тесты /api/healthz, этап 05) →
+      // 3.80 (замок стенда, #62: proxy.ts впервые исполняется тестами и тянет
+      // за собой пол-`lib/`). Полы идут следом, округлением вниз.
       thresholds: {
-        lines: 1.4,
-        functions: 1,
-        branches: 1.8,
-        statements: 1.4,
+        lines: 3.7,
+        functions: 2.3,
+        branches: 3.1,
+        statements: 3.7,
       },
     },
 
