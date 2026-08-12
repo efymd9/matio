@@ -70,7 +70,7 @@ jobs:
           echo "::notice::db-backup пропущен — не заданы секреты:$missing"
           echo "ready=false" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.guard.outputs.ready == 'true'
 
       # Node нужен не приложению, а обёртке над Vercel Blob

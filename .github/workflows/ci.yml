@@ -30,7 +30,7 @@ jobs:
       contents: read
       pull-requests: write   # для стики-коммента с покрытием
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # diff-cover сравнивает с origin/main — нужна история, а не срез.
           fetch-depth: 0

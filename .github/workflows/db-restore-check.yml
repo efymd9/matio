@@ -76,7 +76,7 @@ jobs:
           echo "::notice::db-restore-check пропущен — не заданы секреты:$missing"
           echo "ready=false" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.guard.outputs.ready == 'true'
 
       - uses: pnpm/action-setup@v4
