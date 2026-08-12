@@ -95,7 +95,7 @@ jobs:
       # diff-cover: изменённые в PR строки обязаны быть покрыты ≥85%. Это и
       # есть настоящие ворота — общий процент покрытия растёт медленно, а вот
       # новый непротестированный код в проект больше не попадает.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: github.event_name == 'pull_request'
         with:
           python-version: '3.12'
