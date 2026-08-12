@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
+import type { NextFetchEvent, NextRequest } from "next/server";
 import { NextResponse, userAgent } from "next/server";
 import { db } from "@/db";
 import { users } from "@/db/schema";
@@ -36,6 +36,12 @@ import {
   SITE_URL,
   stripLocalePrefix,
 } from "@/lib/seo";
+import {
+  evaluateStagingLock,
+  NOINDEX_HEADER,
+  NOINDEX_VALUE,
+  stagingLockChallenge,
+} from "@/lib/staging-lock";
 import { VISITOR_COOKIE, VISITOR_COOKIE_MAX_AGE } from "@/lib/visitor-cookie";
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
@@ -260,7 +266,7 @@ function applyVisitorCookie(
   return out;
 }
 
-export default clerkMiddleware(async (auth, req) => {
+const handleRequest = clerkMiddleware(async (auth, req) => {
   // Consolidate the legacy production alias onto the apex so it isn't indexed
   // as a duplicate origin. Vercel does NOT auto-noindex production
   // *.vercel.app aliases (only preview deploys), and the alias currently
@@ -349,6 +355,43 @@ export default clerkMiddleware(async (auth, req) => {
   // gated above.
   return applyVisitorCookie(req, applyMarketingCookies(req)) ?? undefined;
 });
+
+// STAGING LOCK — the outermost layer, ahead of everything above.
+//
+// Set `STAGING_LOCK_PASSWORD` (bench only, NEVER on production) and the whole
+// origin asks for HTTP Basic Auth, plus every response is marked
+// `noindex, nofollow`. It sits first on purpose: an anonymous hit must not
+// reach the marketing machinery below, or a stray crawler would mint visitor
+// and consent cookies — and attribution rows — on the bench.
+//
+// With the variable unset, the cost of all of this is a single environment
+// read: no header parsing, no path matching, no extra allocation, on a file
+// that runs for every request. Why the lock lives here at all rather than in
+// Vercel's panel is explained in lib/staging-lock.ts.
+export default function proxy(req: NextRequest, event: NextFetchEvent) {
+  const password = process.env.STAGING_LOCK_PASSWORD;
+  if (!password) return handleRequest(req, event);
+  return lockedRequest(req, event, password);
+}
+
+async function lockedRequest(
+  req: NextRequest,
+  event: NextFetchEvent,
+  password: string,
+) {
+  const verdict = evaluateStagingLock(
+    password,
+    req.nextUrl.pathname,
+    req.headers.get("authorization"),
+  );
+  if (verdict === "challenge") return stagingLockChallenge();
+  // `?? NextResponse.next()` because a middleware handler may answer with
+  // "carry on, nothing to add" — and even that response must carry the robots
+  // header while the bench is locked.
+  const res = (await handleRequest(req, event)) ?? NextResponse.next();
+  res.headers.set(NOINDEX_HEADER, NOINDEX_VALUE);
+  return res;
+}
 
 export const config = {
   matcher: [

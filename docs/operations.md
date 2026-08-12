@@ -47,6 +47,19 @@ For dev branches, `pnpm db:push` is acceptable. **Never** run `db:push` against 
 
 The migrate command uses `drizzle.config.ts` which `dotenv`-loads `.env.local`. NOTICE messages about `schema "drizzle" already exists, skipping` are normal — they appear on every re-run.
 
+Migrations follow **expand-contract** (CLAUDE.md → "Data: migrations and backups"): a `DROP COLUMN` ships in a separate, later release than the code that stopped using the column.
+
+## DB backups
+
+Daily encrypted dump + monthly automatic restore probe. Nothing to run by hand day to day; the two commands worth knowing:
+
+```bash
+gh workflow run db-backup           # extra dump before a risky migration
+gh workflow run db-restore-check    # "are the backups actually alive?"
+```
+
+Restoring by hand, step by step: [runbooks/db-restore.md](./runbooks/db-restore.md). How the pieces fit together and which secrets are involved: the `/devops` skill, section «Бэкапы».
+
 ## Adding new routes
 
 Pick the right group:
@@ -120,8 +133,19 @@ Always idempotent (retries happen) — use `onConflictDoNothing` / `onConflictDo
 
 ## Deploy
 
+Production is deployed by **publishing a GitHub Release**, which runs
+`.github/workflows/deploy-production.yml` after the owner approves the
+`production` GitHub Environment. Merging to `main` deploys **staging**, not
+matio.tv. Ritual: the `/release` skill; map and emergency paths: `/devops`.
+
+The commands below describe what that workflow does under the hood (and what a
+break-glass manual deploy looks like) — `vercel --prod` from the owner's own
+machine is known to hang in BLOCKED state, so it is not the deploy path:
+
 ```bash
-vercel --prod --yes
+vercel pull --yes --environment=production
+vercel build --prod
+vercel deploy --prebuilt --prod
 ```
 
 Outputs a JSON object with the immutable deployment URL. Production aliases (`matio.tv` apex + `www.matio.tv` + legacy `matio-ten.vercel.app`) update automatically. The apex is the canonical surface — `www` 307-redirects to apex, so external integrations that don't follow redirects (Stripe / Mux / Clerk webhooks) **must** point at the apex form.
@@ -130,7 +154,8 @@ Outputs a JSON object with the immutable deployment URL. Production aliases (`ma
 
 ```bash
 echo -n "the-value" | vercel env add VAR_NAME production
-vercel --prod --yes
+# …then redeploy: publish a release, or re-run deploy-production via
+# Actions → deploy-production → Run workflow.
 ```
 
 To overwrite an existing var:

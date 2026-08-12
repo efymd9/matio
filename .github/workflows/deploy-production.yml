@@ -1,0 +1,214 @@
+# Единственная дверь в прод. Мерж в `main` выкладывает staging; `matio.tv`
+# обновляется ТОЛЬКО отсюда — по опубликованному GitHub Release и только после
+# того, как владелец нажал кнопку подтверждения в Environment `production`.
+#
+# СПЯЩИЙ КОД до переключения инфраструктуры: пока продовый проект Vercel
+# слушает ветку `main`, а секретов нет, гард ниже печатает ::notice:: и тихо
+# пропускает выкладку. Ничего не ломается и ничего не деплоится само.
+#
+# ПОЧЕМУ СОБИРАЕТ VERCEL, А НЕ РАННЕР. Инцидент 04.08.2026 (#46): сборка в
+# раннере через `vercel build` положила прод на ~12 минут. 34 из 42 продовых
+# переменных хранятся как Encrypted, а такие значения `vercel pull` НЕ отдаёт
+# обратно — они доступны только на запись. Сборка получила пустой
+# NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, запекла пустоту в бандл (NEXT_PUBLIC_*
+# инлайнятся на этапе сборки), и Clerk-мидлвар — он выполняется на КАЖДОМ
+# запросе — стал бросать «Missing publishableKey» на всех маршрутах, включая
+# /api/healthz. Собрать приложение вне Vercel невозможно в принципе, пока
+# значения намеренно нечитаемы. Поэтому: загружаем исходники, собирает Vercel
+# своим окружением — тем же, которым собирает сегодня.
+#
+# ПОЧЕМУ CLI, А НЕ ПУШ В ВЕТКУ `production`. Продовый проект Vercel слушает
+# ветку `production` — именно это и отвязывает прод от мержа в `main`. Если бы
+# воркфлоу двигал эту ветку, Vercel собрал бы тот же коммит второй раз: две
+# продовые сборки в гонке за один алиас, и неизвестно, какая победит. Поэтому
+# ветку никто не двигает автоматически — она рычаг «разбить стекло», а выкладку
+# делает CLI из checkout'а релизного тега.
+#
+# АВАРИЙНЫЙ ПУТЬ, если автоматика сломалась (подробности — в скилле /devops):
+#   1. `workflow_dispatch` с input `ref` — тот же путь руками, любым тегом/SHA;
+#   2. умерли сами Actions → `git push --force origin <sha>:production`,
+#      продовый проект соберёт эту ветку своей git-интеграцией;
+#   3. откат без сборки → Vercel → Deployments → предыдущий прод → Promote.
+name: deploy-production
+
+on:
+  release:
+    types: [published]
+  # Ручной запуск обязателен: урок #38 — воркфлоу, который нельзя запустить
+  # руками, чинится только новым пушем. Здесь цена такой поломки — «нашли баг,
+  # а выложить фикс нечем».
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Тег, ветка или SHA для выкладки (пусто = ref запуска)"
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  # Прод выкладывается по одному. Идущий деплой НЕ отменяем: отменённый на
+  # середине деплой оставляет неизвестно что.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: выкладка matio.tv
+    runs-on: ubuntu-latest
+    # Механическая санкция владельца. С обязательным ревьюером в настройках
+    # Environment job встаёт и ждёт кнопки — без неё прод не едет. Пока правила
+    # не заданы (или Environment ещё не создан — GitHub создаст его сам при
+    # первом прогоне), job проходит насквозь и упирается в гард.
+    environment:
+      # ИМЕННО release-production, а не production: окружение `Production`
+      # (и `Preview`) в этом репозитории принадлежит интеграции Vercel — она
+      # отмечает через них свои деплои с 10.05.2026. Имена окружений GitHub
+      # уникальны без учёта регистра, поэтому `production` попадает в чужую
+      # запись, а повешенное на неё правило подтверждения смешивает наш
+      # релизный шлюз со служебной телеметрией вендора. Проверено при
+      # настройке: правило на `Production` деплои Vercel не заблокировало, но
+      # держать их в одной сущности всё равно нельзя.
+      name: release-production
+      url: https://matio.tv
+    permissions:
+      contents: read
+    env:
+      # Релиз даёт тег; ручной запуск — либо явный ref, либо тот, из которого
+      # запущен. Порядок важен: на release-событии `inputs` пустой, на
+      # dispatch пустой `github.event.release`.
+      DEPLOY_REF: ${{ github.event.release.tag_name || inputs.ref || github.ref }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+    steps:
+      # Гард: секретов нет → воркфлоу не красный, а тихо пропускается. Печатаем
+      # ИМЕНА пустых секретов, а не факт «чего-то не хватает» (образец —
+      # release-please.yml: молчаливый пропуск без виновника стоил четырёх
+      # холостых прогонов, прежде чем кто-то догадался, чего именно нет).
+      - name: Проверить секреты Vercel
+        id: guard
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          missing=""
+          [ -n "$VERCEL_TOKEN" ]      || missing="$missing VERCEL_TOKEN"
+          [ -n "$VERCEL_ORG_ID" ]     || missing="$missing VERCEL_ORG_ID"
+          [ -n "$VERCEL_PROJECT_ID" ] || missing="$missing VERCEL_PROJECT_ID"
+          if [ -n "$missing" ]; then
+            echo "::notice::выкладка прода пропущена — не заданы секреты:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.ready == 'true'
+        with:
+          # Выкладываем ровно то, что помечено релизом, а не «что сейчас в
+          # ветке»: между публикацией релиза и нажатием кнопки в main может
+          # уехать что угодно.
+          ref: ${{ env.DEPLOY_REF }}
+
+      # Ни pnpm, ни Node в раннере не нужны: сборкой занимается Vercel.
+      # Мажор CLI пиннут намеренно — продовая выкладка не должна менять
+      # поведение оттого, что вендор выпустил новый CLI ночью.
+      - name: Vercel CLI
+        if: steps.guard.outputs.ready == 'true'
+        run: npm install --global vercel@53
+
+      # Диагностика доступа. Токен со скоупом личного аккаунта не видит
+      # командные проекты, а сообщения CLI об этом невнятны (стоило одного
+      # круга при настройке 04.08.2026). Шаг не валит прогон — он существует,
+      # чтобы следующий отказ доступа объяснял себя сам.
+      - name: Диагностика доступа Vercel
+        if: steps.guard.outputs.ready == 'true'
+        continue-on-error: true
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          echo "Токен принадлежит: $(vercel whoami 2>&1 | tail -1)"
+          echo "Доступные команды:"
+          vercel teams ls 2>&1 | tail -10
+
+      # Запоминаем, что сейчас на проде, ДО выкладки — это цель отката, если
+      # смоук не сойдётся. Без этого шага откат требует человека с ноутбуком.
+      - name: Запомнить текущий прод
+        id: prev
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          id=$(vercel inspect https://matio.tv 2>&1 | awk '$1 == "id" { print $2; exit }')
+          echo "Текущий продовый деплой: ${id:-неизвестен}"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      # Исходники уезжают на Vercel, он собирает их СВОИМ окружением — с
+      # настоящими значениями Encrypted-переменных, которых у раннера нет и
+      # быть не может.
+      - name: Выкладка (сборка на стороне Vercel)
+        id: deploy
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          url=$(vercel deploy --prod --yes)
+          echo "Задеплоено: $url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # Смоук вместо веры в зелёную галочку. «Релиз создан, но на сайте старая
+      # версия» — ровно тот отказ, ради которого заведён /api/healthz.
+      #
+      # БЫСТРЫЙ ПРОВАЛ: 6 попыток по 10 с, а не 20 по 15. В инциденте #46 смоук
+      # ретраил пять минут, пока сайт отдавал 500, при откате в две секунды —
+      # плохой размен. Минуты хватает, чтобы алиас переключился.
+      - name: Смоук /api/healthz
+        id: smoke
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          expected=""
+          if [ -n "$RELEASE_TAG" ]; then
+            # Тег вида matio-vX.Y.Z; healthz отдаёт голое X.Y.Z из package.json.
+            expected="${RELEASE_TAG##*v}"
+          fi
+          live=""
+          for _ in $(seq 1 6); do
+            live=$(curl -fsS --max-time 10 https://matio.tv/api/healthz | jq -r '.version' || true)
+            if [ -z "$expected" ] && [ -n "$live" ]; then break; fi
+            if [ -n "$expected" ] && [ "$live" = "$expected" ]; then break; fi
+            sleep 10
+          done
+          echo "Живая версия: ${live:-нет ответа}${expected:+ (ожидалась $expected)}"
+          if [ -z "$live" ]; then
+            echo "::error::прод не отвечает на /api/healthz после выкладки."
+            exit 1
+          fi
+          if [ -n "$expected" ] && [ "$live" != "$expected" ]; then
+            echo "::error::прод отвечает версией '${live}', а релиз — '${expected}'. Деплой не доехал или собран не тот коммит."
+            exit 1
+          fi
+
+      # Автооткат. Выкладка, которую смоук не подтвердил, откатывается САМА:
+      # человек может спать, а сайт лежать. Откат возвращает готовый артефакт,
+      # пересборки нет — в инциденте #46 это заняло две секунды.
+      - name: Откат, если смоук не сошёлся
+        if: failure() && steps.smoke.conclusion == 'failure' && steps.prev.outputs.id != ''
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          echo "::warning::смоук не сошёлся — откатываю прод на ${{ steps.prev.outputs.id }}"
+          vercel rollback "${{ steps.prev.outputs.id }}" --yes
+          for _ in $(seq 1 6); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://matio.tv/api/healthz || true)
+            echo "после отката /api/healthz: $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "::error::откат выполнен, но прод не отвечает 200 — нужен человек."
+          exit 1

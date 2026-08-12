@@ -1,4 +1,14 @@
+import { readFileSync } from "node:fs";
+
 import type { NextConfig } from "next";
+
+// The product version, single-sourced from package.json — which release-please
+// bumps when a Release PR is merged (release-please-config.json). Inlined at
+// build time and served by /api/healthz, so "which version is actually live"
+// is answered by curl instead of by reading the deploy history.
+const { version: packageVersion } = JSON.parse(
+  readFileSync("./package.json", "utf8"),
+) as { version: string };
 
 // Fail the PRODUCTION build (Vercel) if a required live-Stripe price env var is
 // missing, instead of shipping a deployment whose subscribe checkout actions
@@ -26,6 +36,11 @@ if (
 }
 
 const nextConfig: NextConfig = {
+  env: {
+    // An explicit APP_VERSION (e.g. injected by a CI deploy) wins; otherwise
+    // package.json is the source of truth.
+    APP_VERSION: process.env.APP_VERSION ?? packageVersion,
+  },
   // PostHog recommends posting analytics through a same-origin path so ad
   // blockers don't drop ingestion and the SDK's cookies stay first-party.
   // Middleware (proxy.ts) runs BEFORE these rewrites, so /ingest is excluded

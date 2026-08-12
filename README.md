@@ -62,25 +62,32 @@ follow when working in this repo.
 | `pnpm db:studio` | Drizzle Studio (browser DB GUI) |
 | `pnpm stripe:setup` | Idempotently create Stripe products + prices |
 | `pnpm seed:fake-shows` | Insert 35 demo shows (slug prefix `demo-`) |
-| `pnpm seed:fake-shows -- --reset` | Delete every `demo-*` show |
+| `pnpm seed:fake-shows -- --playback-ids=<mux id>[,<id>:<seconds>]` | …and give one demo show a season of playable episodes (signed playback). Ids are arguments, never committed |
+| `pnpm seed:fake-shows -- --reset` | Delete every `demo-*` show (seasons and episodes cascade) |
 | `pnpm promote-to-admin <email>` | Grant `users.role='admin'` |
 
 ## Deploying
 
-GitHub auto-deploy is **not** wired (the Vercel project lives under a
-different account than the GitHub repo owner). Ship via the CLI:
+Two steps, and only the second one reaches viewers:
 
-```bash
-vercel --prod --yes
-```
+- **Merging to `main` deploys staging** — a separate Vercel project with its
+  own Neon branch, its own keys and seeded data.
+- **Production (`matio.tv`) deploys only from a published GitHub Release.**
+  `.github/workflows/deploy-production.yml` runs in the `production` GitHub
+  Environment, so the job waits for the owner to approve before anything
+  reaches the live site.
 
-Migrations run separately against `DATABASE_URL` from `.env.local`:
+Migrations run separately against `DATABASE_URL`, **staging first**:
 
 ```bash
 pnpm db:migrate
 ```
 
-Always migrate **before** deploying when a release adds new columns/tables.
+Always migrate **before** deploying when a release adds new columns/tables;
+dropping a column happens only *after* the deployment without it is live.
+
+The full map — emergency manual deploy, rollback, staging rules — is in the
+`/devops` skill (`.claude/skills/devops/SKILL.md`).
 
 ## What's in the repo
 
