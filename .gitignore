@@ -58,3 +58,9 @@ storybook-static
 # committing those would make the suite red for everyone else.
 **/__screenshots__/**/*-darwin.png
 .vitest-attachments/
+
+# Локальные настройки ОСНОВНОГО чекаута: хуки-гарды вотчеров очереди PR и
+# issues. Не коммитятся намеренно — иначе они приедут в worktree каждого
+# рабочего агента и станут требовать от него вотчеров, которые положены
+# только основной сессии (этап 08 плейбука).
+.claude/settings.local.json

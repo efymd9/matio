@@ -136,6 +136,126 @@ auto-merge is armed by the main session only, only after review.
   share one machine.
 - Writes to the shared memory are small and additive.
 
+### Routine on autopilot (the `auto` label)
+
+The main session does not only dispatch work — it executes routine itself, with
+sub-agents (Agent tool, `isolation: "worktree"`), one worktree each.
+
+- **What qualifies**: `type:bug` and `type:debt` with **no new or changed
+  visible UI**. Never on autopilot: anything visible, product decisions, paid
+  actions, tearing down environments or data, and the Release PR. `p1` is
+  allowed but the owner is told the moment it starts, not in a digest.
+- **Who labels**: the main session at triage; a worker agent may label a bug it
+  files in passing when the routine nature is obvious. **Doubt = no label** — an
+  unlabelled task simply waits for a human decision, which costs nothing.
+- **Slot cap: 2 concurrent.** Slots are not remembered, they are computed from
+  the board (`auto` ∧ In progress). A slot is filled only by a task whose files
+  and modules do not overlap the active ones. Overlapping *logic* blocks;
+  purely additive neighbours (new independent config keys, new locale strings,
+  new registry rows) do not — the second one merges `origin/main` and the
+  conflict is trivial. Reading the rule too strictly keeps slots empty for
+  nothing.
+- **The sub-agent's prompt** says: work to the spec, open a PR with `Closes #N`,
+  **do not babysit** (the pipeline belongs to the main session), and here are
+  the bare-worktree traps (no gitignored files — copy `.env.local` from the main
+  checkout, run `pnpm install`).
+- **A silent sub-agent is a stuck sub-agent.** No PR and no questions for a long
+  stretch usually means it stopped at a fork and is waiting. Ping it with
+  SendMessage rather than waiting.
+- **Review comments go to the same sub-agent** via SendMessage — its context is
+  alive. A fresh agent would have to rediscover everything.
+- **Cleanup**: `python3 tools/claude/wt_janitor.py` (dry-run) / `--yes`. It
+  deletes a worktree only when it is provably safe: clean copy, a merged PR for
+  the branch, and the branch tip inside that PR. Note the subtlety it exists
+  for: a squash merge gives the merged commit a **new** SHA, so "is the tip an
+  ancestor of main" is always false — the janitor compares against
+  `refs/pull/<n>/head` instead.
+
+**Every piece of work is an issue — including emergency fixes.** During the
+2026-08-04 incident five PRs were opened with no issue behind them; the work
+existed, the board did not know about it. On autopilot that pattern turns into
+invisible fleets of sub-agents. File the issue first, even when the fix is
+urgent — it costs one command.
+
+### Releases and commit conventions
+
+- **Commit messages are the changelog.** `fix:` → patch, `feat:` → minor,
+  `feat!:` / `BREAKING CHANGE:` → major, `docs:` shows up in the changelog,
+  `chore:`/`ci:`/`test:` stay hidden. Below 1.0.0 a `feat:` bumps the minor,
+  never the major.
+- **release-please** keeps a single open Release PR with the accumulated
+  changelog and version bump. Nobody commits into its branch, and auto-merge is
+  never armed on it. Merging it is a release: tag `vX.Y.Z` + GitHub Release —
+  and it happens only on the owner's explicit `"релизь"`. Ritual: the
+  `/release` skill.
+- **Merging to `main` deploys staging, not production.** Staging is the
+  training ground: its own Neon branch, its own keys, seeded data, no live
+  viewers. Production (`matio.tv`) is deployed by exactly one path — publishing
+  a GitHub Release fires `.github/workflows/deploy-production.yml`, whose job is
+  bound to the `production` GitHub Environment and therefore **stands and waits
+  for the owner to press approve**. "Релизь" is no longer just a version bump;
+  it is the only door into production. Vercel still builds every PR as a
+  preview, and a preview still has no database — green proves the build, nothing
+  more.
+  **Migrations go to staging first**: `pnpm db:migrate` against the staging
+  branch → check it there → only then production. Order and the emergency
+  manual deploy path live in the `/devops` skill.
+  *Transitional:* until the owner finishes the infrastructure switchover
+  (issue #40 — second Vercel project, Neon branch, prod project moved to the
+  `production` branch, `VERCEL_*` secrets), the deploy workflow is dormant
+  (its guard prints a `::notice::` and skips) and merging to `main` still
+  deploys production the old way.
+- **`/api/healthz`** answers what is actually live: `curl -s
+  https://matio.tv/api/healthz | jq` returns status, version (from
+  `package.json`, bumped by release-please), the commit and the environment.
+  The release workflow polls it after deploying and fails loudly when the live
+  version does not match the released tag — "released but not actually live" is
+  the failure this endpoint exists to catch.
+- **Infrastructure is a live document too**: changed hosting, a vendor, CI, the
+  database or a domain → update the `/devops` skill in the SAME PR. A stale
+  infra map is read during an incident, which is exactly when being wrong costs
+  the most.
+
+### Data: migrations and backups
+
+- **Migrations are expand-contract, always.** No DDL that breaks the previous
+  version of the code ships in the same release as that code. It is two
+  releases: *expand* — the new column is nullable or has a default and the code
+  writes both shapes; *contract* — the old shape is dropped, and only once the
+  expand deploy is READY. This is not theory in this repo: a `DROP COLUMN` that
+  travelled with its own code cost three minutes of production downtime on
+  2026-06-04, because Drizzle bakes the full column list into the build and a
+  `SELECT` over the vanished column throws. Adding is the mirror image —
+  migrate first, deploy second; dropping is migrate LAST.
+- **An index on a table that can grow states its trade-off in the migration.**
+  A plain `CREATE INDEX` holds a write lock for the entire build;
+  `CONCURRENTLY` does not, but cannot run inside a transaction (its own
+  migration file) and can leave an INVALID index behind if it fails. Either
+  choice is defensible; an unexplained choice is not — the reason goes in a
+  comment in the `.sql`.
+- **Mutations are idempotent.** A client retry — double tap, lost response,
+  webhook redelivery, a user reloading the success page — must never produce a
+  second row. Reuse the patterns already in the codebase instead of inventing
+  one: claim the vendor's event id before processing (`stripe_events.event_id`),
+  a natural unique key plus `ON CONFLICT DO UPDATE` (`show_reminders
+  (show_id, email)`, `watch_progress (user_id, episode_id)`), a partial unique
+  index for "at most one active" (`subscriptions … WHERE status IN (…)`), a
+  deterministic Stripe idempotency key for checkout sessions, and a claim-stamp
+  under `FOR UPDATE SKIP LOCKED` for batch dispatch (`show_reminders.notified_at`).
+  A new write path must be able to answer, in one sentence, what makes running
+  it twice safe.
+- **Backups are real, and the restore probe is what makes them real.**
+  `db-backup` (daily, 03:40 UTC) dumps production with the Postgres 18 client,
+  encrypts it with age and uploads it as a **private** Vercel Blob object;
+  `db-restore-check` (monthly) restores the newest dump into a clean Postgres 18
+  and runs smoke queries. Vercel Blob has no S3-style lifecycle rules, so the
+  35-day retention is executed by the script itself (`infra/backup/blob.ts
+  prune`) — never delete that step. The private age key exists in exactly two
+  places, the owner's password manager and the `BACKUP_AGE_SECRET_KEY` secret;
+  lose both and every dump is scrap. Restoring by hand:
+  [docs/runbooks/db-restore.md](./docs/runbooks/db-restore.md). Neon's PITR
+  stays as the fast "oops, deleted the wrong rows" layer, not as the backup.
+
 ### Tests and coverage
 
 - **Runner: Vitest** (`vitest.config.mts`). Default environment is `node`; a
@@ -434,6 +554,17 @@ scripts/
   check-subscription-dupes.ts # pnpm db:check-sub-dupes — pre-flight for 0008
                            #   (locale tests moved to lib/i18n/negotiate.test.ts
                            #    + lib/seo.test.ts — vitest, `pnpm test:locale`)
+infra/
+  backup/                  # DB backups (run by .github/workflows/db-backup.yml
+                           #   + db-restore-check.yml, not by the app)
+    backup_db.sh           #   pg_dump → age → private Vercel Blob → 35-day prune
+    restore_check.sh       #   newest dump → decrypt → pg_restore into a clean
+                           #     PG18 → smoke; fails on a STALE dump too
+    blob.ts                #   tsx CLI over @vercel/blob (put/latest/fetch/
+                           #     prune/selftest); Blob has no S3 lifecycle, so
+                           #     retention IS this script
+    retention.ts           #   pure prune rules (+ tests) — the one piece of
+                           #     backup logic whose bug DELETES objects
 ```
 
 ## Key business rules
@@ -516,4 +647,14 @@ scripts/
 - **FREE PIVOT (2026-07-04): `PAYMENTS_ENABLED` is deliberately UNSET in prod → the site is fully free** (see the "Free pivot" business rule for exact semantics). Merging the pivot code to main flipped prod to free on deploy — no env change needed (unset = free is the designed default). Open ops items that code can't do: (1) **cancel/pause the existing live Stripe subscriptions** in the Stripe dashboard (billing continues otherwise; the webhook will mirror the cancellations normally); (2) annotate PostHog + the admin dashboard mentally for grain era #5 (paid-funnel events flatline while free); (3) when/if re-enabling, follow the re-enable checklist in the business rule (env BEFORE redeploy, Stripe prices still present, legacy-show trial-row caveat).
 - **Signup gate — code shipped 2026-07-16, `REQUIRE_SIGNUP` NOT yet set anywhere**: flipping it on = `vercel env add REQUIRE_SIGNUP production` (value `1`) + redeploy (runtime read, no build guard; same bind-at-deploy semantics as `PAYMENTS_ENABLED`); removing the var + redeploy reverts to open free mode. When flipping, annotate PostHog (grain era #6: the anonymous organic funnel flatlines; `signup_wall_shown` with `gate:true` becomes the top-of-funnel event) and expect the admin dashboard's free-funnel panels to go dark for post-flip ranges (signups + watch_progress engagement remain live). The analytics-v2 redesign (2026-07-18, see "Analytics dashboard v2" rule) superseded the PostHog signup-funnel panel — `POSTHOG_PERSONAL_API_KEY`/`POSTHOG_PROJECT_ID` are NO longer needed for the live dashboard. Its deploy order: `pnpm db:migrate` (migration 0023 — additive tables/columns + watch_progress backfill) BEFORE the code deploy; the visit/watch ledgers accrue from the deploy moment.
 - **Resend email — code shipped 2026-07-13, live setup PENDING**: (1) create the Resend account and add domain `matio.tv`, region **eu-west-1** (region affects delivery routing only — Resend account data stays US-hosted regardless); (2) add the DNS records at Namecheap (DNS = registrar-servers.com): DKIM TXT at `resend._domainkey`, MX + SPF TXT on `send.matio.tv` — the root SPF (`spf.privateemail.com`, the PrivateEmail mailbox) and Clerk's `clk*` records are untouched, no conflicts; optionally add a starter DMARC `v=DMARC1; p=none; rua=mailto:contact@matio.tv;` at `_dmarc` (none exists today); (3) create a sending-only API key → `vercel env add RESEND_API_KEY production` (+ `.env.local`) and redeploy. Until then the series-end capture form stores addresses and the admin panel shows a connect hint — nothing breaks. Free tier: 100 emails/day, 3,000/mo, 1 domain (Pro $20/mo when the backlog outgrows it). Sender: `Matio <updates@matio.tv>`, replies route to contact@ (must exist as a PrivateEmail mailbox/alias).
-- GitHub auto-deploy IS wired: `git push origin main` triggers a production deployment (recent releases all shipped this way). CLI deploys (`vercel --prod`) from this machine get stuck in BLOCKED state — use the git-push path. `git push` is therefore BOTH source backup AND deploy.
+- GitHub auto-deploy is wired to the TWO-STEP model (live since 2026-08-12):
+  merging to `main` deploys **staging** (`matio-staging.vercel.app`, Basic Auth;
+  see `/devops`); **production deploys only from a published GitHub Release**,
+  through `.github/workflows/deploy-production.yml`, after the owner approves
+  the `release-production` GitHub Environment. The prod Vercel project follows
+  the `production` branch, which no automation pushes — it is the break-glass
+  lever: `git push --force origin <sha>:production` deploys production even
+  with Actions down. Emergency deploy = `workflow_dispatch` of
+  deploy-production (any ref), or that push. CLI deploys (`vercel --prod`)
+  from this machine get stuck in BLOCKED state. `git push` remains the source
+  backup either way.

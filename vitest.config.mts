@@ -67,15 +67,15 @@ export default defineConfig({
       // RATCHET — these numbers move in one direction only. Raised coverage in
       // a PR? Raise the floor in the SAME PR. Lowering one is a review blocker.
       //
-      // Re-measured after the UI Lab landed — stories render real components in
-      // a browser, so component coverage rose on its own (statements
-      // 1.10 → 1.37, lines 1.04 → 1.33, functions 0.65 → 0.92, branches
-      // 1.21 → 1.64). Floors follow, rounded down.
+      // История движения: 1.10 (нулевой старт, этап 03) → 1.37 (истории Lab
+      // исполняют компоненты, этап 04) → 1.45 (тесты /api/healthz, этап 05) →
+      // 3.80 (замок стенда, #62: proxy.ts впервые исполняется тестами и тянет
+      // за собой пол-`lib/`). Полы идут следом, округлением вниз.
       thresholds: {
-        lines: 1.3,
-        functions: 0.9,
-        branches: 1.6,
-        statements: 1.3,
+        lines: 3.7,
+        functions: 2.3,
+        branches: 3.1,
+        statements: 3.7,
       },
     },
 
@@ -86,7 +86,10 @@ export default defineConfig({
           name: "unit",
           environment: "node",
           include: [
-            "{app,components,db,lib,tools}/**/*.{test,spec}.{ts,tsx}",
+            // `infra/` — скрипты эксплуатации (бэкапы). В покрытие они не
+            // входят (см. include выше), но чистые правила вроде ретеншена
+            // удаляют объекты хранилища, и проверять их обязательно.
+            "{app,components,db,infra,lib,tools}/**/*.{test,spec}.{ts,tsx}",
             "proxy.test.ts",
           ],
         },

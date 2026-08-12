@@ -171,13 +171,9 @@ echo -n "value" | vercel env add NAME production
 ```
 Can't pass multiple environments in one call. For preview, you also need a git branch arg — skip until git integration is set up.
 
-**Redeploy** to pick up env var changes:
-```bash
-vercel --prod --yes
-```
-Existing deployments keep their snapshot of env vars — only the **next** deploy picks up changes.
+**Redeploy** to pick up env var changes: publish a release, or re-run the deploy workflow manually (Actions → `deploy-production` → Run workflow). Existing deployments keep their snapshot of env vars — only the **next** deploy picks up changes.
 
-**GitHub auto-deploy**: not currently wired. The Vercel account (`mad-matttts-projects`) doesn't have access to the GitHub user `efymd9`'s repo. To enable, install the Vercel GitHub App on the `efymd9` account from the Vercel dashboard.
+**GitHub auto-deploy**: wired. Production deploys come from a published GitHub Release via `.github/workflows/deploy-production.yml` (approval-gated by the `production` GitHub Environment); merging to `main` deploys the staging project. Deploy model and emergency paths: the `/devops` skill.
 
 **Build settings**: framework auto-detected as Next.js. Routes are dynamic (`ƒ`) by default since they hit DB / cookies.
 
