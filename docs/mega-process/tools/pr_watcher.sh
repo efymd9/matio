@@ -19,6 +19,9 @@
 #   Некролог exit 143 у вытесненного экземпляра — штатный, не ошибка.
 #   При Monitor-схеме перевзводы редки (только после рестарта сессии),
 #   поэтому некрологи вытеснения практически исчезают.
+# - mergeStateStatus=="UNKNOWN" НЕ считается сменой состояния: снимок
+#   собирается ОТНОСИТЕЛЬНО предыдущего (см. SNAPSHOT_JQ ниже), поэтому
+#   поллинг перестал быть stateless-фильтром над ответом gh.
 set -euo pipefail
 
 PIDFILE=/tmp/pr_watcher.pid
@@ -31,19 +34,62 @@ fi
 echo "$$" > "$PIDFILE"
 
 STATE=/tmp/pr_queue_state.json
+FIELDS=number,headRefOid,isDraft,headRefName,mergeStateStatus
 # behind: PR отстал от main (ruleset требует актуальности) — зелёный CI при
 # этом НЕ рождает изменений очереди, и без этого поля вотчер молчит, пока
 # PR застрял (слепая зона, пойманная владельцем у оригинала: авто-мерж ждал
 # update-branch, а сессию ничто не будило).
-FILTER='[.[] | select((.isDraft|not) and (.headRefName | startswith("release-please--") | not)) | {n:.number, oid:.headRefOid, behind:(.mergeStateStatus=="BEHIND")}] | sort_by(.n)'
+# UNKNOWN — намеренно НЕ событие (issue #54, поймано самим вотчером): после
+# каждого мержа в main GitHub пересчитывает mergeability и какое-то время
+# отдаёт mergeStateStatus:"UNKNOWN". Наивное behind:(status=="BEHIND")
+# читает это как «догнал» и печатает ложное событие на КАЖДЫЙ открытый PR,
+# а через минуту второе — когда пересчёт закончился (шесть таких ложных
+# пробуждений за первые сутки при девяти PR в очереди: настоящее событие в
+# этом шуме тонет). Поэтому при UNKNOWN behind берётся из ПРЕДЫДУЩЕГО
+# снимка ($prev): состояние неизвестно ≠ состояние изменилось. Родственный
+# pr_babysit.sh знает ту же граблю про mergeable=UNKNOWN.
+# Что осталось событием: настоящий переход BEHIND⇄не-BEHIND (после
+# пересчёта статус приходит настоящим и сравнение срабатывает — максимум
+# одну проверку спустя), смена oid, появление и исчезновение PR — эти поля
+# сравниваются напрямую. PR, впервые увиденный сразу в UNKNOWN, получает
+# behind:false (прошлого значения нет): его появление и так событие, а
+# настоящее BEHIND доедет следующей проверкой.
+SNAPSHOT_JQ='[.[]
+  | select((.isDraft|not) and (.headRefName | startswith("release-please--") | not))
+  | . as $pr
+  | {n: $pr.number,
+     oid: $pr.headRefOid,
+     behind: (if ($pr.mergeStateStatus // "UNKNOWN") == "UNKNOWN"
+              then ([$prev[] | select(.n == $pr.number) | .behind] + [false])[0]
+              else $pr.mergeStateStatus == "BEHIND" end)}]
+  | sort_by(.n)'
 
-[ -f "$STATE" ] || gh pr list --state open --json number,headRefOid,isDraft,headRefName,mergeStateStatus --jq "$FILTER" > "$STATE"
+# Снимок «как его видит вотчер»: $1 — предыдущий снимок (JSON-массив).
+# Сбой gh/jq → пустой вывод → вызывающий молчит и ждёт следующей проверки.
+# jq -cS (сортировка ключей) обязателен: сравнение строковое, а прежняя
+# версия писала снимок выводом `gh --jq`, у которого ключи отсортированы —
+# без -S первая же проверка после обновления скрипта дала бы ложное событие
+# на переформатировании живого /tmp/pr_queue_state.json.
+snapshot() {
+  gh pr list --state open --json "$FIELDS" 2>/dev/null \
+    | jq -cS --argjson prev "$1" "$SNAPSHOT_JQ" 2>/dev/null || true
+}
+
+# Предыдущий снимок с диска, нормализованный тем же jq -cS.
+prev_state() {
+  local p
+  p=$(jq -cS '.' < "$STATE" 2>/dev/null || true)
+  [ -n "$p" ] && printf '%s' "$p" || printf '[]'
+}
+
+[ -f "$STATE" ] || snapshot '[]' > "$STATE"
 
 while true; do
-  CUR=$(gh pr list --state open --json number,headRefOid,isDraft,headRefName,mergeStateStatus --jq "$FILTER" 2>/dev/null || true)
-  if [ -n "$CUR" ] && [ "$CUR" != "$(cat "$STATE")" ]; then
-    echo "Очередь PR изменилась. БЫЛО: $(jq -c '.' < "$STATE") СТАЛО: $(echo "$CUR" | jq -c '.')"
-    echo "$CUR" > "$STATE"
+  PREV=$(prev_state)
+  CUR=$(snapshot "$PREV")
+  if [ -n "$CUR" ] && [ "$CUR" != "$PREV" ]; then
+    echo "Очередь PR изменилась. БЫЛО: $PREV СТАЛО: $CUR"
+    printf '%s\n' "$CUR" > "$STATE"
   fi
   sleep 60
 done
