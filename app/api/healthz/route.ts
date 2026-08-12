@@ -28,7 +28,17 @@ export function GET() {
       // Which commit that version was actually built from — the two answer
       // different questions when a release is mid-flight.
       commit: present(process.env.VERCEL_GIT_COMMIT_SHA)?.slice(0, 7) ?? null,
-      environment: present(process.env.VERCEL_ENV) ?? "development",
+      // WHICH STAGE this is — the answer an incident reads first. Not
+      // `VERCEL_ENV` alone: Vercel gives the production branch of ANY project
+      // `production`, and staging is its own project whose production branch
+      // is `main` — so the staging site called itself production and was
+      // indistinguishable from matio.tv by this field. `APP_ENV` is our own
+      // marker (`staging` on the staging project) and wins; unset, the answer
+      // is exactly what it was before.
+      environment:
+        present(process.env.APP_ENV) ??
+        present(process.env.VERCEL_ENV) ??
+        "development",
     },
     { headers: { "cache-control": "no-store" } },
   );
