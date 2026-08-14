@@ -38,6 +38,7 @@
     "@mux/mux-player-react": "^3.13.0",
     "@mux/mux-video-react": "^0.31.0",
     "@mux/upchunk": "^3.5.0",
+    "@sentry/nextjs": "^10.70.0",
     "@stripe/react-stripe-js": "^6.8.1",
     "@stripe/stripe-js": "^9.8.0",
     "@vercel/blob": "^2.4.0",

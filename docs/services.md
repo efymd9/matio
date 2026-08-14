@@ -290,6 +290,54 @@ Leave all three blank to keep PostHog entirely off — both the client provider 
 
 **Consent gate**: `components/site/google-analytics.tsx` mirrors the Meta Pixel — `gtag.js` is loaded directly (no npm SDK) and only injected after `cookie_consent.marketing === true`. The tag can't be unloaded once injected, so on **withdrawal** it (1) sets GA's `ga-disable-<id>` kill-switch (`setGaDisabled(true)` in `lib/ga-events.ts`) so gtag stops sending **all** hits — including the cookieless Consent-Mode "ping" beacons that a `denied` update alone does NOT stop — (2) pushes a **Consent Mode v2** `gtag('consent','update', …'denied')` (analytics + ads storage), and (3) the live `consentRef` stops emitting `page_view`. Re-grant clears the kill-switch and updates Consent Mode back to granted. NB: Consent Mode `denied` by itself keeps beaconing anonymized pings — the `ga-disable` flag is the real stop (the gtag equivalent of `fbq('consent','revoke')`). `page_view` is sent on App-Router route changes (the inline `config` fires the first; `trackedPathRef` prevents the double-count). Helpers: `lib/ga-events.ts` (`trackGA` / `onGAReady`). No DB, no webhook, no server component — purely browser-side. The `/cookies` policy lists `_ga` / `_ga_*` and names Google Ireland Ltd as recipient.
 
+## Sentry (error tracking)
+
+**Used for**: server, edge and browser exceptions, plus a modest slice of
+performance traces. One project for the whole web app (a second one arrives with
+the Expo app). **Organisation region: EU** — chosen at organisation creation and
+changeable only by recreating the organisation.
+
+**SDK**: `@sentry/nextjs@10`, wired **by hand** rather than by the setup wizard
+(the wizard rewrites `next.config.ts` and adds Session Replay + the feedback
+widget, both of which record exactly the data we refuse to send).
+
+**Env vars**:
+
+| Name | Notes |
+|---|---|
+| `NEXT_PUBLIC_SENTRY_DSN` | The DSN, and the on/off switch: blank → `Sentry.init` is never called on any runtime, `withSentryConfig` is not applied, and the browser SDK stays out of the bundle. Not a secret. **Build-time inlined on the server too** — set it in Vercel *before* the deploy that should report. |
+| `NEXT_PUBLIC_APP_ENV` | Optional; the browser's copy of `APP_ENV` (only `NEXT_PUBLIC_*` reaches the client bundle). Set to `staging` on the staging project; unset on production, where Vercel's `NEXT_PUBLIC_VERCEL_ENV` answers `production`. Server-side events read the real `APP_ENV`. |
+| `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` | Optional, build-time only: source-map upload, so a stack trace names our code instead of a minified chunk. Without the token the build prints a warning and succeeds. The token is a **secret**. |
+
+**Before turning source-map upload on**: pnpm currently lists `@sentry/cli`
+among its *ignored build scripts*, so the CLI's binary is never downloaded —
+harmless while upload is off, a failing build step the moment it is not. Add it
+to `pnpm-workspace.yaml` → `onlyBuiltDependencies` (or run `pnpm approve-builds`)
+in the same change that adds the auth token.
+
+**Files**: `instrumentation.ts` (Node/edge register + the `onRequestError` hook —
+without that export App Router route/server-action errors never reach Sentry),
+`sentry.server.config.ts`, `sentry.edge.config.ts`, `instrumentation-client.ts`
+(lazy-loads `sentry-client-init.ts` only when a DSN exists), and
+`lib/observability.ts` — the pure, tested module holding the privacy scrubbers
+plus the `environment`/`release` resolution shared with `/api/healthz`.
+
+**Privacy** (the reason this is configured by hand):
+`sendDefaultPii: false`, `includeLocalVariables: false`, `enableLogs: false`, no
+Session Replay, no feedback widget, and `beforeSend` / `beforeSendTransaction` /
+`beforeBreadcrumb` that strip query strings and URL credentials, delete
+cookies / request bodies / parsed query params, reduce request headers to an
+allowlist, reduce the user to an id, redact email-shaped strings from messages,
+and drop console breadcrumbs wholesale. Proven by `lib/observability.test.ts`
+and by the log audit in `lib/log-audit.test.ts`.
+
+**No tunnel route**: Sentry events go straight to Sentry. We already proxy
+PostHog through `/ingest`; a blocked error report is our loss, not the viewer's.
+
+**Readiness**: `/api/readyz` (`select 1` against Neon, 2s ceiling, 503 when the
+database is unreachable) is the companion to the DB-free `/api/healthz`. See the
+`/devops` skill for the honest limits of both.
+
 ## Service → file map
 
 | Service | Code |
@@ -304,3 +352,4 @@ Leave all three blank to keep PostHog entirely off — both the client provider 
 | Meta | `lib/meta-pixel-events.ts`, `lib/meta-capi.ts`, `lib/capi-identity.ts`, `components/site/meta-pixel.tsx`, `components/site/view-content-pixel.tsx`, `components/site/complete-registration-pixel.tsx`, `app/subscribe/{actions.ts,submit-button.tsx,page.tsx}`, `app/api/webhooks/stripe/route.ts`, `proxy.ts` |
 | PostHog | `components/site/posthog-provider.tsx`, `lib/posthog-events.ts`, `lib/posthog-server.ts`, `app/api/webhooks/stripe/route.ts`, `next.config.ts` (rewrite), `proxy.ts` (matcher exclusion) |
 | Google Analytics | `components/site/google-analytics.tsx`, `lib/ga-events.ts`, `app/layout.tsx` (mount) |
+| Sentry | `instrumentation.ts`, `instrumentation-client.ts`, `sentry-client-init.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`, `lib/observability.ts`, `next.config.ts` (`withSentryConfig`, DSN-gated) |
