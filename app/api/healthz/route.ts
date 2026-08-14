@@ -8,6 +8,8 @@
 // Lives under /api rather than at a bare /healthz on purpose: proxy.ts mints
 // the first-party `matio_aid` audience cookie on ordinary GET requests and
 // skips /api — an uptime monitor must not manufacture visitors.
+import { resolveStage } from "@/lib/observability";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
@@ -35,10 +37,10 @@ export function GET() {
       // indistinguishable from matio.tv by this field. `APP_ENV` is our own
       // marker (`staging` on the staging project) and wins; unset, the answer
       // is exactly what it was before.
-      environment:
-        present(process.env.APP_ENV) ??
-        present(process.env.VERCEL_ENV) ??
-        "development",
+      //
+      // Shared with Sentry's `environment` (lib/observability.ts) so a health
+      // check and an error event can never name the same deploy differently.
+      environment: resolveStage(process.env),
     },
     { headers: { "cache-control": "no-store" } },
   );

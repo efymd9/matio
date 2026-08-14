@@ -14,6 +14,8 @@ Netflix-inspired UX. 60-second anonymous trial per (browser session, show).
 - Resend (transactional email — new-episode reminder notifications; `RESEND_API_KEY` unset = sends off, capture keeps working)
 - Meta Pixel + Conversions API (advertising measurement — consent-gated, no SDK)
 - Vercel (hosting) + Vercel Blob (admin-uploaded show artwork — poster/hero)
+- Sentry (`@sentry/nextjs` — errors + light tracing; `NEXT_PUBLIC_SENTRY_DSN`
+  unset = the SDK never initialises, EU region, no Session Replay)
 
 ## Deeper docs
 
@@ -39,6 +41,20 @@ an issue on the board. What is already in force:
 - **Privacy.** User data (texts, content, profiles, emails) NEVER reaches logs,
   the error tracker, or analytics events — only ids, statuses, durations. This
   is the rule behind the hashed-IP and no-raw-PII patterns already in `lib/`.
+  It is no longer only a promise: **the log audit** (`lib/log-audit.test.ts`)
+  seeds recognisable user text — an address, a name, a password-bearing
+  connection string — into the paths that report failures and fails if any of
+  it comes out the other end; the Sentry scrubbers it exercises live in
+  `lib/observability.ts` with their own suite. The audit is meant to GROW: a
+  new server path that logs, or a new field on the error payload, gets a case
+  there in the SAME PR.
+- **Incidents start in the tracker, not in someone's memory.** A spike of
+  errors in Sentry, a red nightly workflow, a 5xx spotted by hand → an issue
+  first (`gh issue create` with `type:bug` + `domain:*` + priority by impact,
+  then `tools/claude/board_status.sh <N> …`), and only then the fix. Same
+  philosophy as the registry, and the same failure it prevents: during the
+  2026-08-04 incident five PRs were opened with no issue behind them, so the
+  work existed and the board did not know about it.
 - **Minimal code.** No speculative abstractions, no layers for a second
   implementation that does not exist. Edits are surgical: change what the task
   needs, leave the rest alone.
@@ -256,6 +272,42 @@ urgent — it costs one command.
   [docs/runbooks/db-restore.md](./docs/runbooks/db-restore.md). Neon's PITR
   stays as the fast "oops, deleted the wrong rows" layer, not as the backup.
 
+### Observability
+
+- **Sentry is DSN-optional by construction.** `NEXT_PUBLIC_SENTRY_DSN` unset =
+  no `Sentry.init` on any runtime, no `withSentryConfig` wrapper around
+  `next.config.ts`, and not one byte of the browser SDK downloaded — the same
+  degradation contract as `RESEND_API_KEY`. `NEXT_PUBLIC_*` is inlined at
+  **build** time (the server bundle too), so the variable has to land in Vercel
+  *before* the deploy that should report.
+- **The privacy configuration is the whole point of wiring it by hand.** No
+  Session Replay, no feedback widget (the wizard adds both — they record the
+  viewer's screen and collect an address), `sendDefaultPii: false`,
+  `includeLocalVariables: false`, `enableLogs: false`, and `beforeSend` /
+  `beforeSendTransaction` / `beforeBreadcrumb` that strip query strings and URL
+  credentials, delete cookies / request bodies / parsed query params, cut
+  headers to an allowlist, reduce the user to an id, redact email-shaped
+  strings, and drop console breadcrumbs wholesale. All of it in
+  `lib/observability.ts`, one contract shared by the Node, edge and browser
+  configs — change it and prove it with a test.
+- **`environment` and `release` are the same answers `/api/healthz` gives**
+  (`resolveStage` / `resolveRelease`): `APP_ENV` → `VERCEL_ENV` →
+  `development`, and `APP_VERSION` — the version release-please stamps on the
+  tag. The browser can only read `NEXT_PUBLIC_*`, so staging needs its own
+  `NEXT_PUBLIC_APP_ENV=staging` or browser events from the bench report as
+  production.
+- **`/api/healthz` is liveness, `/api/readyz` is readiness.** healthz stays
+  deliberately DB-free (an uptime ping must not become load, and a slow
+  database must not read as an outage); readyz runs `select 1` against Neon
+  with a 2s ceiling and answers **503** with a reason code (`timeout` /
+  `unavailable` / `not_configured`) and nothing else — no connection strings,
+  no driver messages. **A green readyz does not prove the service is
+  serving**: connection-pool exhaustion is sudden, total, and invisible to a
+  probe that opens its own cheap query.
+- Ops details, the staging/production specifics and the incident ritual live in
+  the `/devops` skill → «Наблюдаемость»; per-service setup in
+  [docs/services.md](./docs/services.md).
+
 ### Tests and coverage
 
 - **Runner: Vitest** (`vitest.config.mts`). Default environment is `node`; a
@@ -344,7 +396,7 @@ urgent — it costs one command.
 - Server actions for mutations, route handlers for webhooks and token issuance.
 - shadcn components live in `components/ui/`. Custom components in `components/`.
 - Drizzle schemas in `db/schema/*.ts`, one file per logical domain.
-- Env vars: Clerk = `CLERK_*`, Stripe = `STRIPE_*` + `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (client `pk_…` for in-site Embedded Checkout), Mux = `MUX_*`, Meta = `META_*` / `META_CAPI_ACCESS_TOKEN_{n}` / `NEXT_PUBLIC_META_PIXEL_ID` / `NEXT_PUBLIC_META_PIXEL_IDS`, PostHog = `POSTHOG_*` / `NEXT_PUBLIC_POSTHOG_*`, Google Analytics = `NEXT_PUBLIC_GA_MEASUREMENT_ID` (GA4 `G-…`; blank → off), Vercel Blob = `BLOB_READ_WRITE_TOKEN`, Resend = `RESEND_API_KEY` (blank → email off; optional `RESEND_FROM` / `RESEND_REPLY_TO` sender overrides). Never log secrets.
+- Env vars: Clerk = `CLERK_*`, Stripe = `STRIPE_*` + `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (client `pk_…` for in-site Embedded Checkout), Mux = `MUX_*`, Meta = `META_*` / `META_CAPI_ACCESS_TOKEN_{n}` / `NEXT_PUBLIC_META_PIXEL_ID` / `NEXT_PUBLIC_META_PIXEL_IDS`, PostHog = `POSTHOG_*` / `NEXT_PUBLIC_POSTHOG_*`, Google Analytics = `NEXT_PUBLIC_GA_MEASUREMENT_ID` (GA4 `G-…`; blank → off), Vercel Blob = `BLOB_READ_WRITE_TOKEN`, Resend = `RESEND_API_KEY` (blank → email off; optional `RESEND_FROM` / `RESEND_REPLY_TO` sender overrides), Sentry = `NEXT_PUBLIC_SENTRY_DSN` (blank → the SDK never initialises; optional `NEXT_PUBLIC_APP_ENV` for the browser's stage marker and `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` for build-time source-map upload). Never log secrets.
 - Webhook route handlers declare `export const runtime = "nodejs";` (raw body + DB).
 - Server-only modules use `import "server-only";` so they can't leak into a client bundle.
 - All images go through `next/image`. `images.remotePatterns` in `next.config.ts` allowlists `image.mux.com` (Mux thumbnails) and `*.public.blob.vercel-storage.com` (Blob-hosted poster/hero artwork) — any other host throws at render on the public pages. Use `fill` + `sizes` for absolutely-positioned cover images; raw `<img>` is reserved for cases where the Safari < 16.4 `aspect-ratio` quirk requires pinning the img's own intrinsic ratio (see `components/site/poster.tsx`) and for admin-only previews of arbitrary URLs.
@@ -383,7 +435,14 @@ app/
       unsubscribe/         # RFC 8058 one-click unsubscribe (POST target of the
                            #   List-Unsubscribe header; GET redirects to the
                            #   /unsubscribe confirm page)
+    healthz/               # /api/healthz — liveness + which build is live
+                           #   (status/version/commit/environment). NEVER
+                           #   touches the database, on purpose
     playback-token/        # /api/playback-token — Mux JWT issuer
+    readyz/                # /api/readyz — real readiness: `select 1` against
+                           #   Neon, 2s ceiling, 503 + a reason code
+                           #   (timeout|unavailable|not_configured). Status
+                           #   and duration only, no connection details
     t/                     # /api/t — first-party visit beacon (sendBeacon
                            #   target; consent-EXEMPT audience measurement,
                            #   writes visitors + visitor_days; aid from the
@@ -468,6 +527,10 @@ lib/
   db-errors.ts             # isUniqueViolation — walks e.cause (Drizzle 0.44+
                            #   wraps PostgresError; .code is NOT on the
                            #   thrown error). Use this, never e.code directly
+  observability.ts         # universal + PURE: resolveStage/resolveRelease
+                           #   (shared with /api/healthz) + the Sentry privacy
+                           #   contract (scrubbers + sentryPrivacyOptions()).
+                           #   Reads no env itself — see "Observability"
   mux.ts                   # lazy Mux SDK client
   mux-token.ts             # RS256 JWT signer for signed playback
   stripe.ts                # lazy Stripe SDK client
@@ -543,6 +606,15 @@ lib/
                            #   (trim+lowercase+strip; universal, app + PostHog)
   utils.ts                 # cn() from shadcn
 proxy.ts                   # Auth + admin gating (Next 16: was middleware.ts)
+instrumentation.ts         # Sentry register (Node/edge) + the onRequestError
+                           #   export — without it App Router route/server-
+                           #   action errors never reach the tracker. No DSN
+                           #   = neither runtime config is even imported
+instrumentation-client.ts  # browser half; lazily imports sentry-client-init
+sentry-client-init.ts      # browser Sentry.init (no Session Replay, no
+                           #   feedback widget — both record the viewer)
+sentry.server.config.ts    # Node init  — all three spread the same
+sentry.edge.config.ts      # edge init     privacy options from lib/observability
 vercel.json                # regions=['fra1'] (co-located with Neon eu-central-1)
                            # + Cache-Control headers for /shows/* static assets
 scripts/

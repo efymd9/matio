@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
 // The product version, single-sourced from package.json — which release-please
@@ -80,4 +81,27 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Sentry's build-time wrapper: source-map upload (so a stack trace names our
+// code instead of a minified chunk) and the SDK's build instrumentation.
+//
+// APPLIED ONLY WHEN A DSN EXISTS. Without one the export is the plain config
+// above — byte for byte the build we had before Sentry — which is what makes
+// `pnpm build` with no Sentry variables at all a no-op rather than a leap of
+// faith. Source maps additionally need `SENTRY_AUTH_TOKEN`; without it the
+// plugin prints a warning and the build still succeeds.
+//
+// No `tunnelRoute` on purpose: we already proxy PostHog through /ingest, and a
+// second same-origin tunnel is more moving parts than the ad-blocked events are
+// worth (a blocked error report is our loss, not the viewer's).
+export default process.env.NEXT_PUBLIC_SENTRY_DSN
+  ? withSentryConfig(nextConfig, {
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      // Quiet locally, loud in CI — where a failed upload is worth reading.
+      silent: !process.env.CI,
+      telemetry: false,
+      // Never leave uploaded source maps sitting in the deployed output: they
+      // are our source code, served publicly, for anyone who guesses the path.
+      sourcemaps: { deleteSourcemapsAfterUpload: true },
+    })
+  : nextConfig;
