@@ -47,7 +47,7 @@
     "flags": "^4.0.6",
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.28.0",
-    "media-chrome": "^4.19.0",
+    "media-chrome": "^4.19.2",
     "next": "^16.2.12",
     "postgres": "^3.4.9",
     "posthog-js": "^1.376.4",
