@@ -130,7 +130,7 @@ jobs:
 
       # Стики-коммент: один и тот же комментарий ОБНОВЛЯЕТСЯ на каждый пуш,
       # а не плодит ветку из двадцати одинаковых.
-      - uses: marocchino/sticky-pull-request-comment@v2
+      - uses: marocchino/sticky-pull-request-comment@v3
         if: github.event_name == 'pull_request' && always()
         with:
           header: coverage
