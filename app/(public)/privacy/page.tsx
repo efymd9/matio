@@ -1,8 +1,7 @@
 // DRAFT pending legal-counsel review (esp. Art. 13/14 UK GDPR disclosures
 // + retention periods). Controller details filled 2026-05-27 (Matvei
-// Dobrovolskii, sole trader t/a Matio, UK). No DPO appointed (not required
+// ORDINARY LTD, company no. 17381666, UK). No DPO appointed (not required
 // under Art. 37). Supervisory authorities named inline: AEPD (ES) / ICO (UK).
-// Sole trader, so "business address" not "registered office".
 // PostHog disclosure added 2026-05-30. Google Analytics (GA4) disclosure
 // added 2026-06-24.
 import type { Metadata } from "next";
@@ -58,8 +57,9 @@ function PrivacyEn() {
     <div className="prose-legal space-y-8 text-[15px] leading-relaxed text-white/75">
       <Section id="controller" title="1. Who we are">
         <p>
-          Matvei Dobrovolskii trading as Matio, based in the United Kingdom,
-          is the data controller for the personal data processed through{" "}
+          DEEP ORDINARY LTD, registered in England and Wales (company
+          no.&nbsp;17381666, registered office: 66 Paul Street, London
+          EC2A&nbsp;4NA), is the data controller for the personal data processed through{" "}
           <strong>matio.tv</strong>. You can reach us at{" "}
           <strong>contact@matio.tv</strong>. Our data-protection contact is
           the same address. We have not appointed a Data Protection Officer
@@ -353,8 +353,9 @@ function PrivacyEs() {
     <div className="prose-legal space-y-8 text-[15px] leading-relaxed text-white/75">
       <Section id="responsable" title="1. Quiénes somos">
         <p>
-          Matvei Dobrovolskii trading as Matio, con sede en el Reino Unido, es
-          el responsable del tratamiento de los datos personales recogidos a
+          DEEP ORDINARY LTD, sociedad registrada en Inglaterra y Gales
+          (n.º&nbsp;17381666, domicilio social: 66 Paul Street, Londres
+          EC2A&nbsp;4NA), es el responsable del tratamiento de los datos personales recogidos a
           través de <strong>matio.tv</strong>. Puedes contactarnos en{" "}
           <strong>contact@matio.tv</strong>. Nuestro contacto en materia de
           protección de datos es esa misma dirección. No hemos designado un

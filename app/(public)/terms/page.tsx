@@ -1,5 +1,5 @@
 // DRAFT pending legal-counsel review. Trading party + contact details
-// filled 2026-05-27 (Matvei Dobrovolskii, sole trader t/a Matio, England
+// filled 2026-05-27; entity updated 2026-08-16 (DEEP ORDINARY LTD, England
 // & Wales). The Stripe Checkout consent_collection.terms_of_service flow
 // (digital-content waiver, §6) is wired in app/subscribe/actions.ts.
 import type { Metadata } from "next";
@@ -89,8 +89,10 @@ function TermsEn() {
       <Section id="acceptance" title="1. Acceptance of these terms">
         <p>
           These Terms of Service (the &ldquo;Terms&rdquo;) form a binding agreement
-          between you and Matvei Dobrovolskii trading as Matio (&ldquo;matio&rdquo;, &ldquo;we&rdquo;,
-          &ldquo;us&rdquo;), based in the United Kingdom. By creating an account
+          between you and DEEP ORDINARY LTD (&ldquo;matio&rdquo;, &ldquo;we&rdquo;,
+          &ldquo;us&rdquo;), registered in England and Wales (company
+          no.&nbsp;17381666), registered office: 66 Paul Street, London
+          EC2A&nbsp;4NA, United Kingdom. By creating an account
           or paying for a subscription, you confirm you have read, understood and
           accept these Terms. If you do not accept them, do not use the service.
         </p>
@@ -283,8 +285,10 @@ function TermsEs() {
       <Section id="aceptacion" title="1. Aceptación de estos términos">
         <p>
           Estos Términos del servicio (los &laquo;Términos&raquo;) constituyen un
-          contrato vinculante entre tú y Matvei Dobrovolskii trading as Matio (&laquo;matio&raquo;,
-          &laquo;nosotros&raquo;), con sede en el Reino Unido. Al crear
+          contrato vinculante entre tú y DEEP ORDINARY LTD (&laquo;matio&raquo;,
+          &laquo;nosotros&raquo;), sociedad registrada en Inglaterra y Gales
+          (n.º&nbsp;17381666), con domicilio social en 66 Paul Street, Londres
+          EC2A&nbsp;4NA, Reino Unido. Al crear
           una cuenta o pagar una suscripción, confirmas que has leído,
           comprendido y aceptado estos Términos. Si no los aceptas, no utilices
           el servicio.

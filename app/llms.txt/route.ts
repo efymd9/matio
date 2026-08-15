@@ -31,7 +31,7 @@ export async function GET() {
     }`,
     "",
     `- Site: ${SITE_URL}`,
-    "- Operated by: Matvei Dobrovolskii, trading as Matio (United Kingdom)",
+    "- Operated by: DEEP ORDINARY LTD, registered in England and Wales, no. 17381666 (London, UK)",
     "- Contact: contact@matio.tv",
     "- Site languages: English (default, at the bare path) and Spanish (under an /es prefix, e.g. /es/shows/<slug>); every page cross-links its translation via hreflang",
     "",

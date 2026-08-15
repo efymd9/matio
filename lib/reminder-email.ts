@@ -71,9 +71,9 @@ const COPY = {
 } as const;
 
 // Sender identification in the footer (UK PECR); matches the legal pages'
-// sole-trader details. Street address deliberately omitted (sole trader's
-// home address — kept private).
-const SENDER_LINE = "Matvei Dobrovolskii t/a Matio · United Kingdom";
+// company details (DEEP ORDINARY LTD, no. 17381666). The registered-office
+// address is public by definition — safe to print.
+const SENDER_LINE = "DEEP ORDINARY LTD · 66 Paul Street, London EC2A 4NA";
 const TAGLINE = "Story worlds. One studio.";
 
 function escapeHtml(s: string): string {
