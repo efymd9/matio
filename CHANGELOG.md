@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/efymd9/matio/compare/matio-v0.4.0...matio-v0.5.0) (2026-08-15)
+
+
+### Features
+
+* **legal:** смена юрлица — DEEP ORDINARY LTD на всех поверхностях ([#84](https://github.com/efymd9/matio/issues/84)) ([bbd39d3](https://github.com/efymd9/matio/commit/bbd39d3f73f329a5f64b413c752824fee44ab57d))
+
 ## [0.4.0](https://github.com/efymd9/matio/compare/matio-v0.3.0...matio-v0.4.0) (2026-08-15)
 
 
