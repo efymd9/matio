@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/efymd9/matio/compare/matio-v0.3.0...matio-v0.4.0) (2026-08-15)
+
+
+### Features
+
+* **design:** состояние синхронизации дизайн-системы в claude.ai/design ([#80](https://github.com/efymd9/matio/issues/80)) ([f834dc6](https://github.com/efymd9/matio/commit/f834dc6a406de5bb5334e76298a1b6958b02356c))
+* **observability:** Sentry with a tested privacy contract + /api/readyz ([#76](https://github.com/efymd9/matio/issues/76)) ([a43fb48](https://github.com/efymd9/matio/commit/a43fb4800baa0918127baa310c4e377b6766fe68))
+
+
+### Bug fixes
+
+* **observability:** release-метка в браузерных событиях Sentry ([#82](https://github.com/efymd9/matio/issues/82)) ([ab1aef2](https://github.com/efymd9/matio/commit/ab1aef2b57e9983b538599ae192825b3ba82e863))
+
 ## [0.3.0](https://github.com/efymd9/matio/compare/matio-v0.2.0...matio-v0.3.0) (2026-08-12)
 
 
