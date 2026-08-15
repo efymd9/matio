@@ -26,6 +26,8 @@ const eslintConfig = defineConfig([
     // модулей и генерённые превью используют `any` по природе, в бандл
     // приложения ничего из этого не попадает.
     ".design-sync/**",
+    ".ds-sync/**",
+    "ds-bundle/**",
     // Dot-directories aren't matched by a plain `dir/**` glob, and Expo
     // regenerates these on every build.
     "**/.expo/**",
