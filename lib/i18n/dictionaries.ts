@@ -373,7 +373,7 @@ export const es = {
     bodyStudioFree:
       "Estrenamos series originales pensadas para verse en cualquier momento. Todo el catálogo puede verse gratis, sin anuncios.",
     bodyWho:
-      "Matio es un proyecto de Matvei Dobrovolskii (empresario individual), con sede en Inglaterra y Gales.",
+      "Matio es un proyecto de DEEP ORDINARY LTD, sociedad registrada en Inglaterra y Gales (n.º 17381666).",
     contactHeading: "Contacto",
     contactBody: "Escríbenos a contact@matio.tv.",
     browseCta: "Explorar el catálogo",
@@ -773,7 +773,7 @@ export const en: Dict = {
     bodyStudioFree:
       "We release original series made to be watched any time. The full catalogue is free to watch, ad-free.",
     bodyWho:
-      "Matio is a project by Matvei Dobrovolskii (sole trader), based in England & Wales.",
+      "Matio is a project by DEEP ORDINARY LTD, registered in England and Wales (company no. 17381666).",
     contactHeading: "Contact",
     contactBody: "Reach us at contact@matio.tv.",
     browseCta: "Browse the catalogue",

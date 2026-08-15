@@ -70,7 +70,7 @@ export function organizationJsonLd(): JsonLd {
     "@type": "Organization",
     "@id": ORG_ID,
     name: SITE_NAME,
-    legalName: "Matvei Dobrovolskii",
+    legalName: "DEEP ORDINARY LTD",
     url: SITE_URL,
     // Raster logo (Google's Organization-logo guidance prefers a crawlable
     // PNG ≥112×112). Absolute so it's fetchable from any origin.
@@ -83,6 +83,9 @@ export function organizationJsonLd(): JsonLd {
     },
     address: {
       "@type": "PostalAddress",
+      streetAddress: "66 Paul Street",
+      addressLocality: "London",
+      postalCode: "EC2A 4NA",
       addressCountry: "GB",
     },
     // Official profiles (footer + llms.txt list the same URLs — keep all
