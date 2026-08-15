@@ -3,6 +3,7 @@
   "version": "0.3.0",
   "private": true,
   "packageManager": "pnpm@10.33.0",
+  "types": ".design-sync/entry.ts",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
