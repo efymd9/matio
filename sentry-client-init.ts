@@ -29,9 +29,11 @@ Sentry.init({
     APP_ENV: process.env.NEXT_PUBLIC_APP_ENV,
     VERCEL_ENV: process.env.NEXT_PUBLIC_VERCEL_ENV,
   }),
-  // `APP_VERSION` is inlined into the client bundle by next.config.ts's `env`
-  // block, so browser and server events share one release.
-  release: resolveRelease(process.env),
+  // Next inlines env vars into the client bundle ONLY on direct property
+  // access — `process.env.APP_VERSION` as a literal expression. Passing the
+  // whole `process.env` object hands the browser an empty shim and the
+  // release tag silently vanishes (caught live on staging, issue #81).
+  release: resolveRelease({ APP_VERSION: process.env.APP_VERSION }),
   tracesSampleRate: 0.1,
   ...sentryPrivacyOptions(),
 });
