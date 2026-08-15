@@ -1,0 +1,25 @@
+{
+  "projectId": "43d55fb2-5653-4094-8bb6-10fb3077d393",
+  "shape": "storybook",
+  "storybookConfigDir": ".design-sync/sb-config",
+  "storybookStatic": ".design-sync/sb-reference",
+  "pkg": "matio",
+  "globalName": "Matio",
+  "entry": ".design-sync/entry.ts",
+  "titleMap": {
+    "Designtokens": null
+  },
+  "overrides": {
+    "Poster": {
+      "cardMode": "column"
+    }
+  },
+  "extraFonts": [
+    ".design-sync/fonts.css"
+  ],
+  "provider": {
+    "component": "MatioTheme"
+  },
+  "guidelinesGlob": [],
+  "readmeHeader": ".design-sync/conventions.md"
+}

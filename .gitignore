@@ -64,3 +64,13 @@ storybook-static
 # рабочего агента и станут требовать от него вотчеров, которые положены
 # только основной сессии (этап 08 плейбука).
 .claude/settings.local.json
+
+# design-sync (claude.ai/design): артефакты и рабочее состояние — не коммитятся.
+# Долговечное (.design-sync/config.json, NOTES.md, conventions.md, previews/,
+# overrides/) namеренно НЕ в этом списке — оно едет в git.
+.design-sync/sb-reference/
+.design-sync/learnings/
+.design-sync/.cache/
+.design-sync/node_modules
+.ds-sync/
+ds-bundle/

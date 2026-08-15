@@ -22,6 +22,10 @@ const eslintConfig = defineConfig([
     // real findings under a few hundred warnings from minified Storybook.
     "coverage/**",
     "storybook-static/**",
+    // design-sync (claude.ai/design): рабочее состояние синка — шим тестовых
+    // модулей и генерённые превью используют `any` по природе, в бандл
+    // приложения ничего из этого не попадает.
+    ".design-sync/**",
     // Dot-directories aren't matched by a plain `dir/**` glob, and Expo
     // regenerates these on every build.
     "**/.expo/**",
