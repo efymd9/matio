@@ -363,20 +363,94 @@ export const es = {
   about: {
     metaTitle: "Acerca de Matio",
     metaDescription:
-      "Matio es un estudio de streaming de historias originales en formato corto. Conoce quiénes somos y cómo contactarnos.",
-    heading: "Acerca de Matio",
-    lead: "Matio es un servicio de streaming por suscripción dedicado a historias originales en formato corto, producidas por nuestro estudio.",
-    leadFree:
-      "Matio es un servicio de streaming dedicado a historias originales en formato corto, producidas por nuestro estudio.",
-    bodyStudio:
-      "Estrenamos series originales pensadas para verse en cualquier momento. Cada título puede verse gratis durante los primeros 60 segundos; la suscripción mensual desbloquea el catálogo completo, sin anuncios.",
-    bodyStudioFree:
-      "Estrenamos series originales pensadas para verse en cualquier momento. Todo el catálogo puede verse gratis, sin anuncios.",
+      "Matio es un estudio independiente: historias románticas oscuras y series cortas creadas con más de 12 herramientas de IA, del guion al fotograma final.",
+    heroBadge: "Acerca de matio",
+    heroTitle1: "Mundos de historias.",
+    heroTitle2: "Un estudio.",
+    // La variante «free» añade la frase de gratuidad; con pagos activados se
+    // muestra la neutra (la página está indexada — nada de afirmar «gratis»
+    // cuando no lo es).
+    heroSub:
+      "Historias románticas oscuras y series cortas — escritas, producidas y estrenadas bajo un mismo techo.",
+    heroSubFree:
+      "Historias románticas oscuras y series cortas — escritas, producidas y estrenadas bajo un mismo techo. Míralo todo gratis.",
+    heroAlt: "Fotograma de una producción de Matio",
+    browseCta: "Explorar el catálogo",
+    pressCta: "Prensa y partners",
+    missionLabel: "Nuestra misión",
+    missionHeading:
+      "Creamos historias románticas oscuras y series cortas usando más de 12 herramientas de IA.",
+    missionBody:
+      "Todo el proceso — del guion al fotograma final — ocurre dentro del equipo, sin intermediarios y sin comprometer la calidad.",
+    missionAlt: "Still de producción de Matio",
+    visionLabel: "Nuestra visión",
+    visionHeading:
+      "La producción con IA no es un atajo: es un nuevo instrumento para el cine de autor.",
+    visionBody:
+      "La tecnología libera al equipo del trabajo rutinario y nos da más tiempo para la historia, la atmósfera y los personajes. Nuestra meta es ser un estudio cuyas series se reconozcan por un solo fotograma, no por un título.",
+    visionAlt: "Still de producción de Matio",
+    manifestLine1: "Atrapa al espectador desde la primera escena.",
+    manifestLine2: "No lo sueltes hasta el final.",
+    manifestCaption: "EL PRINCIPIO QUE SOSTIENE CADA EPISODIO",
+    // El principio «nunca pagan» solo puede imprimirse mientras el sitio es
+    // gratuito; en modo de pago la lista se reduce a tres.
+    principlesFree: [
+      "La historia la decide la idea, no el presupuesto",
+      "Cada detalle sirve a la atmósfera",
+      "Los espectadores nunca pagan",
+      "Hacemos lo que nosotros mismos querríamos ver",
+    ],
+    principlesPaid: [
+      "La historia la decide la idea, no el presupuesto",
+      "Cada detalle sirve a la atmósfera",
+      "Hacemos lo que nosotros mismos querríamos ver",
+    ],
+    teamLabel: "El equipo",
+    teamHeading1: "El equipo que hace",
+    teamHeading2: "que cada escena atrape",
+    teamSub: (n: number) =>
+      `${n} PERSONAS · UN MISMO TECHO · DEL GUION AL FOTOGRAMA FINAL`,
+    teamPrev: "Anterior",
+    teamNext: "Siguiente",
+    pressBannerKicker: "¿Periodista o partner?",
+    pressBannerHeading: "Boilerplate, stills y datos — en la página de prensa.",
+    pressBannerCta: "Ir a la página de prensa",
     bodyWho:
       "Matio es un proyecto de DEEP ORDINARY LTD, sociedad registrada en Inglaterra y Gales (n.º 17381666).",
-    contactHeading: "Contacto",
-    contactBody: "Escríbenos a contact@matio.tv.",
-    browseCta: "Explorar el catálogo",
+  },
+  press: {
+    metaTitle: "Prensa — Matio",
+    metaDescription:
+      "Sala de prensa de Matio: boilerplate, kit de prensa con marcas y stills, y contacto para entrevistas y screeners.",
+    kicker: "Matio · Prensa y partners",
+    title1: "Sala de",
+    title2: "prensa.",
+    boilerplate:
+      "Matio es un estudio independiente que crea historias románticas oscuras y series cortas con más de 12 herramientas de IA. Todo el proceso — del guion al fotograma final — ocurre dentro del equipo.",
+    boilerplateFree:
+      "Matio es un estudio independiente que crea historias románticas oscuras y series cortas con más de 12 herramientas de IA. Todo el proceso — del guion al fotograma final — ocurre dentro del equipo. Cada episodio se puede ver gratis.",
+    boilerplateNote: "USA ESTE PÁRRAFO TAL CUAL COMO BOILERPLATE.",
+    kitKicker: "Kit de prensa",
+    kitHeading: "Todo en una carpeta.",
+    kitBody:
+      "Marcas, wordmark y stills de producción — listos para uso editorial.",
+    kitDownload: "Descargar el kit · ZIP",
+    cardLogomark: "Logomark",
+    cardLogomarkMeta: "PNG",
+    cardWordmark: "Wordmark",
+    cardWordmarkMeta: "PNG",
+    cardStills: "Stills",
+    cardStillsMeta: "4 × JPEG",
+    usageLabel: "Uso —",
+    usageBody:
+      "la marca dorada solo sobre espresso o rojo de marca. No la recolorees, contornees ni rotes.",
+    contactKicker: "Contacto de prensa",
+    contactBody:
+      "Entrevistas, screeners, stills más allá del kit — respondemos en dos días laborables.",
+    websiteAria: "Sitio web",
+    logomarkAlt: "Logomark de Matio",
+    wordmarkAlt: "Wordmark de Matio",
+    stillsAlt: "Still de producción de Matio",
   },
   footer: {
     sectionLegal: "Legal",
@@ -388,6 +462,7 @@ export const es = {
     contact: "Contacto",
     browse: "Explorar",
     about: "Acerca de",
+    press: "Prensa",
     subscribe: "Suscribirse",
     manage: "Gestionar suscripción",
     followUs: "Síguenos",
@@ -763,20 +838,92 @@ export const en: Dict = {
   about: {
     metaTitle: "About Matio",
     metaDescription:
-      "Matio is a streaming studio for original short-form stories. Learn who we are and how to reach us.",
-    heading: "About Matio",
-    lead: "Matio is a subscription streaming service dedicated to original short-form stories, produced by our studio.",
-    leadFree:
-      "Matio is a streaming service dedicated to original short-form stories, produced by our studio.",
-    bodyStudio:
-      "We release original series made to be watched any time. Every title is free to watch for its first 60 seconds; the monthly membership unlocks the full catalogue, ad-free.",
-    bodyStudioFree:
-      "We release original series made to be watched any time. The full catalogue is free to watch, ad-free.",
+      "Matio is an independent studio: dark romantic stories and short series made with more than 12 AI tools, from script to final frame.",
+    heroBadge: "About matio",
+    heroTitle1: "Story worlds.",
+    heroTitle2: "One studio.",
+    // The "free" variant appends the free-to-watch sentence; with payments on
+    // the neutral one renders (the page is indexed — never claim "free" when
+    // it isn't).
+    heroSub:
+      "Dark romantic stories and short series — written, produced and premiered under one roof.",
+    heroSubFree:
+      "Dark romantic stories and short series — written, produced and premiered under one roof. Free to watch.",
+    heroAlt: "Still frame from a Matio production",
+    browseCta: "Browse the catalogue",
+    pressCta: "Press & partners",
+    missionLabel: "Our mission",
+    missionHeading:
+      "We create dark romantic stories and short series using more than 12 AI tools.",
+    missionBody:
+      "The entire process — from script to final frame — happens within the team, with no intermediaries and no compromises on quality.",
+    missionAlt: "Matio production still",
+    visionLabel: "Our vision",
+    visionHeading:
+      "AI production isn't a shortcut — it's a new instrument for authorial filmmaking.",
+    visionBody:
+      "Technology frees the team from routine work and gives us more time for story, atmosphere, and character. Our goal is to become a studio whose series are recognized from a single frame, not from a title.",
+    visionAlt: "Matio production still",
+    manifestLine1: "Grab the viewer from the first scene.",
+    manifestLine2: "Never let go until the end.",
+    manifestCaption: "THE ONE PRINCIPLE EVERY EPISODE IS BUILT AROUND",
+    // The "never pay" principle can only be printed while the site is free;
+    // in paid mode the list drops to three.
+    principlesFree: [
+      "A story is decided by the idea, not the budget",
+      "Every detail serves the atmosphere",
+      "Viewers never pay",
+      "We make what we'd want to watch ourselves",
+    ],
+    principlesPaid: [
+      "A story is decided by the idea, not the budget",
+      "Every detail serves the atmosphere",
+      "We make what we'd want to watch ourselves",
+    ],
+    teamLabel: "The team",
+    teamHeading1: "The team that makes",
+    teamHeading2: "every scene grip",
+    teamSub: (n: number) => `${n} PEOPLE · ONE ROOF · SCRIPT TO FINAL FRAME`,
+    teamPrev: "Previous",
+    teamNext: "Next",
+    pressBannerKicker: "Journalist or partner?",
+    pressBannerHeading: "Boilerplate, stills and facts — on the press page.",
+    pressBannerCta: "Visit the press page",
     bodyWho:
       "Matio is a project by DEEP ORDINARY LTD, registered in England and Wales (company no. 17381666).",
-    contactHeading: "Contact",
-    contactBody: "Reach us at contact@matio.tv.",
-    browseCta: "Browse the catalogue",
+  },
+  press: {
+    metaTitle: "Press — Matio",
+    metaDescription:
+      "Matio press room: boilerplate, a press kit with marks and stills, and a contact for interviews and screeners.",
+    kicker: "Matio · Press & partners",
+    title1: "Press",
+    title2: "room.",
+    boilerplate:
+      "Matio is an independent studio making dark romantic stories and short series with more than 12 AI tools. The entire process — from script to final frame — happens within the team.",
+    boilerplateFree:
+      "Matio is an independent studio making dark romantic stories and short series with more than 12 AI tools. The entire process — from script to final frame — happens within the team. Every episode is free to watch.",
+    boilerplateNote: "USE THIS PARAGRAPH VERBATIM AS BOILERPLATE.",
+    kitKicker: "Press kit",
+    kitHeading: "Everything in one folder.",
+    kitBody: "Marks, wordmark and production stills — cleared for editorial use.",
+    kitDownload: "Download the kit · ZIP",
+    cardLogomark: "Logomark",
+    cardLogomarkMeta: "PNG",
+    cardWordmark: "Wordmark",
+    cardWordmarkMeta: "PNG",
+    cardStills: "Stills",
+    cardStillsMeta: "4 × JPEG",
+    usageLabel: "Usage —",
+    usageBody:
+      "gold mark on espresso or brand red only. Don't recolour, outline or rotate it.",
+    contactKicker: "Press contact",
+    contactBody:
+      "Interviews, screeners, stills beyond the kit — we answer within two working days.",
+    websiteAria: "Website",
+    logomarkAlt: "Matio logomark",
+    wordmarkAlt: "Matio wordmark",
+    stillsAlt: "Matio production still",
   },
   footer: {
     sectionLegal: "Legal",
@@ -788,6 +935,7 @@ export const en: Dict = {
     contact: "Contact",
     browse: "Browse",
     about: "About",
+    press: "Press",
     subscribe: "Subscribe",
     manage: "Manage subscription",
     followUs: "Follow us",

@@ -72,6 +72,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "yearly",
       priority: 0.3,
     }),
+    ...localizedEntries("/press", {
+      changeFrequency: "monthly",
+      priority: 0.3,
+    }),
     ...published.flatMap((s) =>
       localizedEntries(`/shows/${s.slug}`, {
         lastModified: s.updatedAt ?? catalogLastMod,

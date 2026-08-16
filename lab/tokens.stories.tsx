@@ -27,6 +27,7 @@ const BRAND: { name: string; className: string; hex: string; use: string }[] = [
   { name: "gold-deep", className: "bg-gold-deep", hex: "#241205", use: "Text ON gold" },
   { name: "burgundy", className: "bg-burgundy", hex: "#8f2f1c", use: "Secondary brand" },
   { name: "rust", className: "bg-rust", hex: "#a8401f", use: "Warm accent, borders at /30" },
+  { name: "umber", className: "bg-umber", hex: "#5c2416", use: "Deep gradient partner for burgundy (press-contact band)" },
 ];
 
 export const Colors: Story = {

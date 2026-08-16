@@ -13,7 +13,7 @@ const meta = {
   argTypes: {
     platform: {
       control: "select",
-      options: ["tiktok", "instagram", "youtube", "facebook"],
+      options: ["tiktok", "instagram", "youtube", "x", "facebook"],
     },
     size: { control: { type: "range", min: 12, max: 64, step: 2 } },
   },
@@ -31,7 +31,7 @@ export const FooterRow: Story = {
   play: async ({ canvasElement }) => golden(canvasElement, "social-footer-row"),
   render: (args) => (
     <div className="flex items-center gap-5 text-cream/70">
-      {(["tiktok", "instagram", "youtube", "facebook"] as const).map(
+      {(["tiktok", "instagram", "youtube", "x", "facebook"] as const).map(
         (platform) => (
           <SocialIcon key={platform} {...args} platform={platform} />
         ),
@@ -44,7 +44,7 @@ export const AtDisplaySize: Story = {
   args: { size: 48 },
   render: (args) => (
     <div className="flex items-center gap-6 text-gold">
-      {(["tiktok", "instagram", "youtube", "facebook"] as const).map(
+      {(["tiktok", "instagram", "youtube", "x", "facebook"] as const).map(
         (platform) => (
           <SocialIcon key={platform} {...args} platform={platform} />
         ),

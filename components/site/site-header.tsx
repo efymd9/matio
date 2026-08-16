@@ -104,6 +104,9 @@ function SiteHeaderContent({
           <NavLink href="/about" active={pathname === "/about"}>
             {t.footer.about}
           </NavLink>
+          <NavLink href="/press" active={pathname === "/press"}>
+            {t.footer.press}
+          </NavLink>
           {paymentsEnabled && (
             <NavLink href="/subscribe" active={pathname === "/subscribe"}>
               {t.header.subscribe}
@@ -178,6 +181,13 @@ function MobileNavMenu({
               render={<Link href="/about" />}
             >
               {t.footer.about}
+            </Menu.Item>
+            <Menu.Item
+              closeOnClick
+              className="block rounded-md px-3 py-2.5 text-sm font-medium text-cream/85 outline-none transition-colors data-[highlighted]:bg-cream/8 data-[highlighted]:text-cream"
+              render={<Link href="/press" />}
+            >
+              {t.footer.press}
             </Menu.Item>
             {paymentsEnabled && (
               <Menu.Item

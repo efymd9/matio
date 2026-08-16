@@ -46,6 +46,7 @@ export async function GET() {
     "## Pages",
     "",
     `- [About](${SITE_URL}/about): what Matio is and who runs it`,
+    `- [Press](${SITE_URL}/press): boilerplate, press kit and press contact`,
     `- [Terms of Service](${SITE_URL}/terms)`,
     `- [Privacy Policy](${SITE_URL}/privacy)`,
     `- [Cookie Policy](${SITE_URL}/cookies)`,

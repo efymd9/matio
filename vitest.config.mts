@@ -73,11 +73,13 @@ export default defineConfig({
       // за собой пол-`lib/`) → 4.97 (наблюдаемость, #36: lib/observability.ts,
       // /api/readyz и тест-аудит логов — оба новых файла покрыты на 100%).
       // Полы идут следом, округлением вниз.
+      // → 6.5 (редизайн /about + /press, #88: контент-компоненты исполняются
+      //   историями, ростер и SEO-хелперы — юнитами).
       thresholds: {
-        lines: 5.6,
-        functions: 4.5,
-        branches: 4.4,
-        statements: 5.6,
+        lines: 6.5,
+        functions: 6.0,
+        branches: 4.9,
+        statements: 6.5,
       },
     },
 

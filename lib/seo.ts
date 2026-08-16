@@ -42,6 +42,7 @@ export function isLocalizablePath(path: string): boolean {
   return (
     path === "/" ||
     path === "/about" ||
+    path === "/press" ||
     path === "/terms" ||
     path === "/privacy" ||
     path === "/cookies" ||

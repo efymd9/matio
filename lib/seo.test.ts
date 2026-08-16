@@ -47,6 +47,7 @@ describe("isLocalizablePath", () => {
   it("covers exactly the indexable public set", () => {
     expect(isLocalizablePath("/")).toBe(true);
     expect(isLocalizablePath("/about")).toBe(true);
+    expect(isLocalizablePath("/press")).toBe(true);
     expect(isLocalizablePath("/shows/x")).toBe(true);
     expect(isLocalizablePath("/actors/y")).toBe(true);
     expect(isLocalizablePath("/terms")).toBe(true);

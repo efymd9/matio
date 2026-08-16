@@ -623,6 +623,21 @@ return () => { cancelled = true; abort?.abort(); };
 
 The `cancelled` flag handles the cleanup path for browsers without `AbortController`. All other features work back to iOS 12.2+; this is the current browser compat floor for the player.
 
+## Tailwind v4 — custom breakpoint rule order
+
+The custom `tablet:` breakpoint (`--breakpoint-tablet: 834px` in `@theme`) is
+emitted **before** the stock `sm:`/`md:`/`xl:` buckets in the compiled CSS —
+verified empirically (2026-08-16, the /press kit-card grid): `tablet:grid-cols-3`
+landed at byte ~145k, `sm:grid-cols-2` at ~152k. Same specificity ⇒ the later
+`sm:` rule wins at EVERY width ≥640px, so **a `tablet:` utility can never
+override an `sm:` utility on the same property**. Symptom: the tablet/desktop
+layout silently renders the `sm:` variant.
+
+Rule of thumb: on any one property, combine `tablet:` only with the base
+utility (`grid-cols-1 tablet:grid-cols-3`) or with `xl:` and up — never with
+`sm:`/`md:` below it. Stock breakpoints among themselves sort correctly
+(`sm:` < `xl:` was verified in the same session).
+
 ## Cross-browser CSS (iOS Safari < 15.4)
 
 Tailwind v4 targets "Safari 16.4+, Chrome 111+, Firefox 128+" and emits zero fallbacks. iPhones still in active use — 6s/SE-1st-gen/7/8 frozen on iOS 14/15.0–15.3 — drop entire declarations they can't parse, which silently breaks UI when load-bearing properties are involved.
