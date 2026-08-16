@@ -407,6 +407,12 @@ urgent — it costs one command.
 ```
 app/
   (public)/                # Public catalog: /, /shows/[slug]
+    about/                 # /about — studio page («About page v3» design):
+                           #   4K hero, mission/vision, manifest, values,
+                           #   team slider, press hand-off; bilingual, indexed
+    press/                 # /press — press room: boilerplate, press-kit ZIP
+                           #   (public/press/matio-press-kit.zip, static),
+                           #   press contact; bilingual, indexed
     terms/                 # /terms — bilingual legal page (filled; counsel review pending)
     privacy/               # /privacy — bilingual privacy policy (filled; counsel review pending)
     cookies/               # /cookies — bilingual cookie policy (filled; counsel review pending)
@@ -473,6 +479,11 @@ app/
                            #   checkout_claim cookie, claims, ticket sign-in)
 components/
   ui/                      # shadcn primitives (Base UI under the hood)
+  about/                   # /about + /press bodies (about-content, press-
+                           #   content, press-contact band, team-slider) —
+                           #   presentational, dict/locale via props, each
+                           #   with stories
+
   admin/                   # admin-specific (video upload widget, image-upload-
                            #   field for poster/hero artwork, status select,
                            #   reminders-panel — episode-reminder send form)
@@ -599,9 +610,13 @@ lib/
                            #   ru/en locale, Russian default — see "Admin
                            #   locale" rule
   social-links.ts          # official social profiles (2 TikToks es/en, IG,
-                           #   YT, FB) — single source for the footer row
+                           #   YT, X, FB) — single source for the footer row
                            #   (locale-matched TikTok), Organization sameAs,
                            #   and llms.txt; universal, canonical clean URLs
+  about-team.ts            # /about team roster (owner content from the
+                           #   «About page v3» mock): names + localized
+                           #   roles/bios + card gradients; props for the
+                           #   team slider, deliberately NOT in dictionaries
   utm.ts                   # normalizeUtm() — shared UTM canonicalization
                            #   (trim+lowercase+strip; universal, app + PostHog)
   utils.ts                 # cn() from shadcn

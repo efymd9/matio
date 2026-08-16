@@ -18,6 +18,9 @@
   --color-gold-deep: #241205;
   --color-burgundy: #8f2f1c;
   --color-rust: #a8401f;
+  /* Deep red-brown — tone-a's start shade promoted to a token: gradient
+     partner for burgundy on the press-contact band (about/press pages). */
+  --color-umber: #5c2416;
   /* Redesign breakpoint system: mobile < 834 ≤ tablet < 1280 ≤ desktop.
      `tablet:` sits between md (768) and lg (1024); desktop = `xl:`. */
   --breakpoint-tablet: 834px;

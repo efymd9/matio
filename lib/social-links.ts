@@ -6,7 +6,12 @@ import type { Locale } from "./i18n/dictionaries";
 // string appears everywhere; entity-resolution across those surfaces depends
 // on byte-identical URLs. Universal module: imported by client components.
 
-export type SocialPlatform = "tiktok" | "instagram" | "youtube" | "facebook";
+export type SocialPlatform =
+  | "tiktok"
+  | "instagram"
+  | "youtube"
+  | "facebook"
+  | "x";
 
 export type SocialProfile = {
   platform: SocialPlatform;
@@ -39,6 +44,13 @@ const SHARED_PROFILES: SocialProfile[] = [
     platform: "youtube",
     label: "YouTube",
     url: "https://www.youtube.com/@matio_tv",
+  },
+  // Added 2026-08-16 from the owner's About brief (uploads/ABOUT.md in the
+  // Claude Design project) alongside the /press launch.
+  {
+    platform: "x",
+    label: "X",
+    url: "https://x.com/matiotv",
   },
   {
     platform: "facebook",

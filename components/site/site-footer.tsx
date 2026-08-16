@@ -74,6 +74,7 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-cream/55 tablet:hidden">
           <FooterLink href="/">{t.footer.browse}</FooterLink>
           <FooterLink href="/about">{t.footer.about}</FooterLink>
+          <FooterLink href="/press">{t.footer.press}</FooterLink>
           {paymentsEnabled && (
             <FooterLink href="/subscribe">
               {t.footer.subscribe}
@@ -112,6 +113,7 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
           <FooterColumn heading={t.footer.sectionMatio}>
             <FooterLink href="/">{t.footer.browse}</FooterLink>
             <FooterLink href="/about">{t.footer.about}</FooterLink>
+            <FooterLink href="/press">{t.footer.press}</FooterLink>
             {paymentsEnabled && (
               <FooterLink href="/subscribe">{t.footer.subscribe}</FooterLink>
             )}
