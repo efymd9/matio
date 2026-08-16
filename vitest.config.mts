@@ -74,10 +74,10 @@ export default defineConfig({
       // /api/readyz и тест-аудит логов — оба новых файла покрыты на 100%).
       // Полы идут следом, округлением вниз.
       thresholds: {
-        lines: 4.9,
-        functions: 3.6,
-        branches: 4.0,
-        statements: 5.0,
+        lines: 5.6,
+        functions: 4.5,
+        branches: 4.4,
+        statements: 5.6,
       },
     },
 
