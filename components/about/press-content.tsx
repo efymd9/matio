@@ -21,7 +21,7 @@ export function PressContent({
   return (
     <>
       <section className="mx-auto max-w-7xl px-6 pt-36 sm:px-12 tablet:pt-40">
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <span
             aria-hidden="true"
             className="inline-block h-0.5 w-[18px] rounded-[1px] bg-rust"
@@ -29,6 +29,15 @@ export function PressContent({
           <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-gold/75">
             {t.press.kicker}
           </span>
+          {/* Owner decision (#91): the contact address is visible above the
+              fold, next to the kicker — journalists shouldn't have to scroll
+              to the contact band for it. */}
+          <a
+            href="mailto:contact@matio.tv"
+            className="font-mono text-xs tracking-[0.08em] text-gold/80 transition-colors hover:text-gold sm:ml-auto"
+          >
+            contact@matio.tv
+          </a>
         </div>
         <h1 className="mt-5 font-display text-6xl uppercase leading-[0.97] tracking-[0.01em] text-cream sm:text-7xl xl:text-8xl">
           {t.press.title1} <span className="text-gold">{t.press.title2}</span>

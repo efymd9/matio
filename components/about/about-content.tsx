@@ -98,6 +98,14 @@ export function AboutContent({
               {t.about.pressCta} →
             </Link>
           </div>
+          {/* Owner decision (#91): the contact address is visible above the
+              fold, not only in the press-contact band at the bottom. */}
+          <a
+            href="mailto:contact@matio.tv"
+            className="pt-1 font-mono text-xs tracking-[0.08em] text-cream/70 transition-colors hover:text-gold"
+          >
+            contact@matio.tv
+          </a>
         </div>
       </section>
 
