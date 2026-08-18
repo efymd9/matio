@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/efymd9/matio/compare/matio-v0.5.0...matio-v0.6.0) (2026-08-18)
+
+
+### Features
+
+* **site:** показать contact@matio.tv на первом развороте /about и /press ([#92](https://github.com/efymd9/matio/issues/92)) ([be984c4](https://github.com/efymd9/matio/commit/be984c4ce23dad1bfb249812f4178e087f386343)), closes [#91](https://github.com/efymd9/matio/issues/91)
+* **site:** редизайн /about + новая страница /press (макет Claude Design «About page v3») ([#89](https://github.com/efymd9/matio/issues/89)) ([e40cdc1](https://github.com/efymd9/matio/commit/e40cdc1be18222315f124bf4324ac26970131abf))
+
+
+### Bug fixes
+
+* **site:** email убран с первого разворота /about и /press (откат [#92](https://github.com/efymd9/matio/issues/92) ревёртом [#93](https://github.com/efymd9/matio/issues/93)) ([#94](https://github.com/efymd9/matio/issues/94)) ([6828d27](https://github.com/efymd9/matio/commit/6828d2760967d0dcc2561b22e1e973ad5dbe41ef))
+
 ## [0.5.0](https://github.com/efymd9/matio/compare/matio-v0.4.0...matio-v0.5.0) (2026-08-15)
 
 
