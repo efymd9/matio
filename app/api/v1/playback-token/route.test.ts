@@ -195,6 +195,70 @@ describe("POST /api/v1/playback-token — who gets a token", () => {
   });
 });
 
+describe("POST /api/v1/playback-token — legacy 60s preview (paid mode)", () => {
+  // A show whose ready episodes are ALL subscriber-tier keeps the historical
+  // preview trial. The app reaches it through the same device identity the
+  // web reaches through its cookie.
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    h.showHasTierGating.mockResolvedValue(false);
+    h.row = { playbackId: "pb-1", showId: SHOW, access: "subscriber" };
+  });
+
+  it("refuses to start a preview with no device to key it on", async () => {
+    // Without an identity the 60-second budget would be unlimited.
+    const res = await POST(post({ episodeId: EPISODE }, { device: null }));
+    expect(res.status).toBe(400);
+    expect(h.sign).not.toHaveBeenCalled();
+  });
+
+  it("mints a fresh preview capped at the trial duration", async () => {
+    h.mintTrialSession.mockResolvedValue({
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+    });
+    const body = await (await POST(post({ episodeId: EPISODE }))).json();
+    expect(body.mode).toBe("trial");
+    // Ten minutes of clock remaining must not become a ten-minute token.
+    expect(body.expiresIn).toBe(60);
+  });
+
+  it("serves the remainder of an existing preview", async () => {
+    h.findTrialSession.mockResolvedValue({
+      expiresAt: new Date(Date.now() + 25_000),
+    });
+    const body = await (await POST(post({ episodeId: EPISODE }))).json();
+    expect(body.mode).toBe("trial");
+    expect(body.expiresIn).toBeGreaterThan(0);
+    expect(body.expiresIn).toBeLessThanOrEqual(25);
+    expect(h.mintTrialSession).not.toHaveBeenCalled();
+  });
+
+  it("walls a spent preview with `subscribe_required`", async () => {
+    h.findTrialSession.mockResolvedValue({
+      expiresAt: new Date(Date.now() - 1000),
+    });
+    const res = await POST(post({ episodeId: EPISODE }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.reason).toBe("subscribe_required");
+    expect(h.sign).not.toHaveBeenCalled();
+  });
+
+  it("answers 429 with Retry-After, and without naming the bucket", async () => {
+    h.mintTrialSession.mockRejectedValue(new h.FakeRateLimit("limit"));
+    const res = await POST(post({ episodeId: EPISODE }));
+    const body = await res.json();
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("3600");
+    // Don't confirm to an adversary which bucket they hit.
+    expect(JSON.stringify(body)).not.toMatch(/ip|network|bucket/i);
+  });
+
+  it("lets an unexpected failure surface instead of silently denying access", async () => {
+    h.mintTrialSession.mockRejectedValue(new Error("db down"));
+    await expect(POST(post({ episodeId: EPISODE }))).rejects.toThrow("db down");
+  });
+});
+
 describe("POST /api/v1/playback-token — tracking never blocks playback", () => {
   it("mints one trial row per (device, show) and reuses it after", async () => {
     await POST(post({ episodeId: EPISODE }));
