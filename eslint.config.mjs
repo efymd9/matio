@@ -31,6 +31,10 @@ const eslintConfig = defineConfig([
     // Dot-directories aren't matched by a plain `dir/**` glob, and Expo
     // regenerates these on every build.
     "**/.expo/**",
+    "design_handoff_matio_redesign/**",
+    // The Expo app is a standalone project with its own toolchain and lint
+    // config; the Next/web rules here don't apply to React Native source.
+    "mobile/**",
   ]),
   ...storybook.configs["flat/recommended"]
 ]);
