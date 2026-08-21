@@ -37,7 +37,7 @@
     "@clerk/themes": "^2.4.57",
     "@mux/mux-node": "^14.0.1",
     "@mux/mux-player-react": "^3.13.0",
-    "@mux/mux-video-react": "^0.31.0",
+    "@mux/mux-video-react": "^0.31.2",
     "@mux/upchunk": "^3.5.0",
     "@sentry/nextjs": "^10.70.0",
     "@stripe/react-stripe-js": "^6.8.1",
