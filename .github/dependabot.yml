@@ -11,12 +11,44 @@ updates:
     labels: ["type:debt", "domain:infra", "p3"]
 
   # Expo-приложение: свой package-lock.json, живёт вне pnpm-воркспейса.
+  #
+  # ВНИМАНИЕ, ДВЕ ВЕЩИ (обе оплачены 21.08.2026, issue #109):
+  #
+  # 1. Версии пакетов, которыми управляет Expo SDK, Dependabot двигать НЕ
+  #    должен. Их диктует SDK, и меняются они ровно одной командой при
+  #    апгрейде SDK — `npx expo install --fix`. Поштучный бамп (Dependabot
+  #    предложил react-native 0.86 → 0.87 в обход SDK 57) даёт приложение,
+  #    которое не собирается. Отличать просто по диапазону в package.json:
+  #    точная версия или `~` — пакет SDK, трогать нельзя; `^` — наш выбор,
+  #    обновляется штатно (поэтому react-native-video НЕ в списке ниже и
+  #    продолжает получать бампы).
+  #
+  # 2. Зелёный CI на мобильном PR НИЧЕГО не доказывает про приложение:
+  #    джоба `web (lint · types · tests)` исключает `mobile/**` из ESLint,
+  #    vitest и tsconfig. Карточка выглядит проверенной, а проверено, что
+  #    не сломался веб. Любой оставшийся мобильный бамп мержится только
+  #    после ручной сборки приложения.
   - package-ecosystem: npm
     directory: /mobile
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
     labels: ["type:debt", "domain:mobile", "p3"]
+    ignore:
+      - dependency-name: "expo"
+      - dependency-name: "expo-*"
+      - dependency-name: "@expo/*"
+      - dependency-name: "react"
+      - dependency-name: "react-dom"
+      - dependency-name: "react-native"
+      # Перечислены поимённо, а не маской `react-native-*`: маска заглушила бы
+      # и react-native-video — сторонний плеер, который SDK не пинит.
+      - dependency-name: "react-native-gesture-handler"
+      - dependency-name: "react-native-reanimated"
+      - dependency-name: "react-native-safe-area-context"
+      - dependency-name: "react-native-screens"
+      - dependency-name: "react-native-web"
+      - dependency-name: "react-native-worklets"
 
   - package-ecosystem: github-actions
     directory: /
