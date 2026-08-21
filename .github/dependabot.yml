@@ -9,6 +9,15 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     labels: ["type:debt", "domain:infra", "p3"]
+    # ОДИН PR на всю неделю вместо восьми. Каждое обновление правит один и тот
+    # же pnpm-lock.yaml, а ruleset требует, чтобы ветка была не старше базы:
+    # поэтому любой мерж делает все остальные PR устаревшими, Dependabot их
+    # ребейзит, следующий мерж роняет снова — карусель, которая 21.08.2026
+    # съела полдня на восемь строк версий (#109, разгребали пакетным #118).
+    # Группировка убирает причину: конфликтовать внутри одного PR нечему.
+    groups:
+      npm:
+        patterns: ["*"]
 
   # Expo-приложение: свой package-lock.json, живёт вне pnpm-воркспейса.
   #
@@ -34,6 +43,10 @@ updates:
       interval: weekly
     open-pull-requests-limit: 3
     labels: ["type:debt", "domain:mobile", "p3"]
+    # Та же группировка, что и у веба (см. комментарий выше).
+    groups:
+      mobile:
+        patterns: ["*"]
     ignore:
       - dependency-name: "expo"
       - dependency-name: "expo-*"
@@ -55,3 +68,6 @@ updates:
     schedule:
       interval: weekly
     labels: ["type:debt", "domain:infra", "p3"]
+    groups:
+      actions:
+        patterns: ["*"]
