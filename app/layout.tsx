@@ -140,11 +140,17 @@ export default async function RootLayout({
     <ClerkProvider
       localization={CLERK_LOCALIZATIONS[locale]}
       appearance={{
-        // Official Clerk-designed dark baseTheme. Handles the navbar /
-        // panel split, hover states, and opacity ramps so every surface
-        // stays readable. We just layer the brand gold on top via
-        // colorPrimary (dark gold-deep text keeps CTAs legible on gold).
-        baseTheme: dark,
+        // Official Clerk-designed dark theme. Handles the navbar / panel
+        // split, hover states, and opacity ramps so every surface stays
+        // readable. We just layer the brand gold on top via colorPrimary
+        // (dark gold-deep text keeps CTAs legible on gold).
+        //
+        // Was `baseTheme` until 2026-08-21: Clerk renamed the key to `theme`
+        // and dropped the old one in 7.7 (second such rename caught by CI on
+        // bump #107 — the first was colorTextOnPrimaryBackground). Both names
+        // exist in the version pinned here, so the rename lands before the
+        // bump rather than inside it.
+        theme: dark,
         variables: {
           colorPrimary: "#e6b366",
           // `colorTextOnPrimaryBackground` until 2026-08-21: Clerk deprecated
