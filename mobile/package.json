@@ -3,7 +3,7 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
-    "@clerk/expo": "^4.1.2",
+    "@clerk/expo": "^4.4.0",
     "@expo-google-fonts/anton": "^0.4.2",
     "@expo-google-fonts/geist": "^0.4.2",
     "@expo-google-fonts/geist-mono": "^0.4.3",
