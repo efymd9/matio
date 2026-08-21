@@ -147,7 +147,12 @@ export default async function RootLayout({
         baseTheme: dark,
         variables: {
           colorPrimary: "#e6b366",
-          colorTextOnPrimaryBackground: "#241205",
+          // `colorTextOnPrimaryBackground` until 2026-08-21: Clerk deprecated
+          // that name in favour of this one and REMOVED it in 7.7, where the
+          // old key fails the type check outright (caught by CI on the
+          // Dependabot bump #107). Both names exist in the version pinned
+          // here, so the rename lands before the bump rather than inside it.
+          colorPrimaryForeground: "#241205",
           borderRadius: "0.75rem",
         },
       }}
