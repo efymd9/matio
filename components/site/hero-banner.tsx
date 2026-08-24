@@ -67,6 +67,18 @@ export function HeroBanner({
   // before it mounts.
   const muxDataEnabled = useMarketingConsent() && !!MUX_DATA_ENV_KEY;
 
+  // Consent flipping mid-playback REMOUNTS the player (see the `key` below).
+  // Reset the "video is covering the backdrop" flag in the same breath, or the
+  // backdrop stays at opacity-0 while the fresh instance is still loading and
+  // the hero shows ~half a second of empty background. Render-phase adjustment,
+  // not an effect — React 19's react-hooks/set-state-in-effect forbids the
+  // effect form (same pattern as the watch player's per-episode visual reset).
+  const [prevMuxDataEnabled, setPrevMuxDataEnabled] = useState(muxDataEnabled);
+  if (prevMuxDataEnabled !== muxDataEnabled) {
+    setPrevMuxDataEnabled(muxDataEnabled);
+    setVideoPlaying(false);
+  }
+
   // Meta row: genre · N episodes · 16+ (· year on tablet/desktop). Each entry
   // flags whether it's hidden below the tablet breakpoint; only the genre
   // gets title-cased (DB genres are lowercase).
@@ -104,6 +116,22 @@ export function HeroBanner({
 
       {previewPlaybackId && !videoFailed && (
         <MuxPlayer
+          // Consent changes REMOUNT this player instead of mutating the live
+          // element. `disable-tracking` / `env-key` are the only props that
+          // ever change on a mounted <mux-player>, and @mux/mux-video handles
+          // that attribute by tearing the stream down and restarting it —
+          // `unload(); …then(() => { currentTime = t; play() })` with **no
+          // .catch** (dist/base.mjs, case DISABLE_TRACKING). If the flip lands
+          // while a play() is pending, Chrome rejects it with
+          // "AbortError: The play() request was interrupted by a new load
+          // request", which surfaces as an unhandled rejection in Sentry
+          // (issue #126, seen in production 24.08.2026).
+          //
+          // A remount does the same teardown honestly, with no dangling
+          // promise. Do NOT "simplify" this away, and do NOT freeze consent in
+          // a mount-time snapshot instead: live consent is what stops beacons
+          // the moment a viewer withdraws it (the AUDIT.md H2 leak).
+          key={muxDataEnabled ? "mux-data-on" : "mux-data-off"}
           playbackId={previewPlaybackId}
           tokens={previewToken ? { playback: previewToken } : undefined}
           autoPlay="muted"
