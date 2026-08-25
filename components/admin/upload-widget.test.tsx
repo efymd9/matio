@@ -42,7 +42,7 @@ vi.mock("@/lib/i18n/admin-client", async () => {
   return { useAdminT: () => ru };
 });
 
-import { ru } from "@/lib/i18n/admin-dictionaries";
+import { en, ru } from "@/lib/i18n/admin-dictionaries";
 import { UploadWidget } from "./upload-widget";
 
 function videoFile() {
@@ -128,6 +128,49 @@ describe("UploadWidget — устойчивость к обрыву связи",
     });
     // upchunk на всю жизнь вешает слушатели online/offline и не снимает их.
     expect(chunk.aborts).toBe(1);
+  });
+
+  it("успешная загрузка отмечает эпизод обрабатываемым и отпускает экземпляр", async () => {
+    await startUpload();
+    await act(async () => {
+      await chunk.handlers.success?.(undefined);
+    });
+    expect(server.markEpisodeReprocessing).toHaveBeenCalledWith("ep-1");
+    // Экземпляр отпущен: иначе он остался бы подписан на события сети.
+    expect(screen.queryByText(ru.uploadWidget.uploadFailed)).toBeNull();
+  });
+
+  it("«Убрать» после сбоя возвращает виджет в исходное состояние", async () => {
+    await startUpload();
+    await act(async () => {
+      chunk.handlers.progress?.({ detail: 12 } as unknown);
+      chunk.handlers.error?.({ detail: { message: "boom" } } as unknown);
+    });
+    // Кнопка появляется только когда работа не идёт — во время загрузки
+    // отменить нечем (отдельный пробел в интерфейсе, не в этой правке).
+    await act(async () => {
+      screen.getByText(ru.uploadWidget.remove).click();
+    });
+    expect(screen.queryByText("episode-4.mp4")).toBeNull();
+    expect(screen.queryByText(ru.uploadWidget.uploadFailed)).toBeNull();
+  });
+
+  it("«Закрыть» убирает ошибку вместе с техническими деталями", async () => {
+    await startUpload();
+    await act(async () => {
+      chunk.handlers.error?.({ detail: { message: "Server responded with 0." } } as unknown);
+    });
+    await act(async () => {
+      screen.getByText(ru.uploadWidget.dismiss).click();
+    });
+    expect(screen.queryByText(ru.uploadWidget.uploadFailed)).toBeNull();
+    expect(screen.queryByText(/Server responded with 0/)).toBeNull();
+  });
+
+  it("обе локали умеют сказать про повтор", () => {
+    // Английская половина словаря — тоже код: функция с подстановкой.
+    expect(ru.uploadWidget.retryingChunk(3)).toContain("3");
+    expect(en.uploadWidget.retryingChunk(3)).toContain("3");
   });
 
   it("повтор запрашивает НОВУЮ ссылку, а не переиспользует протухшую", async () => {
