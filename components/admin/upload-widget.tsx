@@ -2,7 +2,7 @@
 
 import { createUpload } from "@mux/upchunk";
 import { useRouter } from "next/navigation";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createMuxUpload, markEpisodeReprocessing } from "@/app/admin/actions";
 import { useAdminT } from "@/lib/i18n/admin-client";
 
@@ -28,9 +28,34 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // The library's own English text ("Server responded with 0…"). Useless to an
+  // editor, valuable to us — kept behind a disclosure rather than thrown away.
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // Attempts left while upchunk is retrying a chunk; null when not retrying.
+  const [retrying, setRetrying] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const uploadRef = useRef<{ abort: () => void } | null>(null);
 
   const isWorking = status === "preparing" || status === "uploading";
+
+  // An upload in flight lives only in this tab's memory: a reload or a closed
+  // tab loses all progress and has to start from zero.
+  useEffect(() => {
+    if (!isWorking) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [isWorking]);
+
+  // Leaving the page mid-upload must not leave an orphan instance behind: it
+  // holds window online/offline listeners and would resume on its own.
+  useEffect(
+    () => () => {
+      uploadRef.current?.abort();
+      uploadRef.current = null;
+    },
+    [],
+  );
 
   function pickFile(next: File | null) {
     if (!next) return;
@@ -63,21 +88,58 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
     }
 
     setStatus("uploading");
+    setRetrying(null);
     const upload = createUpload({
       endpoint: uploadUrl,
       file,
-      chunkSize: 5120, // 5 MB chunks
+      chunkSize: 5120, // 5 MB chunks (upchunk counts in KB; must divide by 256)
+      // THE fix for issue #130. upchunk only retries statuses listed here, and
+      // its default list is [408, 502, 503, 504] — which does NOT include 0.
+      // A dropped connection is stamped by XHR as status 0, so upchunk called
+      // it fatal and gave up on the FIRST hiccup, never touching its retry
+      // budget: "Server responded with 0. Stopping upload." at ~5%, minutes in.
+      // 429/500 are here for the same reason — the resumable session answers
+      // with them under throttling, and the default treats those as terminal.
+      retryCodes: [0, 408, 429, 500, 502, 503, 504],
+      // Per CHUNK, reset after each success; there is no exponential backoff in
+      // this library, so the window is (attempts-1) × delay ≈ 45s. That rides
+      // out a Wi-Fi→LTE handover without hanging the widget on a dead network.
+      attempts: 10,
+      delayBeforeAttempt: 5,
+      // Lets the chunk size follow the actual line speed (doubles under 10s,
+      // halves over 30s). The ceiling matters: the library's own default is
+      // ~500 MB, and one drop would then throw away half a gigabyte of upload.
+      dynamicChunkSize: true,
+      minChunkSize: 1024, // 1 MB
+      maxChunkSize: 20480, // 20 MB
     });
+    uploadRef.current = upload;
     upload.on("error", (e) => {
       const detail = (e as CustomEvent<{ message?: string }>).detail;
+      // The instance keeps window online/offline listeners for its whole life
+      // and never removes them: a dead upload would resume itself the moment
+      // the network came back, while the UI shows an error.
+      upload.abort();
+      uploadRef.current = null;
       setStatus("error");
-      setError(detail?.message ?? t.uploadWidget.uploadFailed);
+      setRetrying(null);
+      setError(t.uploadWidget.uploadFailed);
+      setErrorDetail(detail?.message ?? null);
+    });
+    // Fired per failed attempt while the retry budget lasts. This is a normal
+    // part of a long upload, not a failure — keep the progress bar and say so.
+    upload.on("attemptFailure", (e) => {
+      const detail = (e as CustomEvent<{ attemptsLeft?: number }>).detail;
+      setRetrying(detail?.attemptsLeft ?? 0);
     });
     upload.on("progress", (e) => {
       setProgress((e as CustomEvent<number>).detail);
+      setRetrying(null);
     });
     upload.on("success", async () => {
+      uploadRef.current = null;
       setProgress(100);
+      setRetrying(null);
       try {
         await markEpisodeReprocessing(episodeId);
       } catch (err) {
@@ -98,10 +160,14 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
   }
 
   function reset() {
+    uploadRef.current?.abort();
+    uploadRef.current = null;
     setFile(null);
     setStatus("idle");
     setProgress(0);
     setError(null);
+    setErrorDetail(null);
+    setRetrying(null);
     if (inputRef.current) inputRef.current.value = "";
   }
 
@@ -195,7 +261,9 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
                 {status === "preparing"
                   ? t.uploadWidget.preparingUpload
                   : status === "uploading"
-                    ? t.uploadWidget.uploadingProgress(progress.toFixed(0))
+                    ? retrying !== null
+                      ? t.uploadWidget.retryingChunk(retrying)
+                      : t.uploadWidget.uploadingProgress(progress.toFixed(0))
                     : t.uploadWidget.transcodingNotice}
               </p>
             </div>
@@ -222,16 +290,46 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
           </span>
           <div className="flex-1">
             <p className="text-sm text-rust">{error}</p>
-            <button
-              type="button"
-              onClick={() => {
-                setError(null);
-                setStatus("idle");
-              }}
-              className="mt-0.5 text-xs font-medium text-cream/50 transition-colors hover:text-cream"
-            >
-              {t.uploadWidget.dismiss}
-            </button>
+            {status === "error" && file && (
+              <p className="mt-1 text-xs leading-relaxed text-cream/60">
+                {t.uploadWidget.uploadFailedHint}
+              </p>
+            )}
+            <div className="mt-1 flex flex-wrap items-center gap-3">
+              {status === "error" && file && (
+                <button
+                  type="button"
+                  onClick={startUpload}
+                  className="text-xs font-semibold text-gold transition-colors hover:text-gold-hi"
+                >
+                  {t.uploadWidget.tryAgain}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setErrorDetail(null);
+                  setStatus("idle");
+                }}
+                className="text-xs font-medium text-cream/50 transition-colors hover:text-cream"
+              >
+                {t.uploadWidget.dismiss}
+              </button>
+            </div>
+            {/* The library's raw English message. Hidden by default — it means
+                nothing to an editor, but it is the first thing we ask for when
+                they report a problem. */}
+            {errorDetail && (
+              <details className="mt-1.5">
+                <summary className="cursor-pointer text-xs text-cream/40 transition-colors hover:text-cream/70">
+                  {t.uploadWidget.technicalDetails}
+                </summary>
+                <p className="mt-1 font-mono text-[11px] leading-relaxed text-cream/50">
+                  {errorDetail}
+                </p>
+              </details>
+            )}
           </div>
         </div>
       )}

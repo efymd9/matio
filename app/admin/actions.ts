@@ -735,6 +735,9 @@ export async function moveCastMember(
 
 // ---------- Mux ----------
 
+// How long the direct-upload URL stays usable. See the note at the call site.
+const MUX_UPLOAD_TIMEOUT_SECONDS = 86_400; // 24 hours
+
 export async function createMuxUpload(
   episodeId: string,
 ): Promise<{ uploadUrl: string; uploadId: string }> {
@@ -754,6 +757,14 @@ export async function createMuxUpload(
 
   const upload = await getMux().video.uploads.create({
     cors_origin: corsOrigin,
+    // Mux defaults this URL to ONE HOUR, and every direct upload this app has
+    // ever created carries that default — the account is full of our own
+    // `timed_out` uploads (issue #130). An hour does not cover a multi-gigabyte
+    // master on an editor's uplink: 8 GB at 5 Mbit/s is ~3.5 hours. A day does,
+    // and 86400 is known-good on this account. Not longer: the URL is an access
+    // secret, and upchunk's progress lives only in the tab's memory anyway, so
+    // nothing survives to use a week-long window.
+    timeout: MUX_UPLOAD_TIMEOUT_SECONDS,
     new_asset_settings: {
       // Signed playback IDs enforce the JWT issued by /api/playback-token.
       // Existing public assets still play without one — they'd need to be

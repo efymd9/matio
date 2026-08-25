@@ -77,10 +77,10 @@ export default defineConfig({
       //   историями, ростер и SEO-хелперы — юнитами) → 8.3 (#17: surface
       //   /api/v1 для мобильного — 48 тестов на четыре роута и общий слой).
       thresholds: {
-        lines: 9.4,
-        functions: 8.7,
-        branches: 7.7,
-        statements: 9.5,
+        lines: 10.5,
+        functions: 9.6,
+        branches: 8.5,
+        statements: 10.5,
       },
     },
 
