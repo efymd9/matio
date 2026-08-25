@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.0](https://github.com/efymd9/matio/compare/matio-v0.6.0...matio-v0.7.0) (2026-08-25)
+
+
+### Features
+
+* **api:** влить /api/v1 и Expo-приложение в main, с тестами на surface ([#101](https://github.com/efymd9/matio/issues/101)) ([f533beb](https://github.com/efymd9/matio/commit/f533beb291ab76ab68eaf09e9e9f4b7b5b39e9e0))
+
+
+### Bug fixes
+
+* **admin:** загрузка видео не сдаётся при первом обрыве связи ([#131](https://github.com/efymd9/matio/issues/131)) ([e029f29](https://github.com/efymd9/matio/commit/e029f297ee7c29a9f9431a1127d19e3ad84ec493))
+* **auth:** appearance.baseTheme → theme перед бампом Clerk 7.7 ([#122](https://github.com/efymd9/matio/issues/122)) ([84f7e5d](https://github.com/efymd9/matio/commit/84f7e5d3791b39ce7d3d1f5253f46fc70c123770)), closes [#107](https://github.com/efymd9/matio/issues/107)
+* **auth:** переименовать переменную оформления Clerk перед бампом 7.7 ([#113](https://github.com/efymd9/matio/issues/113)) ([b26c7f2](https://github.com/efymd9/matio/commit/b26c7f2a0a70accd36d10d33aad0bd9a83456b53)), closes [#107](https://github.com/efymd9/matio/issues/107)
+* **ci:** Dependabot не трогает пакеты, которыми управляет Expo SDK ([#112](https://github.com/efymd9/matio/issues/112)) ([e4badba](https://github.com/efymd9/matio/commit/e4badba2f3d5d4e58b7644576c16b7afabef5757)), closes [#109](https://github.com/efymd9/matio/issues/109)
+* **site:** не мутировать живой хиро-плеер при смене согласия на куки ([#129](https://github.com/efymd9/matio/issues/129)) ([50d7498](https://github.com/efymd9/matio/commit/50d7498ecff3c133800826aa03984bf82807bf67)), closes [#126](https://github.com/efymd9/matio/issues/126)
+
 ## [0.6.0](https://github.com/efymd9/matio/compare/matio-v0.5.0...matio-v0.6.0) (2026-08-18)
 
 
