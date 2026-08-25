@@ -817,6 +817,14 @@ export const ru = {
     transcodingNotice: "Транскодирование на Mux — страница обновится сама",
     startUpload: "Начать загрузку",
     dismiss: "Закрыть",
+    // Обрыв связи — штатная часть многогигабайтной загрузки, а не поломка:
+    // сообщаем, что идёт повтор, и не убираем прогресс.
+    retryingChunk: (attemptsLeft: number) =>
+      `Связь прервалась — повторяем (осталось попыток: ${attemptsLeft})`,
+    uploadFailedHint:
+      "Файл загружен не полностью. Нажмите «Попробовать снова» — загрузка начнётся заново. Если обрывается повторно, помогает проводной интернет или файл поменьше: перекодируйте в 1080p, качество на сайте от этого не пострадает.",
+    tryAgain: "Попробовать снова",
+    technicalDetails: "Технические детали",
   },
   adminUi: {
     dangerZone: "Опасная зона",
@@ -1671,6 +1679,12 @@ export const en: AdminDict = {
     transcodingNotice: "Transcoding on Mux — this page will refresh",
     startUpload: "Start upload",
     dismiss: "Dismiss",
+    retryingChunk: (attemptsLeft: number) =>
+      `Connection dropped — retrying (${attemptsLeft} attempts left)`,
+    uploadFailedHint:
+      "The file did not upload completely. Press “Try again” to start over. If it keeps dropping, a wired connection helps — or a smaller file: re-encode to 1080p, the site quality won't suffer.",
+    tryAgain: "Try again",
+    technicalDetails: "Technical details",
   },
   adminUi: {
     dangerZone: "Danger zone",
