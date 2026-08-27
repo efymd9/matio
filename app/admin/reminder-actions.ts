@@ -8,6 +8,7 @@ import { episodes, seasons, showReminders, shows } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin";
 import { unsubscribeUrls } from "@/lib/email-unsubscribe";
 import { muxThumbnailUrl } from "@/lib/mux-token";
+import { redactEmails } from "@/lib/observability";
 import { renderShowReminderEmail } from "@/lib/reminder-email";
 import {
   emailFrom,
@@ -228,10 +229,12 @@ export async function sendShowReminders(
             revertErr,
           );
         }
+        // Resend's error text can quote the address it refused — an email in
+        // a log line violates the privacy rule, so it ships redacted.
         console.error(
           `[reminders] batch send failed for show ${showId}:`,
           error.name,
-          error.message,
+          redactEmails(error.message),
         );
         revalidatePath(`/admin/shows/${showId}`);
         return { status: "error", code: "send_failed", sent };
@@ -239,14 +242,18 @@ export async function sendShowReminders(
 
       // Per-item rejects (invalid address etc.): deliberately keep those
       // rows STAMPED — un-claiming a permanently-bad address would wedge
-      // every future send. Logged with row ids for manual repair.
+      // every future send. Logged with row ids for manual repair. The reject
+      // text typically names the refused address, so it goes through the
+      // same email redaction the Sentry scrubbers use — the row id is how
+      // the admin finds the subscriber, never the address itself.
       const itemErrors = data?.errors ?? [];
       if (itemErrors.length > 0) {
         console.error(
           `[reminders] ${itemErrors.length} item(s) rejected in batch for show ${showId}:`,
           itemErrors.map((e) => ({
             rowId: batch[e.index]?.id,
-            message: e.message,
+            index: e.index,
+            message: redactEmails(e.message),
           })),
         );
       }
