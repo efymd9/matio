@@ -21,9 +21,41 @@ const MARKER_NAME = "Leak Marker";
 const MARKER_SECRET = "dummy-db-password";
 const MARKER_DATABASE_URL = `postgres://matio:${MARKER_SECRET}@db.example.invalid/matio`;
 
-const { execute } = vi.hoisted(() => ({ execute: vi.fn() }));
-vi.mock("@/db", () => ({ db: { execute } }));
+const { execute, select, update, batchSend } = vi.hoisted(() => ({
+  execute: vi.fn(),
+  select: vi.fn(),
+  update: vi.fn(),
+  batchSend: vi.fn(),
+}));
+vi.mock("@/db", () => ({ db: { execute, select, update } }));
 
+// The reminder dispatch path pulls in auth, Next's cache and the Resend SDK —
+// none of which is the thing under audit. Everything except the action's own
+// logging is stubbed to inert values.
+vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("@/lib/admin", () => ({
+  requireAdmin: async () => ({ id: "admin_1" }),
+}));
+vi.mock("@/lib/resend", () => ({
+  resendConfigured: () => true,
+  getResend: () => ({ batch: { send: batchSend } }),
+  emailFrom: () => "Matio <updates@example.invalid>",
+  emailReplyTo: () => "contact@example.invalid",
+}));
+vi.mock("@/lib/email-unsubscribe", () => ({
+  unsubscribeUrls: () => ({
+    page: "https://matio.tv/unsubscribe?token=dummy",
+    oneClick: "https://matio.tv/api/email/unsubscribe?token=dummy",
+  }),
+}));
+vi.mock("@/lib/reminder-email", () => ({
+  renderShowReminderEmail: () => ({ subject: "s", html: "<p>s</p>", text: "s" }),
+}));
+vi.mock("@/lib/mux-token", () => ({
+  muxThumbnailUrl: () => "https://image.mux.com/dummy/thumbnail.jpg",
+}));
+
+import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as readyz } from "@/app/api/readyz/route";
 
 /** Render a console argument the way a log aggregator would see it. */
@@ -55,6 +87,9 @@ function captureConsole() {
 
 beforeEach(() => {
   execute.mockReset();
+  select.mockReset();
+  update.mockReset();
+  batchSend.mockReset();
 });
 
 afterEach(() => {
@@ -157,5 +192,105 @@ describe("log audit · /api/readyz", () => {
 
     expect(body).not.toContain(MARKER_SECRET);
     expect(body).not.toContain("db.example.invalid");
+  });
+});
+
+describe("log audit · reminder dispatch (Resend)", () => {
+  // The realistic worst case Resend produces: both the per-item reject and
+  // the batch-level error quote the address they refused verbatim.
+  const REJECTED_ROW_ID = "rem_rejected_row";
+
+  /** The target-episode lookup: chainable, resolves when awaited. */
+  function selectChain(rows: unknown[]) {
+    const chain = {
+      from: () => chain,
+      innerJoin: () => chain,
+      where: () => chain,
+      orderBy: () => chain,
+      limit: () => chain,
+      for: () => chain,
+      then: (
+        onFulfilled?: (value: unknown[]) => unknown,
+        onRejected?: (reason: unknown) => unknown,
+      ) => Promise.resolve(rows).then(onFulfilled, onRejected),
+    };
+    return chain;
+  }
+
+  /** A claim/un-claim UPDATE: awaitable directly or via .returning(). */
+  function updateChain(returningRows: unknown[]) {
+    const settled = Object.assign(Promise.resolve(undefined), {
+      returning: () => Promise.resolve(returningRows),
+    });
+    return { set: () => ({ where: () => settled }) };
+  }
+
+  const target = {
+    episodeNumber: 2,
+    episodeTitle: "Episode two",
+    episodeDescription: null,
+    episodeDuration: 300,
+    muxPlaybackId: null,
+    muxPlaybackPolicy: "signed",
+    seasonNumber: 1,
+    showTitle: "Show",
+    showSlug: "show",
+    showGenre: null,
+  };
+
+  function dispatchFormData() {
+    const formData = new FormData();
+    formData.set("showId", "show_1");
+    formData.set("episodeId", "ep_1");
+    return formData;
+  }
+
+  it("logs a per-item reject without the subscriber's address", async () => {
+    select.mockImplementation(() => selectChain([target]));
+    update.mockImplementationOnce(() =>
+      updateChain([
+        { id: "rem_ok_row", email: "ok@example.invalid", locale: "en" },
+        { id: REJECTED_ROW_ID, email: MARKER_EMAIL, locale: "en" },
+      ]),
+    );
+    update.mockImplementationOnce(() => updateChain([]));
+    const rejectMessage = `Invalid \`to\` field: ${MARKER_EMAIL} is not a valid email address`;
+    expect(rejectMessage).toContain(MARKER_EMAIL); // the fixture must be dirty
+    batchSend.mockResolvedValue({
+      data: { data: [{ id: "email_1" }], errors: [{ index: 1, message: rejectMessage }] },
+      error: null,
+    });
+    const logged = captureConsole();
+
+    const result = await sendShowReminders({ status: "idle" }, dispatchFormData());
+
+    expect(result).toEqual({ status: "ok", sent: 1 });
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    // What it DOES log: the show_reminders row id — enough for manual repair.
+    expect(logged()).toContain(REJECTED_ROW_ID);
+  });
+
+  it("logs a failed batch send without the subscriber's address", async () => {
+    select.mockImplementation(() => selectChain([target]));
+    update.mockImplementationOnce(() =>
+      updateChain([{ id: REJECTED_ROW_ID, email: MARKER_EMAIL, locale: "en" }]),
+    );
+    // The un-claim UPDATE after the failure.
+    update.mockImplementationOnce(() => updateChain([]));
+    batchSend.mockResolvedValue({
+      data: null,
+      error: {
+        name: "application_error",
+        message: `Unable to send to ${MARKER_EMAIL}`,
+      },
+    });
+    const logged = captureConsole();
+
+    const result = await sendShowReminders({ status: "idle" }, dispatchFormData());
+
+    expect(result).toEqual({ status: "error", code: "send_failed", sent: 0 });
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    // What it DOES log: the vendor's error code, which is id/status territory.
+    expect(logged()).toContain("application_error");
   });
 });
