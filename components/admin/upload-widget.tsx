@@ -19,7 +19,17 @@ function formatSize(bytes: number): string {
 // flips the episode row to `processing` only on the upload `success`
 // event (so a cancelled upload never strands the episode — see
 // app/admin/actions.ts). Everything here is the surface around that.
-export function UploadWidget({ episodeId }: { episodeId: string }) {
+export function UploadWidget({
+  episodeId,
+  episodeStatus,
+}: {
+  episodeId: string;
+  // The episode row's live status, re-read on every router.refresh(). This is
+  // how the widget knows transcoding finished: the Mux webhook flips the row
+  // to `ready`, a refresh re-renders the server page, and the new prop value
+  // lands here without any client-side polling of Mux itself.
+  episodeStatus: "processing" | "ready" | "errored";
+}) {
   const t = useAdminT();
   const router = useRouter();
   const inputId = useId();
@@ -46,6 +56,25 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [isWorking]);
+
+  // After a successful upload the row sits in `processing` until the Mux
+  // webhook arrives — minutes for a long episode. One silent refresh used to
+  // be the whole story, and to a human the wait was indistinguishable from a
+  // failure (issue #136: the editor re-uploaded a finished file and reported
+  // the uploader broken). Poll the server page instead until the row flips,
+  // with a ceiling so a lost webhook can't leave an interval running forever.
+  useEffect(() => {
+    if (status !== "uploaded" || episodeStatus === "ready") return;
+    const startedAt = Date.now();
+    const tick = setInterval(() => {
+      if (Date.now() - startedAt > 15 * 60_000) {
+        clearInterval(tick);
+        return;
+      }
+      router.refresh();
+    }, 10_000);
+    return () => clearInterval(tick);
+  }, [status, episodeStatus, router]);
 
   // Leaving the page mid-upload must not leave an orphan instance behind: it
   // holds window online/offline listeners and would resume on its own.
@@ -152,10 +181,8 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
         return;
       }
       setStatus("uploaded");
-      // Mux fires the asset.ready webhook asynchronously after
-      // transcoding. Refresh once to surface the new status; the user
-      // can refresh again if it's still processing.
-      setTimeout(() => router.refresh(), 5000);
+      // Polling (effect above) takes over from here until the webhook flips
+      // the row to ready.
     });
   }
 
@@ -186,6 +213,29 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
       {/* Drop zone — also the file picker via the wrapping label. While a
           file is selected or uploading we swap it for the detail card so
           the drop target doesn't fight the progress UI. */}
+      {/* The row's own state when nothing is being uploaded right now. Without
+          this, revisiting the page mid-transcode shows a bare drop zone — the
+          exact picture that read as "it failed" in issue #136. */}
+      {!file && episodeStatus === "processing" && (
+        <div className="flex items-start gap-2 rounded-lg border border-gold/25 bg-gold/[0.06] px-3.5 py-2.5">
+          <span className="mt-0.5 shrink-0 text-gold" aria-hidden>
+            <SpinnerGlyph />
+          </span>
+          <p className="text-sm leading-relaxed text-cream/80">
+            {t.uploadWidget.processingBanner}
+          </p>
+        </div>
+      )}
+      {!file && episodeStatus === "errored" && (
+        <div className="flex items-start gap-2 rounded-lg border border-rust/30 bg-rust/[0.06] px-3.5 py-2.5">
+          <span className="mt-0.5 shrink-0 text-rust" aria-hidden>
+            <CrossGlyph />
+          </span>
+          <p className="text-sm leading-relaxed text-cream/80">
+            {t.uploadWidget.erroredBanner}
+          </p>
+        </div>
+      )}
       {!file ? (
         <label
           htmlFor={inputId}
@@ -264,7 +314,9 @@ export function UploadWidget({ episodeId }: { episodeId: string }) {
                     ? retrying !== null
                       ? t.uploadWidget.retryingChunk(retrying)
                       : t.uploadWidget.uploadingProgress(progress.toFixed(0))
-                    : t.uploadWidget.transcodingNotice}
+                    : episodeStatus === "ready"
+                      ? t.uploadWidget.transcodingDone
+                      : t.uploadWidget.transcodingWait}
               </p>
             </div>
           )}
@@ -385,6 +437,24 @@ function CheckGlyph() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M20 6 9 17l-5-5" />
+    </svg>
+  );
+}
+
+function SpinnerGlyph() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      aria-hidden="true"
+      className="animate-spin"
+    >
+      <path d="M12 3a9 9 0 1 0 9 9" />
     </svg>
   );
 }

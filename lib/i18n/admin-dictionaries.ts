@@ -825,6 +825,15 @@ export const ru = {
       "Файл загружен не полностью. Нажмите «Попробовать снова» — загрузка начнётся заново. Если обрывается повторно, помогает проводной интернет или файл поменьше: перекодируйте в 1080p, качество на сайте от этого не пострадает.",
     tryAgain: "Попробовать снова",
     technicalDetails: "Технические детали",
+    // Пост-загрузочные состояния (#136): «обрабатывается» — не ошибка, и это
+    // надо говорить прямым текстом, иначе человек перезаливает готовый файл.
+    transcodingWait:
+      "Видео загружено ✓ Идёт обработка на Mux — обычно несколько минут. Страницу можно закрыть: серия появится сама.",
+    transcodingDone: "Готово — видео обработано и привязано к эпизоду.",
+    processingBanner:
+      "Видео уже загружено и обрабатывается на Mux — это не ошибка. Обычно занимает несколько минут; страница обновится сама.",
+    erroredBanner:
+      "Mux не смог обработать загруженное видео. Попробуйте перекодировать файл (MP4, H.264) и загрузить заново.",
   },
   adminUi: {
     dangerZone: "Опасная зона",
@@ -1685,6 +1694,13 @@ export const en: AdminDict = {
       "The file did not upload completely. Press “Try again” to start over. If it keeps dropping, a wired connection helps — or a smaller file: re-encode to 1080p, the site quality won't suffer.",
     tryAgain: "Try again",
     technicalDetails: "Technical details",
+    transcodingWait:
+      "Video uploaded ✓ Mux is processing it — usually a few minutes. Safe to close this page: the episode will appear on its own.",
+    transcodingDone: "Done — the video is processed and attached to the episode.",
+    processingBanner:
+      "The video is already uploaded and processing on Mux — this is not an error. It usually takes a few minutes; the page will update itself.",
+    erroredBanner:
+      "Mux could not process the uploaded video. Try re-encoding the file (MP4, H.264) and uploading again.",
   },
   adminUi: {
     dangerZone: "Danger zone",
