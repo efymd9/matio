@@ -35,7 +35,8 @@ vi.mock("@/app/admin/actions", () => ({
   markEpisodeReprocessing: server.markEpisodeReprocessing,
 }));
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const nav = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => nav }));
 
 vi.mock("@/lib/i18n/admin-client", async () => {
   const { ru } = await import("@/lib/i18n/admin-dictionaries");
@@ -49,8 +50,10 @@ function videoFile() {
   return new File(["x"], "episode-4.mp4", { type: "video/mp4" });
 }
 
-async function startUpload() {
-  render(<UploadWidget episodeId="ep-1" />);
+async function startUpload(
+  episodeStatus: "processing" | "ready" | "errored" = "processing",
+) {
+  render(<UploadWidget episodeId="ep-1" episodeStatus={episodeStatus} />);
   const input = document.querySelector("input[type=file]") as HTMLInputElement;
   Object.defineProperty(input, "files", { value: [videoFile()] });
   await act(async () => {
@@ -70,6 +73,7 @@ beforeEach(() => {
     uploadId: "up-1",
   });
   server.markEpisodeReprocessing.mockReset().mockResolvedValue(undefined);
+  nav.refresh.mockReset();
 });
 
 afterEach(() => {
@@ -171,6 +175,92 @@ describe("UploadWidget — устойчивость к обрыву связи",
     // Английская половина словаря — тоже код: функция с подстановкой.
     expect(ru.uploadWidget.retryingChunk(3)).toContain("3");
     expect(en.uploadWidget.retryingChunk(3)).toContain("3");
+  });
+
+  it("после загрузки говорит об успехе и что страницу можно закрыть", async () => {
+    await startUpload();
+    await act(async () => {
+      await chunk.handlers.success?.(undefined);
+    });
+    expect(screen.getByText(ru.uploadWidget.transcodingWait)).toBeTruthy();
+  });
+
+  it("пока эпизод обрабатывается — поллит страницу, при готовности перестаёт", async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <UploadWidget episodeId="ep-1" episodeStatus="processing" />,
+      );
+      const input = document.querySelector("input[type=file]") as HTMLInputElement;
+      Object.defineProperty(input, "files", { value: [videoFile()] });
+      await act(async () => {
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await act(async () => {
+        screen.getByText(ru.uploadWidget.startUpload).click();
+      });
+      await act(async () => {
+        await chunk.handlers.success?.(undefined);
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(31_000);
+      });
+      expect(nav.refresh.mock.calls.length).toBeGreaterThanOrEqual(3);
+
+      // Вебхук перевёл строку в ready → refresh перерендерил страницу с новым
+      // пропом. Поллинг обязан остановиться.
+      const before = nav.refresh.mock.calls.length;
+      view.rerender(<UploadWidget episodeId="ep-1" episodeStatus="ready" />);
+      expect(screen.getByText(ru.uploadWidget.transcodingDone)).toBeTruthy();
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(nav.refresh.mock.calls.length).toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("потерянный вебхук не оставляет поллинг работать вечно", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<UploadWidget episodeId="ep-1" episodeStatus="processing" />);
+      const input = document.querySelector("input[type=file]") as HTMLInputElement;
+      Object.defineProperty(input, "files", { value: [videoFile()] });
+      await act(async () => {
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await act(async () => {
+        screen.getByText(ru.uploadWidget.startUpload).click();
+      });
+      await act(async () => {
+        await chunk.handlers.success?.(undefined);
+      });
+
+      // 15 минут — потолок: после него интервал глушит сам себя, даже если
+      // строка так и не перешла в ready (вебхук потерян).
+      await act(async () => {
+        vi.advanceTimersByTime(15 * 60_000 + 1000);
+      });
+      const atCeiling = nav.refresh.mock.calls.length;
+      await act(async () => {
+        vi.advanceTimersByTime(120_000);
+      });
+      expect(nav.refresh.mock.calls.length).toBe(atCeiling);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("в покое при статусе processing показывает «это не ошибка», а не голую драг-зону", () => {
+    render(<UploadWidget episodeId="ep-1" episodeStatus="processing" />);
+    expect(screen.getByText(ru.uploadWidget.processingBanner)).toBeTruthy();
+  });
+
+  it("в покое при статусе errored честно предлагает перезалить", () => {
+    render(<UploadWidget episodeId="ep-1" episodeStatus="errored" />);
+    expect(screen.getByText(ru.uploadWidget.erroredBanner)).toBeTruthy();
   });
 
   it("повтор запрашивает НОВУЮ ссылку, а не переиспользует протухшую", async () => {

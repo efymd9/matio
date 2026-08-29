@@ -159,7 +159,7 @@ export default async function EditEpisodePage({
           </div>
 
           <div className="border-t border-white/[0.06] pt-5">
-            <UploadWidget episodeId={episode.id} />
+            <UploadWidget episodeId={episode.id} episodeStatus={episode.status} />
           </div>
         </div>
       </Panel>
