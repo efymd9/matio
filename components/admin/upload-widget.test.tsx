@@ -222,6 +222,37 @@ describe("UploadWidget — устойчивость к обрыву связи",
     }
   });
 
+  it("потерянный вебхук не оставляет поллинг работать вечно", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<UploadWidget episodeId="ep-1" episodeStatus="processing" />);
+      const input = document.querySelector("input[type=file]") as HTMLInputElement;
+      Object.defineProperty(input, "files", { value: [videoFile()] });
+      await act(async () => {
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await act(async () => {
+        screen.getByText(ru.uploadWidget.startUpload).click();
+      });
+      await act(async () => {
+        await chunk.handlers.success?.(undefined);
+      });
+
+      // 15 минут — потолок: после него интервал глушит сам себя, даже если
+      // строка так и не перешла в ready (вебхук потерян).
+      await act(async () => {
+        vi.advanceTimersByTime(15 * 60_000 + 1000);
+      });
+      const atCeiling = nav.refresh.mock.calls.length;
+      await act(async () => {
+        vi.advanceTimersByTime(120_000);
+      });
+      expect(nav.refresh.mock.calls.length).toBe(atCeiling);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("в покое при статусе processing показывает «это не ошибка», а не голую драг-зону", () => {
     render(<UploadWidget episodeId="ep-1" episodeStatus="processing" />);
     expect(screen.getByText(ru.uploadWidget.processingBanner)).toBeTruthy();
