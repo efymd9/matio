@@ -16,9 +16,9 @@ description: Карта живой инфраструктуры Matio (хост�
 
 | Что | Где | Доступ и особенности |
 |---|---|---|
-| GitHub | `efymd9/matio`, **публичный** | ruleset `protect-main`: PR обязателен, обходов нет, обязательные чеки — `web (lint · types · tests)` и `Vercel`, strict (ветка обязана быть актуальной). Доска: `https://github.com/users/efymd9/projects/1` |
+| GitHub | `efymd9/matio`, **публичный** | ruleset `protect-main`: PR обязателен, обходов нет, обязательные чеки — `web (lint · types · tests)` и `Vercel – matio`, strict (ветка обязана быть актуальной). Доска: `https://github.com/users/efymd9/projects/1` |
 | Vercel (прод) | проект `mad-matttts-projects/matio` (`prj_bT5c7cdVTRzAIPX7uLGYjQLBF5EI`) | production-ветка **`production`**; функции пиннуты в **fra1** (`vercel.json`) — рядом с Neon; без этого каждый запрос к БД шёл через Атлантику (TTFB ~1s → ~300ms) |
-| Vercel (staging) | второй проект на том же репозитории, `matio-staging.vercel.app` | production-ветка `main`; preview-деплои у него выключены — чек `Vercel` на PR даёт продовый проект; вход по паролю (`STAGING_LOCK_PASSWORD`, см. «Staging») |
+| Vercel (staging) | второй проект на том же репозитории, `matio-staging.vercel.app` | production-ветка `main`; на PR присутствуют чеки обоих проектов (`Vercel – matio` — обязательный, `Vercel – matio-staging` — нет); вход по паролю (`STAGING_LOCK_PASSWORD`, см. «Staging») |
 | Neon (Postgres 18) | проект `little-base-06482402`, aws-eu-central-1 | пулер; `db/index.ts` с `prepare: false`; у staging — своя ветка того же проекта |
 | Clerk | продовый инстанс, домены `clerk.matio.tv` / `accounts.matio.tv` | вход по email-коду включён (гостевые аккаунты беспарольные) |
 | Stripe | **LIVE**, вебхук `we_1Tbdh2CGXbzphNyzsw1zWSZf` → `https://matio.tv/api/webhooks/stripe` | платежи ВЫКЛЮЧЕНЫ (`PAYMENTS_ENABLED` не задан), но ключи удалять нельзя, пока жив хоть один подписчик |
