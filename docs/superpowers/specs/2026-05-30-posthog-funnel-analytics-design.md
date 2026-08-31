@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-30
 **Status:** Approved (brainstorming) — pending implementation plan
-**Author:** Matvei Dobrovolskii + Claude
+**Author:** Matio team
 
 ## Problem
 

@@ -76,6 +76,16 @@ export function organizationJsonLd(): JsonLd {
     // PNG ≥112×112). Absolute so it's fetchable from any origin.
     logo: `${SITE_URL}/icon-512.png`,
     email: "contact@matio.tv",
+    // Machine-readable company registration — until now the number lived only
+    // in prose (about/terms/JSON-LD legalName). GB-COH is the recognised
+    // authority code for the UK register; this lets a crawler VERIFY
+    // "Matio = DEEP ORDINARY LTD" instead of taking the site's word.
+    identifier: {
+      "@type": "PropertyValue",
+      propertyID: "GB-COH",
+      value: "17381666",
+    },
+    foundingDate: "2026-08-04",
     contactPoint: {
       "@type": "ContactPoint",
       email: "contact@matio.tv",
@@ -90,7 +100,15 @@ export function organizationJsonLd(): JsonLd {
     },
     // Official profiles (footer + llms.txt list the same URLs — keep all
     // three surfaces sourced from lib/social-links so they never drift).
-    sameAs: ALL_SOCIAL_PROFILES.map((p) => p.url),
+    // Social profiles PLUS the Companies House register entry. CH is not a
+    // social profile (so it stays out of lib/social-links → footer/llms
+    // "profiles" list), but as a sameAs it is the one link that lets a search
+    // engine confirm the legal entity against an authoritative source rather
+    // than trusting our own six profiles.
+    sameAs: [
+      ...ALL_SOCIAL_PROFILES.map((p) => p.url),
+      "https://find-and-update.company-information.service.gov.uk/company/17381666",
+    ],
   };
 }
 

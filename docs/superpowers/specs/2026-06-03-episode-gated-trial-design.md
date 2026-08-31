@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-03
 **Status:** Approved design, pre-implementation
-**Owner:** Matvei
+**Owner:** Matio
 
 ## Goal
 

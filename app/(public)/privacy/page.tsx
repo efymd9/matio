@@ -1,5 +1,5 @@
 // DRAFT pending legal-counsel review (esp. Art. 13/14 UK GDPR disclosures
-// + retention periods). Controller details filled 2026-05-27 (Matvei
+// + retention periods). Controller details filled 2026-05-27 (DEEP
 // ORDINARY LTD, company no. 17381666, UK). No DPO appointed (not required
 // under Art. 37). Supervisory authorities named inline: AEPD (ES) / ICO (UK).
 // PostHog disclosure added 2026-05-30. Google Analytics (GA4) disclosure
