@@ -11,7 +11,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  localeFromCountry,
   negotiateLocale,
   parseAcceptLanguage,
   pickFromLanguageTags,
@@ -68,46 +67,31 @@ describe("parseAcceptLanguage", () => {
   });
 });
 
-describe("localeFromCountry", () => {
-  it("maps Spanish-affinity geos to es and everything valid else to en", () => {
-    expect(localeFromCountry("ES")).toBe("es");
-    expect(localeFromCountry("mx")).toBe("es");
-    expect(localeFromCountry("BR")).toBe("es"); // affinity, not language
-    expect(localeFromCountry("PT")).toBe("es");
-    expect(localeFromCountry("US")).toBe("en");
-    expect(localeFromCountry("DE")).toBe("en");
-  });
-
-  it("returns null for missing or malformed input", () => {
-    expect(localeFromCountry("")).toBeNull();
-    expect(localeFromCountry(null)).toBeNull();
-    expect(localeFromCountry("XX1")).toBeNull();
-  });
-});
-
 describe("negotiateLocale", () => {
-  it("ignores geo entirely when there is no Accept-Language header", () => {
+  it("defaults to English when there is no Accept-Language header", () => {
     // Googlebot crawls from US IPs and sends no Accept-Language: the default
     // here IS the site's indexed language.
-    expect(negotiateLocale(null, "US")).toBe("en");
-    expect(negotiateLocale(null, "ES")).toBe("en");
-    expect(negotiateLocale("", "DE")).toBe("en");
-    expect(negotiateLocale("   ", "GB")).toBe("en");
+    expect(negotiateLocale(null)).toBe("en");
+    expect(negotiateLocale("")).toBe("en");
+    expect(negotiateLocale("   ")).toBe("en");
   });
 
-  it("lets a supported header beat geo in both directions", () => {
-    expect(negotiateLocale("en-US,en;q=0.9", "ES")).toBe("en");
-    expect(negotiateLocale("es-MX", "US")).toBe("es");
+  it("honours an explicit supported language", () => {
+    expect(negotiateLocale("en-US,en;q=0.9")).toBe("en");
+    expect(negotiateLocale("es-MX")).toBe("es");
+    expect(negotiateLocale("es;q=0.8,en;q=0.9")).toBe("en");
   });
 
-  it("falls back to a geo tiebreak only for unsupported headers", () => {
-    expect(negotiateLocale("fr-FR,fr;q=0.9", "FR")).toBe("en");
-    expect(negotiateLocale("pt-BR", "BR")).toBe("es");
-    expect(negotiateLocale("fr-FR", "MX")).toBe("es");
-    expect(negotiateLocale("de-DE", null)).toBe("en");
-    expect(negotiateLocale("*", "US")).toBe("en");
-    expect(negotiateLocale("*", "AR")).toBe("es");
-    expect(negotiateLocale("*", null)).toBe("en");
+  it("gives English to every unmatched header — geo is never consulted", () => {
+    // The 2026-08-31 owner decision: a ru/de/fr/pt browser gets English
+    // everywhere, including in Spain and Latin America. Spanish is explicit
+    // signals only (header, switcher cookie, /es URL). This is what stops a
+    // Russian-language browser in Madrid from being pinned to Spanish.
+    expect(negotiateLocale("ru-RU,ru;q=0.9")).toBe("en");
+    expect(negotiateLocale("fr-FR,fr;q=0.9")).toBe("en");
+    expect(negotiateLocale("pt-BR")).toBe("en");
+    expect(negotiateLocale("de-DE")).toBe("en");
+    expect(negotiateLocale("*")).toBe("en");
   });
 });
 

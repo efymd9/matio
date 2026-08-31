@@ -3,10 +3,10 @@
 // separate ru/en system in admin-dictionaries.ts (Russian default, own
 // admin_locale cookie) that never affects the visitor-facing language.
 //
-// English is the default (since 2026-07-04 — was Spanish). Spanish stays
-// the locale for visitors likely to prefer it: an es Accept-Language
-// always wins negotiation, and the ES_AFFINITY_COUNTRIES geo tiebreak
-// covers Hispanophone + BR/PT visitors whose header matches neither dict.
+// English is the default (since 2026-07-04 — was Spanish). Spanish is
+// served ONLY on explicit signals: an es Accept-Language, the switcher
+// cookie, or an /es URL. The geo tiebreak (Hispanophone-country guess for
+// unmatched headers) was removed 2026-08-31 — see negotiate.ts for why.
 // Both dicts import here, so they can be referenced from server and
 // client components alike without crossing the React Server Component
 // boundary — the LocaleProvider only passes the locale string, the
