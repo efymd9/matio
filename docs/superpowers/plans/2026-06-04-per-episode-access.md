@@ -12,7 +12,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-04-per-episode-access-design.md` (in this worktree).
 
-**Working directory:** `/Users/matveidobrovolskii/dev/matio/.claude/worktrees/per-episode-access` (branch `worktree-per-episode-access`, based on main @ ae1ee54). All paths below are relative to it.
+**Working directory:** `~/dev/matio/.claude/worktrees/per-episode-access` (branch `worktree-per-episode-access`, based on main @ ae1ee54). All paths below are relative to it.
 
 ---
 

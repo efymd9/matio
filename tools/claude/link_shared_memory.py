@@ -23,7 +23,7 @@ import json
 import sys
 from pathlib import Path
 
-MAIN_CHECKOUT = Path("/Users/matveidobrovolskii/dev/matio")  # напр. Path.home() / "dev/myapp"
+MAIN_CHECKOUT = Path.home() / "dev" / "matio"  # основная (не голая) копия репозитория
 CANONICAL = (
     Path.home()
     / ".claude/projects"

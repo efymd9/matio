@@ -426,9 +426,9 @@ export const es = {
     title1: "Sala de",
     title2: "prensa.",
     boilerplate:
-      "Matio es un estudio independiente que crea historias románticas oscuras y series cortas con más de 12 herramientas de IA. Todo el proceso — del guion al fotograma final — ocurre dentro del equipo.",
+      "Matio es un estudio independiente que crea historias románticas oscuras y series cortas con más de 12 herramientas de IA. Todo el proceso — del guion al fotograma final — ocurre dentro del equipo. Matio es un proyecto de DEEP ORDINARY LTD, sociedad registrada en Inglaterra y Gales (n.º 17381666).",
     boilerplateFree:
-      "Matio es un estudio independiente que crea historias románticas oscuras y series cortas con más de 12 herramientas de IA. Todo el proceso — del guion al fotograma final — ocurre dentro del equipo. Cada episodio se puede ver gratis.",
+      "Matio es un estudio independiente que crea historias románticas oscuras y series cortas con más de 12 herramientas de IA. Todo el proceso — del guion al fotograma final — ocurre dentro del equipo. Cada episodio se puede ver gratis. Matio es un proyecto de DEEP ORDINARY LTD, sociedad registrada en Inglaterra y Gales (n.º 17381666).",
     boilerplateNote: "USA ESTE PÁRRAFO TAL CUAL COMO BOILERPLATE.",
     kitKicker: "Kit de prensa",
     kitHeading: "Todo en una carpeta.",
@@ -467,7 +467,7 @@ export const es = {
     manage: "Gestionar suscripción",
     followUs: "Síguenos",
     tagline: "Mundos de historias. Un estudio.",
-    copyright: (year: number) => `© ${year} matio. Todos los derechos reservados.`,
+    copyright: (year: number) => `© ${year} matio · DEEP ORDINARY LTD`,
   },
   cookieBanner: {
     title: "Cookies en matio",
@@ -900,9 +900,9 @@ export const en: Dict = {
     title1: "Press",
     title2: "room.",
     boilerplate:
-      "Matio is an independent studio making dark romantic stories and short series with more than 12 AI tools. The entire process — from script to final frame — happens within the team.",
+      "Matio is an independent studio making dark romantic stories and short series with more than 12 AI tools. The entire process — from script to final frame — happens within the team. Matio is a project by DEEP ORDINARY LTD, registered in England and Wales (company no. 17381666).",
     boilerplateFree:
-      "Matio is an independent studio making dark romantic stories and short series with more than 12 AI tools. The entire process — from script to final frame — happens within the team. Every episode is free to watch.",
+      "Matio is an independent studio making dark romantic stories and short series with more than 12 AI tools. The entire process — from script to final frame — happens within the team. Every episode is free to watch. Matio is a project by DEEP ORDINARY LTD, registered in England and Wales (company no. 17381666).",
     boilerplateNote: "USE THIS PARAGRAPH VERBATIM AS BOILERPLATE.",
     kitKicker: "Press kit",
     kitHeading: "Everything in one folder.",
@@ -940,7 +940,7 @@ export const en: Dict = {
     manage: "Manage subscription",
     followUs: "Follow us",
     tagline: "Story worlds. One studio.",
-    copyright: (year: number) => `© ${year} matio. All rights reserved.`,
+    copyright: (year: number) => `© ${year} matio · DEEP ORDINARY LTD`,
   },
   cookieBanner: {
     title: "Cookies on matio",

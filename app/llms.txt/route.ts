@@ -24,14 +24,14 @@ export async function GET() {
   const lines = [
     "# Matio",
     "",
-    `> Matio (${SITE_URL}) is a streaming platform for original short-form series produced by the Matio studio.${
+    `> Matio (${SITE_URL}) is a streaming platform for original short-form series produced by the Matio studio, operated by DEEP ORDINARY LTD (registered in England and Wales, company no. 17381666).${
       paymentsOn
         ? " Episodes stream with a paid membership; selected episodes and previews are free to watch."
         : " The full catalogue is currently free to watch — no account or payment required."
     }`,
     "",
     `- Site: ${SITE_URL}`,
-    "- Operated by: DEEP ORDINARY LTD, registered in England and Wales, no. 17381666 (London, UK)",
+    "- Operated by: DEEP ORDINARY LTD, registered in England and Wales, no. 17381666 (London, UK) — https://find-and-update.company-information.service.gov.uk/company/17381666",
     "- Contact: contact@matio.tv",
     "- Site languages: English (default, at the bare path) and Spanish (under an /es prefix, e.g. /es/shows/<slug>); every page cross-links its translation via hreflang",
     "",

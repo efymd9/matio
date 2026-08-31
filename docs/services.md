@@ -138,7 +138,7 @@ stripe login
 |---|---|
 | `DATABASE_URL` | Neon console → Connection Details → **Pooled connection** string. Must include the `-pooler` subdomain and `?channel_binding=require&sslmode=require`. |
 
-**Project context** (already provisioned): project id `little-base-06482402`, org `Matvei` (`org-bitter-breeze-88568674`), region `aws-eu-central-1`, Postgres 18. Pooled endpoint: `ep-jolly-base-alxh3o8i-pooler.c-3.eu-central-1.aws.neon.tech`.
+**Project context** (already provisioned): project id `little-base-06482402`, org owner account (`org-bitter-breeze-88568674`), region `aws-eu-central-1`, Postgres 18. Pooled endpoint: `ep-jolly-base-alxh3o8i-pooler.c-3.eu-central-1.aws.neon.tech`.
 
 **Driver config** (`db/index.ts`):
 ```ts
