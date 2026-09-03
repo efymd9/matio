@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04
 **Status:** Approved design, pre-implementation
-**Owner:** Matvei
+**Owner:** Matio
 **Supersedes:** the positional half of `2026-06-03-episode-gated-trial-design.md` (live on matio.tv since 2026-06-03)
 
 ## Goal
