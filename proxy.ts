@@ -337,10 +337,7 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
     const wantsEs =
       cookieLocale === "es" ||
       (!cookieLocale &&
-        negotiateLocale(
-          req.headers.get("accept-language"),
-          req.headers.get("x-vercel-ip-country"),
-        ) === "es");
+        negotiateLocale(req.headers.get("accept-language")) === "es");
     if (wantsEs) {
       const url = req.nextUrl.clone();
       url.pathname = localizedPath(req.nextUrl.pathname, "es");

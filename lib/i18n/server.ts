@@ -17,7 +17,7 @@ export const LOCALE_COOKIE = LOCALE_COOKIE_NAME;
 
 // Resolve the locale for this request. An explicit choice (the `locale`
 // cookie the language switcher writes) always wins; with no cookie we
-// negotiate from Accept-Language with an x-vercel-ip-country tiebreak
+// negotiate from Accept-Language
 // (lib/i18n/negotiate.ts — nothing is persisted, so a changed browser
 // language re-detects on the next visit). Crawlers send no Accept-Language
 // and get the English default (the site's indexed language since
@@ -45,11 +45,9 @@ export const getLocale = cache(async (): Promise<Locale> => {
     if (value && (SUPPORTED_LOCALES as readonly string[]).includes(value)) {
       return value as Locale;
     }
-    // 3. Accept-Language negotiation + geo tiebreak (persists nothing).
-    return negotiateLocale(
-      h.get("accept-language"),
-      h.get("x-vercel-ip-country"),
-    );
+    // 3. Accept-Language negotiation (persists nothing; geo is not
+    //    consulted for language since 2026-08-31 — see negotiate.ts).
+    return negotiateLocale(h.get("accept-language"));
   } catch {
     // Never let locale resolution take down a render — a throw here would
     // white-screen every page via global-error. Worst case: default copy.
