@@ -61,7 +61,10 @@ export function OpenAIPixel({
       } else {
         // Withdrawn after the SDK loaded this session: halt every ping. We
         // can't unload the script, so flip its consent switch and (via
-        // consentRef) stop emitting our own events.
+        // consentRef) stop emitting our own events. If the SDK file is still
+        // in flight, this call lands in the stub queue AFTER the snippet's
+        // page_viewed, so that one already-queued event still goes out — the
+        // same window the Meta/GA stubs have; not a bug to "fix".
         window.oaiq?.("consent", false);
       }
     };
@@ -88,15 +91,25 @@ export function OpenAIPixel({
   if (!enabled || !OPENAI_PIXEL_ID) return null;
 
   // OpenAI's official snippet, verbatim except: the ID comes from env, debug
-  // is on only in development (it logs every ping to the console), and we
-  // announce readiness for onOaiqReady() consumers. The `if(w.oaiq)return`
-  // guard is the SDK's own SPA protection against a second injection.
+  // is on only in development (it logs every ping to the console), we
+  // announce readiness for onOaiqReady() consumers, and we say
+  // oaiq("consent", true) explicitly BETWEEN init and the first measure. That
+  // line is load-bearing: the SDK persists a denial for 30 days (cookie
+  // __oaiq_consent + localStorage) and re-reads it on every load, so a
+  // visitor who once withdrew and later re-accepted would otherwise get a
+  // loaded-but-mute pixel — every event silently dropped while our banner
+  // says "accepted". Safe because this snippet is never injected without
+  // marketing consent (the same reason GA's snippet can default to granted).
+  // Order matters: consent BEFORE measure, or the first page_viewed is lost.
+  // The `if(w.oaiq)return` guard is the SDK's own SPA protection against a
+  // second injection.
   const debug = process.env.NODE_ENV === "development";
 
   return (
     <Script id="openai-pixel-base" strategy="afterInteractive">
-      {`!function(w,d,s,u){if(w.oaiq)return;var q=function(){q.q.push(arguments)};q.q=[];w.oaiq=q;var j=d.createElement(s);j.async=1;j.src=u;var f=d.getElementsByTagName(s)[0];f.parentNode.insertBefore(j,f)}(window,document,"script","${OAIQ_SDK_SRC}");
-oaiq("init",{pixelId:"${OPENAI_PIXEL_ID}",debug:${debug ? "true" : "false"}});
+      {`!function(w,d,s,u){if(w.oaiq)return;var q=function(){q.q.push(arguments)};q.q=[];w.oaiq=q;var j=d.createElement(s);j.async=1;j.src=u;var f=d.getElementsByTagName(s)[0];f.parentNode.insertBefore(j,f)}(window,document,"script",${JSON.stringify(OAIQ_SDK_SRC)});
+oaiq("init",{pixelId:${JSON.stringify(OPENAI_PIXEL_ID)},debug:${debug ? "true" : "false"}});
+oaiq("consent",true);
 oaiq("measure","page_viewed",{type:"contents"});
 window.__oaiqReady=true;
 window.dispatchEvent(new Event("${OAIQ_READY_EVENT}"));`}

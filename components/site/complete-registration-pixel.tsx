@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 import { measureOaiq, onOaiqReady } from "@/lib/openai-pixel-events";
+import { readConsentFromDocument } from "@/lib/cookie-consent";
 
 // Fires CompleteRegistration (Meta) + signup_completed (PostHog) +
 // subscription_created (OpenAI / ChatGPT Ads) once per user, at the
@@ -86,6 +87,12 @@ export function CompleteRegistrationPixel({
     const offOaiq = oaDone
       ? () => {}
       : onOaiqReady(() => {
+          // The SDK can't be unloaded, so "loaded" is not "consented": after
+          // a mid-session withdrawal window.oaiq is still a function but drops
+          // every event. Burning the dedupe flag then would lose this user's
+          // conversion forever — so measure (and burn) only on LIVE consent;
+          // otherwise the next mount after a re-grant gets another chance.
+          if (readConsentFromDocument()?.marketing !== true) return;
           measureOaiq(
             "subscription_created",
             { type: "plan_enrollment", plan_id: "free-membership" },

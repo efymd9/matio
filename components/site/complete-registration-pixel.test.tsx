@@ -2,7 +2,16 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  CONSENT_VERSION,
+  writeConsentToDocument,
+} from "@/lib/cookie-consent";
+import { OAIQ_READY_EVENT } from "@/lib/openai-pixel-events";
+
 import { CompleteRegistrationPixel } from "./complete-registration-pixel";
+
+const consent = (marketing: boolean) =>
+  writeConsentToDocument({ necessary: true, marketing, ts: 1, v: CONSENT_VERSION });
 
 // The account-materialization beacon: one conversion per user, per tracker,
 // and only once the consent-gated SDK is actually present.
@@ -25,6 +34,7 @@ beforeEach(() => {
     configurable: true,
     value: window.localStorage,
   });
+  consent(true);
 });
 
 afterEach(() => {
@@ -53,11 +63,34 @@ describe("CompleteRegistrationPixel — ChatGPT Ads conversion", () => {
     expect(oaiq).toHaveBeenCalledTimes(1);
   });
 
-  it("never fires while the SDK is absent (no marketing consent)", () => {
+  it("waits for the SDK: zero calls before ready, exactly one after", () => {
     render(<CompleteRegistrationPixel userId="user_7" />);
-    // No SDK → the ready-deferral is armed, nothing measured, and the
-    // localStorage flag is NOT burned, so a later consent still converts.
+    // No SDK yet → the ready-deferral is armed, nothing measured, and the
+    // localStorage flag is NOT burned, so a later load still converts.
     expect(localStorage.getItem("matio:oaiq:signup:user_7")).toBeNull();
+    const oaiq = vi.fn();
+    window.oaiq = oaiq as unknown as NonNullable<typeof window.oaiq>;
+    expect(oaiq).not.toHaveBeenCalled();
+    window.dispatchEvent(new Event(OAIQ_READY_EVENT));
+    expect(oaiq).toHaveBeenCalledTimes(1);
+    expect(oaiq.mock.calls[0][1]).toBe("subscription_created");
+    expect(localStorage.getItem("matio:oaiq:signup:user_7")).toBe("1");
+  });
+
+  it("does not measure — or burn the dedupe flag — after consent was withdrawn mid-session", () => {
+    // The SDK stays loaded after a withdrawal but drops every event; burning
+    // the flag then would lose the conversion forever.
+    consent(false);
+    const oaiq = vi.fn();
+    window.oaiq = oaiq as unknown as NonNullable<typeof window.oaiq>;
+    render(<CompleteRegistrationPixel userId="user_9" />);
+    expect(oaiq).not.toHaveBeenCalledWith(
+      "measure",
+      "subscription_created",
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(localStorage.getItem("matio:oaiq:signup:user_9")).toBeNull();
   });
 
   it("does nothing without a user id", () => {

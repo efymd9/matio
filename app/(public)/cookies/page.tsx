@@ -163,7 +163,7 @@ function CookiesEn() {
               name: "__oppref, __oaiq_consent (OpenAI)",
               purpose:
                 "Set by the ChatGPT Ads measurement pixel (OpenAI) to store the click identifier when you arrive from an ad shown in ChatGPT, so a later sign-up can be attributed to that ad, and to remember your consent choice for it. Only set after you accept marketing cookies.",
-              expiry: "Set by OpenAI",
+              expiry: "Consent choice: 30 days; click id: set by OpenAI",
               category: "Marketing",
             },
           ]}
@@ -355,7 +355,7 @@ function CookiesEs() {
               name: "__oppref, __oaiq_consent (OpenAI)",
               purpose:
                 "Las coloca el píxel de medición de ChatGPT Ads (OpenAI) para guardar el identificador de clic cuando llegas desde un anuncio mostrado en ChatGPT, de modo que un registro posterior pueda atribuirse a ese anuncio, y para recordar tu elección de consentimiento. Solo se colocan tras aceptar las cookies de marketing.",
-              expiry: "Lo establece OpenAI",
+              expiry: "Elección de consentimiento: 30 días; id de clic: lo establece OpenAI",
               category: "Marketing",
             },
           ]}

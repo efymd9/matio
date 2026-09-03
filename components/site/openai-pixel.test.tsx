@@ -70,6 +70,21 @@ describe("OpenAIPixel — consent gate", () => {
     expect(src).toMatch(/debug:(true|false)\}/);
   });
 
+  it("re-grants the SDK's persisted consent BEFORE the first measure", () => {
+    // The SDK remembers a denial for 30 days and re-reads it on every load.
+    // Without an explicit consent(true) between init and measure, a visitor
+    // who once withdrew and later re-accepted gets a loaded-but-mute pixel.
+    // Order matters: consent after measure loses the first page_viewed.
+    render(<OpenAIPixel initialConsent={consented} />);
+    const src = injected()!.getAttribute("data-src-preview") ?? "";
+    const init = src.indexOf('oaiq("init"');
+    const consent = src.indexOf('oaiq("consent",true)');
+    const measure = src.indexOf('oaiq("measure"');
+    expect(init).toBeGreaterThan(-1);
+    expect(consent).toBeGreaterThan(init);
+    expect(measure).toBeGreaterThan(consent);
+  });
+
   it("injects after a consent decision made this session", () => {
     render(<OpenAIPixel initialConsent={null} />);
     expect(injected()).toBeNull();
