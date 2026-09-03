@@ -2,7 +2,11 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CONSENT_CHANGED_EVENT } from "@/lib/cookie-consent";
+import {
+  CONSENT_CHANGED_EVENT,
+  CONSENT_VERSION,
+  type ConsentRecord,
+} from "@/lib/cookie-consent";
 
 // next/script would try to load the real SDK; render it as a plain <script>
 // so the test can inspect what WOULD be injected without executing it.
@@ -22,8 +26,8 @@ vi.mock("@/lib/openai-pixel-events", async (importOriginal) => {
 
 import { OpenAIPixel } from "./openai-pixel";
 
-const consented = { marketing: true, decidedAt: "2026-09-01T00:00:00.000Z" };
-const declined = { marketing: false, decidedAt: "2026-09-01T00:00:00.000Z" };
+const consented: ConsentRecord = { necessary: true, marketing: true, ts: 0, v: CONSENT_VERSION };
+const declined: ConsentRecord = { necessary: true, marketing: false, ts: 0, v: CONSENT_VERSION };
 
 function injected() {
   return document.getElementById("openai-pixel-base");
