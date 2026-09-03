@@ -18,20 +18,6 @@ import {
   type Locale,
 } from "./dictionaries";
 
-// Countries where Spanish is the best guess for a visitor whose
-// Accept-Language matched neither dictionary: Hispanophone countries
-// (official/primary language Spanish, incl. Puerto Rico and Equatorial
-// Guinea) plus the Lusophone pair BR/PT — a pt-only browser reads the
-// Spanish UI far more comfortably than the English one (and English
-// proficiency in Brazil is low). Every other *valid* country code falls
-// to English as the international default. Judgment call — flip BR/PT out
-// of this set if funnel data ever says otherwise.
-export const ES_AFFINITY_COUNTRIES = new Set([
-  "ES", "MX", "CO", "AR", "PE", "VE", "CL", "GT", "EC", "BO", "CU", "DO",
-  "HN", "PY", "SV", "NI", "CR", "PA", "UY", "GQ", "PR",
-  "BR", "PT",
-]);
-
 // Map a single language tag (es-419, en_GB, EN) to a supported locale by
 // its primary subtag, or null. Case-insensitive; tolerates the
 // non-standard underscore separator some clients emit.
@@ -100,37 +86,25 @@ export function parseAcceptLanguage(
   return best;
 }
 
-// Geo tiebreak from Vercel's `x-vercel-ip-country` (ISO 3166-1 alpha-2).
-// Same validation posture as marketingConsentRequired(): anything that
-// isn't a clean two-letter code is "unknown" → null (the header is absent
-// on localhost and can be junk behind weird proxies).
-export function localeFromCountry(
-  country: string | null | undefined,
-): Locale | null {
-  const c = country?.trim().toUpperCase();
-  if (!c || !/^[A-Z]{2}$/.test(c)) return null;
-  return ES_AFFINITY_COUNTRIES.has(c) ? "es" : "en";
-}
-
 // The full ladder for a visitor with no `locale` cookie:
 //   1. No Accept-Language at all → DEFAULT_LOCALE (English since
 //      2026-07-04). Real browsers always send the header; the no-header
 //      population is crawlers (Googlebot crawls from US IPs with NO
 //      Accept-Language) — so the DEFAULT_LOCALE here IS the indexed
-//      language of the site. Geo is deliberately NOT consulted.
+//      language of the site.
 //   2. Header names a supported language → highest-q wins (this is how
 //      Spanish-preferring browsers keep getting Spanish).
-//   3. Header exists but matches nothing (fr-FR, de, pt-BR, bare `*`) →
-//      geo tiebreak (ES_AFFINITY_COUNTRIES → es, other valid → en);
-//      unknown geo → DEFAULT_LOCALE.
+//   3. Anything else → DEFAULT_LOCALE. There used to be a geo tiebreak here
+//      (ES_AFFINITY_COUNTRIES: an unmatched header from a Hispanophone
+//      country → es) — removed 2026-08-31 by owner decision: it handed
+//      Spanish to every ru/de/fr-browser tourist in Spain/LatAm, and one
+//      /es visit then pinned it via the sticky locale cookie. English is
+//      the default for everyone who didn't ask for Spanish; es remains for
+//      the explicit signals only (Accept-Language, the switcher, /es URLs).
+//      Geo is deliberately NOT consulted for language at all any more.
 export function negotiateLocale(
   acceptLanguage: string | null | undefined,
-  country: string | null | undefined,
 ): Locale {
   if (!acceptLanguage?.trim()) return DEFAULT_LOCALE;
-  return (
-    parseAcceptLanguage(acceptLanguage) ??
-    localeFromCountry(country) ??
-    DEFAULT_LOCALE
-  );
+  return parseAcceptLanguage(acceptLanguage) ?? DEFAULT_LOCALE;
 }
