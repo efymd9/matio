@@ -285,6 +285,7 @@ Leave all three blank to keep PostHog entirely off — both the client provider 
 | Name | Notes |
 |---|---|
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` | GA4 Measurement ID (`G-XXXXXXXXXX`), from the GA4 property's Web data stream. **Public** — ships in the client bundle. **Blank → GA fully off** (`components/site/google-analytics.tsx` renders `null`). |
+| `NEXT_PUBLIC_OPENAI_PIXEL_ID` | ChatGPT Ads Measurement Pixel ID (OpenAI Ads Manager → Pixel). **Public** — ships in the client bundle. **Blank → the pixel is fully off** (`components/site/openai-pixel.tsx` renders `null`). Consent-gated like Meta/GA; the campaign conversion `subscription_created` fires from `components/site/complete-registration-pixel.tsx` at account creation while payments are off. |
 
 **`NEXT_PUBLIC_*` is build-time** — set it in Vercel *before* deploying (same as the Meta / PostHog public vars). Missing at build → GA ships disabled and needs a redeploy after adding the ID.
 

@@ -3,9 +3,11 @@
 import { useEffect } from "react";
 import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
+import { measureOaiq, onOaiqReady } from "@/lib/openai-pixel-events";
 
-// Fires CompleteRegistration (Meta) + signup_completed (PostHog) once per
-// user, at the account-materialization moment: first authed /subscribe for
+// Fires CompleteRegistration (Meta) + signup_completed (PostHog) +
+// subscription_created (OpenAI / ChatGPT Ads) once per user, at the
+// account-materialization moment: first authed /subscribe for
 // the signed-in flow, post-sign-in /welcome for pay-first buyers. Meta Lead
 // moved to the paywall (2026-06-10 funnel mapping: ViewContent at play start
 // → Lead at the paywall → InitiateCheckout at the CTA → Purchase) — it no
@@ -66,9 +68,40 @@ export function CompleteRegistrationPixel({
           }
         });
 
+    // ChatGPT Ads conversion. The owner configured `subscription_created`
+    // (type plan_enrollment) as the campaign's conversion in OpenAI Ads
+    // Manager. While payments are OFF, creating an account IS the only plan
+    // enrollment that happens (the free membership), so it fires here — the
+    // same moment as Meta's CompleteRegistration. When payments return, this
+    // call moves to the paid path and plan_id stops being "free-membership".
+    // Only documented fields (the SDK rejects unknown ones); event_id keys a
+    // future Conversions-API dedupe. No PII — the Clerk id is an opaque id.
+    const oaKey = `matio:oaiq:signup:${userId}`;
+    let oaDone = false;
+    try {
+      oaDone = !!localStorage.getItem(oaKey);
+    } catch {
+      // Storage blocked: fire anyway; event_id dedupes on OpenAI's side.
+    }
+    const offOaiq = oaDone
+      ? () => {}
+      : onOaiqReady(() => {
+          measureOaiq(
+            "subscription_created",
+            { type: "plan_enrollment", plan_id: "free-membership" },
+            { event_id: `signup:${userId}` },
+          );
+          try {
+            localStorage.setItem(oaKey, "1");
+          } catch {
+            // ignore storage write failures
+          }
+        });
+
     return () => {
       offPixel();
       offPostHog();
+      offOaiq();
     };
   }, [userId, utm]);
   return null;
