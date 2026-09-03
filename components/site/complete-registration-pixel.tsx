@@ -13,10 +13,16 @@ import { readConsentFromDocument } from "@/lib/cookie-consent";
 // moved to the paywall (2026-06-10 funnel mapping: ViewContent at play start
 // → Lead at the paywall → InitiateCheckout at the CTA → Purchase) — it no
 // longer fires here; the localStorage key keeps its historical "creg" name
-// so users who fired before the change don't retro-fire. All browser-side
-// and inherently consent-gated (the ready-deferral never fires without a
-// loaded SDK). De-dupe via a localStorage flag keyed by user id, set only
-// AFTER the events actually fire so a not-yet-loaded SDK doesn't burn it.
+// so users who fired before the change don't retro-fire. All browser-side.
+// Consent is checked twice, on purpose: the ready-deferral never fires
+// without a loaded SDK (none loads without marketing consent), AND every
+// callback re-reads the live consent cookie before firing — "loaded" is not
+// "consented". None of the SDKs can be unloaded, so after a mid-session
+// withdrawal fbq (in `consent revoke`), posthog (opted out) and oaiq all stay
+// present but silently drop every event. De-dupe via a localStorage flag
+// keyed by user id, set only AFTER the event actually fires: a not-yet-loaded
+// SDK or a withdrawn consent must not burn it, or this user's conversion is
+// lost forever — even after they grant consent again (#147).
 export function CompleteRegistrationPixel({
   userId,
   utm,
@@ -43,6 +49,8 @@ export function CompleteRegistrationPixel({
     const offPixel = fbDone
       ? () => {}
       : onPixelReady(() => {
+          // Live consent, not "SDK loaded" — see the module comment.
+          if (readConsentFromDocument()?.marketing !== true) return;
           trackPixel("CompleteRegistration");
           try {
             localStorage.setItem(fbKey, "1");
@@ -61,6 +69,8 @@ export function CompleteRegistrationPixel({
     const offPostHog = phDone
       ? () => {}
       : onPostHogReady(() => {
+          // Live consent, not "SDK loaded" — see the module comment.
+          if (readConsentFromDocument()?.marketing !== true) return;
           capturePostHog("signup_completed", utm);
           try {
             localStorage.setItem(phKey, "1");
@@ -87,11 +97,7 @@ export function CompleteRegistrationPixel({
     const offOaiq = oaDone
       ? () => {}
       : onOaiqReady(() => {
-          // The SDK can't be unloaded, so "loaded" is not "consented": after
-          // a mid-session withdrawal window.oaiq is still a function but drops
-          // every event. Burning the dedupe flag then would lose this user's
-          // conversion forever — so measure (and burn) only on LIVE consent;
-          // otherwise the next mount after a re-grant gets another chance.
+          // Live consent, not "SDK loaded" — see the module comment.
           if (readConsentFromDocument()?.marketing !== true) return;
           measureOaiq(
             "subscription_created",
