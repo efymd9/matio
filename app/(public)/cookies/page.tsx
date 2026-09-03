@@ -1,6 +1,6 @@
 // DRAFT pending legal-counsel review. Describes the cookies the site sets
 // (Clerk + Stripe + attribution + Meta Pixel + PostHog + Google Analytics). The
-// attribution_first / attribution_last / _fbp / _fbc / ph_* / _ga / _ga_*
+// attribution_first / attribution_last / _fbp / _fbc / ph_* / _ga / _ga_* / __oppref / __oaiq_consent
 // marketing cookies are gated on cookie_consent.marketing via proxy.ts + the
 // consent banner. Contact details filled 2026-05-27; Meta Pixel + Conversions
 // API disclosure added 2026-05-29; PostHog disclosure added 2026-05-30; Google
@@ -159,6 +159,13 @@ function CookiesEn() {
               expiry: "Up to 2 years",
               category: "Marketing",
             },
+            {
+              name: "__oppref, __oaiq_consent (OpenAI)",
+              purpose:
+                "Set by the ChatGPT Ads measurement pixel (OpenAI) to store the click identifier when you arrive from an ad shown in ChatGPT, so a later sign-up can be attributed to that ad, and to remember your consent choice for it. Only set after you accept marketing cookies.",
+              expiry: "Consent choice: 30 days; click id: set by OpenAI",
+              category: "Marketing",
+            },
           ]}
         />
         <p>
@@ -175,6 +182,11 @@ function CookiesEn() {
           <strong>only after you accept marketing cookies</strong> &mdash; until
           then Google&rsquo;s consent-mode signals are withheld &mdash; and
           shares usage and device data with <strong>Google Ireland Ltd</strong>.
+          We also use the <strong>ChatGPT Ads measurement pixel</strong> to
+          measure how our advertising in ChatGPT performs; it runs{" "}
+          <strong>only after you accept marketing cookies</strong> and shares
+          event signals (page views, sign-ups) with{" "}
+          <strong>OpenAI Ireland Ltd</strong>.
           Our video provider <strong>Mux</strong> measures
           playback quality and watch time via <strong>Mux Data</strong>; like
           the Pixel, this runs <strong>only after you accept marketing
@@ -339,6 +351,13 @@ function CookiesEs() {
               expiry: "Hasta 2 años",
               category: "Marketing",
             },
+            {
+              name: "__oppref, __oaiq_consent (OpenAI)",
+              purpose:
+                "Las coloca el píxel de medición de ChatGPT Ads (OpenAI) para guardar el identificador de clic cuando llegas desde un anuncio mostrado en ChatGPT, de modo que un registro posterior pueda atribuirse a ese anuncio, y para recordar tu elección de consentimiento. Solo se colocan tras aceptar las cookies de marketing.",
+              expiry: "Elección de consentimiento: 30 días; id de clic: lo establece OpenAI",
+              category: "Marketing",
+            },
           ]}
         />
         <p>
@@ -355,7 +374,12 @@ function CookiesEs() {
           <strong>tras aceptar las cookies de marketing</strong> &mdash; hasta
           entonces se retienen las señales del modo de consentimiento de Google
           &mdash; y comparte datos de uso y de dispositivo con{" "}
-          <strong>Google Ireland Ltd</strong>. Nuestro proveedor de vídeo{" "}
+          <strong>Google Ireland Ltd</strong>. También usamos el{" "}
+          <strong>píxel de medición de ChatGPT Ads</strong> para medir el
+          rendimiento de nuestra publicidad en ChatGPT; se activa{" "}
+          <strong>solo tras aceptar las cookies de marketing</strong> y
+          comparte señales de eventos (vistas de página, registros) con{" "}
+          <strong>OpenAI Ireland Ltd</strong>. Nuestro proveedor de vídeo{" "}
           <strong>Mux</strong> mide la calidad de reproducción y el tiempo de
           visionado mediante <strong>Mux Data</strong>; al igual que el Pixel,
           esto se ejecuta <strong>solo tras aceptar las cookies de

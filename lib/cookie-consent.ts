@@ -118,7 +118,15 @@ export function clearMarketingCookies(): void {
   // localhost (no dot), where there is no domain-scoped cookie to clear.
   const labels = window.location.hostname.split(".");
   const root = labels.length >= 2 ? labels.slice(-2).join(".") : null;
-  for (const name of ["attribution_first", "attribution_last", "_fbp", "_fbc"]) {
+  // `__oppref` is the ChatGPT Ads pixel's click identifier — the OpenAI
+  // counterpart of `_fbc` (host-only, path=/, lifetime set by OpenAI).
+  for (const name of [
+    "attribution_first",
+    "attribution_last",
+    "_fbp",
+    "_fbc",
+    "__oppref",
+  ]) {
     document.cookie = `${name}=; max-age=0; path=/`;
     if (root) document.cookie = `${name}=; max-age=0; path=/; domain=.${root}`;
   }
