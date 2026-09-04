@@ -10,30 +10,30 @@ import {
 
 // ChatGPT Ads `subscription_created` — the browser-side purchase beacon for
 // PAID mode. Mounted on the two pages a buyer lands on straight from Stripe:
-// /welcome (pay-first guests, session verified PAID server-side) and the
-// watch page's return (signed-in buyers, `?cs=<checkout session>` appended to
-// return_url and rendered only once the subscription is mirrored). Meta's
-// Purchase is server-side (CAPI from the Stripe webhook); OpenAI's server
-// Conversions API is not wired yet, so this is the only oaiq purchase signal —
-// event_id = the Checkout Session id keeps a future server call deduplicated
-// against it. Amount is what was actually charged today (the $1 trial fee, in
+// /welcome (pay-first guests) and the signed-in return (watch page / home),
+// both after the server has verified the Checkout Session at Stripe as PAID
+// and belonging to this buyer (lib/checkout-return-verify.ts). Meta's Purchase
+// is server-side (CAPI from the Stripe webhook); OpenAI's server Conversions
+// API is not wired yet, so this is the only oaiq purchase signal — purchaseKey
+// is the Stripe SUBSCRIPTION id, the same key CAPI uses, so a future server
+// call dedupes against it by construction. Amount is what was actually charged today (the $1 trial fee, in
 // cents — OpenAI's schema), mirroring TRIAL_FEE_VALUE for Meta.
 //
 // Once per session id via localStorage, burned only under LIVE consent (the
 // SDK stays loaded after a withdrawal but drops events — see the same guard
 // in complete-registration-pixel.tsx).
 export function PurchasePixel({
-  checkoutSessionId,
+  purchaseKey,
   amountCents,
   currency,
 }: {
-  checkoutSessionId: string;
+  purchaseKey: string;
   amountCents: number;
   currency: string;
 }) {
   useEffect(() => {
-    if (!checkoutSessionId) return;
-    const key = `matio:oaiq:purchase:${checkoutSessionId}`;
+    if (!purchaseKey) return;
+    const key = `matio:oaiq:purchase:${purchaseKey}`;
     let done = false;
     try {
       done = !!localStorage.getItem(key);
@@ -51,7 +51,7 @@ export function PurchasePixel({
           amount: Math.max(0, Math.round(amountCents)),
           currency: currency.toUpperCase(),
         },
-        { event_id: checkoutSessionId },
+        { event_id: purchaseKey },
       );
       try {
         localStorage.setItem(key, "1");
@@ -59,6 +59,6 @@ export function PurchasePixel({
         // ignore storage write failures
       }
     });
-  }, [checkoutSessionId, amountCents, currency]);
+  }, [purchaseKey, amountCents, currency]);
   return null;
 }

@@ -10,7 +10,9 @@ import { TopThreeRow } from "@/components/site/top-three-row";
 import { getContinueWatching } from "@/lib/continue-watching";
 import { getPublishedShows } from "@/lib/catalog";
 import { paymentsEnabled } from "@/lib/free-mode";
-import { CheckoutReturnBeacon } from "@/components/site/checkout-return-beacon";
+import { auth } from "@clerk/nextjs/server";
+import { PurchaseBeacon } from "@/components/site/purchase-beacon";
+import { verifyCheckoutReturn } from "@/lib/checkout-return-verify";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import { catalogItemListJsonLd, jsonLdScript } from "@/lib/structured-data";
@@ -87,8 +89,12 @@ export default async function HomePage({
 }) {
   const { t } = await getDict();
   // Signed-in checkout without a show target returns here as
-  // `/?welcome=1&cs=<Checkout Session>` — see CheckoutReturnBeacon.
+  // `/?welcome=1&cs=<Checkout Session>`: verified at Stripe + mirrored inline
+  // (lib/checkout-return-verify.ts); auth is read only when the param is set.
   const { cs } = await searchParams;
+  const checkoutReturn = cs
+    ? await verifyCheckoutReturn(cs, (await auth()).userId)
+    : null;
   // Warm the cross-origin thumbnail/preview host (DNS+TLS) before the ~350KB
   // hero player chunk loads — the handshake otherwise sits on the LCP path.
   // crossOrigin "anonymous" matches how next/image fetches, so this reuses the
@@ -170,7 +176,7 @@ export default async function HomePage({
 
   return (
     <>
-      <CheckoutReturnBeacon cs={cs} />
+      <PurchaseBeacon result={checkoutReturn} />
     <main className="bg-background">
       <script
         type="application/ld+json"

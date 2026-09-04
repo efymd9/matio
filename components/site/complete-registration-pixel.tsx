@@ -85,14 +85,12 @@ export function CompleteRegistrationPixel({
           }
         });
 
-    // ChatGPT Ads conversion. The owner configured `subscription_created`
-    // (type plan_enrollment) as the campaign's conversion in OpenAI Ads
-    // Manager. While payments are OFF, creating an account IS the only plan
-    // enrollment that happens (the free membership), so it fires here — the
-    // same moment as Meta's CompleteRegistration. When payments return, this
-    // call moves to the paid path and plan_id stops being "free-membership".
-    // Only documented fields (the SDK rejects unknown ones); event_id keys a
-    // future Conversions-API dedupe. No PII — the Clerk id is an opaque id.
+    // ChatGPT Ads. Paid mode: this is a registration (`registration_completed`)
+    // and the purchase is measured by <PurchasePixel/> on the checkout return.
+    // Free mode: creating an account IS the plan enrollment, so the campaign's
+    // configured conversion (`subscription_created`, plan "free-membership")
+    // fires here. Only documented fields (the SDK rejects unknown ones);
+    // event_id keys a future Conversions-API dedupe. No PII — opaque Clerk id.
     const oaKey = `matio:oaiq:signup:${userId}`;
     let oaDone = false;
     try {

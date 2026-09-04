@@ -139,7 +139,7 @@ export default async function WelcomePage({
           (the session was checked PAID above), and the amount is what Stripe
           actually charged today, in cents. */}
       <PurchasePixel
-        checkoutSessionId={session.id}
+        purchaseKey={sub.id}
         amountCents={session.amount_total ?? 0}
         currency={session.currency ?? "usd"}
       />

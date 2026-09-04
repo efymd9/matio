@@ -16,7 +16,8 @@ import {
 import { Player, type PlayerEpisode } from "@/components/watch/player";
 import { WatchShell } from "@/components/watch/watch-shell";
 import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
-import { CheckoutReturnBeacon } from "@/components/site/checkout-return-beacon";
+import { PurchaseBeacon } from "@/components/site/purchase-beacon";
+import { verifyCheckoutReturn } from "@/lib/checkout-return-verify";
 import { Icon } from "@/components/site/icon";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
@@ -184,6 +185,11 @@ export default async function WatchPage({
     : playable[0];
 
   const { userId } = await auth();
+  // Signed-in checkout return (`?cs=`): verify the session at Stripe as paid
+  // and OURS, mirror the subscription inline (so the paint below already
+  // shows the subscriber state — the guest flow does the same on /welcome),
+  // and key the purchase beacon with the subscription id.
+  const checkoutReturn = await verifyCheckoutReturn(cs, userId);
   // hasActiveSubscription bundles the status-set and current_period_end
   // checks in one place; see lib/subscription-access.ts for why past_due
   // grants access and why the period-end timestamp is also enforced.
@@ -247,7 +253,7 @@ export default async function WatchPage({
     await linkVisitorToUser(userId!);
     return (
       <WatchShell>
-        <CheckoutReturnBeacon cs={cs} />
+        <PurchaseBeacon result={checkoutReturn} />
         <Player
           mode="subscriber"
           orientation={show.orientation}
@@ -304,12 +310,8 @@ export default async function WatchPage({
 
       return (
         <WatchShell>
-          <CompleteRegistrationPixel
-            userId={userId}
-            utm={signupUtm}
-            paymentsEnabled={paymentsOn}
-          />
-          <CheckoutReturnBeacon cs={cs} />
+          <PurchaseBeacon result={checkoutReturn} />
+          <CompleteRegistrationPixel userId={userId} utm={signupUtm} paymentsEnabled={paymentsOn} />
           <Player
             mode="member"
             orientation={show.orientation}
@@ -352,6 +354,7 @@ export default async function WatchPage({
 
     return (
       <WatchShell>
+        <PurchaseBeacon result={checkoutReturn} />
         <Player
           mode="free"
           orientation={show.orientation}
@@ -410,6 +413,7 @@ export default async function WatchPage({
 
   return (
     <WatchShell>
+      <PurchaseBeacon result={checkoutReturn} />
       <Player
         mode="trial"
         orientation={show.orientation}
