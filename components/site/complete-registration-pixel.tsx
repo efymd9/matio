@@ -26,8 +26,14 @@ import { readConsentFromDocument } from "@/lib/cookie-consent";
 export function CompleteRegistrationPixel({
   userId,
   utm,
+  paymentsEnabled = false,
 }: {
   userId: string;
+  // Paid mode: a registration is a registration (`registration_completed`);
+  // the purchase itself is measured by <PurchasePixel/> on the checkout
+  // return. Free mode: creating an account IS the plan enrollment, so the
+  // campaign's configured conversion (`subscription_created`) fires here.
+  paymentsEnabled?: boolean;
   // First-touch UTM (server-resolved from the attribution_first cookie on
   // /subscribe) so signup_completed carries campaign attribution — by signup
   // time the URL has no utm_* params, so posthog-js can't auto-attach them.
@@ -79,14 +85,12 @@ export function CompleteRegistrationPixel({
           }
         });
 
-    // ChatGPT Ads conversion. The owner configured `subscription_created`
-    // (type plan_enrollment) as the campaign's conversion in OpenAI Ads
-    // Manager. While payments are OFF, creating an account IS the only plan
-    // enrollment that happens (the free membership), so it fires here — the
-    // same moment as Meta's CompleteRegistration. When payments return, this
-    // call moves to the paid path and plan_id stops being "free-membership".
-    // Only documented fields (the SDK rejects unknown ones); event_id keys a
-    // future Conversions-API dedupe. No PII — the Clerk id is an opaque id.
+    // ChatGPT Ads. Paid mode: this is a registration (`registration_completed`)
+    // and the purchase is measured by <PurchasePixel/> on the checkout return.
+    // Free mode: creating an account IS the plan enrollment, so the campaign's
+    // configured conversion (`subscription_created`, plan "free-membership")
+    // fires here. Only documented fields (the SDK rejects unknown ones);
+    // event_id keys a future Conversions-API dedupe. No PII — opaque Clerk id.
     const oaKey = `matio:oaiq:signup:${userId}`;
     let oaDone = false;
     try {
@@ -99,11 +103,19 @@ export function CompleteRegistrationPixel({
       : onOaiqReady(() => {
           // Live consent, not "SDK loaded" — see the module comment.
           if (readConsentFromDocument()?.marketing !== true) return;
-          measureOaiq(
-            "subscription_created",
-            { type: "plan_enrollment", plan_id: "free-membership" },
-            { event_id: `signup:${userId}` },
-          );
+          if (paymentsEnabled) {
+            measureOaiq(
+              "registration_completed",
+              { type: "customer_action" },
+              { event_id: `signup:${userId}` },
+            );
+          } else {
+            measureOaiq(
+              "subscription_created",
+              { type: "plan_enrollment", plan_id: "free-membership" },
+              { event_id: `signup:${userId}` },
+            );
+          }
           try {
             localStorage.setItem(oaKey, "1");
           } catch {
@@ -116,6 +128,6 @@ export function CompleteRegistrationPixel({
       offPostHog();
       offOaiq();
     };
-  }, [userId, utm]);
+  }, [userId, utm, paymentsEnabled]);
   return null;
 }

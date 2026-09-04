@@ -12,6 +12,7 @@ import {
   embeddedCheckoutEnabled,
 } from "@/lib/checkout-session";
 import { buildWatchPath, resolveCheckoutTarget } from "@/lib/checkout-target";
+import { buildCheckoutReturnUrl } from "@/lib/checkout-return";
 import {
   readAttributionCookies,
   toStripeMetadata,
@@ -132,7 +133,11 @@ export async function createAuthCheckoutSession(
   // the top frame to after payment; in hosted mode it's success_url. Either
   // way it's our own domain — the subscription is mirrored by the webhook.
   const watchPath = buildWatchPath(target);
-  const successUrl = watchPath ? `${origin}${watchPath}` : `${origin}/?welcome=1`;
+  // `cs={CHECKOUT_SESSION_ID}` is substituted by Stripe on return — the
+  // watch page / home read it to fire the browser-side purchase beacon once
+  // (components/site/purchase-pixel.tsx). Same placeholder the guest flow
+  // already uses for /welcome; it is a public-ish id that grants nothing.
+  const successUrl = buildCheckoutReturnUrl(origin, watchPath);
   // Cancel only applies to the hosted fallback (the embedded form has no
   // cancel button — the buyer navigates back from /checkout itself).
   const cancelParams = new URLSearchParams();

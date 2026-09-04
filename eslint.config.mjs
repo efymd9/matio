@@ -35,6 +35,11 @@ const eslintConfig = defineConfig([
     // The Expo app is a standalone project with its own toolchain and lint
     // config; the Next/web rules here don't apply to React Native source.
     "mobile/**",
+    // Agent worktrees live INSIDE the repo tree (.claude/worktrees/<agent>/):
+    // without this, `pnpm lint` from the main checkout scans a parallel
+    // session's copy — its generated Storybook shims included — and fails on
+    // code that is not ours. CI never has worktrees; this is for humans.
+    ".claude/worktrees/**",
   ]),
   ...storybook.configs["flat/recommended"]
 ]);

@@ -613,6 +613,7 @@ export const ru = {
     subtitle: "Лента событий по каждому визиту",
     tabOverview: "Обзор",
     tabSessions: "Сессии",
+    tabLegacy: "Старый дашборд",
     coverageNote:
       "Источник — PostHog: видны только визиты с согласием на куки (EU до баннера и часть трафика с блокировщиками сюда не попадают). Время — UTC.",
     listTitle: "Сессии",
@@ -1488,6 +1489,7 @@ export const en: AdminDict = {
     subtitle: "An event feed for every visit",
     tabOverview: "Overview",
     tabSessions: "Sessions",
+    tabLegacy: "Legacy dashboard",
     coverageNote:
       "Source — PostHog: only cookie-consented visits appear (EU pre-banner and some ad-blocked traffic are invisible here). Times are UTC.",
     listTitle: "Sessions",
