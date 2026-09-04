@@ -26,8 +26,14 @@ import { readConsentFromDocument } from "@/lib/cookie-consent";
 export function CompleteRegistrationPixel({
   userId,
   utm,
+  paymentsEnabled = false,
 }: {
   userId: string;
+  // Paid mode: a registration is a registration (`registration_completed`);
+  // the purchase itself is measured by <PurchasePixel/> on the checkout
+  // return. Free mode: creating an account IS the plan enrollment, so the
+  // campaign's configured conversion (`subscription_created`) fires here.
+  paymentsEnabled?: boolean;
   // First-touch UTM (server-resolved from the attribution_first cookie on
   // /subscribe) so signup_completed carries campaign attribution — by signup
   // time the URL has no utm_* params, so posthog-js can't auto-attach them.
@@ -99,11 +105,19 @@ export function CompleteRegistrationPixel({
       : onOaiqReady(() => {
           // Live consent, not "SDK loaded" — see the module comment.
           if (readConsentFromDocument()?.marketing !== true) return;
-          measureOaiq(
-            "subscription_created",
-            { type: "plan_enrollment", plan_id: "free-membership" },
-            { event_id: `signup:${userId}` },
-          );
+          if (paymentsEnabled) {
+            measureOaiq(
+              "registration_completed",
+              { type: "customer_action" },
+              { event_id: `signup:${userId}` },
+            );
+          } else {
+            measureOaiq(
+              "subscription_created",
+              { type: "plan_enrollment", plan_id: "free-membership" },
+              { event_id: `signup:${userId}` },
+            );
+          }
           try {
             localStorage.setItem(oaKey, "1");
           } catch {
@@ -116,6 +130,6 @@ export function CompleteRegistrationPixel({
       offPostHog();
       offOaiq();
     };
-  }, [userId, utm]);
+  }, [userId, utm, paymentsEnabled]);
   return null;
 }

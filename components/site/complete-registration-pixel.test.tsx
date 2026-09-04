@@ -103,6 +103,24 @@ describe("CompleteRegistrationPixel — ChatGPT Ads conversion", () => {
     expect(localStorage.getItem("matio:oaiq:signup:user_7")).toBe("1");
   });
 
+  it("in paid mode a registration reports registration_completed, not a plan enrollment", () => {
+    const oaiq = vi.fn();
+    window.oaiq = oaiq as unknown as NonNullable<typeof window.oaiq>;
+    render(<CompleteRegistrationPixel userId="user_paid" paymentsEnabled />);
+    expect(oaiq).toHaveBeenCalledWith(
+      "measure",
+      "registration_completed",
+      { type: "customer_action" },
+      { event_id: "signup:user_paid" },
+    );
+    expect(oaiq).not.toHaveBeenCalledWith(
+      "measure",
+      "subscription_created",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
   it("does not measure — or burn the dedupe flag — after consent was withdrawn mid-session", () => {
     // The SDK stays loaded after a withdrawal but drops every event; burning
     // the flag then would lose the conversion forever.

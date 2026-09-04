@@ -79,6 +79,11 @@ export type OaiqParamsFor<E extends OaiqEvent> = E extends
     ? OaiqCustomerActionParams
     : OaiqPlanEnrollmentParams;
 
+// The single membership plan, as ChatGPT Ads Manager sees it. A stable
+// human id rather than the Stripe price id — that differs between test and
+// live mode, and OpenAI groups reporting by this string.
+export const OAIQ_MEMBERSHIP_PLAN_ID = "matio-membership-monthly";
+
 export type OaiqOptions = {
   // Browser/server deduplication key — the same value sent through a future
   // Conversions API call collapses into one conversion.

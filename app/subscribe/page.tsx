@@ -87,7 +87,7 @@ export default async function SubscribePage({
     <div className="relative min-h-screen overflow-hidden bg-background pb-16 pt-28 sm:pt-32">
       {/* Meta Pixel CompleteRegistration — fires once per user (new signups
           land here right after Clerk sign-up). Renders nothing. */}
-      <CompleteRegistrationPixel userId={userId} utm={signupUtm} />
+      <CompleteRegistrationPixel userId={userId} utm={signupUtm} paymentsEnabled />
       {/* Soft radial accent behind the content */}
       <div
         className="pointer-events-none absolute inset-0 opacity-40"

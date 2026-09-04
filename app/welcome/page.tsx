@@ -14,6 +14,7 @@ import {
 import { getDict } from "@/lib/i18n/server";
 import { getStripe } from "@/lib/stripe";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
+import { PurchasePixel } from "@/components/site/purchase-pixel";
 
 // Guest (pay-first) checkout success page. Deliberately OUTSIDE the
 // /subscribe(.*) proxy auth matcher — the buyer has no session yet; that's
@@ -134,6 +135,14 @@ export default async function WelcomePage({
 
   const shell = (content: ReactNode) => (
     <div className="relative min-h-screen overflow-hidden bg-background pb-16 pt-28 sm:pt-32">
+      {/* ChatGPT Ads purchase beacon — every branch below is post-verification
+          (the session was checked PAID above), and the amount is what Stripe
+          actually charged today, in cents. */}
+      <PurchasePixel
+        checkoutSessionId={session.id}
+        amountCents={session.amount_total ?? 0}
+        currency={session.currency ?? "usd"}
+      />
       <div
         className="pointer-events-none absolute inset-0 opacity-40"
         aria-hidden

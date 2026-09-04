@@ -117,7 +117,7 @@ export function TicketSignIn({
     <div className="mt-4">
       {phase === "done" ? (
         <>
-          <CompleteRegistrationPixel userId={userId} utm={utm} />
+          <CompleteRegistrationPixel userId={userId} utm={utm} paymentsEnabled />
           <p className="text-sm text-cream/65">{t.welcome.ready}</p>
           <div className="mt-7 flex justify-center">
             <a

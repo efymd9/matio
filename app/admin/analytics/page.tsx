@@ -21,6 +21,7 @@ import {
   SOURCE_BUCKET_LABELS,
 } from "@/lib/analytics-spec-shared";
 import { paymentsEnabled } from "@/lib/free-mode";
+import { resolveAnalyticsView } from "@/lib/admin-analytics-view";
 import { getAdminDict } from "@/lib/i18n/admin-server";
 import { FunnelChart, KpiTile } from "@/components/admin/charts";
 import {
@@ -82,9 +83,10 @@ export default async function AnalyticsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  // Paid mode keeps the untouched legacy dashboard (dormant while the
-  // free pivot holds — the spec'd page below is the free-mode dashboard).
-  if (paymentsEnabled()) {
+  // The retention dashboard below is THE dashboard in both modes; the
+  // pre-2026-07-18 legacy page (MRR, subscription mix, paid funnels) stays
+  // reachable in paid mode via ?view=legacy — see lib/admin-analytics-view.
+  if (resolveAnalyticsView(paymentsEnabled(), (await searchParams).view) === "legacy") {
     return <LegacyDashboard searchParams={searchParams} />;
   }
 

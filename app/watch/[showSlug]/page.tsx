@@ -16,6 +16,7 @@ import {
 import { Player, type PlayerEpisode } from "@/components/watch/player";
 import { WatchShell } from "@/components/watch/watch-shell";
 import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
+import { CheckoutReturnBeacon } from "@/components/site/checkout-return-beacon";
 import { Icon } from "@/components/site/icon";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
@@ -49,10 +50,12 @@ export default async function WatchPage({
   searchParams,
 }: {
   params: Promise<{ showSlug: string }>;
-  searchParams: Promise<{ resume?: string; ep?: string }>;
+  searchParams: Promise<{ resume?: string; ep?: string; cs?: string }>;
 }) {
   const { showSlug } = await params;
-  const { resume, ep: epParam } = await searchParams;
+  // `cs` = the Checkout Session id Stripe appends to the signed-in return_url
+  // (app/subscribe/actions.ts) — consumed by <CheckoutReturnBeacon/> below.
+  const { resume, ep: epParam, cs } = await searchParams;
 
   const [show] = await db
     .select()
@@ -244,6 +247,7 @@ export default async function WatchPage({
     await linkVisitorToUser(userId!);
     return (
       <WatchShell>
+        <CheckoutReturnBeacon cs={cs} />
         <Player
           mode="subscriber"
           orientation={show.orientation}
@@ -300,7 +304,12 @@ export default async function WatchPage({
 
       return (
         <WatchShell>
-          <CompleteRegistrationPixel userId={userId} utm={signupUtm} />
+          <CompleteRegistrationPixel
+            userId={userId}
+            utm={signupUtm}
+            paymentsEnabled={paymentsOn}
+          />
+          <CheckoutReturnBeacon cs={cs} />
           <Player
             mode="member"
             orientation={show.orientation}
