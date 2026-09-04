@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.8.0](https://github.com/efymd9/matio/compare/matio-v0.7.0...matio-v0.8.0) (2026-09-04)
+
+
+### Features
+
+* **marketing:** ChatGPT-пиксель (OpenAI oaiq) под гейтом согласия + конверсия регистрации ([#146](https://github.com/efymd9/matio/issues/146)) ([a2c3b9d](https://github.com/efymd9/matio/commit/a2c3b9d0ca272a291480f223121fcd6f26b31b22))
+
+
+### Bug fixes
+
+* **admin:** не пускать email подписчика в логи ошибок Resend ([#133](https://github.com/efymd9/matio/issues/133)) ([dffd85e](https://github.com/efymd9/matio/commit/dffd85e6c846fdad3df7239bbc66788f26a805fa)), closes [#132](https://github.com/efymd9/matio/issues/132)
+* **admin:** после загрузки — явный успех и живой статус обработки ([#137](https://github.com/efymd9/matio/issues/137)) ([784e989](https://github.com/efymd9/matio/commit/784e9895ffe689bef50c98fea309866a500a3b63))
+* **i18n:** английский для всех, кто не просил испанский (гео-догадка удалена) ([#140](https://github.com/efymd9/matio/issues/140)) ([fe43516](https://github.com/efymd9/matio/commit/fe43516e5d0935c81433443d9bda5e37ef3dcbe0))
+* **marketing:** не сжигать флаг дедупа регистрации при отозванном согласии (Meta, PostHog) ([#148](https://github.com/efymd9/matio/issues/148)) ([710d6e7](https://github.com/efymd9/matio/commit/710d6e77e8fb9ec5a2ebab3a921c62437234ef88)), closes [#147](https://github.com/efymd9/matio/issues/147)
+* **seo:** усилить граф сущности Matio=DEEP ORDINARY LTD, вычистить имя из репо ([#142](https://github.com/efymd9/matio/issues/142)) ([fce6091](https://github.com/efymd9/matio/commit/fce6091bce22d4e6ec80d7bbcc62076b22e1e5e9)), closes [#141](https://github.com/efymd9/matio/issues/141)
+
+
+### Documentation
+
+* **devops:** NEXT_PUBLIC-переменная на стенде — выкатка и проверка вшитого значения ([#149](https://github.com/efymd9/matio/issues/149)) ([61888f9](https://github.com/efymd9/matio/commit/61888f9b13a82d24c22eeeb217f37073d46af838))
+* сверить CLAUDE.md с реальностью перед запуском параллельной сессии ([#138](https://github.com/efymd9/matio/issues/138)) ([e890409](https://github.com/efymd9/matio/commit/e890409d6e0651fd8c304f95c51dabd3515d6965))
+
 ## [0.7.0](https://github.com/efymd9/matio/compare/matio-v0.6.0...matio-v0.7.0) (2026-08-25)
 
 
