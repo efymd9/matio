@@ -18,6 +18,19 @@ updates:
     groups:
       npm:
         patterns: ["*"]
+    # Мажоры в недельную пачку НЕ входят. Волна 04.09.2026 (#150) приехала
+    # красной ровно из-за четырёх мажоров в одном PR с 29 патчами — и вся
+    # группа стала немержабельной. Мажор — это отдельный PR с миграцией
+    # (эти четыре — #157); миноры и патчи тех же пакетов приезжают штатно.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@mux/mux-node"
+        update-types: ["version-update:semver-major"]
 
   # Expo-приложение: свой package-lock.json, живёт вне pnpm-воркспейса.
   #
