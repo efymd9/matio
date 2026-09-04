@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/efymd9/matio/compare/matio-v0.8.0...matio-v0.9.0) (2026-09-04)
+
+
+### Features
+
+* **payments:** подготовка к включению — конверсия ChatGPT по режиму, дашборд v2 в обоих режимах ([#156](https://github.com/efymd9/matio/issues/156)) ([71122c6](https://github.com/efymd9/matio/commit/71122c6473a9788ce3a127d2a65b0ccf166c3d31))
+
 ## [0.8.0](https://github.com/efymd9/matio/compare/matio-v0.7.0...matio-v0.8.0) (2026-09-04)
 
 
