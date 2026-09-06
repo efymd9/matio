@@ -196,6 +196,15 @@ vercel env pull .env.vercel.production
 3. `pnpm promote-to-admin you@example.com` → that row's `role='admin'`.
 4. Visit `/admin` — should land on the show list. Non-admins get redirected to `/`.
 
+### Account deletion (art. 17 erasure)
+
+1. Delete the user in the Clerk dashboard (or UserProfile → "Delete account"). Webhook fires `user.deleted` (the endpoint must be subscribed to it — see [services → Clerk](./services.md#clerk-authentication)).
+2. The `users` row and everything cascading from it are gone; visit history stays de-identified. Check with counts, not addresses:
+   ```bash
+   psql $DATABASE_URL -c "select (select count(*) from users where id = '<clerk id>') as users, (select count(*) from watch_progress where user_id = '<clerk id>') as progress, (select count(*) from visitors where user_id = '<clerk id>') as linked_visitors;"
+   ```
+   All three read `0`. Resend the same message from the Clerk webhook log → still 200, nothing changes.
+
 ### Show → upload → publish
 
 1. `/admin` → New show. Slug must be `[a-z0-9-]+`. Status defaults to draft.

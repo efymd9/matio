@@ -40,14 +40,14 @@
 
 | Таблица | Персональные поля | Класс | Как стирается | Ретеншен |
 |---|---|---|---|---|
-| `users` | `id` (Clerk id), `email`, `role`, `stripe_customer_id`, `signup_origin`, `country`, `attribution_{first,last}_{source,medium,campaign}`, `created_at` | PII | корень каскада; `DELETE` никто не выполняет — `user.deleted` не обрабатывается (#161) | пока есть аккаунт (де-факто бессрочно) |
+| `users` | `id` (Clerk id), `email`, `role`, `stripe_customer_id`, `signup_origin`, `country`, `attribution_{first,last}_{source,medium,campaign}`, `created_at` | PII | корень каскада: вебхук Clerk `user.deleted` → `DELETE FROM users` (`app/api/webhooks/clerk/route.ts`; идемпотентно; при живой подписке Stripe — стирает и пишет `console.error` с id для ручной отмены) | пока есть аккаунт |
 | `subscriptions` | `user_id` → CASCADE, `stripe_subscription_id`, `status`, `plan`, `current_period_end`, `cancel_at_period_end`, `attribution_*`, `created_at`/`updated_at` | псевдо | каскад с `users` | с аккаунтом; налоговые записи — у Stripe, не здесь |
 | `watch_progress` | `user_id` → CASCADE, `episode_id`, `position_seconds`, `max_position_seconds`, `total_watched_seconds`, `completed`, `first_watched_at`, `updated_at` | псевдо (история просмотра) | каскад с `users` | с аккаунтом |
 | `watch_days` | `user_id` → CASCADE, `day` | псевдо | каскад с `users` | с аккаунтом (#162 — окно для аналитики) |
 | `trial_sessions` | `session_token` (UUID cookie `trial_session` **или** `matio_device_id` приложения), `show_id`, `started_at`/`expires_at`, `user_id` → SET NULL, `converted`, `last_position_seconds`, `ip_hash` (HMAC-SHA256 IP, соль = `MUX_SIGNING_KEY_PRIVATE_KEY`), `attribution_*`, `kind`, `furthest_episode_number`, `last_episode_id`, `signup_wall_at` | псевдо | при удалении аккаунта строка остаётся без `user_id`; иначе — ничем | бессрочно; `/privacy` обещает 30 дней (#162) |
 | `visitors` | `aid` (UUID cookie `matio_aid`), `first_seen_at`, `first_path`, `referrer` (сырой `document.referrer`, ≤300 символов — может нести чужие query-параметры), `utm_*`, `country`, `user_id` → SET NULL, `linked_at` | псевдо | при удалении аккаунта остаётся без `user_id`; иначе — ничем | бессрочно; `/privacy` обещает 25 месяцев (#162) |
 | `visitor_days` | `aid` → CASCADE от `visitors`, `day`, `landed_home`, `show_viewed`, `wall_seen` | псевдо | каскад с `visitors` | как `visitors` |
-| `show_reminders` | `email`, `show_id`, `user_id` → SET NULL, `locale`, `ip_hash`, `created_at`, `notified_at` | PII | только `unsubscribeEmail` (все строки адреса, `lib/email-unsubscribe.ts`); удаление аккаунта НЕ трогает (по дизайну — решение владельца в #161) | бессрочно, отправленные тоже (#162) |
+| `show_reminders` | `email`, `show_id`, `user_id` → SET NULL, `locale`, `ip_hash`, `created_at`, `notified_at` | PII | `unsubscribeEmail` (все строки адреса, `lib/email-unsubscribe.ts`) и удаление аккаунта: `user.deleted` удаляет все строки по адресу аккаунта + по `user_id` до каскада (анонимные строки с другим адресом не затрагиваются — их стирает только отписка) | бессрочно, отправленные тоже (#162) |
 | `guest_checkout_attempts` | `ip_hash`, `window_start`, `count` | псевдо | самопрунинг строк старше 2 ч (`lib/checkout-rate-limit.ts`) | 2 ч |
 | `marketing_links` | `created_by` → SET NULL (id админа) | внутреннее | SET NULL | бессрочно (админские ссылки) |
 
@@ -107,7 +107,6 @@ PR этапа 10 не требовалось; закрывающий PR убир
 
 | # | Дыра | Где |
 |---|---|---|
-| #161 | `user.deleted` от Clerk не обрабатывается — удаление аккаунта не доходит до `users` и каскадов; ручной GDPR-запрос = SQL руками | `app/api/webhooks/clerk/route.ts` |
 | #162 | ни одной джобы ретеншена: `trial_sessions`, `visitors`/`visitor_days`, `watch_days`, отправленные `show_reminders`, `stripe_events` — бессрочно; `/privacy` обещает 30 дней / 25 месяцев; Vercel-логи короче обещанных 30 дней | вся БД |
 | #163 | доступ/портируемость (ст. 15/20): ни скрипта экспорта, ни ранбука | — |
 | #164 | стирание не доходит до процессоров (Stripe Customer, PostHog person с email); реестра заявок, по которому §7 ранбука восстановления велит повторять стирание, не существует | `docs/runbooks/db-restore.md` |
@@ -115,5 +114,10 @@ PR этапа 10 не требовалось; закрывающий PR убир
 
 Не дыры, а решения владельца (пометки для юриста — список в PR этапа 10):
 гео-дефолт согласия вне EU/EEA/UK/CH; consent-exempt статус `matio_aid` для
-AEPD; хранение `show_reminders` после удаления аккаунта; отсутствие
-возрастного гейта; расхождения текста `/privacy` с фактом (§1–§2).
+AEPD; отсутствие возрастного гейта; расхождения текста `/privacy` с фактом
+(§1–§2). Удаление `show_reminders` вместе с аккаунтом — решение PR #161
+(до него строки намеренно переживали аккаунт).
+
+Закрыто: #161 — `user.deleted` стирает `users` + каскады + `show_reminders`
+по адресу; ops-хвост (подписка прод-эндпойнта Clerk на событие) — в
+`docs/registry.md`.

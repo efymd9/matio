@@ -6,7 +6,7 @@ Production prod URL: **https://matio.tv**. Stripe webhook URL on prod = `https:/
 
 ## Clerk (authentication)
 
-**Used for**: sessions, sign-in/sign-up UI (hosted Account Portal), `user.created` webhook.
+**Used for**: sessions, sign-in/sign-up UI (hosted Account Portal), `user.created` + `user.deleted` webhooks (mirror in, erase out).
 
 **SDK**: `@clerk/nextjs@7.3.x`. Note Clerk 7 dropped `<SignedIn>` / `<SignedOut>` — use `<Show when="signed-in">` instead (see [gotchas](./gotchas.md#clerk-7-changes)).
 
@@ -22,10 +22,12 @@ Production prod URL: **https://matio.tv**. Stripe webhook URL on prod = `https:/
 **Webhook setup**:
 1. Dashboard → Webhooks → Add endpoint
 2. URL: `https://matio.tv/api/webhooks/clerk`
-3. Subscribe to `user.created`
+3. Subscribe to `user.created` **and `user.deleted`** (the production endpoint was created with `user.created` only — adding `user.deleted` there is an owner step tracked in `docs/registry.md`; until it is ticked, account deletion never reaches our database)
 4. Copy the endpoint's signing secret into `CLERK_WEBHOOK_SIGNING_SECRET`
 
 Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@clerk/nextjs/webhooks` (not `/server`). It picks up the secret from env automatically.
+
+**`user.deleted` = our art. 17 GDPR erasure.** Deleting the account in Clerk (UserProfile → "Delete account", the dashboard, or an owner-run erasure request — always Clerk, never SQL) is the one trigger; the handler runs `DELETE FROM users WHERE id = <clerk id>` and the FK actions in `db/schema/*` take the rest (CASCADE: `subscriptions`, `watch_progress`, `watch_days`; SET NULL: `trial_sessions`, `visitors`, `marketing_links.created_by`), plus an explicit delete of `show_reminders` rows for the account's address (that table keys on the email, not the account). Idempotent: a redelivery for an already-erased user is a 200 no-op. A live Stripe subscription does NOT block the erasure but is logged by id (`console.error`, user/customer/subscription ids — never the address) because Stripe keeps billing until someone cancels it there by hand; processor-side erasure is #164. Full map: the `/gdpr` skill → `references/data-map.md`.
 
 **Production instance**: live as of 2026-05-27 on the custom domain `clerk.matio.tv` / `accounts.matio.tv`. DNS records (`accounts`, `clerk`, `clk._domainkey`, `clk2._domainkey`, `clkmail`) are CNAMEs configured at Namecheap. Keys (`pk_live_…`, `sk_live_…`) and a fresh webhook signing secret are in Vercel production env.
 

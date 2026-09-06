@@ -50,7 +50,7 @@ Hot-path indexes (migration 0010): `subscriptions(user_id, updated_at DESC)` for
 ## Auth model
 
 - Clerk owns identity + sessions.
-- `users` table mirrors Clerk via `user.created` webhook (`app/api/webhooks/clerk/route.ts`) — handler is idempotent (`onConflictDoNothing` on `users.id`).
+- `users` table mirrors Clerk via `user.created` webhook (`app/api/webhooks/clerk/route.ts`) — handler is idempotent (`onConflictDoNothing` on `users.id`). The same handler answers `user.deleted` with `DELETE FROM users` (art. 17 erasure: FK cascades + an explicit `show_reminders` delete by the account's address; a missing row is a 200 no-op, so redeliveries are safe). Deleting the account in Clerk is the ONLY erasure mechanism — a manual GDPR request is executed there, never by SQL.
 - `users.role` is the **only** source of truth for admin — never Clerk metadata alone.
 - Clerk's hosted UI (sign-in modal, sign-up modal, UserButton dropdown, validation copy) is localized to match the site dictionary via `ClerkProvider`'s `localization` prop in `app/layout.tsx` — `enUS` by default (English is the site default since 2026-07-04), `esES` when negotiation or the locale cookie resolves Spanish. Adding a locale to the site = also add its `@clerk/localizations` bundle to the `CLERK_LOCALIZATIONS` map.
 - `proxy.ts` is the first line of defense; pages/actions use `lib/admin.ts` helpers as belt-and-braces:
@@ -470,7 +470,7 @@ Admin mutation that changes shows.status or shows.deleted_at:
   ─►  next read recomputes from DB and re-fills the cache
 ```
 
-The home page stays `dynamic = "force-dynamic"` because the hero embeds a fresh 60s Mux preview JWT per request — only the catalog query inside is cached. `/sitemap.xml` is also `force-dynamic` so freshly soft-deleted shows drop out on the next crawl rather than being frozen at build time; the cached query keeps the DB cost trivial on warm hits.
+The home page stays `dynamic = "force-dynamic"` because the hero embeds a fresh 60s Mux preview JWT per request — only the catalog query inside is cached. That token dies under the looping hero teaser after ~60s; the player then fetches `/api/hero-preview-token` (the same mint, `lib/hero-preview.ts`) and remounts with it — at most 20 cycles per page, then it rests on the backdrop (#128). `/sitemap.xml` is also `force-dynamic` so freshly soft-deleted shows drop out on the next crawl rather than being frozen at build time; the cached query keeps the DB cost trivial on warm hits.
 
 Migration to Next 16's `'use cache'` + `cacheTag` + `updateTag` is deliberately deferred — enabling `cacheComponents: true` requires removing `runtime = "nodejs"` from all 5 webhook routes and `dynamic = "force-dynamic"` from the home + sitemap. Separate refactor.
 
