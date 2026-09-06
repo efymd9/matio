@@ -7,6 +7,7 @@ import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConfigProvider } from "@/api/config-context";
 import { AuthProvider } from "@/auth/clerk";
+import { LocaleProvider, useInitialLocale } from "@/i18n/locale";
 import { colors } from "@/theme";
 
 // Hold the splash until the brand faces are ready. Without this the first
@@ -35,11 +36,16 @@ export default function RootLayout() {
     Geist_600SemiBold,
     GeistMono_400Regular,
   });
+  // The stored language choice (or the device's) — held behind the splash
+  // for the same reason as the fonts: a first frame in the wrong language
+  // that then flips is worse than a few more milliseconds of splash.
+  const initialLocale = useInitialLocale();
 
   // Render nothing while loading, but do NOT block forever on a font failure —
   // shipping a blank app because a typeface didn't decode is a worse outcome
-  // than shipping one in the system font.
-  if (!fontsLoaded && !fontError) return null;
+  // than shipping one in the system font. (The locale read has its own
+  // deadline and always resolves.)
+  if ((!fontsLoaded && !fontError) || !initialLocale) return null;
   void SplashScreen.hideAsync();
 
   // SafeAreaProvider is declared explicitly rather than relying on whatever
@@ -49,19 +55,23 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ThemeProvider value={navTheme}>
         <StatusBar style="light" />
-        {/* Auth outside Config: the token provider must be installed before any
-            /v1 request goes out, or the first calls of a signed-in session
-            silently look anonymous. */}
-        <AuthProvider>
-          <ConfigProvider>
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: colors.bg },
-              }}
-            />
-          </ConfigProvider>
-        </AuthProvider>
+        {/* Locale outermost: every provider below renders copy (the config
+            error state, the update wall) and reads it through useT(). */}
+        <LocaleProvider initial={initialLocale}>
+          {/* Auth outside Config: the token provider must be installed before
+              any /v1 request goes out, or the first calls of a signed-in
+              session silently look anonymous. */}
+          <AuthProvider>
+            <ConfigProvider>
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: colors.bg },
+                }}
+              />
+            </ConfigProvider>
+          </AuthProvider>
+        </LocaleProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

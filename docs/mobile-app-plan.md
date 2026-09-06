@@ -483,6 +483,50 @@ activate the Simulator window (`osascript … System Events … non-zero code: 1
 first-run dev-menu sheet covers the lower half of the screen while needing a real tap to
 dismiss, which `simctl` cannot do — a native dev build avoids it.
 
+**Phase 1 remainder, 2026-09-06 (#96) — progress, continue-watching, es/en, vertical shows.**
+No new dependencies.
+
+- **`POST /api/v1/progress`** — the app's progress save. The write is the web's, literally:
+  `saveWatchProgress`'s core moved to `lib/watch-progress.ts:saveWatchProgressForUser` and
+  BOTH the server action and the route call it — position clamp (24h ceiling, floor to whole
+  seconds), `max_position_seconds = GREATEST(existing, new)`, live `completed`, the same-tick
+  `watch_days` upsert, the paid-mode ownership gate. The route adds Bearer auth (401 anonymous,
+  nothing written), 400/404/403 instead of the action's silent return, `no-store`. Idempotent
+  because the row is keyed on `(user_id, episode_id)` with `ON CONFLICT DO UPDATE` — a double
+  flush lands on the same row.
+- **`GET /api/v1/continue`** — `getContinueWatching()` verbatim (published shows, ready episodes,
+  one tile per show, finished dropped), plus four additive fields the app needs and the web rail
+  ignores: `positionSeconds`, `durationSeconds`, `episodeTitle`, `show.orientation`. Media URLs
+  absolutized. 401 anonymous: the helper's anonymous branch reads the web's trial cookie, which a
+  native client never holds.
+- **Client saves** (`src/watch/use-progress-saver.ts`) port the web discipline by intent: the
+  playhead is sampled into a ref (no state, no network per tick), one save per 10s while
+  playing and moved, an immediate flush on `AppState` → background/inactive (the phone-lock
+  case) and on unmount, `completed=true` once at `ended`. Signed-out viewers send nothing.
+  The home rail refreshes when a save lands (a module-level `onProgressSaved` signal) but only
+  while focused — no network for a screen nobody is looking at.
+- **Resume**: the rail tile passes `resume=<seconds>`; the show page path looks the position up
+  from `/v1/continue` in parallel with the token (best-effort). Seek happens on `onLoad`, never
+  inside the last 10s.
+- **es/en**: dictionaries come from `lib/i18n/dictionaries.ts` through `src/shared/i18n.ts` —
+  not one string copied. App-only copy (sign-in steps, the update wall) lives in the new
+  `lib/i18n/app-dictionaries.ts` (universal; the admin-dictionaries precedent, keeps it out of
+  the web bundle). **Device language without a new dependency**: `I18nManager.getConstants()
+  .localeIdentifier` (Android) → `Intl.DateTimeFormat().resolvedOptions().locale` (iOS —
+  `RCTI18nManager` in RN 0.86 does not export the constant; checked in node_modules) → the
+  web's `pickFromLanguageTags` → English. Choice persists in SecureStore (`matio_locale`); the
+  header pill EN | ES is the manual switcher. `expo-localization` stays un-added unless a real
+  device proves the detection wrong (registry row).
+- **Vertical shows**: `orientation` rides on the route params (show page and rail), and a
+  vertical episode renders `resizeMode="cover"` under our own `VerticalChrome` (full-surface
+  tap to play/pause, bottom-left kicker/title/episode/progress, right rail with sound) with the
+  native transport off; landscape shows keep the native controls, letterboxed. Scrub, episodes
+  list and share on the vertical chrome are phase 2 (#97).
+
+Verified: web lint/typecheck/tests green; `npx tsc --noEmit` in `mobile/` clean; `npx expo
+export --platform ios` produced the Hermes bundle. **Not verified on a device or simulator** —
+none was reachable in the session; the owner's checklist is in the PR.
+
 ## 15. Traps
 
 - **`/api/v1` is inside the Clerk matcher already** — don't add a second auth layer. Do add

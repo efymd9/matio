@@ -8,16 +8,20 @@ import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
 import {
   Artwork,
-  episodeCountLabel,
+  durationMinutes,
   ErrorState,
-  formatDuration,
   GoldButton,
   Loading,
   MetaRow,
   Pill,
   Scrim,
 } from "@/components/ui";
-import type { EpisodeSummary, PlaybackDenialReason } from "@/shared/api-types";
+import { useT } from "@/i18n/locale";
+import type {
+  EpisodeSummary,
+  PlaybackDenialReason,
+  ShowDetail,
+} from "@/shared/api-types";
 import { isEpisodeLockedForApp } from "@/shared/api-types";
 import { body, colors, display, radius, SCREEN_PAD, space } from "@/theme";
 
@@ -28,6 +32,7 @@ export default function ShowScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const config = useConfig();
+  const t = useT();
 
   const { isSignedIn } = useOptionalAuth();
   const signedIn = isSignedIn;
@@ -38,15 +43,23 @@ export default function ShowScreen() {
 
   // A locked episode routes to sign-in instead of the player: the wall is the
   // point of the gate, and bouncing off a 403 would be a wasted round trip.
+  // The show's orientation rides along so the player picks its chrome
+  // without a second fetch.
   const openEpisode = useCallback(
-    (episodeId: string, epTitle: string, locked: boolean) => {
+    (show: ShowDetail, episode: EpisodeSummary, locked: boolean) => {
       if (locked) {
         router.push("/sign-in");
         return;
       }
       router.push({
         pathname: "/watch/[episodeId]",
-        params: { episodeId, title: epTitle },
+        params: {
+          episodeId: episode.id,
+          title: episode.title,
+          showTitle: show.title,
+          orientation: show.orientation,
+          episodeNumber: String(episode.number),
+        },
       });
     },
     [router],
@@ -63,7 +76,7 @@ export default function ShowScreen() {
     const missing = show.error.code === "not_found";
     return (
       <ErrorState
-        message={missing ? "Show not found" : "Couldn't load this show"}
+        message={missing ? t.showDetail.notFound : t.app.common.showLoadFailed}
         hint={missing ? undefined : show.error.message}
         onRetry={missing ? undefined : show.retry}
       />
@@ -96,6 +109,8 @@ export default function ShowScreen() {
 
         <Pressable
           onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel={t.watch.backToShowAria}
           style={({ pressed }) => [
             styles.backButton,
             { top: insets.top + space(2) },
@@ -107,27 +122,27 @@ export default function ShowScreen() {
         </Pressable>
 
         <View style={styles.heroContent}>
-          <Pill label="Matio Original" />
+          <Pill label={t.hero.matioOriginal} />
           <Text style={styles.title}>{data.title}</Text>
           {/* No hardcoded age rating — see the note in app/index.tsx. */}
-          <MetaRow parts={[data.genre[0] ?? "", episodeCountLabel(data.episodeCount)]} />
+          <MetaRow parts={[data.genre[0] ?? "", t.showDetail.episodeCount(data.episodeCount)]} />
         </View>
       </View>
 
       <View style={{ paddingHorizontal: SCREEN_PAD, marginTop: space(5) }}>
         {first ? (
           <GoldButton
-            label="Play"
-            onPress={() => openEpisode(first.id, first.title, firstLocked !== false)}
+            label={t.showDetail.play}
+            onPress={() => openEpisode(data, first, firstLocked !== false)}
           />
         ) : null}
         {data.synopsis ? <Text style={styles.synopsis}>{data.synopsis}</Text> : null}
       </View>
 
       <View style={{ paddingHorizontal: SCREEN_PAD, marginTop: space(8), gap: space(3) }}>
-        <Text style={styles.episodesHeading}>Episodes</Text>
+        <Text style={styles.episodesHeading}>{t.showDetail.tabEpisodes}</Text>
         {data.episodes.length === 0 ? (
-          <Text style={styles.emptyEpisodes}>No episodes are ready yet.</Text>
+          <Text style={styles.emptyEpisodes}>{t.showDetail.noEpisodesYetLine}</Text>
         ) : (
           data.episodes.map((ep, i) => {
             const locked = isEpisodeLockedForApp({
@@ -144,7 +159,7 @@ export default function ShowScreen() {
                 position={i + 1}
                 showSlug={data.slug}
                 locked={locked}
-                onPress={() => openEpisode(ep.id, ep.title, locked !== false)}
+                onPress={() => openEpisode(data, ep, locked !== false)}
               />
             );
           })
@@ -167,6 +182,8 @@ function EpisodeRow({
   locked: false | PlaybackDenialReason;
   onPress: () => void;
 }) {
+  const t = useT();
+  const minutes = durationMinutes(episode.durationSeconds);
   return (
     <Pressable
       onPress={onPress}
@@ -194,10 +211,14 @@ function EpisodeRow({
           </Text>
         ) : null}
         <View style={styles.episodeFooter}>
-          <Text style={styles.episodeDuration}>{formatDuration(episode.durationSeconds)}</Text>
+          <Text style={styles.episodeDuration}>
+            {minutes !== null ? t.showDetail.minutes(minutes) : ""}
+          </Text>
           {locked ? (
             <Text style={styles.lockLabel}>
-              {locked === "signup_required" ? "Free account" : "Subscribers"}
+              {locked === "signup_required"
+                ? t.episodesOverlay.lockedSignup
+                : t.episodesOverlay.lockedSubscribe}
             </Text>
           ) : null}
         </View>
