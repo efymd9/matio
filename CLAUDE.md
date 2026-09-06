@@ -379,8 +379,8 @@ urgent — it costs one command.
   (`resolveStage` / `resolveRelease`): `APP_ENV` → `VERCEL_ENV` →
   `development`, and `APP_VERSION` — the version release-please stamps on the
   tag. The browser can only read `NEXT_PUBLIC_*`, so staging needs its own
-  `NEXT_PUBLIC_APP_ENV=staging` or browser events from the bench report as
-  production.
+  `NEXT_PUBLIC_APP_ENV=staging` (it has one) or browser events from the bench
+  report as production.
 - **`/api/healthz` is liveness, `/api/readyz` is readiness.** healthz stays
   deliberately DB-free (an uptime ping must not become load, and a slow
   database must not read as an outage); readyz runs `select 1` against Neon
@@ -931,12 +931,13 @@ infra/
   order note for migration 0023 is history (applied 2026-07-18).
 - **Sentry — LIVE in prod since v0.5.0 (2026-08-16)**: org `deep-ordinary`
   (region EU), project `javascript-nextjs`. `NEXT_PUBLIC_SENTRY_DSN` is baked
-  at build time. The staging bench had a DSN verified with a live event during
-  stage 07, but carries **no `NEXT_PUBLIC_APP_ENV=staging`** — any browser
-  event from the bench reports `environment: production`; the reliable
-  discriminator is `request.url` (the #126 triage lesson, also in
-  docs/registry.md). Source maps are off (`SENTRY_ORG/PROJECT/AUTH_TOKEN`
-  unset) — prod stack traces name minified chunks.
+  at build time. The staging project carries its own `NEXT_PUBLIC_SENTRY_DSN`
+  AND `NEXT_PUBLIC_APP_ENV=staging` (both since 2026-08-15, verified
+  2026-09-06 via `vercel env ls` on the staging project — an earlier note
+  claiming the bench lacked `APP_ENV` was wrong), so bench events report
+  `environment: staging`; `request.url` remains the belt-and-braces
+  discriminator. Source maps are off (`SENTRY_ORG/PROJECT/AUTH_TOKEN` unset)
+  — prod stack traces name minified chunks (registry row).
 - **Resend email — LIVE.** Domain `matio.tv` verified (region eu-west-1), DNS
   in place: DKIM at `resend._domainkey`, `send.matio.tv` MX →
   `feedback-smtp.eu-west-1.amazonses.com` + SPF `include:amazonses.com`, and
