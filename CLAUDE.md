@@ -553,7 +553,9 @@ app/
                            #   writes visitors + visitor_days; aid from the
                            #   httpOnly cookie only, never the body)
     webhooks/
-      clerk/               # user.created → mirrors to users
+      clerk/               # user.created → mirrors to users; user.deleted →
+                           #   DELETE FROM users (art. 17: FK cascades +
+                           #   show_reminders by address; idempotent 200)
       mux/                 # video.asset.{ready,errored} (ready also stamps
                            #   episodes.released_at write-if-null when the
                            #   show is already published)

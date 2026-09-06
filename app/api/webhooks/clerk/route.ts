@@ -1,7 +1,9 @@
 import { verifyWebhook } from "@clerk/nextjs/webhooks";
+import { and, eq, gt, inArray, or } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { showReminders, subscriptions, users } from "@/db/schema";
+import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 
 // Webhooks run on Node, not Edge — verifyWebhook needs the raw request body
 // and we hit Postgres via postgres-js.
@@ -42,5 +44,93 @@ export async function POST(req: NextRequest) {
       .onConflictDoNothing({ target: users.id });
   }
 
+  if (evt.type === "user.deleted") {
+    return eraseDeletedUser(evt.data.id);
+  }
+
+  return new Response("OK", { status: 200 });
+}
+
+// Art. 17 GDPR for our database. Clerk is the source of truth for the
+// account: deleting it there (UserProfile → "Delete account", the dashboard,
+// or our own hand-run erasure request) is the ONE trigger, and this handler
+// is the ONE mechanism — a manual request is executed by deleting the user
+// in Clerk, never by SQL. The payload carries only the id (no email), and one
+// DELETE on the mirror row takes everything hanging off it with it through
+// the FK actions declared in db/schema/* (route.test.ts pins them):
+// CASCADE — subscriptions, watch_progress, watch_days; SET NULL —
+// trial_sessions, visitors (visit history stays, de-identified),
+// marketing_links.created_by. show_reminders is the one PII table keyed on
+// the address rather than the account, so it is erased here explicitly.
+async function eraseDeletedUser(userId: string | undefined) {
+  if (!userId) {
+    // Clerk's "Send Example" payload and any malformed delivery: nothing to
+    // act on and nothing a retry would fix — acknowledge (same stance as the
+    // emailless user.created above).
+    console.warn("user.deleted event has no id — skipping");
+    return new Response("OK (no id, skipped)", { status: 200 });
+  }
+
+  const [user] = await db
+    .select({ email: users.email, stripeCustomerId: users.stripeCustomerId })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!user) {
+    // Already erased (Clerk redelivers on timeouts) or never mirrored —
+    // either way the end state holds. Idempotent 200.
+    return new Response("OK (already erased)", { status: 200 });
+  }
+
+  // Money guard. A live Stripe subscription outlives the account — Stripe
+  // keeps billing a customer who can no longer sign in. Erasure does not
+  // wait for that, but it must not be silent: the ids (never the address)
+  // go to the log so the subscription is cancelled and the Customer deleted
+  // at Stripe by hand — processor-side erasure is #164, not this handler.
+  const [liveSub] = await db
+    .select({ stripeSubscriptionId: subscriptions.stripeSubscriptionId })
+    .from(subscriptions)
+    .where(
+      and(
+        eq(subscriptions.userId, userId),
+        inArray(subscriptions.status, [...ACCESS_GRANTING_STATUSES]),
+        gt(subscriptions.currentPeriodEnd, new Date()),
+      ),
+    )
+    .limit(1);
+  if (liveSub) {
+    console.error(
+      "Clerk user.deleted: account had a LIVE Stripe subscription — cancel it at Stripe by hand (#164)",
+      {
+        userId,
+        stripeCustomerId: user.stripeCustomerId,
+        stripeSubscriptionId: liveSub.stripeSubscriptionId,
+      },
+    );
+  }
+
+  // "Delete my account" erases the reminder requests too: every row for the
+  // account's address (the same reach as unsubscribeEmail — the address IS
+  // the subscription) plus any row the account linked under another
+  // address. This runs BEFORE the users DELETE, because the FK's SET NULL
+  // would drop that link first. Reminder addresses are stored lowercased.
+  const reminders = await db
+    .delete(showReminders)
+    .where(
+      or(
+        eq(showReminders.email, user.email.toLowerCase()),
+        eq(showReminders.userId, userId),
+      ),
+    )
+    .returning({ id: showReminders.id });
+
+  await db.delete(users).where(eq(users.id, userId));
+
+  console.info("Clerk user.deleted: local data erased", {
+    userId,
+    reminderRows: reminders.length,
+    stripeCustomer: user.stripeCustomerId !== null,
+    liveSubscription: liveSub !== undefined,
+  });
   return new Response("OK", { status: 200 });
 }
