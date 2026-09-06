@@ -76,14 +76,14 @@ export default defineConfig({
       // → 6.5 (редизайн /about + /press, #88: контент-компоненты исполняются
       //   историями, ростер и SEO-хелперы — юнитами) → 8.3 (#17: surface
       //   /api/v1 для мобильного — 48 тестов на четыре роута и общий слой)
-      // → 16.3 (#96: /v1/progress + /v1/continue, общее ядро прогресса
-      //   lib/watch-progress.ts, lib/continue-watching.ts и веб-экшен
-      //   saveWatchProgress впервые под тестами).
+      // → 20.8 (#127: плеер /watch впервые исполняется jsdom-тестом —
+      //   две тысячи строк player.tsx вошли в измерение; 20.90/20.46/16.85/16.37
+      //   по прогону, полы с запасом 0.1 на дрейф между macOS и CI).
       thresholds: {
-        lines: 16.3,
-        functions: 13.9,
-        branches: 12.8,
-        statements: 16.1,
+        lines: 20.8,
+        functions: 16.7,
+        branches: 16.2,
+        statements: 20.3,
       },
     },
 
