@@ -86,10 +86,10 @@ export default defineConfig({
       //   история Icon исполняют lib/design.ts и icon.tsx целиком;
       //   24.28/24.00/19.22/19.96 по прогону, те же 0.1 запаса).
       thresholds: {
-        lines: 24.1,
-        functions: 19.9,
+        lines: 24.5,
+        functions: 20.3,
         branches: 19.1,
-        statements: 23.9,
+        statements: 24.0,
       },
     },
 

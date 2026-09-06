@@ -27,7 +27,7 @@
     "seed:fake-shows": "tsx scripts/seed-fake-shows.ts",
     "gen:icons": "bash scripts/gen-icons.sh",
     "lab": "storybook dev -p 6006",
-    "lab:build": "storybook build",
+    "lab:build": "storybook build && node tools/lab/static-smoke.mjs",
     "qa:styles": "./tools/qa/no-magic-styles.sh"
   },
   "dependencies": {
