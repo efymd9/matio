@@ -21,40 +21,29 @@ const MARKER_NAME = "Leak Marker";
 const MARKER_SECRET = "dummy-db-password";
 const MARKER_DATABASE_URL = `postgres://matio:${MARKER_SECRET}@db.example.invalid/matio`;
 
-<<<<<<< HEAD
-const { execute, select, update, del, batchSend, clerkVerify } = vi.hoisted(
+const { execute, select, update, del, insert, batchSend, clerkVerify } = vi.hoisted(
   () => ({
     execute: vi.fn(),
     select: vi.fn(),
     update: vi.fn(),
     del: vi.fn(),
+    insert: vi.fn(),
     batchSend: vi.fn(),
     clerkVerify: vi.fn(),
   }),
 );
-vi.mock("@/db", () => ({ db: { execute, select, update, delete: del } }));
+vi.mock("@/db", () => ({ db: { execute, select, update, delete: del, insert } }));
 vi.mock("server-only", () => ({}));
 
 // The Clerk webhook's signature check is exercised in its own suite
 // (app/api/webhooks/clerk/route.test.ts); here the event is handed over
 // verified so the audit sees only what the handler itself logs.
 vi.mock("@clerk/nextjs/webhooks", () => ({ verifyWebhook: clerkVerify }));
-=======
-const { execute, select, update, insert, batchSend } = vi.hoisted(() => ({
-  execute: vi.fn(),
-  select: vi.fn(),
-  update: vi.fn(),
-  insert: vi.fn(),
-  batchSend: vi.fn(),
-}));
-vi.mock("@/db", () => ({ db: { execute, select, update, insert } }));
-vi.mock("server-only", () => ({}));
 // The app's progress route resolves the caller through Clerk; a fixed user
 // keeps the audit on the path that actually reaches the database.
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: "user_1" }),
 }));
->>>>>>> origin/main
 
 // The reminder dispatch path pulls in auth, Next's cache and the Resend SDK —
 // none of which is the thing under audit. Everything except the action's own
@@ -84,11 +73,8 @@ vi.mock("@/lib/mux-token", () => ({
 
 import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as readyz } from "@/app/api/readyz/route";
-<<<<<<< HEAD
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
-=======
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
->>>>>>> origin/main
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -121,11 +107,8 @@ beforeEach(() => {
   execute.mockReset();
   select.mockReset();
   update.mockReset();
-<<<<<<< HEAD
   del.mockReset();
-=======
   insert.mockReset();
->>>>>>> origin/main
   batchSend.mockReset();
   clerkVerify.mockReset();
 });
@@ -333,7 +316,6 @@ describe("log audit · reminder dispatch (Resend)", () => {
   });
 });
 
-<<<<<<< HEAD
 describe("log audit · Clerk user.deleted (account erasure)", () => {
   // The worst case this path logs: the deleted account still has a live
   // Stripe subscription, so the handler shouts — and the users row it just
@@ -385,7 +367,9 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     // What it DOES log: the ids the owner needs to finish the job at Stripe.
     expect(logged()).toContain(USER_ID);
     expect(logged()).toContain("sub_dummy");
-=======
+  });
+});
+
 describe("log audit · /api/v1/progress (the app's watch-progress save)", () => {
   // The body is client-controlled text headed for a uuid column; the
   // realistic worst case is a client that puts something personal where an
@@ -457,6 +441,5 @@ describe("log audit · /api/v1/progress (the app's watch-progress save)", () => 
     for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
       expect(logged()).not.toContain(marker);
     }
->>>>>>> origin/main
   });
 });
