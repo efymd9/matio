@@ -345,4 +345,35 @@ describe("log audit · /api/v1/progress (the app's watch-progress save)", () => 
     expect(logged()).not.toContain(MARKER_SECRET);
     expect(logged()).not.toContain("db.example.invalid");
   });
+
+  it("lets a failed WRITE surface without logging the row the driver quoted", async () => {
+    // The lookup succeeds and the upsert itself fails — the postgres driver
+    // echoes the statement it choked on, values included. A seeded identity
+    // in that echo must not reach the console any more than the URL did.
+    vi.stubEnv("DATABASE_URL", MARKER_DATABASE_URL);
+    const lookup = {
+      from: () => lookup,
+      innerJoin: () => lookup,
+      where: () => lookup,
+      limit: async () => [
+        { id: EPISODE, showId: "show_1", access: "free", durationSeconds: 600 },
+      ],
+    };
+    select.mockImplementation(() => lookup);
+    insert.mockImplementation(() => {
+      throw new Error(
+        `insert into watch_progress (user_id, episode_id) values ('${MARKER_NAME} <${MARKER_EMAIL}>', '${EPISODE}') — ${MARKER_DATABASE_URL}`,
+      );
+    });
+    const logged = captureConsole();
+
+    await expect(
+      saveProgress(post({ episodeId: EPISODE, positionSeconds: 10, completed: false })),
+    ).rejects.toThrow();
+
+    expect(insert).toHaveBeenCalled(); // the fixture reached the write
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+    }
+  });
 });

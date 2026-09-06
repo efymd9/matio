@@ -3,7 +3,14 @@ import { auth } from "@clerk/nextjs/server";
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
-import { episodes, seasons, shows, trialSessions, watchProgress } from "@/db/schema";
+import {
+  episodes,
+  seasons,
+  shows,
+  trialSessions,
+  watchProgress,
+  type ShowOrientation,
+} from "@/db/schema";
 import { TRIAL_COOKIE } from "@/lib/trial";
 
 // One "keep watching" tile. `fraction` is the resume playhead as a share of
@@ -18,7 +25,7 @@ export type ContinueWatchingItem = {
   show: {
     slug: string;
     title: string;
-    orientation: "horizontal" | "vertical";
+    orientation: ShowOrientation;
     heroImageUrl: string | null;
     posterImageUrl: string | null;
   };
@@ -50,7 +57,7 @@ function collapse(
   rows: Array<{
     slug: string;
     title: string;
-    orientation: "horizontal" | "vertical";
+    orientation: ShowOrientation;
     heroImageUrl: string | null;
     posterImageUrl: string | null;
     episodeId: string;

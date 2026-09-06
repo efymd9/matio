@@ -50,13 +50,14 @@ export async function saveWatchProgressForUser(
   if (clamped === null) return "invalid_position";
 
   // Verify the episode is actually playable: status='ready', on a
-  // published, non-deleted show — and fetch the show's gating config in
-  // the same query for the tier check below.
+  // published, non-deleted show — and fetch the show's gating config and
+  // the episode's length in the same query for the checks below.
   const [ep] = await db
     .select({
       id: episodes.id,
       showId: seasons.showId,
       access: episodes.access,
+      durationSeconds: episodes.durationSeconds,
     })
     .from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
@@ -83,25 +84,38 @@ export async function saveWatchProgressForUser(
     if (ep.access === "subscriber") return "forbidden";
   }
 
+  // Bound the position to the episode's own timeline. The 24h clamp above
+  // only rejects the absurd; this is what stops a client from posting
+  // 86 400 s against a ten-minute episode and "finishing" it — the
+  // dashboard reads finished as max_position ≥ 95 %·duration, and the
+  // continue-watching rail would drop it. Unknown duration → the ceiling
+  // alone (a buffered playhead can legitimately run a hair past the end).
+  const capped = ep.durationSeconds
+    ? Math.min(clamped, ep.durationSeconds)
+    : clamped;
+
   await db
     .insert(watchProgress)
     .values({
       userId,
       episodeId,
-      positionSeconds: clamped,
-      maxPositionSeconds: clamped,
+      positionSeconds: capped,
+      maxPositionSeconds: capped,
       completed,
     })
     .onConflictDoUpdate({
       target: [watchProgress.userId, watchProgress.episodeId],
+      // Exactly these four. first_watched_at (release retention on the
+      // dashboard) and total_watched_seconds (owned by saveWatchSegments)
+      // must survive a conflict untouched — the test pins the key set.
       set: {
-        positionSeconds: clamped,
+        positionSeconds: capped,
         // Monotonic furthest playhead — position_seconds is the resume
         // target and regresses on seek-back; depth metrics read this.
         // (completed keeps its live flip-on-rewatch semantics — the
         // continue-watching rail depends on it; "ever finished" analytics
         // read max_position_seconds ≥ duration instead.)
-        maxPositionSeconds: sql`GREATEST(${watchProgress.maxPositionSeconds}, ${clamped})`,
+        maxPositionSeconds: sql`GREATEST(${watchProgress.maxPositionSeconds}, ${capped})`,
         completed,
         updatedAt: new Date(),
       },

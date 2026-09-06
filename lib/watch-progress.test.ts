@@ -8,7 +8,9 @@ vi.mock("server-only", () => ({}));
 // it refuses, and the SQL it carries for the monotonic playhead. The
 // database is faked down to the two builders the module walks.
 const h = vi.hoisted(() => ({
-  row: undefined as { id: string; showId: string; access: string } | undefined,
+  row: undefined as
+    | { id: string; showId: string; access: string; durationSeconds?: number | null }
+    | undefined,
   inserts: [] as Array<{ table: unknown; values: unknown; conflict: unknown }>,
   hasActiveSubscription: vi.fn(),
 }));
@@ -95,6 +97,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.useRealTimers();
 });
 
 describe("clampPositionSeconds", () => {
@@ -151,6 +154,44 @@ describe("saveWatchProgressForUser — the write", () => {
     expect(write.conflict.set.updatedAt).toBeInstanceOf(Date);
   });
 
+  it("touches exactly four columns on conflict — never first_watched_at or total_watched_seconds", async () => {
+    // first_watched_at feeds the dashboard's release retention and
+    // total_watched_seconds is owned by saveWatchSegments; a save that
+    // rewrote either would silently corrupt both. Pin the whole key set.
+    await saveWatchProgressForUser(USER, EPISODE, 12, false);
+
+    const [write] = progressWrites();
+    expect(Object.keys(write.conflict.set).sort()).toEqual([
+      "completed",
+      "maxPositionSeconds",
+      "positionSeconds",
+      "updatedAt",
+    ]);
+  });
+
+  it("caps the position at the episode's own duration", async () => {
+    // A client could otherwise post a day against a ten-minute episode and
+    // "finish" it for the dashboard (finished = max_position ≥ 95 %·duration)
+    // — and knock it off the continue-watching rail.
+    h.row = { id: EPISODE, showId: "show-1", access: "free", durationSeconds: 600 };
+    await expect(saveWatchProgressForUser(USER, EPISODE, 86_400, false)).resolves.toBe(
+      "saved",
+    );
+
+    const [write] = progressWrites();
+    expect(write.values).toMatchObject({ positionSeconds: 600, maxPositionSeconds: 600 });
+    expect(write.conflict.set.positionSeconds).toBe(600);
+    expect(write.conflict.set.maxPositionSeconds).toBe(
+      `GREATEST(${watchProgress.maxPositionSeconds}, 600)`,
+    );
+  });
+
+  it("keeps the 24h ceiling alone when the duration is unknown", async () => {
+    h.row = { id: EPISODE, showId: "show-1", access: "free", durationSeconds: null };
+    await saveWatchProgressForUser(USER, EPISODE, 5000, false);
+    expect(progressWrites()[0].values).toMatchObject({ positionSeconds: 5000 });
+  });
+
   it("keeps max_position_seconds monotonic on a seek back", async () => {
     await saveWatchProgressForUser(USER, EPISODE, 100, false);
     await saveWatchProgressForUser(USER, EPISODE, 40, false);
@@ -174,15 +215,17 @@ describe("saveWatchProgressForUser — the write", () => {
     expect(rewatch.conflict.set.completed).toBe(false);
   });
 
-  it("stamps the user's day in the activity ledger on the same tick", async () => {
+  it("stamps the user's day in the activity ledger on the same tick, in UTC", async () => {
+    // Late evening UTC: a local-date rendering would already read the 2nd
+    // in Europe. The dashboard buckets days in UTC, so the ledger must too.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-01T23:30:00Z"));
+
     await saveWatchProgressForUser(USER, EPISODE, 10, false);
 
     const ledger = h.inserts.find((c) => c.table === watchDays);
     expect(ledger).toBeDefined();
-    expect(ledger?.values).toEqual({
-      userId: USER,
-      day: new Date().toISOString().slice(0, 10),
-    });
+    expect(ledger?.values).toEqual({ userId: USER, day: "2026-09-01" });
     // A no-op on the second save of the day, never a duplicate-key error.
     expect(ledger?.conflict).toBe("do_nothing");
   });
