@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { subscribeToShowReminder } from "@/app/watch/actions";
 import { Icon } from "@/components/site/icon";
 import { MatioLogo } from "@/components/site/matio-logo";
+import { BURGUNDY_GLOW } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
 
 // SSR-safe "are we on the client" flag. Same pattern as the other
@@ -130,13 +131,12 @@ export function SeriesEndOverlay({
         if (e.target === e.currentTarget) onDismiss();
       }}
     >
-      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-rust/30 bg-espresso-2/95 p-6 shadow-[0_20px_80px_rgba(0,0,0,0.5)] backdrop-blur-2xl sm:p-8">
+      <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-rust/30 bg-espresso-2/95 p-6 shadow-dialog backdrop-blur-2xl sm:p-8">
         <div
           className="pointer-events-none absolute inset-0 opacity-40"
           aria-hidden
           style={{
-            backgroundImage:
-              "radial-gradient(circle at 50% 0%, rgba(143,47,28,0.4), transparent 60%)",
+            backgroundImage: BURGUNDY_GLOW,
           }}
         />
 
@@ -170,13 +170,13 @@ export function SeriesEndOverlay({
 
           {succeeded ? (
             <div className="mt-7">
-              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-gold/15">
-                <Icon name="check" size={20} color="#e6b366" />
+              <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-gold/15 text-gold">
+                <Icon name="check" size={20} />
               </div>
               <button
                 type="button"
                 onClick={onDismiss}
-                className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-full bg-gold-cta text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out active:scale-[0.98]"
+                className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-full bg-gold-cta text-sm font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out active:scale-[0.98]"
               >
                 {t.seriesEndOverlay.closeCta}
               </button>
@@ -222,7 +222,7 @@ export function SeriesEndOverlay({
               <button
                 type="submit"
                 disabled={submitting}
-                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-gold-cta text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[transform,filter] duration-150 ease-out hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100"
+                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-gold-cta text-sm font-extrabold text-gold-deep shadow-cta transition-[transform,filter] duration-150 ease-out hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100"
               >
                 {submitting
                   ? t.seriesEndOverlay.submitting

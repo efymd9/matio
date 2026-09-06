@@ -1331,9 +1331,9 @@ function EpisodePlayback({
           aria-label={t.player.playPauseAria}
           className="group absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 text-cream"
         >
-          <span className="bg-gold-cta flex h-[72px] w-[72px] items-center justify-center rounded-full text-gold-deep shadow-[0_20px_50px_-16px_rgba(230,179,102,0.6)] transition-transform duration-150 group-hover:scale-105">
+          <span className="bg-gold-cta flex h-[72px] w-[72px] items-center justify-center rounded-full text-gold-deep shadow-play transition-transform duration-150 group-hover:scale-105">
             <span className="-mr-1 inline-flex">
-              <Icon name="play" size={32} color="#241205" />
+              <Icon name="play" size={32} />
             </span>
           </span>
           <span className="text-xs font-semibold uppercase tracking-[0.3em] text-cream/80">
@@ -1835,15 +1835,15 @@ function EpisodePlayback({
             aria-label={t.player.playPauseAria}
           >
             <span slot="play" className="contents">
-              <span className="bg-gold-cta flex h-[68px] w-[68px] items-center justify-center rounded-full text-gold-deep shadow-[0_20px_50px_-16px_rgba(230,179,102,0.6)] transition-transform hover:scale-105 sm:h-[92px] sm:w-[92px]">
+              <span className="bg-gold-cta flex h-[68px] w-[68px] items-center justify-center rounded-full text-gold-deep shadow-play transition-transform hover:scale-105 sm:h-[92px] sm:w-[92px]">
                 <span className="-mr-1 inline-flex">
-                  <Icon name="play" size={32} color="#241205" />
+                  <Icon name="play" size={32} />
                 </span>
               </span>
             </span>
             <span slot="pause" className="contents">
-              <span className="bg-gold-cta flex h-[68px] w-[68px] items-center justify-center rounded-full text-gold-deep shadow-[0_20px_50px_-16px_rgba(230,179,102,0.6)] transition-transform hover:scale-105 sm:h-[92px] sm:w-[92px]">
-                <Icon name="pause" size={32} color="#241205" />
+              <span className="bg-gold-cta flex h-[68px] w-[68px] items-center justify-center rounded-full text-gold-deep shadow-play transition-transform hover:scale-105 sm:h-[92px] sm:w-[92px]">
+                <Icon name="pause" size={32} />
               </span>
             </span>
           </MediaPlayButton>
@@ -1871,7 +1871,7 @@ function EpisodePlayback({
               el.currentTime = current.introEndSeconds;
             }
           }}
-          className="bg-gold-cta absolute bottom-[124px] right-5 z-20 inline-flex h-[42px] items-center rounded-full px-[22px] text-[13px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform hover:scale-[1.02] active:scale-[0.98] sm:right-8"
+          className="bg-gold-cta absolute bottom-[124px] right-5 z-20 inline-flex h-[42px] items-center rounded-full px-[22px] text-[13px] font-extrabold text-gold-deep shadow-cta transition-transform hover:scale-[1.02] active:scale-[0.98] sm:right-8"
         >
           {t.player.skipIntro}
         </button>
@@ -1899,7 +1899,7 @@ function EpisodePlayback({
           }}
           className="absolute bottom-[124px] left-1/2 z-20 inline-flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/55 px-4 py-2 text-xs font-bold text-cream backdrop-blur-xl transition-colors hover:bg-black/70"
         >
-          <Icon name="mute" size={14} color="#e6b366" />
+          <Icon name="mute" size={14} className="text-gold" />
           {t.player.tapForSound}
         </button>
       ) : null}
@@ -1921,9 +1921,9 @@ function EpisodePlayback({
           aria-label={t.player.playPauseAria}
           className="absolute inset-0 z-20 flex items-center justify-center"
         >
-          <span className="bg-gold-cta flex h-[72px] w-[72px] items-center justify-center rounded-full text-gold-deep shadow-[0_20px_50px_-16px_rgba(230,179,102,0.6)]">
+          <span className="bg-gold-cta flex h-[72px] w-[72px] items-center justify-center rounded-full text-gold-deep shadow-play">
             <span className="-mr-1 inline-flex">
-              <Icon name="play" size={32} color="#241205" />
+              <Icon name="play" size={32} />
             </span>
           </span>
         </button>

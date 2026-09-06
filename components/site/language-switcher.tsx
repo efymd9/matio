@@ -136,7 +136,7 @@ export function LanguageSwitcher() {
       <Menu.Portal keepMounted>
         <Menu.Positioner sideOffset={6} align="end">
           <Menu.Popup
-            className="z-50 min-w-[8.5rem] rounded-2xl border border-rust/30 bg-espresso-2/95 p-1 text-sm text-cream shadow-[0_18px_40px_-18px_rgba(0,0,0,0.6)] backdrop-blur-xl outline-none data-[open]:animate-in data-[open]:fade-in-0 data-[open]:zoom-in-95 data-[closed]:animate-out data-[closed]:fade-out-0 data-[closed]:zoom-out-95"
+            className="z-50 min-w-[8.5rem] rounded-2xl border border-rust/30 bg-espresso-2/95 p-1 text-sm text-cream shadow-popup backdrop-blur-xl outline-none data-[open]:animate-in data-[open]:fade-in-0 data-[open]:zoom-in-95 data-[closed]:animate-out data-[closed]:fade-out-0 data-[closed]:zoom-out-95"
           >
             {OPTIONS.map((opt) => (
               <LocaleMenuRow

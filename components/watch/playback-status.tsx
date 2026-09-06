@@ -37,7 +37,7 @@ export function RateLimitedNotice({ showSlug }: { showSlug: string }) {
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
           <Link
             href={`/subscribe?show=${encodeURIComponent(showSlug)}`}
-            className="inline-flex h-11 items-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out hover:brightness-105 active:scale-[0.98]"
+            className="inline-flex h-11 items-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out hover:brightness-105 active:scale-[0.98]"
           >
             {t.watch.rateLimitedSubscribe}
           </Link>
@@ -82,7 +82,7 @@ export function PlaybackUnavailable({
           <button
             type="button"
             onClick={onRetry}
-            className="inline-flex h-11 items-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out hover:brightness-105 active:scale-[0.98]"
+            className="inline-flex h-11 items-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out hover:brightness-105 active:scale-[0.98]"
           >
             {t.watch.unavailableRetry}
           </button>

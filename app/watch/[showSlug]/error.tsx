@@ -41,7 +41,7 @@ export default function WatchSegmentError({
         <button
           type="button"
           onClick={reset}
-          className="inline-flex h-11 items-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out hover:brightness-105 active:scale-[0.98]"
+          className="inline-flex h-11 items-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out hover:brightness-105 active:scale-[0.98]"
         >
           {t.watchError.tryAgain}
         </button>

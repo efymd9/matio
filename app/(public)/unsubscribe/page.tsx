@@ -60,7 +60,7 @@ export default async function UnsubscribePage({
             <form action={confirmUnsubscribe.bind(null, e, token)}>
               <button
                 type="submit"
-                className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-full bg-gold-cta text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out active:scale-[0.98]"
+                className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-full bg-gold-cta text-sm font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out active:scale-[0.98]"
               >
                 {t.unsubscribe.confirmCta}
               </button>

@@ -9,7 +9,7 @@ const subscribe = () => () => {};
 const getClientSnapshot = () => true;
 const getServerSnapshot = () => false;
 import { Icon } from "@/components/site/icon";
-import { TONE_GRADIENT, toneFor } from "@/lib/design";
+import { GOLD_GLOW, TONE_GRADIENT, toneFor } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
 import type { PlayerEpisode } from "./player";
 
@@ -74,7 +74,7 @@ export function UpNextOverlay({
       aria-label={t.upNextOverlay.label}
       className="pointer-events-none fixed inset-0 z-[100] flex items-end justify-end pt-5 pl-5 pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pt-8 sm:pl-8 sm:pr-[max(env(safe-area-inset-right),2rem)] sm:pb-[max(env(safe-area-inset-bottom),2rem)]"
     >
-      <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-rust/30 bg-espresso-2/95 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+      <div className="pointer-events-auto w-full max-w-md rounded-2xl border border-rust/30 bg-espresso-2/95 p-4 shadow-sheet backdrop-blur-2xl">
         <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-gold">
           {t.upNextOverlay.label}
         </p>
@@ -101,8 +101,7 @@ export function UpNextOverlay({
                 className="absolute inset-0 opacity-30"
                 aria-hidden
                 style={{
-                  backgroundImage:
-                    "radial-gradient(circle at 50% 50%, rgba(230,179,102,0.25), transparent 60%)",
+                  backgroundImage: GOLD_GLOW,
                 }}
               />
             )}
@@ -112,7 +111,7 @@ export function UpNextOverlay({
             />
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-burgundy/80 text-cream backdrop-blur-md">
-                <Icon name="play" size={14} color="#f6efe4" />
+                <Icon name="play" size={14} />
               </div>
             </div>
           </div>
@@ -146,9 +145,9 @@ export function UpNextOverlay({
               e.stopPropagation();
               onPlayNow();
             }}
-            className="bg-gold-cta inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
+            className="bg-gold-cta inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-sm font-extrabold text-gold-deep shadow-cta transition-transform hover:scale-[1.02] active:scale-[0.98]"
           >
-            <Icon name="play" size={14} color="#241205" />
+            <Icon name="play" size={14} />
             {t.upNextOverlay.watchNow}
           </button>
           <button

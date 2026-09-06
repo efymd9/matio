@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { OpenInBrowserHint } from "@/components/watch/open-in-browser-hint";
-import { TONE_GRADIENT } from "@/lib/design";
+import { TONE_GRADIENT, WALL_SCRIM } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 
@@ -75,7 +75,7 @@ export function Paywall({
   const checkoutHref = `/checkout?${params.toString()}`;
 
   const primaryCta =
-    "inline-flex h-[52px] items-center justify-center rounded-full bg-gold-cta px-7 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 focus-visible:ring-offset-2 focus-visible:ring-offset-espresso-2 active:scale-[0.98]";
+    "inline-flex h-[52px] items-center justify-center rounded-full bg-gold-cta px-7 text-sm font-extrabold text-gold-deep shadow-cta transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 focus-visible:ring-offset-2 focus-visible:ring-offset-espresso-2 active:scale-[0.98]";
 
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-espresso sm:aspect-video sm:h-auto">
@@ -90,8 +90,7 @@ export function Paywall({
         className="pointer-events-none absolute inset-0"
         aria-hidden
         style={{
-          backgroundImage:
-            "linear-gradient(to top, rgba(15,10,7,0.97) 30%, rgba(15,10,7,0.55) 60%, rgba(15,10,7,0.25) 100%)",
+          backgroundImage: WALL_SCRIM,
         }}
       />
       <div className="glow-floor pointer-events-none absolute inset-0" aria-hidden />
