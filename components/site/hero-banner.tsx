@@ -5,7 +5,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { Fragment, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
-import { TONE_GRADIENT, toneFor } from "@/lib/design";
+import {
+  HERO_SCRIM_BOTTOM,
+  HERO_SCRIM_SIDE,
+  TONE_GRADIENT,
+  toneFor,
+} from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
 import { useMarketingConsent } from "@/lib/use-marketing-consent";
 import { Icon } from "./icon";
@@ -287,8 +292,7 @@ export function HeroBanner({
         aria-hidden
         className="pointer-events-none absolute inset-0"
         style={{
-          backgroundImage:
-            "linear-gradient(to top, #0f0a07 4%, rgba(15,10,7,0.4) 40%, transparent 66%)",
+          backgroundImage: HERO_SCRIM_BOTTOM,
         }}
       />
       {/* Left column scrim — tablet/desktop only (58% desktop, 70% tablet). */}
@@ -296,8 +300,7 @@ export function HeroBanner({
         aria-hidden
         className="pointer-events-none absolute inset-y-0 left-0 hidden w-[70%] tablet:block xl:w-[58%]"
         style={{
-          backgroundImage:
-            "linear-gradient(to right, rgba(15,10,7,0.85), rgba(15,10,7,0.35), transparent)",
+          backgroundImage: HERO_SCRIM_SIDE,
         }}
       />
       {/* Burgundy floor glow — mobile/tablet only (absent on desktop by design). */}
@@ -341,9 +344,9 @@ export function HeroBanner({
         <div className="flex items-center gap-2.5 pt-1.5 tablet:gap-2.5">
           <Link
             href={`/watch/${slug}`}
-            className="inline-flex h-[52px] flex-1 items-center justify-center gap-2 rounded-full bg-gold-cta px-8 text-[15px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform active:scale-[0.98] tablet:h-[52px] tablet:flex-none tablet:self-start xl:h-14 xl:px-10 xl:text-base"
+            className="inline-flex h-[52px] flex-1 items-center justify-center gap-2 rounded-full bg-gold-cta px-8 text-[15px] font-extrabold text-gold-deep shadow-cta transition-transform active:scale-[0.98] tablet:h-[52px] tablet:flex-none tablet:self-start xl:h-14 xl:px-10 xl:text-base"
           >
-            <Icon name="play" size={17} color="#241205" />
+            <Icon name="play" size={17} />
             {paymentsOn ? t.hero.play : t.hero.watchFree}
           </Link>
           <Link

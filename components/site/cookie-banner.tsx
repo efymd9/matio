@@ -104,7 +104,7 @@ export function CookieBanner({
           <button
             type="button"
             onClick={accept}
-            className="inline-flex h-11 items-center justify-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform hover:brightness-105 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/70"
+            className="inline-flex h-11 items-center justify-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-cta transition-transform hover:brightness-105 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/70"
           >
             {t.cookieBanner.acceptAll}
           </button>

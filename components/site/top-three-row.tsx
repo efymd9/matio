@@ -33,7 +33,7 @@ export async function TopThreeRow({ shows }: { shows: Show[] }) {
                 tone={toneFor(show.slug || show.id)}
                 title={show.title}
                 rounded="card2xl"
-                className="relative z-[2] aspect-[2/3] w-[136px] shadow-[0_18px_40px_-16px_rgba(0,0,0,0.8)] transition-transform duration-500 group-hover:scale-[1.02] tablet:w-[166px] xl:w-[200px]"
+                className="relative z-[2] aspect-[2/3] w-[136px] shadow-poster transition-transform duration-500 group-hover:scale-[1.02] tablet:w-[166px] xl:w-[200px]"
               />
             </Link>
           </li>

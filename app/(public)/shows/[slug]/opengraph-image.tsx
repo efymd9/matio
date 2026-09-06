@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { ImageResponse } from "next/og";
 import { getShowBySlug } from "@/lib/show-query";
+import { DUOTONE_GRADIENT, OG_NO_ART_GLOW, OG_PHOTO_SCRIM } from "@/lib/design";
 import { SITE_NAME } from "@/lib/seo";
 import { en } from "@/lib/i18n/dictionaries";
 
@@ -122,8 +123,7 @@ export default async function Image({
             style={{
               position: "absolute",
               inset: 0,
-              background:
-                "linear-gradient(160deg, rgba(230,179,102,0.2), rgba(143,47,28,0.3))",
+              background: DUOTONE_GRADIENT,
             }}
           />
         ) : null}
@@ -132,9 +132,7 @@ export default async function Image({
           style={{
             position: "absolute",
             inset: 0,
-            background: background
-              ? "linear-gradient(180deg, rgba(15,10,7,0.15) 0%, rgba(15,10,7,0.6) 55%, rgba(15,10,7,0.97) 100%)"
-              : "radial-gradient(circle at 26% 20%, rgba(230,179,102,0.16), transparent 55%), radial-gradient(ellipse at 50% 115%, rgba(143,47,28,0.45), transparent 55%)",
+            background: background ? OG_PHOTO_SCRIM : OG_NO_ART_GLOW,
           }}
         />
         <div

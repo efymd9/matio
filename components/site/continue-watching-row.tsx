@@ -29,7 +29,7 @@ export async function ContinueWatchingRow({
                 href={`/watch/${item.show.slug}?ep=${item.episodeId}`}
                 className="group flex w-[220px] flex-col gap-2 outline-none tablet:w-[260px] tablet:gap-[9px] xl:w-[310px] xl:gap-2.5"
               >
-                <div className="relative aspect-video overflow-hidden rounded-[14px] shadow-[0_14px_30px_-14px_rgba(0,0,0,0.8)] xl:rounded-2xl">
+                <div className="relative aspect-video overflow-hidden rounded-[14px] shadow-card xl:rounded-2xl">
                   {art ? (
                     <Image
                       src={art}
@@ -50,8 +50,8 @@ export async function ContinueWatchingRow({
                     className="duotone pointer-events-none absolute inset-0"
                   />
                   <div className="absolute inset-0 flex items-center justify-center bg-black/25">
-                    <span className="flex size-10 items-center justify-center rounded-full bg-burgundy/80 backdrop-blur-md tablet:size-11 xl:size-12">
-                      <Icon name="play" size={15} color="#f6efe4" />
+                    <span className="flex size-10 items-center justify-center rounded-full bg-burgundy/80 text-cream backdrop-blur-md tablet:size-11 xl:size-12">
+                      <Icon name="play" size={15} />
                     </span>
                   </div>
                   <div className="absolute inset-x-0 bottom-0 h-[3px] bg-cream/20 xl:h-1">

@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { Icon } from "@/components/site/icon";
-import { TONE_GRADIENT } from "@/lib/design";
+import { TONE_GRADIENT, WALL_SCRIM } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 import { markSignupWallShown } from "@/app/watch/actions";
@@ -98,8 +98,7 @@ export function SignupWall({
         className="pointer-events-none absolute inset-0"
         aria-hidden
         style={{
-          backgroundImage:
-            "linear-gradient(to top, rgba(15,10,7,0.97) 30%, rgba(15,10,7,0.55) 60%, rgba(15,10,7,0.25) 100%)",
+          backgroundImage: WALL_SCRIM,
         }}
       />
       <div className="glow-floor pointer-events-none absolute inset-0" aria-hidden />
@@ -157,7 +156,7 @@ export function SignupWall({
                   wall: "signup",
                 })
               }
-              className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out active:scale-[0.98]"
+              className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out active:scale-[0.98]"
             >
               {t.signupWall.signUpCta}
             </button>
@@ -168,7 +167,7 @@ export function SignupWall({
               tier is already theirs — send them straight back in. */}
           <a
             href={watchHref}
-            className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform duration-150 ease-out active:scale-[0.98]"
+            className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out active:scale-[0.98]"
           >
             {t.signupWall.signUpCta}
           </a>

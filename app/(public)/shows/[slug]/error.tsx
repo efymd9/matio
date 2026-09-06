@@ -13,7 +13,7 @@ export default function ShowError({
       <p className="mb-6 text-sm text-cream/55">{error.message || "An unexpected error occurred."}</p>
       <button
         onClick={reset}
-        className="inline-flex h-11 items-center justify-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform active:scale-[0.98]"
+        className="inline-flex h-11 items-center justify-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-cta transition-transform active:scale-[0.98]"
       >
         Try again
       </button>

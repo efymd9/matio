@@ -424,7 +424,22 @@ urgent — it costs one command.
   literal in a feature. `tools/qa/no-magic-styles.sh` runs in CI and fails with
   the file and line; run it locally with `pnpm qa:styles`. A shade that does
   not exist yet is added to `@theme` **and** to the token sheet in
-  `lab/tokens.stories.tsx` in the same PR.
+  `lab/tokens.stories.tsx` in the same PR. Since #31 the gate catches four
+  layers in `components/site`, `components/watch`, `app/(public)`,
+  `app/watch`: colour literals in arbitrary Tailwind values (`bg-[#…]`);
+  colour in props (`color="#…"`, `fill=`, `stroke=`, incl. `color={cond ?
+  "#…" : …}`) — an `Icon` inherits `currentColor`, the parent's text token or
+  a `className="text-gold"` on the icon decides; **any** `shadow-[…]` — the
+  eight `--shadow-*` tokens in `@theme` (`shadow-cta`, `shadow-play`,
+  `shadow-card`, `shadow-poster`, `shadow-popup`, `shadow-hover-card`,
+  `shadow-sheet`, `shadow-dialog`, named by role because the values did not
+  collapse without moving a pixel) are the only shadows a feature may use;
+  and gradients with a colour literal in inline styles — those are constants
+  in `lib/design.ts` next to `TONE_GRADIENT` (`HERO_SCRIM_BOTTOM/SIDE`,
+  `SHOW_HERO_SCRIM`, `WALL_SCRIM`, `GOLD_GLOW`, `BURGUNDY_GLOW`, `OG_*`).
+  The token sheet's `Shadows` / `Gradients` stories pin every token to the
+  literal it replaced (computed `box-shadow` / string equality) — a token that
+  drifts fails there by name, before any golden.
 - **Lab-first.** A new or changed visible element appears in the UI Lab
   **first**, in **at least five genuinely different** variants — five variants,
   not one variant five times, and not a pixel copy of a reference. The owner
