@@ -21,6 +21,7 @@ const MARKER_NAME = "Leak Marker";
 const MARKER_SECRET = "dummy-db-password";
 const MARKER_DATABASE_URL = `postgres://matio:${MARKER_SECRET}@db.example.invalid/matio`;
 
+<<<<<<< HEAD
 const { execute, select, update, del, batchSend, clerkVerify } = vi.hoisted(
   () => ({
     execute: vi.fn(),
@@ -38,6 +39,22 @@ vi.mock("server-only", () => ({}));
 // (app/api/webhooks/clerk/route.test.ts); here the event is handed over
 // verified so the audit sees only what the handler itself logs.
 vi.mock("@clerk/nextjs/webhooks", () => ({ verifyWebhook: clerkVerify }));
+=======
+const { execute, select, update, insert, batchSend } = vi.hoisted(() => ({
+  execute: vi.fn(),
+  select: vi.fn(),
+  update: vi.fn(),
+  insert: vi.fn(),
+  batchSend: vi.fn(),
+}));
+vi.mock("@/db", () => ({ db: { execute, select, update, insert } }));
+vi.mock("server-only", () => ({}));
+// The app's progress route resolves the caller through Clerk; a fixed user
+// keeps the audit on the path that actually reaches the database.
+vi.mock("@clerk/nextjs/server", () => ({
+  auth: async () => ({ userId: "user_1" }),
+}));
+>>>>>>> origin/main
 
 // The reminder dispatch path pulls in auth, Next's cache and the Resend SDK —
 // none of which is the thing under audit. Everything except the action's own
@@ -67,7 +84,11 @@ vi.mock("@/lib/mux-token", () => ({
 
 import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as readyz } from "@/app/api/readyz/route";
+<<<<<<< HEAD
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
+=======
+import { POST as saveProgress } from "@/app/api/v1/progress/route";
+>>>>>>> origin/main
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -100,7 +121,11 @@ beforeEach(() => {
   execute.mockReset();
   select.mockReset();
   update.mockReset();
+<<<<<<< HEAD
   del.mockReset();
+=======
+  insert.mockReset();
+>>>>>>> origin/main
   batchSend.mockReset();
   clerkVerify.mockReset();
 });
@@ -308,6 +333,7 @@ describe("log audit · reminder dispatch (Resend)", () => {
   });
 });
 
+<<<<<<< HEAD
 describe("log audit · Clerk user.deleted (account erasure)", () => {
   // The worst case this path logs: the deleted account still has a live
   // Stripe subscription, so the handler shouts — and the users row it just
@@ -359,5 +385,78 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     // What it DOES log: the ids the owner needs to finish the job at Stripe.
     expect(logged()).toContain(USER_ID);
     expect(logged()).toContain("sub_dummy");
+=======
+describe("log audit · /api/v1/progress (the app's watch-progress save)", () => {
+  // The body is client-controlled text headed for a uuid column; the
+  // realistic worst case is a client that puts something personal where an
+  // id belongs, and a driver error that quotes what it choked on.
+  const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+  function post(body: unknown): Parameters<typeof saveProgress>[0] {
+    return { headers: new Headers(), json: async () => body } as unknown as Parameters<
+      typeof saveProgress
+    >[0];
+  }
+
+  it("rejects a body carrying user text without echoing it anywhere", async () => {
+    const logged = captureConsole();
+
+    const res = await saveProgress(
+      post({ episodeId: MARKER_EMAIL, positionSeconds: 10, completed: false }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(JSON.stringify(await res.json())).not.toContain(MARKER_EMAIL);
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("lets a database failure surface without logging what the driver quoted", async () => {
+    vi.stubEnv("DATABASE_URL", MARKER_DATABASE_URL);
+    select.mockImplementation(() => {
+      throw new Error(`could not connect to ${MARKER_DATABASE_URL}`);
+    });
+    const logged = captureConsole();
+
+    await expect(
+      saveProgress(post({ episodeId: EPISODE, positionSeconds: 10, completed: false })),
+    ).rejects.toThrow();
+
+    // The route itself writes nothing to the console — the failure is the
+    // framework's to report, through the Sentry scrubbers audited above.
+    expect(logged()).not.toContain(MARKER_SECRET);
+    expect(logged()).not.toContain("db.example.invalid");
+  });
+
+  it("lets a failed WRITE surface without logging the row the driver quoted", async () => {
+    // The lookup succeeds and the upsert itself fails — the postgres driver
+    // echoes the statement it choked on, values included. A seeded identity
+    // in that echo must not reach the console any more than the URL did.
+    vi.stubEnv("DATABASE_URL", MARKER_DATABASE_URL);
+    const lookup = {
+      from: () => lookup,
+      innerJoin: () => lookup,
+      where: () => lookup,
+      limit: async () => [
+        { id: EPISODE, showId: "show_1", access: "free", durationSeconds: 600 },
+      ],
+    };
+    select.mockImplementation(() => lookup);
+    insert.mockImplementation(() => {
+      throw new Error(
+        `insert into watch_progress (user_id, episode_id) values ('${MARKER_NAME} <${MARKER_EMAIL}>', '${EPISODE}') — ${MARKER_DATABASE_URL}`,
+      );
+    });
+    const logged = captureConsole();
+
+    await expect(
+      saveProgress(post({ episodeId: EPISODE, positionSeconds: 10, completed: false })),
+    ).rejects.toThrow();
+
+    expect(insert).toHaveBeenCalled(); // the fixture reached the write
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+    }
+>>>>>>> origin/main
   });
 });

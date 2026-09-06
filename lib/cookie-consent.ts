@@ -120,12 +120,17 @@ export function clearMarketingCookies(): void {
   const root = labels.length >= 2 ? labels.slice(-2).join(".") : null;
   // `__oppref` is the ChatGPT Ads pixel's click identifier — the OpenAI
   // counterpart of `_fbc` (host-only, path=/, lifetime set by OpenAI).
+  // `muxData` is Mux Data's viewer-id cookie (host-only, path=/, written by
+  // mux-embed while a consented view is being monitored). Listed under
+  // Marketing on /cookies, so a withdrawal has to take it with it — the watch
+  // player stops the monitor itself but never touches cookies (#127).
   for (const name of [
     "attribution_first",
     "attribution_last",
     "_fbp",
     "_fbc",
     "__oppref",
+    "muxData",
   ]) {
     document.cookie = `${name}=; max-age=0; path=/`;
     if (root) document.cookie = `${name}=; max-age=0; path=/; domain=.${root}`;

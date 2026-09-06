@@ -526,6 +526,15 @@ To truly stop the beacons until marketing consent (and an env key) you must pass
 
 `disableTracking` alone still drops the `mux-data` cookie; `disableCookies` alone still beacons. Gate on `useMarketingConsent() && NEXT_PUBLIC_MUX_DATA_ENV_KEY`. This closed the pre-consent leak on both `components/watch/player.tsx` and the home hero (`components/site/hero-banner.tsx`).
 
+### `@mux/mux-video-react` is NOT the `<mux-video>` custom element — its Mux Data props are read once, at initialize
+
+The two players react to a consent flip in opposite ways, and both are traps (#126, #127):
+
+- **`@mux/mux-player-react`** (the hero) renders the `<mux-player>` custom element, which forwards `disable-tracking` to an inner `<mux-video>` whose `attributeChangedCallback` **tears the stream down and restarts it** — `unload(); …then(() => { currentTime = t; paused || play() })` with no `.catch` (`@mux/mux-video/dist/base.mjs`, `case DISABLE_TRACKING`). Flipping the prop on a live element = a mid-stream reload + an orphaned `play()` rejection in Sentry. The hero therefore **remounts** on consent (`key={muxDataEnabled ? …}`).
+- **`@mux/mux-video-react`** (the watch player) renders a **bare `<video>`** and reads `envKey` / `disableTracking` / `disableCookies` only inside playback-core's `initialize()`, from an effect keyed on the src alone (`dist/index.mjs`: `useEffect(() => { … initialize(t, a, …) … }, [d])`). Flipping the props on a mounted element does **nothing** — no reload, no play(), and no change to a monitor that is already running. So a mid-episode grant only lands at the next initialize (auto-advance src swap, token-refresh remount, manual swap), and a mid-episode **withdrawal would keep beaconing** until then. The player stops it itself with mux-embed's `video.mux.destroy()` (the same call playback-core's teardown makes; it flushes the final view-end beacon and marks the handle `deleted`, so teardown later skips it) and the banner's `clearMarketingCookies()` expires `muxData`. Proven against the real wrapper + real mux-embed in `components/watch/player.test.tsx`.
+
+Removing `envKey` is **not** a substitute for `disableTracking`: `setupMux` monitors whenever `!disableTracking && (envKey || isMuxVideoSrc)`, and a `playbackId` src always satisfies the second half.
+
 ### Mux Data API quirks (`lib/mux-data.ts`)
 
 The read-side Data API (`api.mux.com/data/v1`) has several traps:

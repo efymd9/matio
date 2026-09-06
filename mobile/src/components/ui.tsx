@@ -10,6 +10,8 @@ import {
   View,
   type ViewStyle,
 } from "react-native";
+import { useT } from "@/i18n/locale";
+import type { ContinueWatchingEntry } from "@/shared/api-types";
 import { body, colors, display, radius, SCREEN_PAD, space, toneStopsFor } from "@/theme";
 
 // ---------------------------------------------------------------- scrim
@@ -225,6 +227,45 @@ export function PosterCard({
   );
 }
 
+// 16:9 "continue watching" tile — the web rail's shape: hero art (poster as
+// the fallback), a resume bar along the bottom edge, show title + episode
+// under it. `fraction` comes from the server so the bar never disagrees with
+// the position the tap resumes at.
+const CONTINUE_W = 220;
+
+export function ContinueCard({
+  item,
+  onPress,
+}: {
+  item: ContinueWatchingEntry;
+  onPress?: () => void;
+}) {
+  const t = useT();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [{ width: CONTINUE_W }, pressed && { opacity: 0.8 }]}
+    >
+      <View>
+        <Artwork
+          uri={item.show.heroImageUrl ?? item.show.posterImageUrl}
+          toneKey={item.show.slug}
+          style={styles.continueArt}
+        />
+        <View style={styles.continueTrack}>
+          <View style={[styles.continueFill, { width: `${item.fraction * 100}%` }]} />
+        </View>
+      </View>
+      <Text numberOfLines={1} style={styles.posterTitle}>
+        {item.show.title}
+      </Text>
+      <Text numberOfLines={1} style={styles.continueMeta}>
+        {t.home.epShort(item.episodeNumber)} · {item.episodeTitle}
+      </Text>
+    </Pressable>
+  );
+}
+
 // ---------------------------------------------------------------- states
 
 export function Loading() {
@@ -244,25 +285,24 @@ export function ErrorState({
   hint?: string;
   onRetry?: () => void;
 }) {
+  const t = useT();
   return (
     <View style={styles.centred}>
       <Text style={styles.errorTitle}>{message}</Text>
       {hint ? <Text style={styles.errorHint}>{hint}</Text> : null}
-      {onRetry ? <GoldButton label="Try again" onPress={onRetry} style={{ marginTop: space(6) }} /> : null}
+      {onRetry ? (
+        <GoldButton label={t.watchError.tryAgain} onPress={onRetry} style={{ marginTop: space(6) }} />
+      ) : null}
     </View>
   );
 }
 
 // ---------------------------------------------------------------- helpers
 
-export function formatDuration(seconds: number | null): string {
-  if (!seconds) return "";
-  const mins = Math.max(1, Math.round(seconds / 60));
-  return `${mins} min`;
-}
-
-export function episodeCountLabel(n: number): string {
-  return n === 1 ? "1 episode" : `${n} episodes`;
+// Whole minutes for a duration read-out, never "0 min" for a short clip.
+export function durationMinutes(seconds: number | null): number | null {
+  if (!seconds) return null;
+  return Math.max(1, Math.round(seconds / 60));
 }
 
 const styles = StyleSheet.create({
@@ -338,6 +378,23 @@ const styles = StyleSheet.create({
     marginTop: space(2),
     letterSpacing: 0.3,
   },
+  continueArt: {
+    width: CONTINUE_W,
+    height: (CONTINUE_W * 9) / 16,
+    borderRadius: radius.poster,
+  },
+  continueTrack: {
+    position: "absolute",
+    left: space(2),
+    right: space(2),
+    bottom: space(2),
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    overflow: "hidden",
+  },
+  continueFill: { height: "100%", backgroundColor: colors.gold },
+  continueMeta: { ...body, color: colors.inkDim, fontSize: 11, marginTop: space(1) },
   centred: { flex: 1, alignItems: "center", justifyContent: "center", padding: SCREEN_PAD },
   errorTitle: { ...display, color: colors.ink, fontSize: 18, textAlign: "center" },
   errorHint: {
