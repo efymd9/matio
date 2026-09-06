@@ -34,8 +34,11 @@ export const showReminders = pgTable(
     email: text("email").notNull(),
     // Linked to the user when the request comes from a signed-in
     // session; nullable because anonymous viewers can also leave their
-    // email. ON DELETE SET NULL so account deletion doesn't erase the
-    // reminder request — the email itself is the address.
+    // email. ON DELETE SET NULL is the schema's safety net only: since
+    // 2026-09-06 the Clerk `user.deleted` handler (app/api/webhooks/clerk/
+    // route.ts) explicitly deletes every reminder row for the account's
+    // address BEFORE the users row goes — "delete my account" erases the
+    // reminder request too.
     userId: text("user_id").references(() => users.id, {
       onDelete: "set null",
     }),

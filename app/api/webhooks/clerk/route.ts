@@ -1,4 +1,5 @@
 import { verifyWebhook } from "@clerk/nextjs/webhooks";
+import * as Sentry from "@sentry/nextjs";
 import { and, eq, gt, inArray, or } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
@@ -99,6 +100,9 @@ async function eraseDeletedUser(userId: string | undefined) {
     )
     .limit(1);
   if (liveSub) {
+    // Vercel logs live a day and Sentry drops console breadcrumbs wholesale,
+    // so the money guard also raises a Sentry message — ids only. Until #164
+    // automates the Stripe side, this is the signal the owner acts on.
     console.error(
       "Clerk user.deleted: account had a LIVE Stripe subscription — cancel it at Stripe by hand (#164)",
       {
@@ -107,7 +111,24 @@ async function eraseDeletedUser(userId: string | undefined) {
         stripeSubscriptionId: liveSub.stripeSubscriptionId,
       },
     );
+    Sentry.captureMessage(
+      "clerk user.deleted: live Stripe subscription left behind (#164)",
+      {
+        level: "warning",
+        tags: {
+          userId,
+          stripeSubscriptionId: liveSub.stripeSubscriptionId ?? "unknown",
+        },
+      },
+    );
   }
+
+  // No transaction around the two DELETEs — on purpose: the only partial
+  // state a crash between them can leave is "reminders gone, users row still
+  // here", i.e. too much erased, never a surviving address; the 500 makes
+  // Clerk retry and the retry converges (reminders already gone, users found
+  // and deleted). The order matters: reminders first, or SET NULL would cut
+  // the user_id link before the explicit delete can use it.
 
   // "Delete my account" erases the reminder requests too: every row for the
   // account's address (the same reach as unsubscribeEmail — the address IS
