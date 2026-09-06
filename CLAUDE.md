@@ -596,7 +596,9 @@ components/
 
   admin/                   # admin-specific (video upload widget, image-upload-
                            #   field for poster/hero artwork, status select,
-                           #   reminders-panel — episode-reminder send form)
+                           #   reminders-panel — episode-reminder send form,
+                           #   fork-panel — branch-of select + fork editor +
+                           #   live viewer preview on the episode page)
   site/                    # header, footer, cookie-banner, language switcher,
                            #   posters, hero, logo, meta-pixel (consent-gated
                            #   loader), view-content-pixel,
@@ -624,7 +626,10 @@ db/
                            #   visitors + visitor_days (first-party visit
                            #   ledger, aid = matio_aid cookie), watch_days
                            #   (user×day activity), watch_segments (episode×
-                           #   day×10s-bucket retention counters)
+                           #   day×10s-bucket retention counters),
+                           #   episode_choices (branching-video edges; a
+                           #   branch itself is an episodes row with
+                           #   branch_of_episode_id — see "Branching video")
 drizzle/                   # migrations (sql) + drizzle-kit meta
                            # (schema/ also holds: actors, guest_checkout_attempts)
 lib/
@@ -641,6 +646,13 @@ lib/
   subscription-mirror.ts   # mirrorSubscription (moved out of the Stripe
                            #   webhook route so /welcome can run the same
                            #   idempotent mirror inline)
+  branching.ts             # universal + PURE rules of the branching-video
+                           #   graph: resolveNextStep (fork / auto / ending /
+                           #   linear by edge-set SIZE), parseForkForm +
+                           #   validateForkDraft (admin form, typed codes),
+                           #   validateBranchGraph (publish guard DFS) —
+                           #   see "Branching video"; the actions only load
+                           #   rows and write the result
   catalog.ts               # getPublishedShows() cached via unstable_cache
                            #   (tag 'catalog'); shared by / + /sitemap.xml
   hero-preview.ts          # server-only: pickFeaturedShow + resolveHeroPreview
@@ -752,6 +764,7 @@ app/admin/reminder-actions.ts, app/watch/actions.ts (saveWatchProgress /
 saveTrialPosition / saveWatchSegments), app/admin/analytics/sessions/
 (PostHog HogQL event feed — the live consumer of POSTHOG_PERSONAL_API_KEY),
 lib/episode-access.ts (isEpisodeLocked), lib/continue-watching.ts,
+lib/branching.ts (branching-video rules — pure, see "Branching video"),
 lib/can-autoplay.ts, lib/checkout-session.ts / -trial.ts / -rate-limit.ts,
 lib/posthog-sessions.ts, lib/staging-lock.ts, lib/use-vertical-layout.ts,
 lib/api/ (types.ts universal + v1.ts server-only), lib/about-team.ts,
@@ -839,6 +852,48 @@ infra/
   (`components/watch/vertical-chrome.tsx` vs the horizontal transport), gated
   by `lib/use-vertical-layout.ts` (vertical && viewport ≤768px). Any player
   edit has to be checked in both orientations.
+- **Branching video (2026-09-06, #143 — PR 1 of 2; the player is #144)**:
+  Bandersnatch-style forks. **A branch is an ordinary `episodes` row** with
+  `branch_of_episode_id` set (self-FK, `SET NULL`; migration 0024 —
+  expand-only, no contract phase), so the whole upload / webhook / token /
+  progress / tier pipeline works on it unchanged; the edges live in
+  `episode_choices` (`from` CASCADE, `to` RESTRICT, unique `(from,
+  position)`, partial unique `(from) WHERE is_default`). **The meaning of an
+  episode's edge set is its SIZE** (`lib/branching.ts:resolveNextStep`): ≥2
+  rows = a fork (the parent's `fork_prompt_en/es` is shown for
+  `fork_window_seconds` (3–30) before the end; targets MUST be branches of
+  that parent), exactly 1 = a silent auto-transition (how a branch
+  reconverges; any ready episode), 0 on a branch = an ending, 0 on a regular
+  episode = today's linear `episodes[idx + 1]` — one schema covers v1
+  reconvergence, multiple endings and nested forks. Prompt and labels are
+  VIEWER copy → es/en on the rows (not ru/en, not `dictionaries.ts`).
+  **Branches are hidden from every public list**: the show page + its JSON-LD
+  `numberOfEpisodes`, `getOrderedReadyEpisodeIds` (funnel positions, the
+  app's positional gate — a branch id resolves to position 0), the home
+  hero's "first episode" + episode count, and the watch page's Player
+  `episodes` prop (PR 1 filters them out entirely — that prop feeds both the
+  overlay and `episodes[idx + 1]`; PR 2 threads them through as
+  playable-but-unlisted). `lib/continue-watching.ts` leads a FINISHED branch
+  on to its single silent continuation (one extra query, only when a branch
+  row is present) instead of dropping the show from the rail. The mobile
+  `/api/v1` excludes a branch-bearing show WHOLESALE (`linearShowsOnly()` in
+  `lib/api/v1.ts`, WHERE-only in `catalog` + `shows/[slug]`; DTOs untouched).
+  **Admin**: the episode page's "Branching" panel (`components/admin/
+  fork-panel.tsx` → `upsertEpisodeChoices` / `deleteEpisodeChoice`, typed
+  `AdminFormState` codes rendered inline — never throws for what an owner can
+  get wrong; the only throw is the (episode, season, show) chain guard) —
+  branch-of select (hidden-input idiom), prompt es/en, timer, ≤3 options with
+  target + default radio, live per-locale preview; branches numbered **900+**
+  by convention (hint only — `unique(season_id, number)` stays). **Publish
+  guard**: `updateShow` with `status=published` runs `validateBranchGraph`
+  (DFS from every listed ready episode) and refuses `publish_fork_incomplete`
+  (prompt with <2 options) / `publish_branch_not_ready` /
+  `publish_choice_target_not_branch` / `publish_branch_cycle` — on EVERY
+  published save, not only the draft→published edge. `deleteEpisode` on a
+  choice target is refused by the FK; the page hides the button and says why.
+  Deferred (registry): re-choose on seek-back, choice stats, mobile support,
+  the paid-mode trial-mint rate limit. Rationale and rejected designs: [ADR
+  0001](./docs/adr/0001-branching-video-graph.md).
 - **Mux re-upload safety**: `createMuxUpload` only creates the upload URL — it does NOT clear the episode's playback fields. The clearing happens in `markEpisodeReprocessing`, which the upload widget calls from upchunk's `success` event. A cancelled mid-upload no longer permanently breaks the episode (Mux's webhook refuses to overwrite a different existing `asset_id`). Two numbers in this path are anti-regressions, not decoration: `uploads.create({ timeout: 86_400 })` (`app/admin/actions.ts` — Mux's one-hour default doesn't survive a multi-GB master and filled the account with `timed_out` uploads, #130), and upchunk's `retryCodes: [0, 408, 429, 500, 502, 503, 504]` + `attempts: 10` + `dynamicChunkSize` capped at 20MB (`components/admin/upload-widget.tsx` — the default list has no `0`, and a dropped connection is exactly status 0, so every network hiccup used to kill the upload on the FIRST try, #131). After success the widget polls `router.refresh()` every 10s (≤15 min) until the `episodeStatus` prop from the episode page reads `ready` (#136) — removing that prop unhooks the poller.
 - **Show artwork (poster/hero)**: drag-and-drop in the show form uploads **client-direct to Vercel Blob** — `components/admin/image-upload-field.tsx` calls `upload()` from `@vercel/blob/client`, which gets a scoped token from `/api/admin/upload-image` (`handleUpload`; admin-gated via `getCurrentAdmin()`, image content-types only, ≤15 MB, pathname pinned to `shows/(poster|hero)-*`, `addRandomSuffix` so nothing is ever overwritten). The file bytes never touch our functions (same philosophy as the Mux/upchunk video path — sidesteps the ~4.5 MB body limit). The returned URL lands in the existing `posterImageUrl`/`heroImageUrl` form fields, so `createShow`/`updateShow` persist it unchanged; `updateShow` best-effort `del()`s the previous Blob object when artwork is replaced/cleared (scoped to our Blob host — legacy same-origin `/shows/*.png` values are left alone and still work). The URL input remains as a fallback for same-origin paths; arbitrary external hosts will throw in `next/image` on the public pages (not in the `remotePatterns` allowlist).
 - Playback always goes through `/api/playback-token` → signed Mux JWT. Subscriber TTL: 1 hour (auto-refreshed). Trial TTL: `min(remaining, TRIAL_DURATION_SECONDS)`.

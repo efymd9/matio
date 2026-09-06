@@ -82,11 +82,15 @@ export default defineConfig({
       // → 21.6 (#128: хиро-плеер — фатальные/нефатальные ошибки и перевыпуск
       //   токена тизера; lib/hero-preview.ts + /api/hero-preview-token покрыты
       //   на 100%; 21.74/21.25/17.34/17.15 по прогону, те же 0.1 запаса).
+      // → 27.4 (#143: ветвящееся видео — lib/branching.ts (правила графа),
+      //   экшены развилки и publish-guard, панель fork-panel в jsdom,
+      //   continue-watching через ветку, WHERE-исключения /api/v1;
+      //   27.50/23.84/21.93/27.07 по прогону, те же 0.1 запаса).
       thresholds: {
-        lines: 23.9,
-        functions: 19.9,
-        branches: 18.5,
-        statements: 23.4,
+        lines: 27.4,
+        functions: 23.7,
+        branches: 21.8,
+        statements: 26.9,
       },
     },
 

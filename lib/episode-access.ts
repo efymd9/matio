@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons } from "@/db/schema";
 
@@ -15,6 +15,12 @@ export type EpisodeTier = "free" | "member" | "subscriber";
 // Ordered ready-episode ids for a show; position = array index + 1. The
 // caller is responsible for show-level checks (published, not deleted) —
 // every current caller has already verified them.
+//
+// Branches (branch_of_episode_id NOT NULL, #143) are excluded: they are
+// reachable only through a fork choice, never by position, so counting them
+// would shift every funnel depth and signup-gate position after a fork.
+// A branch id therefore resolves to position 0 here — callers already treat
+// that as "not in the linear run".
 export async function getOrderedReadyEpisodeIds(
   showId: string,
 ): Promise<string[]> {
@@ -22,7 +28,13 @@ export async function getOrderedReadyEpisodeIds(
     .select({ id: episodes.id })
     .from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
-    .where(and(eq(seasons.showId, showId), eq(episodes.status, "ready")))
+    .where(
+      and(
+        eq(seasons.showId, showId),
+        eq(episodes.status, "ready"),
+        isNull(episodes.branchOfEpisodeId),
+      ),
+    )
     .orderBy(asc(seasons.number), asc(episodes.number));
   return rows.map((r) => r.id);
 }
