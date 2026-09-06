@@ -136,19 +136,24 @@ PR: данные не размножаются бесконтрольно, ст�
 Факт на 06.09.2026 (полная таблица — `references/data-map.md`):
 
 - **Триггер** — удаление аккаунта в Clerk (UserProfile → «Delete account»,
-  дашборд, или наш ручной запрос). Наш вебхук
-  (`app/api/webhooks/clerk/route.ts`) обрабатывает только `user.created`;
-  **`user.deleted` игнорируется — в БД не происходит ничего** (#161).
-  Единственная механика сегодня — SQL руками. Целевое состояние: одна
-  механика — `user.deleted` → `DELETE FROM users` → каскады; ручной
-  GDPR-запрос исполняется удалением в Clerk тем же путём, не отдельным SQL.
+  дашборд, или наш ручной запрос). Вебхук `user.deleted`
+  (`app/api/webhooks/clerk/route.ts`, с #161) — единственная механика:
+  `DELETE FROM users WHERE id = <clerk id>` → каскады FK + явное удаление
+  `show_reminders` по адресу аккаунта. Идемпотентно: повтор для уже стёртого
+  — 200 без записи. Ручной GDPR-запрос исполняется удалением в Clerk тем же
+  путём, не отдельным SQL. Ops-условие: прод-эндпойнт в дашборде Clerk должен
+  быть подписан на `user.deleted` (пока нет — строка в `docs/registry.md`).
+  Тест `app/api/webhooks/clerk/route.test.ts` пришпиливает полную карту FK на
+  `users`: новая таблица со ссылкой на `users` без `onDelete` ломает тест —
+  и это правильно, потому что иначе она ломала бы стирание.
 - **Каскады FK от `users.id`** (`db/schema/*`, проверено по коду):
   `CASCADE` — `subscriptions`, `watch_progress`, `watch_days`; `SET NULL` —
   `trial_sessions.user_id`, `visitors.user_id` (история визитов остаётся
-  псевдонимной: aid, referrer, utm, country), `show_reminders.user_id` (email
-  остаётся — строка живёт как подписка на рассылку, её стирает только
-  `unsubscribeEmail`; удалять ли при стирании аккаунта — решение владельца в
-  #161), `marketing_links.created_by` (админ).
+  псевдонимной: aid, referrer, utm, country), `show_reminders.user_id` — но на
+  этот SET NULL обработчик не полагается: строки `show_reminders` по адресу
+  аккаунта и по `user_id` он удаляет сам, ДО `DELETE FROM users` («меня
+  больше нет» включает напоминания; SET NULL остаётся страховкой схемы),
+  `marketing_links.created_by` (админ).
 - **Не привязано к `users` вовсе** (псевдонимное): `trial_sessions` без
   `user_id` (session_token, ip_hash), `visitors` без `user_id`,
   `guest_checkout_attempts` (ip_hash, самопрунинг 2 ч), `stripe_events`
@@ -159,7 +164,10 @@ PR: данные не размножаются бесконтрольно, ст�
 - **Джобы**: фоновых джоб с данными пользователей нет; рассылка — ручная
   кнопка в админке, читает `show_reminders` в момент нажатия.
 - **Процессоры**: Clerk — источник истины; Stripe Customer и PostHog person
-  (с `email`) остаются и требуют отдельных вызовов (#164); Resend — логи
+  (с `email`) остаются и требуют отдельных вызовов (#164) — живую подписку
+  Stripe обработчик `user.deleted` не ждёт: стирает локально и пишет
+  `console.error` с id пользователя/customer/subscription (не адрес), отмену
+  в Stripe делает человек; Resend — логи
   истекают через 30 дней сами; Meta/Google/OpenAI держат хешированный email
   и клиентские id событий — per-user удаления у них нет; Sentry — только
   `user.id`, истекает по ретеншену плана.

@@ -25,10 +25,21 @@ The app imports a few genuinely universal modules straight from the web app's `l
 |---|---|---|
 | `src/shared/design.ts` | `../../../lib/design` | brand tokens — colours must not drift between surfaces |
 | `src/shared/api-types.ts` | `../../../lib/api/types` | the `/api/v1` wire contract, so a DTO change fails compilation instead of failing on a user's phone |
+| `src/shared/i18n.ts` | `../../../lib/i18n/dictionaries`, `…/app-dictionaries`, `…/negotiate` | the site's es/en copy (rails, walls, player labels) — the app never re-types a string; `app-dictionaries.ts` holds the app-only copy (sign-in steps, the update wall); `negotiate.ts` is the tag-matching rule the device language goes through |
 
-Those two files are the **only** places holding a path across the project boundary. Import
+Those three files are the **only** places holding a path across the project boundary. Import
 `@/shared/...` everywhere else. Do not extend this to modules that aren't universal — anything
-importing `server-only`, `next/*`, or drizzle will break the bundle.
+importing `server-only`, `next/*`, or drizzle will break the bundle (`lib/i18n/server.ts` is
+exactly such a module and is deliberately not re-exported).
+
+## Language
+
+`src/i18n/locale.tsx` resolves the locale the way the site does, minus cookie and URL: the
+stored choice (SecureStore, key `matio_locale`) → the device language → English. Device
+detection uses `I18nManager.getConstants().localeIdentifier` (Android) and
+`Intl.DateTimeFormat().resolvedOptions().locale` (iOS — RN 0.86's `RCTI18nManager` does not
+export the constant), both through the web's `pickFromLanguageTags`, with **no new dependency**.
+The EN | ES pill in the home header is the manual switcher; screens read copy via `useT()`.
 
 ## Running it
 
@@ -85,12 +96,9 @@ EXPO_PUBLIC_API_BASE_URL=http://192.168.0.125:3100 npx expo start
 
 ## Not yet added (deliberately)
 
-Two dependencies are wanted for real design fidelity and are **pending approval** (the repo's
-convention is to ask before adding):
+The repo's convention is to ask before adding a dependency. Still pending the owner's go-ahead:
 
-- `expo-linear-gradient` — the brand is built on gradients (hero scrims, gold CTAs, the duotone
-  wash, tone fallbacks). `src/components/ui.tsx` currently fakes vertical scrims with stacked
-  opacity bands and flattens the duotone to a solid tint.
-- `@expo-google-fonts/anton` (+ Geist) — Anton is the display face for every heading. Display
-  type currently approximates it with the heaviest system weight plus the spec's uppercase and
-  tracking. Swap `fontFamily` into `display` in `src/theme.ts`; no call sites change.
+- `eslint-config-expo` (+ a flat config here) — `npm run lint` does not work today; the app
+  source is unlinted. Tracked in `docs/registry.md`.
+- `expo-localization` — only if device-language detection (see "Language") proves wrong on a
+  real device; today it is done without it.

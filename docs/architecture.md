@@ -50,7 +50,7 @@ Hot-path indexes (migration 0010): `subscriptions(user_id, updated_at DESC)` for
 ## Auth model
 
 - Clerk owns identity + sessions.
-- `users` table mirrors Clerk via `user.created` webhook (`app/api/webhooks/clerk/route.ts`) — handler is idempotent (`onConflictDoNothing` on `users.id`).
+- `users` table mirrors Clerk via `user.created` webhook (`app/api/webhooks/clerk/route.ts`) — handler is idempotent (`onConflictDoNothing` on `users.id`). The same handler answers `user.deleted` with `DELETE FROM users` (art. 17 erasure: FK cascades + an explicit `show_reminders` delete by the account's address; a missing row is a 200 no-op, so redeliveries are safe). Deleting the account in Clerk is the ONLY erasure mechanism — a manual GDPR request is executed there, never by SQL.
 - `users.role` is the **only** source of truth for admin — never Clerk metadata alone.
 - Clerk's hosted UI (sign-in modal, sign-up modal, UserButton dropdown, validation copy) is localized to match the site dictionary via `ClerkProvider`'s `localization` prop in `app/layout.tsx` — `enUS` by default (English is the site default since 2026-07-04), `esES` when negotiation or the locale cookie resolves Spanish. Adding a locale to the site = also add its `@clerk/localizations` bundle to the `CLERK_LOCALIZATIONS` map.
 - `proxy.ts` is the first line of defense; pages/actions use `lib/admin.ts` helpers as belt-and-braces:

@@ -153,6 +153,48 @@ export type PlaybackTokenResponse = {
   mode: PlaybackMode;
 };
 
+// ---------------------------------------------------------------- progress
+
+// POST /api/v1/progress — the app's watch-progress save. Signed-in only: the
+// server keys the row on the Clerk user, and an anonymous call is 401 with
+// nothing written (the app never sends one — see useProgressSaver).
+export type SaveProgressRequest = {
+  episodeId: string;
+  // Whole seconds are stored; a fractional playhead is floored server-side.
+  positionSeconds: number;
+  // Live flip-on-rewatch semantics, same as the web: true at `ended`, false
+  // on every mid-episode tick — the continue-watching rail reads it.
+  completed: boolean;
+};
+
+export type SaveProgressResponse = { ok: true };
+
+// GET /api/v1/continue — one tile per show the user is mid-way through,
+// most-recently-watched first. `positionSeconds` is the resume target the
+// app seeks to; `fraction` (= position / duration, clamped to [0, 1]) drives
+// the tile's progress bar without the client redoing the arithmetic.
+export type ContinueWatchingEntry = {
+  show: {
+    slug: string;
+    title: string;
+    orientation: ShowOrientation;
+    posterImageUrl: string | null;
+    heroImageUrl: string | null;
+  };
+  episodeId: string;
+  episodeNumber: number;
+  episodeTitle: string;
+  positionSeconds: number;
+  durationSeconds: number;
+  fraction: number;
+  // ISO-8601; when the row was last touched.
+  updatedAt: string;
+};
+
+export type ContinueResponse = {
+  items: ContinueWatchingEntry[];
+};
+
 // Returned in ApiErrorBody.reason on a 403, same values the web player routes
 // on: "signup_required" → sign-up wall, "subscribe_required" → paywall.
 export type PlaybackDenialReason = "signup_required" | "subscribe_required";

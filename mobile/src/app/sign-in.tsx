@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CLERK_PUBLISHABLE_KEY } from "@/auth/clerk";
 import { ErrorState, GoldButton, Pill } from "@/components/ui";
+import { useT } from "@/i18n/locale";
 import { body, colors, display, radius, SCREEN_PAD, space } from "@/theme";
 
 // Passwordless email-code sign-in.
@@ -33,6 +34,7 @@ type Flow = "signIn" | "signUp";
 export default function SignInScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const t = useT();
 
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
@@ -48,18 +50,27 @@ export default function SignInScreen() {
 
   if (!CLERK_PUBLISHABLE_KEY) {
     return (
-      <ErrorState
-        message="Sign-in unavailable"
-        hint="This build has no Clerk publishable key configured."
-      />
+      <ErrorState message={t.app.signIn.unavailable} hint={t.app.signIn.unavailableHint} />
     );
+  }
+
+  // Clerk errors carry a user-safe message; anything else gets a generic line
+  // rather than leaking an internal string into the UI.
+  function messageFor(err: unknown): string {
+    if (typeof err === "object" && err !== null) {
+      const e = err as { errors?: { message?: string }[]; message?: string };
+      const first = e.errors?.[0]?.message;
+      if (first) return first;
+      if (e.message) return e.message;
+    }
+    return t.seriesEndOverlay.errorGeneric;
   }
 
   async function sendCode() {
     if (busy || !signIn || !signUp) return;
     const address = email.trim();
     if (!address.includes("@")) {
-      setError("Enter a valid email address.");
+      setError(t.app.signIn.invalidEmail);
       return;
     }
 
@@ -98,7 +109,7 @@ export default function SignInScreen() {
     if (busy || !signIn || !signUp) return;
     const value = code.trim();
     if (value.length < 4) {
-      setError("Enter the code from your email.");
+      setError(t.app.signIn.invalidCode);
       return;
     }
 
@@ -146,15 +157,13 @@ export default function SignInScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ alignSelf: "flex-start" }}>
-          <Pill label="Keep watching free" />
+          <Pill label={t.signupWall.kicker} />
         </View>
         <Text style={styles.title}>
-          {step === "email" ? "Create your account" : "Check your email"}
+          {step === "email" ? t.signupWall.headline : t.app.signIn.checkEmail}
         </Text>
         <Text style={styles.copy}>
-          {step === "email"
-            ? "Create a free account to keep watching and save your progress across every series."
-            : `We sent a code to ${email.trim()}.`}
+          {step === "email" ? t.signupWall.bodyNoCount : t.app.signIn.codeSent(email.trim())}
         </Text>
 
         {step === "email" ? (
@@ -162,7 +171,7 @@ export default function SignInScreen() {
             style={styles.input}
             value={email}
             onChangeText={setEmail}
-            placeholder="you@example.com"
+            placeholder={t.seriesEndOverlay.emailPlaceholder}
             placeholderTextColor={colors.inkDim}
             keyboardType="email-address"
             autoCapitalize="none"
@@ -191,7 +200,13 @@ export default function SignInScreen() {
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <GoldButton
-          label={busy ? "Please wait…" : step === "email" ? "Send code" : "Sign in"}
+          label={
+            busy
+              ? t.app.common.pleaseWait
+              : step === "email"
+                ? t.app.signIn.sendCode
+                : t.app.signIn.verify
+          }
           onPress={() => {
             if (!ready) return;
             void (step === "email" ? sendCode() : verifyCode());
@@ -205,26 +220,14 @@ export default function SignInScreen() {
           hitSlop={8}
         >
           <Text style={styles.secondary}>
-            {step === "code" ? "Use a different email" : "Not now"}
+            {step === "code" ? t.app.signIn.differentEmail : t.app.common.notNow}
           </Text>
         </Pressable>
 
-        <Text style={styles.fine}>No card needed. Just an email.</Text>
+        <Text style={styles.fine}>{t.signupWall.noCardNeeded}</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
-}
-
-// Clerk errors carry a user-safe message; anything else gets a generic line
-// rather than leaking an internal string into the UI.
-function messageFor(err: unknown): string {
-  if (typeof err === "object" && err !== null) {
-    const e = err as { errors?: { message?: string }[]; message?: string };
-    const first = e.errors?.[0]?.message;
-    if (first) return first;
-    if (e.message) return e.message;
-  }
-  return "Something went wrong. Try again.";
 }
 
 const styles = StyleSheet.create({
