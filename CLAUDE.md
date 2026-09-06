@@ -444,6 +444,28 @@ urgent — it costs one command.
   gitignored `*-darwin.png`. When a golden fails, download the CI artifact
   `visual-baselines`, look at the diff, and if the change was intended commit
   the regenerated PNGs in the same PR. Never regenerate until green.
+- **The Lab outside vitest (`pnpm lab`, `pnpm lab:build`) runs on a `vitest`
+  shim — and the static build checks itself.** `lab/golden.ts` imports
+  `expect` from `vitest` (the screenshot matcher exists only in vitest's
+  browser mode); in a plain Storybook preview that import throws at module
+  load and used to kill every story that imports `golden` — in `storybook
+  dev` AND in the static build (#78). So `.storybook/main.ts` aliases the
+  bare `vitest` specifier to an inert `tools/lab/test-shim.ts` whenever
+  `process.env.VITEST` is unset (the rule is the pure
+  `tools/lab/test-shim-alias.ts`, unit-tested — shimming under vitest would
+  turn every golden into a vacuous pass, silently); under vitest
+  (`pnpm test:stories`, CI) nothing is aliased. `storybook/test` is
+  deliberately NOT shimmed: `expect/fn/userEvent/within` work in a plain
+  preview, so play functions run for real in `pnpm lab` — only `golden()` is
+  a no-op there, which is the truth anyway. A story importing a name the shim
+  lacks fails the Vite build loudly («is not exported by») — add the export,
+  never widen the shim to `any`. `pnpm lab:build` = `storybook build` +
+  `tools/lab/static-smoke.mjs`: serves `storybook-static/` on a free port,
+  opens one story per stories file in headless Chromium (the playwright the
+  suite already has) and takes the verdict from Storybook's own channel
+  (`storyFinished` vs `playFunctionThrewException` / `storyThrewException` /
+  …) — a dead preview or a failing play exits 1 instead of the old silent 0.
+  Not in CI: nothing consumes the static build yet (registry).
 
 ### Task tracker
 
@@ -771,6 +793,9 @@ sentry.edge.config.ts      # edge init     privacy options from lib/observabilit
 lab/                       # UI Lab gallery pages (token sheet, golden.ts)
 tools/claude/              # board + watcher + janitor scripts (see above)
 tools/qa/                  # no-magic-styles.sh (CI style gate)
+tools/lab/                 # the Lab outside vitest: `vitest` shim + alias
+                           #   rule (+ test) and the post-build smoke that
+                           #   `pnpm lab:build` runs (see UI rules)
 docs/                      # architecture/services/operations/gotchas +
                            #   mega-process/ (playbook), adr/, runbooks/,
                            #   registry.md (loose ends)
