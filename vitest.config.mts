@@ -80,10 +80,10 @@ export default defineConfig({
       //   две тысячи строк player.tsx вошли в измерение; 20.90/20.46/16.85/16.37
       //   по прогону, полы с запасом 0.1 на дрейф между macOS и CI).
       thresholds: {
-        lines: 22.2,
-        functions: 17.5,
-        branches: 17.5,
-        statements: 21.8,
+        lines: 23.1,
+        functions: 19.4,
+        branches: 17.8,
+        statements: 22.6,
       },
     },
 

@@ -21,15 +21,24 @@ const MARKER_NAME = "Leak Marker";
 const MARKER_SECRET = "dummy-db-password";
 const MARKER_DATABASE_URL = `postgres://matio:${MARKER_SECRET}@db.example.invalid/matio`;
 
-const { execute, select, update, insert, batchSend } = vi.hoisted(() => ({
-  execute: vi.fn(),
-  select: vi.fn(),
-  update: vi.fn(),
-  insert: vi.fn(),
-  batchSend: vi.fn(),
-}));
-vi.mock("@/db", () => ({ db: { execute, select, update, insert } }));
+const { execute, select, update, del, insert, batchSend, clerkVerify } = vi.hoisted(
+  () => ({
+    execute: vi.fn(),
+    select: vi.fn(),
+    update: vi.fn(),
+    del: vi.fn(),
+    insert: vi.fn(),
+    batchSend: vi.fn(),
+    clerkVerify: vi.fn(),
+  }),
+);
+vi.mock("@/db", () => ({ db: { execute, select, update, delete: del, insert } }));
 vi.mock("server-only", () => ({}));
+
+// The Clerk webhook's signature check is exercised in its own suite
+// (app/api/webhooks/clerk/route.test.ts); here the event is handed over
+// verified so the audit sees only what the handler itself logs.
+vi.mock("@clerk/nextjs/webhooks", () => ({ verifyWebhook: clerkVerify }));
 // The app's progress route resolves the caller through Clerk; a fixed user
 // keeps the audit on the path that actually reaches the database.
 vi.mock("@clerk/nextjs/server", () => ({
@@ -64,6 +73,7 @@ vi.mock("@/lib/mux-token", () => ({
 
 import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as readyz } from "@/app/api/readyz/route";
+import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
 
 /** Render a console argument the way a log aggregator would see it. */
@@ -97,8 +107,10 @@ beforeEach(() => {
   execute.mockReset();
   select.mockReset();
   update.mockReset();
+  del.mockReset();
   insert.mockReset();
   batchSend.mockReset();
+  clerkVerify.mockReset();
 });
 
 afterEach(() => {
@@ -301,6 +313,60 @@ describe("log audit · reminder dispatch (Resend)", () => {
     expect(logged()).not.toContain(MARKER_EMAIL);
     // What it DOES log: the vendor's error code, which is id/status territory.
     expect(logged()).toContain("application_error");
+  });
+});
+
+describe("log audit · Clerk user.deleted (account erasure)", () => {
+  // The worst case this path logs: the deleted account still has a live
+  // Stripe subscription, so the handler shouts — and the users row it just
+  // read carries the address. Only ids may come out.
+  const USER_ID = "user_marker";
+
+  function selectChain(rows: unknown[]) {
+    const chain = {
+      from: () => chain,
+      where: () => chain,
+      limit: async () => rows,
+    };
+    return chain;
+  }
+
+  function deleteChain(returningRows: unknown[]) {
+    return {
+      where: () =>
+        Object.assign(Promise.resolve(undefined), {
+          returning: async () => returningRows,
+        }),
+    };
+  }
+
+  it("erases an account with a live subscription without logging its address", async () => {
+    clerkVerify.mockResolvedValue({
+      type: "user.deleted",
+      object: "event",
+      data: { id: USER_ID, object: "user", deleted: true },
+    });
+    select
+      .mockImplementationOnce(() =>
+        selectChain([{ email: MARKER_EMAIL, stripeCustomerId: "cus_dummy" }]),
+      )
+      .mockImplementationOnce(() =>
+        selectChain([{ stripeSubscriptionId: "sub_dummy" }]),
+      );
+    del.mockImplementation(() => deleteChain([{ id: "rem_1" }]));
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(
+      new Request("https://matio.tv/api/webhooks/clerk", {
+        method: "POST",
+      }) as never,
+    );
+
+    expect(res.status).toBe(200);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    // What it DOES log: the ids the owner needs to finish the job at Stripe.
+    expect(logged()).toContain(USER_ID);
+    expect(logged()).toContain("sub_dummy");
   });
 });
 
