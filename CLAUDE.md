@@ -379,8 +379,8 @@ urgent — it costs one command.
   (`resolveStage` / `resolveRelease`): `APP_ENV` → `VERCEL_ENV` →
   `development`, and `APP_VERSION` — the version release-please stamps on the
   tag. The browser can only read `NEXT_PUBLIC_*`, so staging needs its own
-  `NEXT_PUBLIC_APP_ENV=staging` or browser events from the bench report as
-  production.
+  `NEXT_PUBLIC_APP_ENV=staging` (it has one) or browser events from the bench
+  report as production.
 - **`/api/healthz` is liveness, `/api/readyz` is readiness.** healthz stays
   deliberately DB-free (an uptime ping must not become load, and a slow
   database must not read as an outage); readyz runs `select 1` against Neon
@@ -507,7 +507,7 @@ urgent — it costs one command.
 - Webhook route handlers declare `export const runtime = "nodejs";` (raw body + DB).
 - Server-only modules use `import "server-only";` so they can't leak into a client bundle.
 - All images go through `next/image`. `images.remotePatterns` in `next.config.ts` allowlists `image.mux.com` (Mux thumbnails) and `*.public.blob.vercel-storage.com` (Blob-hosted poster/hero artwork) — any other host throws at render on the public pages. Use `fill` + `sizes` for absolutely-positioned cover images; raw `<img>` is reserved for cases where the Safari < 16.4 `aspect-ratio` quirk requires pinning the img's own intrinsic ratio (see `components/site/poster.tsx`) and for admin-only previews of arbitrary URLs.
-- The hero `MuxPlayer` on `/` is `next/dynamic({ ssr: false })` — keep it that way (a static import pulls ~350KB gzipped into every cold home-page visit) — **and keep its `key={muxDataEnabled ? "mux-data-on" : "mux-data-off"}`**: flipping `disable-tracking`/`env-key` on a live element makes @mux/mux-video run `unload(); …then(() => play())` with no `.catch`, and the orphaned play() lands in Sentry as an unhandled AbortError (issue #126, seen in prod 2026-08-24). This is the OPPOSITE rule to the watch player, where a remount kills WebKit's per-element autoplay blessing (`key` forbidden there) — and freezing consent into a mount-time snapshot is forbidden everywhere (the AUDIT.md H2 pre-consent leak). **The watch player is a different library and needs no remount** (#127): `@mux/mux-video-react` renders a bare `<video>` and reads the Mux Data props only inside playback-core's `initialize()` (effect keyed on the src), so a consent flip there never touches the stream — but it also never stops a running monitor, which is why `components/watch/player.tsx` calls mux-embed's `video.mux.destroy()` on withdrawal (beacons stop on the spot; a grant lands at the next initialize — auto-advance, token refresh or manual swap) and `clearMarketingCookies` expires `muxData`. Both contracts are pinned by `components/watch/player.test.tsx` against the real wrapper; see [gotchas → Mux](./docs/gotchas.md#mux-sdk-14).
+- The hero `MuxPlayer` on `/` is `next/dynamic({ ssr: false })` — keep it that way (a static import pulls ~350KB gzipped into every cold home-page visit) — **and keep its `key={muxDataEnabled ? "mux-data-on" : "mux-data-off"}`**: flipping `disable-tracking`/`env-key` on a live element makes @mux/mux-video run `unload(); …then(() => play())` with no `.catch`, and the orphaned play() lands in Sentry as an unhandled AbortError (issue #126, seen in prod 2026-08-24). This is the OPPOSITE rule to the watch player, where a remount kills WebKit's per-element autoplay blessing (`key` forbidden there) — and freezing consent into a mount-time snapshot is forbidden everywhere (the AUDIT.md H2 pre-consent leak). **The watch player is a different library and needs no remount** (#127): `@mux/mux-video-react` renders a bare `<video>` and reads the Mux Data props only inside playback-core's `initialize()` (effect keyed on the src), so a consent flip there never touches the stream — but it also never stops a running monitor, which is why `components/watch/player.tsx` calls mux-embed's `video.mux.destroy()` on withdrawal (beacons stop on the spot; a grant lands at the next initialize — auto-advance, token refresh or manual swap) and `clearMarketingCookies` expires `muxData`. Both contracts are pinned by `components/watch/player.test.tsx` against the real wrapper; see [gotchas → Mux](./docs/gotchas.md#mux-sdk-14). **The hero's `onError` reacts to FATAL errors only** (#128): `<mux-player>` forwards every playback-core `error` — recoverable ones included (`detail.fatal === false`, e.g. the "Attempting to reconnect…" MediaError) — and the player's own handler drops the non-fatal ones, so ours does too. A fatal error puts the backdrop back (`videoPlaying` reset) and unmounts the player; the one fatal error we fix ourselves is the 60s preview token running out under the looping teaser (JWT `exp` read client-side — that also covers Safari's native HLS, where playback-core attaches no `NETWORK_TOKEN_EXPIRED` code): the hero fetches `/api/hero-preview-token` (the same featured-show / first-episode / 60s mint the page embeds — `lib/hero-preview.ts`) and remounts with it, at most 20 cycles per page, then rests on the backdrop. Nothing on that path throws or logs — no new Sentry source.
 
 ## File structure
 
@@ -571,6 +571,9 @@ app/
     healthz/               # /api/healthz — liveness + which build is live
                            #   (status/version/commit/environment). NEVER
                            #   touches the database, on purpose
+    hero-preview-token/    # /api/hero-preview-token — re-mints the home
+                           #   hero's 60s preview JWT for the looping teaser
+                           #   (same featured-show rule as the page; #128)
     playback-token/        # /api/playback-token — Mux JWT issuer
     readyz/                # /api/readyz — real readiness: `select 1` against
                            #   Neon, 2s ceiling, 503 + a reason code
@@ -662,6 +665,9 @@ lib/
                            #   idempotent mirror inline)
   catalog.ts               # getPublishedShows() cached via unstable_cache
                            #   (tag 'catalog'); shared by / + /sitemap.xml
+  hero-preview.ts          # server-only: pickFeaturedShow + resolveHeroPreview
+                           #   (featured show → first ready episode → 60s
+                           #   JWT); shared by / and /api/hero-preview-token
   cookie-consent.ts        # cookie_consent parse/serialize, banner helpers
                            #   (universal — imported by proxy.ts AND banner)
   slug.ts                  # SLUG_PATTERN/isValidSlug/slugify (RU translit) —
@@ -950,12 +956,13 @@ infra/
   order note for migration 0023 is history (applied 2026-07-18).
 - **Sentry — LIVE in prod since v0.5.0 (2026-08-16)**: org `deep-ordinary`
   (region EU), project `javascript-nextjs`. `NEXT_PUBLIC_SENTRY_DSN` is baked
-  at build time. The staging bench had a DSN verified with a live event during
-  stage 07, but carries **no `NEXT_PUBLIC_APP_ENV=staging`** — any browser
-  event from the bench reports `environment: production`; the reliable
-  discriminator is `request.url` (the #126 triage lesson, also in
-  docs/registry.md). Source maps are off (`SENTRY_ORG/PROJECT/AUTH_TOKEN`
-  unset) — prod stack traces name minified chunks.
+  at build time. The staging project carries its own `NEXT_PUBLIC_SENTRY_DSN`
+  AND `NEXT_PUBLIC_APP_ENV=staging` (both since 2026-08-15, verified
+  2026-09-06 via `vercel env ls` on the staging project — an earlier note
+  claiming the bench lacked `APP_ENV` was wrong), so bench events report
+  `environment: staging`; `request.url` remains the belt-and-braces
+  discriminator. Source maps are off (`SENTRY_ORG/PROJECT/AUTH_TOKEN` unset)
+  — prod stack traces name minified chunks (registry row).
 - **Resend email — LIVE.** Domain `matio.tv` verified (region eu-west-1), DNS
   in place: DKIM at `resend._domainkey`, `send.matio.tv` MX →
   `feedback-smtp.eu-west-1.amazonses.com` + SPF `include:amazonses.com`, and

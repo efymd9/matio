@@ -1,5 +1,5 @@
 import { preconnect, prefetchDNS } from "react-dom";
-import { and, asc, count, eq, inArray } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons } from "@/db/schema";
 import { ContinueWatchingRow } from "@/components/site/continue-watching-row";
@@ -13,74 +13,15 @@ import { paymentsEnabled } from "@/lib/free-mode";
 import { auth } from "@clerk/nextjs/server";
 import { PurchaseBeacon } from "@/components/site/purchase-beacon";
 import { verifyCheckoutReturn } from "@/lib/checkout-return-verify";
-import { signMuxPlaybackToken } from "@/lib/mux-token";
+import { pickFeaturedShow, resolveHeroPreview } from "@/lib/hero-preview";
 import { getDict } from "@/lib/i18n/server";
 import { catalogItemListJsonLd, jsonLdScript } from "@/lib/structured-data";
-import { TRIAL_DURATION_SECONDS } from "@/lib/trial";
-// The hero auto-plays a muted preview of the featured show's first episode.
-// The signed JWT we mint here ends up in the HTML, so anyone can extract it
-// and stream the asset directly. Cap the TTL to the trial duration so the
-// preview window never exposes more than what /watch already gives an
-// anonymous visitor for free. (Defense-in-depth: also configure referrer
-// restrictions on the Mux signing key — see docs/services.md.)
-const PREVIEW_TTL_SECONDS = TRIAL_DURATION_SECONDS;
 
 // Force dynamic rendering. The hero embeds a 60s Mux JWT in the HTML — if
 // the page were prerendered at build time (Next 16's default for pure DB
 // reads) or CDN-cached for more than ~60s, the JWT would be dead on arrival
 // for almost every visitor. Each request must mint a fresh token.
 export const dynamic = "force-dynamic";
-
-// First ready episode of the show's first season → muted hero preview
-// (playback id + signed token when the asset uses a signed policy).
-async function resolveHeroPreview(showId: string): Promise<{
-  previewPlaybackId: string | null;
-  previewToken: string | null;
-}> {
-  const featuredSeasons = await db
-    .select({ id: seasons.id })
-    .from(seasons)
-    .where(eq(seasons.showId, showId))
-    .orderBy(asc(seasons.number))
-    .limit(1);
-  if (featuredSeasons.length === 0) {
-    return { previewPlaybackId: null, previewToken: null };
-  }
-
-  const [readyEp] = await db
-    .select({
-      muxPlaybackId: episodes.muxPlaybackId,
-      muxPlaybackPolicy: episodes.muxPlaybackPolicy,
-    })
-    .from(episodes)
-    .where(
-      and(
-        inArray(
-          episodes.seasonId,
-          featuredSeasons.map((s) => s.id),
-        ),
-        eq(episodes.status, "ready"),
-      ),
-    )
-    .orderBy(asc(episodes.number))
-    .limit(1);
-
-  if (!readyEp?.muxPlaybackId) {
-    return { previewPlaybackId: null, previewToken: null };
-  }
-  let previewToken: string | null = null;
-  if (readyEp.muxPlaybackPolicy === "signed") {
-    try {
-      previewToken = signMuxPlaybackToken(
-        readyEp.muxPlaybackId,
-        PREVIEW_TTL_SECONDS,
-      );
-    } catch {
-      previewToken = null;
-    }
-  }
-  return { previewPlaybackId: readyEp.muxPlaybackId, previewToken };
-}
 
 export default async function HomePage({
   searchParams,
@@ -108,7 +49,9 @@ export default async function HomePage({
   // query is cached, not the page itself.
   const published = await getPublishedShows();
 
-  if (published.length === 0) {
+  // Featured-show rule shared with /api/hero-preview-token (lib/hero-preview).
+  const featured = pickFeaturedShow(published);
+  if (!featured) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background px-6 text-center">
         <div className="flex flex-col items-center gap-5">
@@ -126,11 +69,6 @@ export default async function HomePage({
       </main>
     );
   }
-
-  const featured =
-    published.find((s) => s.featured) ??
-    published.find((s) => !!s.heroImageUrl) ??
-    published[0];
 
   // The three remaining reads are independent — run them in parallel so a
   // warm request pays one Neon round-trip of latency, not three in series
