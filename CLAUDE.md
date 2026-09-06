@@ -32,9 +32,10 @@ Always check these before changing integrations or guessing API shapes:
 
 The development process itself is a playbook in [docs/mega-process/](./docs/mega-process/)
 (stages 01–10). It is being rolled out stage by stage; every stage is tracked as
-an issue on the board. Stages 01–08 are in force; **09 (load testing) and 10
-(privacy/GDPR) are not rolled out yet** — 10 is the natural next module, and a
-prerequisite for mobile push notifications (#98). What is already in force:
+an issue on the board. Stages 01–08 and 10 are in force; **09 (load testing)
+is not rolled out yet**. Stage 10 (privacy/GDPR) landed 2026-09-06 as the
+`/gdpr` skill — a prerequisite for mobile push notifications (#98); its "legal
+frame" section is a DRAFT pending a lawyer's review. What is already in force:
 
 ### Core rules
 
@@ -50,6 +51,18 @@ prerequisite for mobile push notifications (#98). What is already in force:
   `lib/observability.ts` with their own suite. The audit is meant to GROW: a
   new server path that logs, or a new field on the error payload, gets a case
   there in the SAME PR.
+- **Personal data changes run through `/gdpr`.** Any PR that touches personal
+  data — a new field / table / cache key holding user data, a new external
+  service or SDK that sees it, a change to what emails, pushes, analytics
+  events or (should one ever appear) LLM prompts carry, a new log/capture/track
+  call — runs the «new feature → obligations» checklist in
+  `.claude/skills/gdpr/SKILL.md` and updates the data map
+  (`.claude/skills/gdpr/references/data-map.md`) and the processor table
+  (`references/processors.md`) in the SAME PR. A new processor also gets a
+  `docs/registry.md` row until its DPA status is confirmed. Every spec ends
+  with a `GDPR: …` line before it can be `spec:ready` (`/spec`), and `/review`
+  checks the «Данные» item as a live gate. Erasure and retention gaps are
+  issues on the board (#161–#165), never silent fixes or silent omissions.
 - **Incidents start in the tracker, not in someone's memory.** A spike of
   errors in Sentry, a red nightly workflow, a 5xx spotted by hand → an issue
   first (`gh issue create` with `type:bug` + `domain:*` + priority by impact,
@@ -144,8 +157,9 @@ auto-merge is armed by the main session only, only after review.
 - Skills in `.claude/skills/`: `/duty` (the main session's start-of-day ritual
   — arm BOTH queue watchers via Monitor: `tools/claude/pr_watcher.sh` and
   `issue_watcher.sh`; autopilot dispatch; cleanup), `/spec`, `/release`,
-  `/devops`, `/review`. They are LIVE documents — change the process, update
-  the skill in the same PR.
+  `/devops`, `/review`, `/gdpr` (privacy checklist + `references/data-map.md`
+  + `references/processors.md` — stage 10). They are LIVE documents — change
+  the process, update the skill in the same PR.
 - `tools/claude/` beyond `board_status.sh` and `pr_babysit.sh`:
   `pr_watcher.sh` + `issue_watcher.sh` (queue watchers), `watcher_guard.sh` +
   `babysit_guard.sh` (Stop hooks), `wt_janitor.py`, `link_shared_memory.py`,
