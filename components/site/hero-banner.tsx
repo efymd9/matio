@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
-import { Fragment, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { TONE_GRADIENT, toneFor } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
@@ -21,6 +21,79 @@ const MUX_DATA_ENV_KEY = process.env.NEXT_PUBLIC_MUX_DATA_ENV_KEY ?? "";
 const MuxPlayer = dynamic(() => import("@mux/mux-player-react"), {
   ssr: false,
 });
+
+// Where the player asks for a fresh preview token once the server-rendered
+// one has expired (app/api/hero-preview-token/route.ts). That token lives
+// HERO_PREVIEW_TTL_SECONDS (60s) while the teaser loops for as long as the
+// visitor stays — without a refresh the stream died after ~90s and the hero
+// sat on an empty background for the rest of the visit (issue #128).
+const HERO_PREVIEW_TOKEN_PATH = "/api/hero-preview-token";
+// Each fresh token buys one more cycle (60s of TTL plus whatever hls.js had
+// buffered). A tab parked on `/` for a day would otherwise call the route
+// forever; after this many cycles the hero rests on the backdrop instead.
+const MAX_TOKEN_REFRESHES = 20;
+
+// What `<mux-player>` hands its `error` listeners. @mux/playback-core builds a
+// MediaError — `{ code, fatal, muxCode, … }` — and dispatches it as
+// `CustomEvent("error", { detail })`; @mux/mux-video re-dispatches it through
+// the shadow roots with the same detail (dist/base.mjs, `handleEvent`). The
+// player's OWN handler ignores everything that is not fatal —
+// `if (!(a?.fatal)) { warn(a); return; }` (@mux/mux-player dist/base.mjs) —
+// because recoverable errors DO come through: playback-core's "Attempting to
+// reconnect..." is dispatched with `fatal: false` while hls.js retries. Mirror
+// the library: a non-fatal error is its business, and reacting to it is how
+// the teaser used to vanish for good.
+type PlayerError = { code?: number; fatal?: boolean };
+
+function isFatalPlayerError(event: Event): boolean {
+  const detail = (event as CustomEvent<unknown>).detail;
+  // The native `error` event carries no detail; the element still exposes the
+  // error object, which is where the library's handler reads it too.
+  const target = event.currentTarget as { media?: { error?: unknown } } | null;
+  const raw = detail ?? target?.media?.error;
+  if (typeof raw !== "object" || raw === null) return false;
+  const { code, fatal } = raw as PlayerError;
+  // MediaError derives `fatal` from the code when its constructor is not told:
+  // 2 (NETWORK) … 5 (ENCRYPTED) are fatal, 1 (ABORTED) is not
+  // (@mux/playback-core dist/index.mjs, `class MediaError`).
+  return fatal ?? (typeof code === "number" && code >= 2 && code <= 5);
+}
+
+// `exp` of the compact JWT (seconds since the epoch, RFC 7519 §4.1.4) — the
+// only question is whether the token's clock has run out. playback-core does
+// this same parse to label a 403 "token expired" on the hls.js path
+// (muxCode NETWORK_TOKEN_EXPIRED); reading it ourselves also covers Safari's
+// native HLS path, where no such label is ever attached.
+function tokenExpired(token: string | null, now = Date.now()): boolean {
+  if (!token) return false;
+  try {
+    const [, payload = ""] = token.split(".");
+    const { exp } = JSON.parse(
+      atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
+    ) as { exp?: unknown };
+    return typeof exp === "number" && exp * 1000 <= now;
+  } catch {
+    return false;
+  }
+}
+
+// Best-effort by design: anything but a fresh token for THIS playback id
+// (route down, featured show changed meanwhile, public asset with no token)
+// leaves the hero on the backdrop — never a throw, never a Sentry event.
+async function fetchFreshPreviewToken(
+  playbackId: string,
+): Promise<string | null> {
+  try {
+    const res = await fetch(HERO_PREVIEW_TOKEN_PATH, { cache: "no-store" });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { playbackId?: unknown; token?: unknown };
+    return body.playbackId === playbackId && typeof body.token === "string"
+      ? body.token
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 // Cinema-style hero (gold-duotone redesign). Layers bottom-up:
 //   1. backdrop image OR tone gradient
@@ -57,7 +130,14 @@ export function HeroBanner({
   paymentsOn: boolean;
 }) {
   const [videoPlaying, setVideoPlaying] = useState(false);
+  // No player mounted: after a fatal error, and for the round-trip to a fresh
+  // token. The backdrop stands in either way — see handlePlayerError.
   const [videoFailed, setVideoFailed] = useState(false);
+  // What the CURRENT player instance plays with: the server-rendered token
+  // first, then whatever the token route hands back once that one expires.
+  const [token, setToken] = useState(previewToken);
+  const tokenRefreshes = useRef(0);
+  const tokenRefreshInFlight = useRef(false);
   const backdrop = heroImageUrl ?? posterImageUrl;
   const tone = toneFor(slug);
   const t = useT();
@@ -78,6 +158,38 @@ export function HeroBanner({
     setPrevMuxDataEnabled(muxDataEnabled);
     setVideoPlaying(false);
   }
+
+  // Issue #128: `onError` used to hide the player for good on ANY error and
+  // left `videoPlaying` set — so a recoverable hiccup, or the 60s token dying
+  // under the looping teaser, collapsed the hero into an empty background
+  // until the next page load.
+  const handlePlayerError = (event: Event) => {
+    // Recoverable: hls.js is retrying and the player itself just logs and
+    // moves on. Touching state here is exactly the old bug.
+    if (!isFatalPlayerError(event)) return;
+    // Fatal: the backdrop comes back to full opacity and the dead instance
+    // goes (it has the library's error dialog up by now).
+    setVideoPlaying(false);
+    setVideoFailed(true);
+    // The one fatal error that is ours to fix: the preview token ran out. Ask
+    // for a fresh one and remount; every other failure stays on the backdrop.
+    if (
+      !previewPlaybackId ||
+      !tokenExpired(token) ||
+      tokenRefreshInFlight.current ||
+      tokenRefreshes.current >= MAX_TOKEN_REFRESHES
+    ) {
+      return;
+    }
+    tokenRefreshes.current += 1;
+    tokenRefreshInFlight.current = true;
+    void fetchFreshPreviewToken(previewPlaybackId).then((fresh) => {
+      tokenRefreshInFlight.current = false;
+      if (!fresh) return;
+      setToken(fresh);
+      setVideoFailed(false);
+    });
+  };
 
   // Meta row: genre · N episodes · 16+ (· year on tablet/desktop). Each entry
   // flags whether it's hidden below the tablet breakpoint; only the genre
@@ -133,7 +245,7 @@ export function HeroBanner({
           // the moment a viewer withdraws it (the AUDIT.md H2 leak).
           key={muxDataEnabled ? "mux-data-on" : "mux-data-off"}
           playbackId={previewPlaybackId}
-          tokens={previewToken ? { playback: previewToken } : undefined}
+          tokens={token ? { playback: token } : undefined}
           autoPlay="muted"
           loop
           muted
@@ -160,7 +272,7 @@ export function HeroBanner({
             "--media-object-position": "center",
           }}
           onPlaying={() => setVideoPlaying(true)}
-          onError={() => setVideoFailed(true)}
+          onError={handlePlayerError}
         />
       )}
 
