@@ -10,7 +10,7 @@ import { createPortal } from "react-dom";
 const subscribe = () => () => {};
 const getClientSnapshot = () => true;
 const getServerSnapshot = () => false;
-import { TONE_GRADIENT, toneFor } from "@/lib/design";
+import { GOLD_GLOW, TONE_GRADIENT, toneFor } from "@/lib/design";
 import { Icon } from "@/components/site/icon";
 import { useT } from "@/lib/i18n/client";
 import { isEpisodeLocked, type Mode, type PlayerEpisode } from "./player";
@@ -176,8 +176,7 @@ export function EpisodesOverlay({
                                 className="absolute inset-0 opacity-30"
                                 aria-hidden
                                 style={{
-                                  backgroundImage:
-                                    "radial-gradient(circle at 50% 50%, rgba(230,179,102,0.25), transparent 60%)",
+                                  backgroundImage: GOLD_GLOW,
                                 }}
                               />
                             )}
@@ -196,7 +195,6 @@ export function EpisodesOverlay({
                                         : "play"
                                   }
                                   size={12}
-                                  color="#f6efe4"
                                 />
                               </div>
                             </div>

@@ -26,7 +26,7 @@ import { ActorChip } from "@/components/site/actor-chip";
 import { Icon } from "@/components/site/icon";
 import { MetaDot } from "@/components/site/meta-dot";
 import { ShareButton } from "@/components/site/share-button";
-import { TONE_GRADIENT, toneFor } from "@/lib/design";
+import { SHOW_HERO_SCRIM, TONE_GRADIENT, toneFor } from "@/lib/design";
 import { cn } from "@/lib/utils";
 
 // Per-show metadata: makes Slack / Twitter / iMessage unfurls show the
@@ -275,8 +275,7 @@ export default async function ShowDetailPage({
           aria-hidden
           className="pointer-events-none absolute inset-0"
           style={{
-            backgroundImage:
-              "linear-gradient(to top, #0f0a07 4%, rgba(15,10,7,0.4) 45%, transparent 70%)",
+            backgroundImage: SHOW_HERO_SCRIM,
           }}
         />
         <div
@@ -338,9 +337,9 @@ export default async function ShowDetailPage({
             {totalEpisodes > 0 && (
               <Link
                 href={`/watch/${show.slug}`}
-                className="inline-flex h-[54px] w-full items-center justify-center gap-2 rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform active:scale-[0.98] tablet:w-auto tablet:min-w-[220px] tablet:self-start"
+                className="inline-flex h-[54px] w-full items-center justify-center gap-2 rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-cta transition-transform active:scale-[0.98] tablet:w-auto tablet:min-w-[220px] tablet:self-start"
               >
-                <Icon name="play" size={17} color="#241205" />
+                <Icon name="play" size={17} />
                 {t.showDetail.play}
               </Link>
             )}
@@ -522,8 +521,8 @@ function EpisodeRow({
             </>
           )}
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-burgundy/80 backdrop-blur-md">
-              <Icon name="play" size={11} color="#f6efe4" />
+            <div className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-burgundy/80 text-cream backdrop-blur-md">
+              <Icon name="play" size={11} />
             </div>
           </div>
         </div>

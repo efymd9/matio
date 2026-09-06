@@ -97,7 +97,7 @@ export function ActorChip({
           ref={cardRef}
           id={cardId}
           role="tooltip"
-          className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-3 w-64 rounded-2xl border border-rust/30 bg-espresso-2 p-4 shadow-[0_20px_50px_rgba(0,0,0,0.6)]"
+          className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-3 w-64 rounded-2xl border border-rust/30 bg-espresso-2 p-4 shadow-hover-card"
           style={{ transform: `translateX(calc(-50% + ${shift}px))` }}
         >
           <div className="flex items-center gap-3">

@@ -451,9 +451,9 @@ async function ComingSoon({
     <div className="glow-floor fixed inset-0 z-50 flex flex-col bg-espresso px-6">
       <Link
         href={`/shows/${showSlug}`}
-        className="bg-gold-cta absolute left-6 top-[max(env(safe-area-inset-top),1.25rem)] inline-flex h-10 items-center gap-2 rounded-full px-5 text-sm font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
+        className="bg-gold-cta absolute left-6 top-[max(env(safe-area-inset-top),1.25rem)] inline-flex h-10 items-center gap-2 rounded-full px-5 text-sm font-extrabold text-gold-deep shadow-cta transition-transform hover:scale-[1.02] active:scale-[0.98]"
       >
-        <Icon name="back" size={16} color="#241205" />
+        <Icon name="back" size={16} />
         {showTitle}
       </Link>
       <div className="flex flex-1 items-center justify-center">

@@ -167,7 +167,7 @@ function MobileNavMenu({
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner sideOffset={6} align="end">
-          <Menu.Popup className="z-50 min-w-[10rem] rounded-2xl border border-rust/30 bg-espresso-2/95 p-1 text-sm text-cream shadow-[0_18px_40px_-18px_rgba(0,0,0,0.6)] backdrop-blur-xl outline-none data-[open]:animate-in data-[open]:fade-in-0 data-[open]:zoom-in-95 data-[closed]:animate-out data-[closed]:fade-out-0 data-[closed]:zoom-out-95">
+          <Menu.Popup className="z-50 min-w-[10rem] rounded-2xl border border-rust/30 bg-espresso-2/95 p-1 text-sm text-cream shadow-popup backdrop-blur-xl outline-none data-[open]:animate-in data-[open]:fade-in-0 data-[open]:zoom-in-95 data-[closed]:animate-out data-[closed]:fade-out-0 data-[closed]:zoom-out-95">
             <Menu.Item
               closeOnClick
               className="block rounded-md px-3 py-2.5 text-sm font-medium text-cream/85 outline-none transition-colors data-[highlighted]:bg-cream/8 data-[highlighted]:text-cream"

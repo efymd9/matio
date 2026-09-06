@@ -72,3 +72,36 @@ export const PALETTE = {
 // Pre-composed because React Native has no CSS color-mix equivalent.
 export const INK_MUTED = "rgba(246,239,228,0.72)";
 export const INK_DIM = "rgba(246,239,228,0.5)";
+
+// Scrims and glows (#31). These used to be inline-style literals in the
+// features; they are the same strings verbatim — a gradient that "looks the
+// same" is not the same, and the goldens compare at 0.1%. All inline-style
+// (not Tailwind) because they carry alpha stops and, for the OG image, run
+// through Satori, which has no CSS variables. rgba(15,10,7,…) is espresso,
+// rgba(230,179,102,…) gold, rgba(143,47,28,…) burgundy.
+
+// Home hero: the bottom fade into the page background, and the left-column
+// scrim behind the copy (tablet/desktop only).
+export const HERO_SCRIM_BOTTOM = `linear-gradient(to top, ${PALETTE.espresso} 4%, rgba(15,10,7,0.4) 40%, transparent 66%)`;
+export const HERO_SCRIM_SIDE =
+  "linear-gradient(to right, rgba(15,10,7,0.85), rgba(15,10,7,0.35), transparent)";
+// Show page hero backdrop — same idea as HERO_SCRIM_BOTTOM, slightly longer
+// fade (45%/70%) because the title block sits lower there.
+export const SHOW_HERO_SCRIM = `linear-gradient(to top, ${PALETTE.espresso} 4%, rgba(15,10,7,0.4) 45%, transparent 70%)`;
+// Paywall / signup wall: the near-opaque fade that keeps the wall copy
+// legible over the dimmed artwork.
+export const WALL_SCRIM =
+  "linear-gradient(to top, rgba(15,10,7,0.97) 30%, rgba(15,10,7,0.55) 60%, rgba(15,10,7,0.25) 100%)";
+// Centred gold glow — the artwork stand-in on episode thumbnails (episodes
+// overlay, up-next card); the call site sets the opacity.
+export const GOLD_GLOW =
+  "radial-gradient(circle at 50% 50%, rgba(230,179,102,0.25), transparent 60%)";
+// Burgundy glow bleeding in from the top edge of the series-end dialog.
+export const BURGUNDY_GLOW =
+  "radial-gradient(circle at 50% 0%, rgba(143,47,28,0.4), transparent 60%)";
+// OpenGraph image (Satori): legibility scrim over a photo, and the glow pair
+// that stands in for artwork when there is none.
+export const OG_PHOTO_SCRIM =
+  "linear-gradient(180deg, rgba(15,10,7,0.15) 0%, rgba(15,10,7,0.6) 55%, rgba(15,10,7,0.97) 100%)";
+export const OG_NO_ART_GLOW =
+  "radial-gradient(circle at 26% 20%, rgba(230,179,102,0.16), transparent 55%), radial-gradient(ellipse at 50% 115%, rgba(143,47,28,0.45), transparent 55%)";

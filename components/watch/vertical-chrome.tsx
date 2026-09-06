@@ -122,9 +122,9 @@ export function VerticalChrome({
         aria-label={t.player.playPauseAria}
       >
         <span slot="play" className="contents">
-          <span className="bg-gold-cta flex h-20 w-20 items-center justify-center rounded-full text-gold-deep shadow-[0_20px_50px_-16px_rgba(230,179,102,0.6)]">
+          <span className="bg-gold-cta flex h-20 w-20 items-center justify-center rounded-full text-gold-deep shadow-play">
             <span className="-mr-1 inline-flex">
-              <Icon name="play" size={36} color="#241205" />
+              <Icon name="play" size={36} />
             </span>
           </span>
         </span>
@@ -169,7 +169,7 @@ export function VerticalChrome({
           }}
           className="absolute left-1/2 top-[calc(max(env(safe-area-inset-top),1rem)+3.25rem)] z-30 inline-flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/55 px-4 py-2 text-xs font-bold text-cream backdrop-blur-xl transition-colors hover:bg-black/70"
         >
-          <Icon name="mute" size={14} color="#e6b366" />
+          <Icon name="mute" size={14} className="text-gold" />
           {t.player.tapForSound}
         </button>
       ) : null}
@@ -179,7 +179,7 @@ export function VerticalChrome({
         <button
           type="button"
           onClick={onSkipIntro}
-          className="bg-gold-cta absolute bottom-40 right-4 z-30 inline-flex h-[38px] items-center rounded-full px-5 text-[13px] font-extrabold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
+          className="bg-gold-cta absolute bottom-40 right-4 z-30 inline-flex h-[38px] items-center rounded-full px-5 text-[13px] font-extrabold text-gold-deep shadow-cta transition-transform hover:scale-[1.02] active:scale-[0.98]"
         >
           {t.player.skipIntro}
         </button>
@@ -205,9 +205,9 @@ export function VerticalChrome({
           aria-label={t.player.playPauseAria}
           className="absolute inset-0 z-30 flex items-center justify-center"
         >
-          <span className="bg-gold-cta flex h-20 w-20 items-center justify-center rounded-full text-gold-deep shadow-[0_20px_50px_-16px_rgba(230,179,102,0.6)]">
+          <span className="bg-gold-cta flex h-20 w-20 items-center justify-center rounded-full text-gold-deep shadow-play">
             <span className="-mr-1 inline-flex">
-              <Icon name="play" size={36} color="#241205" />
+              <Icon name="play" size={36} />
             </span>
           </span>
         </button>

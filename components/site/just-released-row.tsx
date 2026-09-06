@@ -25,7 +25,7 @@ export async function JustReleasedRow({ shows }: { shows: Show[] }) {
                 title={show.title}
                 badge={show.justReleased ? t.home.newBadge : null}
                 rounded="card"
-                className="aspect-[2/3] shadow-[0_14px_30px_-14px_rgba(0,0,0,0.8)] transition-transform duration-500 group-hover:scale-[1.02]"
+                className="aspect-[2/3] shadow-card transition-transform duration-500 group-hover:scale-[1.02]"
               />
               <div className="flex flex-col gap-0.5 px-0.5">
                 <p className="text-[13px] font-semibold leading-tight text-cream">

@@ -52,7 +52,7 @@ export function ShareButton({
       <Icon
         name={copied ? "check" : "share"}
         size={18}
-        color={copied ? "#e6b366" : "currentColor"}
+        className={copied ? "text-gold" : undefined}
       />
     </button>
   );
