@@ -405,6 +405,33 @@ function EpisodePlayback({
   // effect), so the consent value is settled before it mounts.
   const marketingConsent = useMarketingConsent();
   const muxDataEnabled = marketingConsent && !!MUX_DATA_ENV_KEY;
+  // What a consent flip does to the LIVE element (issue #127). This is NOT
+  // the hero's situation: <mux-player> is a custom element whose
+  // attributeChangedCallback tears the stream down on `disable-tracking`
+  // (#126), whereas @mux/mux-video-react renders a bare <video> and reads
+  // envKey/disableTracking/disableCookies ONLY inside playback-core's
+  // initialize(), from an effect keyed on the src alone (dist/index.mjs:
+  // `useEffect(() => { … initialize(t, a, …) … }, [d])`, d = the Mux URL).
+  // So flipping the props on <MuxVideo> mid-episode never unloads, reloads
+  // or play()s anything — no orphan rejection is possible on this path —
+  // but it also changes NOTHING on a monitor that is already running.
+  //
+  // A GRANT therefore takes effect at the next initialize (auto-advance src
+  // swap, token-refresh remount, manual swap): the conservative direction —
+  // nothing fires without consent, the viewer is merely unmeasured until the
+  // next episode. A WITHDRAWAL must not wait for that: stop the running
+  // monitor on the spot through mux-embed's own `video.mux.destroy()` — the
+  // very call playback-core's teardown makes. It removes the element
+  // listeners, flushes the final view-end beacon (the same one teardown
+  // would send at the next episode, only earlier), and marks the handle
+  // `deleted`, so that later teardown skips it. The stream is untouched, and
+  // the next initialize sees disableTracking=true and stays off. The muxData
+  // cookie is cleared by the banner (clearMarketingCookies).
+  useEffect(() => {
+    if (muxDataEnabled) return;
+    const handle = videoRef.current?.mux;
+    if (handle && !handle.deleted) handle.destroy();
+  }, [muxDataEnabled]);
   // Mirrored ref + state: ref handles the fast tick comparison inside the
   // 10s interval (avoids re-creating the interval on every save), state
   // is what the paywall branch reads (refs can't be accessed in render).
