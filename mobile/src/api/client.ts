@@ -3,7 +3,10 @@ import type {
   ApiErrorCode,
   AppConfig,
   CatalogResponse,
+  ContinueResponse,
   PlaybackTokenResponse,
+  SaveProgressRequest,
+  SaveProgressResponse,
   ShowDetail,
 } from "@/shared/api-types";
 import { getDeviceId } from "./device";
@@ -71,7 +74,7 @@ function isErrorBody(value: unknown): value is ApiErrorBody {
 // "anonymous, untracked" — which the server handles — instead of stalling.
 const PREFLIGHT_TIMEOUT_MS = 3_000;
 
-async function settleOrNull<T>(p: Promise<T>, ms: number): Promise<T | null> {
+export async function settleOrNull<T>(p: Promise<T>, ms: number): Promise<T | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
@@ -159,6 +162,11 @@ export const api = {
       method: "POST",
       body: { episodeId },
     }),
+  // Signed-in only (401 otherwise) — the caller gates on auth so a refused
+  // request is never even sent. See watch/use-progress-saver.ts.
+  saveProgress: (body: SaveProgressRequest) =>
+    request<SaveProgressResponse>("/api/v1/progress", { method: "POST", body }),
+  continueWatching: () => request<ContinueResponse>("/api/v1/continue"),
 };
 
 // Mux HLS URL for a signed playback ID. Kept here so the URL shape lives next

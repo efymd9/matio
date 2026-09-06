@@ -8,18 +8,25 @@ import { TRIAL_COOKIE } from "@/lib/trial";
 
 // One "keep watching" tile. `fraction` is the resume playhead as a share of
 // the episode's duration, clamped to [0, 1]. `updatedAt` drives ordering
-// (most-recently-watched first). Resume position itself is resolved
+// (most-recently-watched first). On the web the resume position is resolved
 // server-side on /watch — the tile deep-links to the episode (?ep=) so the
-// click lands on the same episode the tile promises.
+// click lands on the same episode the tile promises. The app has no such
+// server render, so the tile also carries the raw `positionSeconds` /
+// `durationSeconds` (and the show's orientation, which picks its player
+// chrome) — additive fields the web rail simply ignores.
 export type ContinueWatchingItem = {
   show: {
     slug: string;
     title: string;
+    orientation: "horizontal" | "vertical";
     heroImageUrl: string | null;
     posterImageUrl: string | null;
   };
   episodeId: string;
   episodeNumber: number;
+  episodeTitle: string;
+  positionSeconds: number;
+  durationSeconds: number;
   fraction: number;
   updatedAt: Date;
 };
@@ -29,11 +36,6 @@ export type ContinueWatchingItem = {
 // only the latest-touched show, so over-fetch then collapse in JS.
 const CANDIDATE_LIMIT = 48;
 const MAX_ITEMS = 12;
-
-function clampFraction(position: number, duration: number | null): number | null {
-  if (!duration || duration <= 0) return null;
-  return Math.min(1, Math.max(0, position / duration));
-}
 
 // Past this share of the runtime the episode counts as finished — the show
 // leaves the rail instead of sitting at a full progress bar forever.
@@ -48,10 +50,12 @@ function collapse(
   rows: Array<{
     slug: string;
     title: string;
+    orientation: "horizontal" | "vertical";
     heroImageUrl: string | null;
     posterImageUrl: string | null;
     episodeId: string;
     episodeNumber: number;
+    episodeTitle: string;
     positionSeconds: number;
     durationSeconds: number | null;
     completed: boolean;
@@ -63,18 +67,25 @@ function collapse(
   for (const row of rows) {
     if (seen.has(row.slug)) continue;
     seen.add(row.slug);
-    const fraction = clampFraction(row.positionSeconds, row.durationSeconds);
-    if (fraction === null) continue;
+    // Unknown duration → no fraction → no tile (and no fall-through to an
+    // older row for this show — see above).
+    const duration = row.durationSeconds;
+    if (!duration || duration <= 0) continue;
+    const fraction = Math.min(1, Math.max(0, row.positionSeconds / duration));
     if (row.completed || fraction >= FINISHED_FRACTION) continue;
     items.push({
       show: {
         slug: row.slug,
         title: row.title,
+        orientation: row.orientation,
         heroImageUrl: row.heroImageUrl,
         posterImageUrl: row.posterImageUrl,
       },
       episodeId: row.episodeId,
       episodeNumber: row.episodeNumber,
+      episodeTitle: row.episodeTitle,
+      positionSeconds: row.positionSeconds,
+      durationSeconds: duration,
       fraction,
       updatedAt: row.updatedAt,
     });
@@ -95,10 +106,12 @@ export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
       .select({
         slug: shows.slug,
         title: shows.title,
+        orientation: shows.orientation,
         heroImageUrl: shows.heroImageUrl,
         posterImageUrl: shows.posterImageUrl,
         episodeId: episodes.id,
         episodeNumber: episodes.number,
+        episodeTitle: episodes.title,
         positionSeconds: watchProgress.positionSeconds,
         durationSeconds: episodes.durationSeconds,
         completed: watchProgress.completed,
@@ -128,10 +141,12 @@ export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
     .select({
       slug: shows.slug,
       title: shows.title,
+      orientation: shows.orientation,
       heroImageUrl: shows.heroImageUrl,
       posterImageUrl: shows.posterImageUrl,
       episodeId: episodes.id,
       episodeNumber: episodes.number,
+      episodeTitle: episodes.title,
       positionSeconds: trialSessions.lastPositionSeconds,
       durationSeconds: episodes.durationSeconds,
       // trial_sessions carries no completed flag; the ≥95% fraction

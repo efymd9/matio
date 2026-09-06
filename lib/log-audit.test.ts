@@ -21,13 +21,20 @@ const MARKER_NAME = "Leak Marker";
 const MARKER_SECRET = "dummy-db-password";
 const MARKER_DATABASE_URL = `postgres://matio:${MARKER_SECRET}@db.example.invalid/matio`;
 
-const { execute, select, update, batchSend } = vi.hoisted(() => ({
+const { execute, select, update, insert, batchSend } = vi.hoisted(() => ({
   execute: vi.fn(),
   select: vi.fn(),
   update: vi.fn(),
+  insert: vi.fn(),
   batchSend: vi.fn(),
 }));
-vi.mock("@/db", () => ({ db: { execute, select, update } }));
+vi.mock("@/db", () => ({ db: { execute, select, update, insert } }));
+vi.mock("server-only", () => ({}));
+// The app's progress route resolves the caller through Clerk; a fixed user
+// keeps the audit on the path that actually reaches the database.
+vi.mock("@clerk/nextjs/server", () => ({
+  auth: async () => ({ userId: "user_1" }),
+}));
 
 // The reminder dispatch path pulls in auth, Next's cache and the Resend SDK —
 // none of which is the thing under audit. Everything except the action's own
@@ -57,6 +64,7 @@ vi.mock("@/lib/mux-token", () => ({
 
 import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as readyz } from "@/app/api/readyz/route";
+import { POST as saveProgress } from "@/app/api/v1/progress/route";
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -89,6 +97,7 @@ beforeEach(() => {
   execute.mockReset();
   select.mockReset();
   update.mockReset();
+  insert.mockReset();
   batchSend.mockReset();
 });
 
@@ -292,5 +301,48 @@ describe("log audit · reminder dispatch (Resend)", () => {
     expect(logged()).not.toContain(MARKER_EMAIL);
     // What it DOES log: the vendor's error code, which is id/status territory.
     expect(logged()).toContain("application_error");
+  });
+});
+
+describe("log audit · /api/v1/progress (the app's watch-progress save)", () => {
+  // The body is client-controlled text headed for a uuid column; the
+  // realistic worst case is a client that puts something personal where an
+  // id belongs, and a driver error that quotes what it choked on.
+  const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+  function post(body: unknown): Parameters<typeof saveProgress>[0] {
+    return { headers: new Headers(), json: async () => body } as unknown as Parameters<
+      typeof saveProgress
+    >[0];
+  }
+
+  it("rejects a body carrying user text without echoing it anywhere", async () => {
+    const logged = captureConsole();
+
+    const res = await saveProgress(
+      post({ episodeId: MARKER_EMAIL, positionSeconds: 10, completed: false }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(JSON.stringify(await res.json())).not.toContain(MARKER_EMAIL);
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("lets a database failure surface without logging what the driver quoted", async () => {
+    vi.stubEnv("DATABASE_URL", MARKER_DATABASE_URL);
+    select.mockImplementation(() => {
+      throw new Error(`could not connect to ${MARKER_DATABASE_URL}`);
+    });
+    const logged = captureConsole();
+
+    await expect(
+      saveProgress(post({ episodeId: EPISODE, positionSeconds: 10, completed: false })),
+    ).rejects.toThrow();
+
+    // The route itself writes nothing to the console — the failure is the
+    // framework's to report, through the Sentry scrubbers audited above.
+    expect(logged()).not.toContain(MARKER_SECRET);
+    expect(logged()).not.toContain("db.example.invalid");
   });
 });

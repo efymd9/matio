@@ -2,6 +2,7 @@ import { createContext, use, useCallback, type ReactNode } from "react";
 import { Linking, StyleSheet, Text, View } from "react-native";
 import { APP_BUILD } from "@/build";
 import { ErrorState, GoldButton, Loading } from "@/components/ui";
+import { useT } from "@/i18n/locale";
 import type { AppConfig } from "@/shared/api-types";
 import { body, colors, display, SCREEN_PAD, space } from "@/theme";
 import { api, API_BASE_URL } from "./client";
@@ -23,6 +24,7 @@ export function useConfig(): AppConfig {
 }
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
+  const t = useT();
   const state = useAsync(useCallback(() => api.config(), []), []);
 
   if (state.status === "loading") return <Loading />;
@@ -30,7 +32,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   if (state.status === "error") {
     return (
       <ErrorState
-        message="Couldn't reach Matio"
+        message={t.app.common.unreachable}
         hint={`${state.error.message}\n${API_BASE_URL}`}
         onRetry={state.retry}
       />
@@ -49,14 +51,13 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
 }
 
 function UpdateRequired({ webUrl }: { webUrl: string }) {
+  const t = useT();
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Update Matio</Text>
-      <Text style={styles.copy}>
-        This version is out of date and can no longer play. Please update to keep watching.
-      </Text>
+      <Text style={styles.title}>{t.app.update.title}</Text>
+      <Text style={styles.copy}>{t.app.update.body}</Text>
       <GoldButton
-        label="Open matio.tv"
+        label={t.app.update.cta}
         onPress={() => void Linking.openURL(webUrl)}
         style={{ marginTop: space(6), alignSelf: "stretch" }}
       />

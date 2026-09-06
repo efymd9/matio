@@ -75,12 +75,15 @@ export default defineConfig({
       // Полы идут следом, округлением вниз.
       // → 6.5 (редизайн /about + /press, #88: контент-компоненты исполняются
       //   историями, ростер и SEO-хелперы — юнитами) → 8.3 (#17: surface
-      //   /api/v1 для мобильного — 48 тестов на четыре роута и общий слой).
+      //   /api/v1 для мобильного — 48 тестов на четыре роута и общий слой)
+      // → 16.3 (#96: /v1/progress + /v1/continue, общее ядро прогресса
+      //   lib/watch-progress.ts, lib/continue-watching.ts и веб-экшен
+      //   saveWatchProgress впервые под тестами).
       thresholds: {
-        lines: 14.9,
-        functions: 13.2,
-        branches: 11.7,
-        statements: 14.7,
+        lines: 16.3,
+        functions: 13.9,
+        branches: 12.8,
+        statements: 16.1,
       },
     },
 
