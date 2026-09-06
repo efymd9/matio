@@ -274,8 +274,10 @@ function applyVisitorCookie(
 // stable ones on prod and the bench, nothing at all where the origin cannot
 // be enumerated (Vercel previews, localhost) — `undefined` keeps Clerk's
 // verification exactly as it was. Bound once at deploy; the per-request
-// callback only withholds the list from a native Bearer token, which carries
-// no `azp` for it to be checked against. Both rules in lib/authorized-parties.
+// callback only withholds the list on `/api/v1/*` from the header token Clerk
+// itself is about to verify when that token carries no `azp` — the app's
+// native session. Both rules, and why the header is read exactly the way
+// Clerk reads it, in lib/authorized-parties.
 const AUTHORIZED_PARTIES = resolveAuthorizedParties(process.env);
 
 const clerkOptions = AUTHORIZED_PARTIES
@@ -283,6 +285,7 @@ const clerkOptions = AUTHORIZED_PARTIES
       authorizedParties: authorizedPartiesForRequest(
         AUTHORIZED_PARTIES,
         req.headers.get("authorization"),
+        req.nextUrl.pathname,
       ),
     })
   : undefined;

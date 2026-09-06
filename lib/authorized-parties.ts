@@ -5,11 +5,12 @@
 // (a future subdomain, another app) is accepted here as-is (#100).
 //
 // Universal and PURE: no `next/headers`, no `process.env` — the environment
-// and the request header arrive as arguments, so a test states what it tests.
-// Runs inside proxy.ts, i.e. on every request: nothing here allocates beyond
-// the one-time list.
+// and the request arrive as arguments, so a test states what it tests. Runs
+// inside proxy.ts, i.e. on every request: nothing here allocates beyond the
+// one-time list.
 
 import type { EnvLike } from "@/lib/observability";
+import { SITE_URL } from "@/lib/seo";
 
 /**
  * The deployment's own stable origins, or `undefined` when they cannot be
@@ -25,15 +26,22 @@ import type { EnvLike } from "@/lib/observability";
  * there too. `APP_ENV` (the stage marker) is deliberately NOT consulted: the
  * question is not "which stage" but "is the origin stable".
  *
- * Origins come from the environment, not from a hard-coded list:
- * `VERCEL_PROJECT_PRODUCTION_URL` (set by Vercel on every deployment: the
- * project's shortest production domain, bare hostname — `matio.tv` on prod,
- * `matio-staging.vercel.app` on the bench) plus `NEXT_PUBLIC_APP_URL` when it
- * is an https origin. A custom domain is listed with its apex AND `www.`
- * twin (prod: `https://matio.tv` + `https://www.matio.tv`); a `*.vercel.app`
- * host has no such twin. Garbage in either variable is skipped, and an empty
- * result is `undefined` — a broken variable must degrade to today's
- * behaviour, not lock every browser out.
+ * Origins come from the environment: `VERCEL_PROJECT_PRODUCTION_URL` (set by
+ * Vercel on every deployment: the project's shortest production domain, bare
+ * hostname — `matio.tv` on prod, `matio-staging.vercel.app` on the bench)
+ * plus `NEXT_PUBLIC_APP_URL` when it is an https origin. A custom domain is
+ * listed with its apex AND `www.` twin (prod: `https://matio.tv` +
+ * `https://www.matio.tv`); a `*.vercel.app` host has no such twin. Garbage
+ * in either variable is skipped.
+ *
+ * The canonical site (`SITE_URL`, hard-pinned) is ALWAYS in the list. That
+ * is the safety net for a variable that is valid but wrong — say the system
+ * variable naming the legacy `matio-ten.vercel.app` alias instead of the
+ * apex: `TokenInvalidAuthorizedParties` is not a handshake reason in
+ * `@clerk/backend`, so a list without the apex would sign EVERY prod request
+ * out (the SignupWall for everyone under REQUIRE_SIGNUP, a redirect loop on
+ * /admin). On the bench the apex is a harmless extra: a token carrying a
+ * matio.tv `azp` is signed by the other Clerk instance and fails there.
  */
 export function resolveAuthorizedParties(env: EnvLike): string[] | undefined {
   if (env.VERCEL_ENV !== "production") return undefined;
@@ -42,12 +50,13 @@ export function resolveAuthorizedParties(env: EnvLike): string[] | undefined {
   for (const candidate of [
     env.VERCEL_PROJECT_PRODUCTION_URL,
     env.NEXT_PUBLIC_APP_URL,
+    SITE_URL,
   ]) {
     const url = parseHttps(candidate);
     if (!url) continue;
     for (const origin of withWwwTwin(url)) origins.add(origin);
   }
-  return origins.size > 0 ? [...origins] : undefined;
+  return [...origins];
 }
 
 /** `https://host[:port]/…` or a bare `host` → a URL; anything else → null. */
@@ -75,10 +84,15 @@ function withHostname(url: URL, hostname: string): string {
   return twin.origin;
 }
 
+/** The only surface the native app talks to; the exemption below is scoped to it. */
+const NATIVE_API_PREFIX = "/api/v1/";
+
 /**
  * The allowlist to verify ONE request with. The deploy-time list applies to
- * every request except a `Bearer` token that carries no `azp` claim at all —
- * a native session token (`@clerk/expo`), minted with no browser Origin.
+ * every request except one case: a `/api/v1/*` request whose Authorization
+ * header carries a token with no `azp` claim at all — a native session token
+ * (`@clerk/expo`), minted with no browser Origin. Everywhere else (`/`,
+ * `/watch`, `/admin`, the web's own `/api/*`) the list always applies.
  *
  * Why the exemption exists: `@clerk/backend` ≥3.x rejects a token WITHOUT
  * `azp` outright when `authorizedParties` is set (`assertAuthorizedPartiesClaim`
@@ -86,6 +100,14 @@ function withHostname(url: URL, hostname: string): string {
  * plain list would sign the mobile app out of `/api/v1`. Clerk's own
  * verification guidance is "if the `azp` claim doesn't exist, skip this
  * step" — this is that rule, applied where the SDK no longer applies it.
+ *
+ * The token peeked at MUST be the token Clerk will verify. Clerk reads the
+ * header on its own terms (`parseAuthorizationHeader`, mirrored below, byte
+ * for byte) and, when it finds a header token, verifies THAT and never looks
+ * at the cookie — so withholding the list on a header token can never relax
+ * the check on a cookie session. A looser reading (a case-insensitive
+ * `bearer`, say) would open exactly that hole: Clerk sees no header token,
+ * verifies the cookie, and we would have withheld the list for it.
  *
  * Peeking at the payload without verifying it is safe: the peek never grants
  * anything, it only decides whether to ADD the `azp` constraint. The
@@ -96,11 +118,29 @@ function withHostname(url: URL, hostname: string): string {
 export function authorizedPartiesForRequest(
   parties: string[] | undefined,
   authorization: string | null | undefined,
+  pathname: string,
 ): string[] | undefined {
   if (!parties) return undefined;
-  const bearer = /^Bearer\s+(\S+)$/i.exec(authorization ?? "")?.[1];
-  if (bearer && !jwtCarriesAzp(bearer)) return undefined;
+  if (!pathname.startsWith(NATIVE_API_PREFIX)) return parties;
+  const token = clerkTokenInHeader(authorization);
+  if (token !== undefined && !jwtCarriesAzp(token)) return undefined;
   return parties;
+}
+
+/**
+ * `@clerk/backend` 3.17.1 `parseAuthorizationHeader`, verbatim: no header →
+ * nothing; no space → the whole value is the token; `Bearer <token>` (exact
+ * case) → the token; any other scheme (`Basic`, `bearer`, …) → nothing, and
+ * Clerk then authenticates from the cookie.
+ */
+function clerkTokenInHeader(
+  authorization: string | null | undefined,
+): string | undefined {
+  if (!authorization) return undefined;
+  const [scheme, token] = authorization.split(" ", 2);
+  if (!token) return scheme;
+  if (scheme === "Bearer") return token;
+  return undefined;
 }
 
 function jwtCarriesAzp(token: string): boolean {

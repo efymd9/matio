@@ -182,14 +182,22 @@ describe("proxy — Clerk authorized parties (wiring)", () => {
     });
 
     expect(typeof options).toBe("function");
+    const parties = ["https://matio.tv", "https://www.matio.tv"];
     // A browser request — cookie session, no Authorization header.
-    expect(options!(request("/admin"))).toEqual({
-      authorizedParties: ["https://matio.tv", "https://www.matio.tv"],
-    });
-    // The mobile app — a native Bearer token, which carries no azp.
+    expect(options!(request("/admin"))).toEqual({ authorizedParties: parties });
+    // The mobile app — a native Bearer token, which carries no azp, on the
+    // one surface it talks to.
     const nativeToken = `x.${btoa(JSON.stringify({ sub: "user_1" }))}.y`;
     expect(
       options!(request("/api/v1/continue", { authorization: `Bearer ${nativeToken}` })),
     ).toEqual({ authorizedParties: undefined });
+    // The same token anywhere else is held to the list; so is a header Clerk
+    // itself would not read as a token (its parser is case-sensitive).
+    expect(
+      options!(request("/watch/some-show", { authorization: `Bearer ${nativeToken}` })),
+    ).toEqual({ authorizedParties: parties });
+    expect(
+      options!(request("/api/v1/continue", { authorization: `bearer ${nativeToken}` })),
+    ).toEqual({ authorizedParties: parties });
   });
 });
