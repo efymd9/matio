@@ -19,20 +19,27 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // say inside a node test runner.
 vi.mock("server-only", () => ({}));
 
+// What proxy.ts hands clerkMiddleware as its options — the authorized-parties
+// wiring is proved below by reading it back. Hoisted so the same record
+// survives a module reset (the list is bound at import time from the env).
+const clerk = vi.hoisted(() => ({ options: [] as unknown[] }));
+
 vi.mock("@clerk/nextjs/server", () => ({
   // Mirrors the real contract: hand the handler an `auth()` and turn a
   // "nothing to add" answer into a pass-through response.
-  clerkMiddleware:
-    (
-      handler: (
-        auth: () => Promise<{ userId: string | null }>,
-        req: NextRequest,
-        event: NextFetchEvent,
-      ) => Promise<NextResponse | undefined>,
-    ) =>
-    async (req: NextRequest, event: NextFetchEvent) =>
+  clerkMiddleware: (
+    handler: (
+      auth: () => Promise<{ userId: string | null }>,
+      req: NextRequest,
+      event: NextFetchEvent,
+    ) => Promise<NextResponse | undefined>,
+    options?: unknown,
+  ) => {
+    clerk.options.push(options);
+    return async (req: NextRequest, event: NextFetchEvent) =>
       (await handler(async () => ({ userId: null }), req, event)) ??
-      NextResponse.next(),
+      NextResponse.next();
+  },
   createRouteMatcher: (patterns: string[]) => (req: NextRequest) =>
     patterns.some((pattern) =>
       new RegExp(`^${pattern.replace("(.*)", "(?:/.*)?")}$`).test(
@@ -132,5 +139,57 @@ describe("proxy — staging lock on", () => {
     const res = await proxy(request("/api/t"), event);
 
     expect(res?.status).toBe(401);
+  });
+});
+
+// The list itself is specified in lib/authorized-parties.test.ts; what is
+// proved here is that proxy.ts actually hands it to clerkMiddleware, per
+// request, and hands NOTHING where the origin is not stable.
+describe("proxy — Clerk authorized parties (wiring)", () => {
+  type Options =
+    | ((req: NextRequest) => { authorizedParties: string[] | undefined })
+    | undefined;
+
+  async function importWithEnv(env: Record<string, string | undefined>) {
+    for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+    vi.resetModules();
+    await import("./proxy");
+    return clerk.options.at(-1) as Options;
+  }
+
+  it("passes no options on a preview deploy — the reviewer's browser stays signed in", async () => {
+    const options = await importWithEnv({
+      VERCEL_ENV: "preview",
+      VERCEL_PROJECT_PRODUCTION_URL: "matio.tv",
+    });
+
+    expect(options).toBeUndefined();
+  });
+
+  it("passes no options locally", async () => {
+    const options = await importWithEnv({
+      VERCEL_ENV: undefined,
+      VERCEL_PROJECT_PRODUCTION_URL: undefined,
+    });
+
+    expect(options).toBeUndefined();
+  });
+
+  it("hands clerkMiddleware the deployment's own origins on prod, per request", async () => {
+    const options = await importWithEnv({
+      VERCEL_ENV: "production",
+      VERCEL_PROJECT_PRODUCTION_URL: "matio.tv",
+    });
+
+    expect(typeof options).toBe("function");
+    // A browser request — cookie session, no Authorization header.
+    expect(options!(request("/admin"))).toEqual({
+      authorizedParties: ["https://matio.tv", "https://www.matio.tv"],
+    });
+    // The mobile app — a native Bearer token, which carries no azp.
+    const nativeToken = `x.${btoa(JSON.stringify({ sub: "user_1" }))}.y`;
+    expect(
+      options!(request("/api/v1/continue", { authorization: `Bearer ${nativeToken}` })),
+    ).toEqual({ authorizedParties: undefined });
   });
 });

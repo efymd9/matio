@@ -13,6 +13,10 @@ import {
   readAttributionFromSearchParams,
   serializeAttribution,
 } from "@/lib/attribution";
+import {
+  authorizedPartiesForRequest,
+  resolveAuthorizedParties,
+} from "@/lib/authorized-parties";
 import { FBC_COOKIE, buildFbc } from "@/lib/capi-identity";
 import {
   CONSENT_COOKIE,
@@ -266,6 +270,23 @@ function applyVisitorCookie(
   return out;
 }
 
+// Which origins may present a session token here (#100): the deployment's own
+// stable ones on prod and the bench, nothing at all where the origin cannot
+// be enumerated (Vercel previews, localhost) — `undefined` keeps Clerk's
+// verification exactly as it was. Bound once at deploy; the per-request
+// callback only withholds the list from a native Bearer token, which carries
+// no `azp` for it to be checked against. Both rules in lib/authorized-parties.
+const AUTHORIZED_PARTIES = resolveAuthorizedParties(process.env);
+
+const clerkOptions = AUTHORIZED_PARTIES
+  ? (req: NextRequest) => ({
+      authorizedParties: authorizedPartiesForRequest(
+        AUTHORIZED_PARTIES,
+        req.headers.get("authorization"),
+      ),
+    })
+  : undefined;
+
 const handleRequest = clerkMiddleware(async (auth, req) => {
   // Consolidate the legacy production alias onto the apex so it isn't indexed
   // as a duplicate origin. Vercel does NOT auto-noindex production
@@ -351,7 +372,7 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
   // landings are nearly always /, /shows/*, or /watch/* — anything not
   // gated above.
   return applyVisitorCookie(req, applyMarketingCookies(req)) ?? undefined;
-});
+}, clerkOptions);
 
 // STAGING LOCK — the outermost layer, ahead of everything above.
 //

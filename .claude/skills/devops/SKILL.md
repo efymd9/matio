@@ -182,6 +182,15 @@ deployments`. Бесплатный уровень (`prod_deployment_urls_and_all
   отвечать по-старому. Проверка:
   `curl -s https://matio-staging.vercel.app/api/healthz | jq -r .environment`
   → `staging`, то же на `matio.tv` → `production`.
+- **Список `authorizedParties` Clerk собирается из окружения деплоя** (#100,
+  `lib/authorized-parties.ts`): из `VERCEL_PROJECT_PRODUCTION_URL` (системная
+  переменная Vercel — кратчайший production-домен проекта) плюс
+  `NEXT_PUBLIC_APP_URL`, и только при `VERCEL_ENV=production`. Стенд →
+  `https://matio-staging.vercel.app`, прод → `https://matio.tv` +
+  `https://www.matio.tv`, превью и localhost → списка нет (поведение как
+  раньше). Ничего задавать не нужно; сменил домен проекта — список сменится
+  сам на следующем деплое. Нативные Bearer-токены приложения (без `azp`)
+  список не задевает.
 
 `vercel.json` (регион `fra1`, `framework: nextjs`, заголовки) лежит в
 репозитории и потому **общий для обоих проектов** — различия между стендом и
