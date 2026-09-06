@@ -83,10 +83,10 @@ export default defineConfig({
       //   токена тизера; lib/hero-preview.ts + /api/hero-preview-token покрыты
       //   на 100%; 21.74/21.25/17.34/17.15 по прогону, те же 0.1 запаса).
       thresholds: {
-        lines: 23.1,
-        functions: 19.4,
-        branches: 17.8,
-        statements: 22.6,
+        lines: 23.9,
+        functions: 19.9,
+        branches: 18.5,
+        statements: 23.4,
       },
     },
 
