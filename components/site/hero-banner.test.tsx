@@ -179,3 +179,211 @@ describe("HeroBanner — Mux Data consent", () => {
     expect(mux.mounts).toHaveLength(0);
   });
 });
+
+// Compact JWT carrying only an `exp` claim — the hero reads nothing else and
+// checks no signature (the token is the one the server handed it).
+function jwtExpiring(atMs: number): string {
+  const payload = btoa(JSON.stringify({ exp: Math.floor(atMs / 1000) }));
+  return `eyJhbGciOiJSUzI1NiJ9.${payload}.dummy-signature`;
+}
+
+// Fire `error` on the most recently mounted instance — after a remount the
+// fresh instance is the one the hero listens to.
+function fireError(event: Event) {
+  act(() => {
+    const latest = mux.mounts[mux.mounts.length - 1];
+    (latest.onError as (e: Event) => void)(event);
+  });
+}
+
+// The shape playback-core dispatches: `CustomEvent("error", { detail:
+// MediaError })`, forwarded verbatim through the shadow roots.
+const mediaError = (detail: Record<string, unknown>) =>
+  new CustomEvent("error", { detail });
+
+describe("HeroBanner — playback errors (#128)", () => {
+  const fetchMock = vi.fn();
+  const backdrop = () => screen.getByRole("presentation", { hidden: true });
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("ignores a non-fatal error: the preview stays, the backdrop stays hidden", async () => {
+    render(<HeroBanner {...PROPS} heroImageUrl="/hero.jpg" />);
+    await screen.findByTestId("mux-player");
+    act(() => {
+      (mux.mounts[0].onPlaying as () => void)();
+    });
+
+    // "Attempting to reconnect..." — what playback-core dispatches while
+    // hls.js retries: MEDIA_ERR_NETWORK with fatal:false, muxCode
+    // NETWORK_RECONNECTING. The old handler hid the player on exactly this.
+    fireError(mediaError({ code: 2, fatal: false, muxCode: 2000003 }));
+
+    expect(screen.getByTestId("mux-player")).toBeTruthy();
+    expect(mux.unmounts).toBe(0);
+    expect(backdrop().className).toContain("opacity-0");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("a fatal error brings the backdrop back to full opacity and removes the player", async () => {
+    render(<HeroBanner {...PROPS} heroImageUrl="/hero.jpg" />);
+    await screen.findByTestId("mux-player");
+    act(() => {
+      (mux.mounts[0].onPlaying as () => void)();
+    });
+    expect(backdrop().className).toContain("opacity-0");
+
+    // MEDIA_ERR_DECODE — nothing a fresh token could fix.
+    fireError(mediaError({ code: 3, fatal: true }));
+
+    expect(screen.queryByTestId("mux-player")).toBeNull();
+    expect(backdrop().className).toContain("opacity-100");
+    // The token is still valid, so there is nothing to refresh.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reads the error off the element when the event has no detail (native path)", async () => {
+    render(<HeroBanner {...PROPS} />);
+    await screen.findByTestId("mux-player");
+    const nativeError = (code: number) =>
+      ({
+        detail: undefined,
+        currentTarget: { media: { error: { code } } },
+      }) as unknown as Event;
+
+    // MEDIA_ERR_ABORTED: MediaError derives fatal:false from code 1.
+    fireError(nativeError(1));
+    expect(screen.getByTestId("mux-player")).toBeTruthy();
+
+    // MEDIA_ERR_NETWORK: fatal by code.
+    fireError(nativeError(2));
+    expect(screen.queryByTestId("mux-player")).toBeNull();
+  });
+
+  it("recovers from an expired token: fetches a fresh one and remounts with it", async () => {
+    let resolveFetch: (value: unknown) => void = () => {};
+    fetchMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    const expired = jwtExpiring(Date.now() - 1_000);
+    const fresh = jwtExpiring(Date.now() + 60_000);
+    render(
+      <HeroBanner {...PROPS} previewToken={expired} heroImageUrl="/hero.jpg" />,
+    );
+    await screen.findByTestId("mux-player");
+    expect(mux.mounts[0]).toMatchObject({ tokens: { playback: expired } });
+    act(() => {
+      (mux.mounts[0].onPlaying as () => void)();
+    });
+
+    // What hls.js + playback-core produce for a 403 on an expired JWT.
+    fireError(mediaError({ code: 2, fatal: true, muxCode: 2403210 }));
+
+    // Honest poster while the round-trip runs — the dead instance is gone.
+    expect(screen.queryByTestId("mux-player")).toBeNull();
+    expect(backdrop().className).toContain("opacity-100");
+    expect(fetchMock).toHaveBeenCalledWith("/api/hero-preview-token", {
+      cache: "no-store",
+    });
+
+    await act(async () => {
+      resolveFetch({
+        ok: true,
+        json: async () => ({ playbackId: "pb-hero", token: fresh }),
+      });
+    });
+
+    expect(mux.mounts).toHaveLength(2);
+    expect(mux.unmounts).toBe(1);
+    expect(mux.mounts[1]).toMatchObject({ tokens: { playback: fresh } });
+  });
+
+  it("asks for a token once per dead instance, however many errors it fires", async () => {
+    fetchMock.mockReturnValue(new Promise(() => {}));
+    render(<HeroBanner {...PROPS} previewToken={jwtExpiring(0)} />);
+    await screen.findByTestId("mux-player");
+
+    fireError(mediaError({ code: 2, fatal: true }));
+    fireError(mediaError({ code: 2, fatal: true }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["the route is unreachable", () => Promise.reject(new Error("offline"))],
+    [
+      "the route has no preview",
+      () => Promise.resolve({ ok: false, status: 404, json: async () => ({}) }),
+    ],
+    [
+      "the featured show changed meanwhile",
+      () =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ playbackId: "pb-other", token: "t" }),
+        }),
+    ],
+    [
+      "the asset is public now (no token)",
+      () =>
+        Promise.resolve({
+          ok: true,
+          json: async () => ({ playbackId: "pb-hero", token: null }),
+        }),
+    ],
+  ])("stays on the backdrop when %s", async (_case, answer) => {
+    fetchMock.mockImplementation(answer);
+    render(<HeroBanner {...PROPS} previewToken={jwtExpiring(0)} />);
+    await screen.findByTestId("mux-player");
+
+    fireError(mediaError({ code: 2, fatal: true }));
+    await act(async () => {});
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("mux-player")).toBeNull();
+    expect(mux.mounts).toHaveLength(1);
+  });
+
+  it("stops refreshing after 20 cycles and rests on the backdrop", async () => {
+    // Every fresh token is already expired, so each cycle ends the same way.
+    fetchMock.mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ playbackId: "pb-hero", token: jwtExpiring(0) }),
+    }));
+    render(<HeroBanner {...PROPS} previewToken={jwtExpiring(0)} />);
+    await screen.findByTestId("mux-player");
+
+    for (let cycle = 1; cycle <= 20; cycle += 1) {
+      fireError(mediaError({ code: 2, fatal: true }));
+      await act(async () => {});
+      expect(mux.mounts).toHaveLength(cycle + 1);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(20);
+
+    fireError(mediaError({ code: 2, fatal: true }));
+    await act(async () => {});
+
+    expect(fetchMock).toHaveBeenCalledTimes(20);
+    expect(screen.queryByTestId("mux-player")).toBeNull();
+  });
+
+  it("treats a public preview (no token) as never expiring", async () => {
+    render(<HeroBanner {...PROPS} previewToken={null} />);
+    await screen.findByTestId("mux-player");
+
+    fireError(mediaError({ code: 2, fatal: true }));
+    await act(async () => {});
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("mux-player")).toBeNull();
+  });
+});

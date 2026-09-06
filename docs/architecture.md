@@ -470,7 +470,7 @@ Admin mutation that changes shows.status or shows.deleted_at:
   ─►  next read recomputes from DB and re-fills the cache
 ```
 
-The home page stays `dynamic = "force-dynamic"` because the hero embeds a fresh 60s Mux preview JWT per request — only the catalog query inside is cached. `/sitemap.xml` is also `force-dynamic` so freshly soft-deleted shows drop out on the next crawl rather than being frozen at build time; the cached query keeps the DB cost trivial on warm hits.
+The home page stays `dynamic = "force-dynamic"` because the hero embeds a fresh 60s Mux preview JWT per request — only the catalog query inside is cached. That token dies under the looping hero teaser after ~60s; the player then fetches `/api/hero-preview-token` (the same mint, `lib/hero-preview.ts`) and remounts with it — at most 20 cycles per page, then it rests on the backdrop (#128). `/sitemap.xml` is also `force-dynamic` so freshly soft-deleted shows drop out on the next crawl rather than being frozen at build time; the cached query keeps the DB cost trivial on warm hits.
 
 Migration to Next 16's `'use cache'` + `cacheTag` + `updateTag` is deliberately deferred — enabling `cacheComponents: true` requires removing `runtime = "nodejs"` from all 5 webhook routes and `dynamic = "force-dynamic"` from the home + sitemap. Separate refactor.
 

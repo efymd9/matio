@@ -535,6 +535,10 @@ The two players react to a consent flip in opposite ways, and both are traps (#1
 
 Removing `envKey` is **not** a substitute for `disableTracking`: `setupMux` monitors whenever `!disableTracking && (envKey || isMuxVideoSrc)`, and a `playbackId` src always satisfies the second half.
 
+### `<mux-player>`'s `error` event is NOT fatal-only
+
+playback-core dispatches every MediaError it builds as `CustomEvent("error", { detail })` on the media element — recoverable ones included (`fatal: false`, e.g. "Attempting to reconnect..." with `muxCode: NETWORK_RECONNECTING`) — and `@mux/mux-video` re-dispatches it through the shadow roots with the same `detail` (`dist/base.mjs`, `handleEvent`). The player element's own listener reads `this.media.error` and returns early unless `.fatal` (`@mux/mux-player/dist/base.mjs`); the React wrapper's `onError` hands you the raw DOM event with no such filter. Read `event.detail?.fatal` (falling back to `currentTarget.media.error`, where a MediaError built without an explicit flag derives it from the code: 2–5 fatal, 1 not) before treating an error as terminal — the hero used to unmount on any of them (#128). An expired signed URL surfaces as a fatal `MEDIA_ERR_NETWORK` with `muxCode: NETWORK_TOKEN_EXPIRED` (2403210) on the hls.js path only; Safari's native HLS path gets the bare native error, so `components/site/hero-banner.tsx` checks the JWT's `exp` itself instead of the code.
+
 ### Mux Data API quirks (`lib/mux-data.ts`)
 
 The read-side Data API (`api.mux.com/data/v1`) has several traps:
