@@ -268,15 +268,17 @@ export const Gradients: Story = {
     }
     await golden(canvasElement, "tokens-gradients");
   },
+  // Two columns and small type on purpose: the golden captures the whole
+  // sheet, and a sheet taller than the viewport screenshots as half blank.
   render: () => (
-    <div className="grid grid-cols-1 gap-4">
+    <div className="grid grid-cols-1 gap-3 tablet:grid-cols-2">
       {GRADIENTS.map((token) => (
         <div
           key={token.name}
-          className="flex items-center gap-5 rounded-xl bg-espresso-2 p-3"
+          className="flex items-center gap-4 rounded-xl bg-espresso-2 p-3"
         >
           <div
-            className={`relative h-20 w-40 shrink-0 overflow-hidden rounded-xl ${token.base}`}
+            className={`relative h-16 w-28 shrink-0 overflow-hidden rounded-lg ${token.base}`}
           >
             <div
               className="absolute inset-0"
@@ -285,7 +287,7 @@ export const Gradients: Story = {
           </div>
           <div className="min-w-0">
             <div className="font-mono text-sm text-cream">{token.name}</div>
-            <div className="font-mono text-xs break-words text-cream/50">
+            <div className="font-mono text-[10px] leading-tight break-all text-cream/50">
               {token.value}
             </div>
             <div className="text-xs text-cream/70">{token.use}</div>
