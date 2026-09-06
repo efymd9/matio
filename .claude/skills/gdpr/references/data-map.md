@@ -29,7 +29,7 @@
 | **OpenAI** (ChatGPT Ads pixel `oaiq`) | Ирландия / США | `page_viewed`, `registration_completed`/`subscription_created` с `event_id` = `signup:<Clerk id>` или Stripe subscription id, `plan_id`, `amount`, `currency`; cookie `__oppref` (click id), IP/UA запроса | по правилам OpenAI |
 | **Sentry** (org-регион EU) | ЕС | ошибки/трейсы: `user.id` (Clerk id) и только он, URL без query, UA, `content-type`/`content-length`; без cookies, тел, breadcrumbs консоли, replay, feedback | ошибки 30/90 дней по плану |
 | **Устройство — браузер** | у пользователя | cookies (таблица в §4), `localStorage`-флаги дедупа событий (`matio:fb:lead`, `matio:fb:creg:<Clerk id>`, `matio:ph:signup:<Clerk id>`, `matio:oaiq:signup:<Clerk id>`, `matio:oaiq:purchase:<sub id>`), настройки media-chrome (mute) | до очистки браузера |
-| **Устройство — приложение (Expo)** | у пользователя | `expo-secure-store`: Clerk session JWT; `matio_device_id` — UUID (аналог `matio_aid`; **iOS keychain переживает переустановку**) | до удаления/сброса |
+| **Устройство — приложение (Expo)** | у пользователя | `expo-secure-store`: Clerk session JWT; `matio_device_id` — UUID (аналог `matio_aid`; **iOS keychain переживает переустановку**); `matio_locale` — выбранный язык (`es`/`en`, предпочтение, не идентификатор; #96) | до удаления/сброса |
 
 ## 2. Таблицы по чувствительности
 
