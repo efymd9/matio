@@ -286,6 +286,17 @@ describe("deleteEpisodeChoice", () => {
     expect(h.writes).toEqual([]);
   });
 
+  it("turns a failed rewrite into the generic code, like the save does", async () => {
+    h.selects = [CHAIN, EPISODE_ROW, SAVED, WITH_B3];
+    h.txFails = true;
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await deleteEpisodeChoice("c-1", EP, SEASON, SHOW)).toEqual({
+      status: "error",
+      code: "unknown",
+    });
+    spy.mockRestore();
+  });
+
   it("re-elects the first remaining option as default when the default goes", async () => {
     h.selects = [CHAIN, EPISODE_ROW, SAVED, WITH_B3];
     // c-1 was the default; without it b-2 must inherit, or the timer has

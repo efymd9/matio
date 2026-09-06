@@ -458,7 +458,7 @@ export function ForkPanel({
           <button
             type="submit"
             disabled={pending}
-            className="inline-flex h-10 items-center gap-1.5 rounded-full bg-gold-cta px-4 text-sm font-bold text-gold-deep shadow-[0_16px_40px_-14px_rgba(230,179,102,0.5)] transition-[filter] hover:brightness-110 active:scale-[0.99] disabled:opacity-60"
+            className="inline-flex h-10 items-center gap-1.5 rounded-full bg-gold-cta px-4 text-sm font-bold text-gold-deep shadow-cta transition-[filter] hover:brightness-110 active:scale-[0.99] disabled:opacity-60"
           >
             <Icon name="check" size={15} color="#241205" />
             {pending ? t.fork.savePending : t.fork.save}
