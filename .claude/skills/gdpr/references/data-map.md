@@ -13,7 +13,7 @@
 
 | Хранилище | Регион | Что лежит | Ретеншен (факт) |
 |---|---|---|---|
-| **Neon Postgres**, проект `little-base-06482402`, ветка production | AWS eu-central-1 (Франкфурт) | все таблицы из §2 | бессрочно — джоб чистки нет (#162); PITR 6 ч |
+| **Neon Postgres**, проект `little-base-06482402`, ветка production | AWS eu-central-1 (Франкфурт) | все таблицы из §2 | по окнам §2: ежедневный крон `/api/cron/retention` (`lib/retention.ts`, Vercel Cron 04:10 UTC, политики = обещания `/privacy` §6) удаляет батчами `trial_sessions` (30 дн., анонимные), `visitors`+`visitor_days` (25 мес.), `watch_days` (25 мес.), отправленные `show_reminders` (30 дн. после отправки); остальное — с аккаунтом; PITR 6 ч |
 | Neon, ветка staging | тот же регион | только сид-данные (нет аккаунтов, истории, адресов — реестр) | — |
 | **Vercel Blob** `matio-blob` (public store) | Франкфурт | (а) артворк шоу + аватары виртуальных актёров — не персональное; (б) `db-backups/production/db-<UTC>.dump.age` — полный дамп базы, зашифрован age (публичный ключ в GH vars; приватный — менеджер паролей владельца + секрет `BACKUP_AGE_SECRET_KEY`), объект приватный | (б) 35 дней + самый свежий дамп всегда остаётся (`infra/backup/retention.ts`) |
 | **GitHub Actions**, раннер `ubuntu-latest` | США, эфемерный | `db-backup`: дамп в открытом виде во временном каталоге до шифрования (минуты, `trap rm`); `db-restore-check` (1-го числа): полное восстановление в открытом виде в контейнере Postgres 18 на время джобы; артефактов нет, наружу — одна строка со счётчиками | жизнь джобы |
@@ -45,11 +45,11 @@
 | `erased_customers` | `stripe_customer_id`, `erased_at` | псевдо (только id клиента Stripe — ни адреса, ни Clerk id; без FK — строка `users` уже стёрта) | **не стирается — это тумбстоун**: `claimGuestCheckout` (единственный путь, создающий аккаунт из клиента Stripe) не запускается для id из этой таблицы — иначе следующий вебхук Stripe по клиенту (`guest = "1"` в метаданных подписки не истекает) воскресил бы Clerk-пользователя и `users` с адресом. Проверяется в `mirrorSubscription` (ветка «нет пользователя») и на `/welcome` (`lib/guest-checkout.ts:isErasedCustomer`) | бессрочно — «не воскрешать» не имеет срока: Stripe хранит клиента как налоговую запись годами, и его вебхуки могут прийти через годы. Ст. 17(3)(b)/(e)-образное основание: минимальная запись, нужная, чтобы стирание было необратимым |
 | `subscriptions` | `user_id` → CASCADE, `stripe_subscription_id`, `status`, `plan`, `current_period_end`, `cancel_at_period_end`, `attribution_*`, `created_at`/`updated_at` | псевдо | каскад с `users` | с аккаунтом; налоговые записи — у Stripe, не здесь |
 | `watch_progress` | `user_id` → CASCADE, `episode_id`, `position_seconds`, `max_position_seconds`, `total_watched_seconds`, `completed`, `first_watched_at`, `updated_at` | псевдо (история просмотра) | каскад с `users` | с аккаунтом |
-| `watch_days` | `user_id` → CASCADE, `day` | псевдо | каскад с `users` | с аккаунтом (#162 — окно для аналитики) |
-| `trial_sessions` | `session_token` (UUID cookie `trial_session` **или** `matio_device_id` приложения), `show_id`, `started_at`/`expires_at`, `user_id` → SET NULL, `converted`, `last_position_seconds`, `ip_hash` (HMAC-SHA256 IP, соль = `MUX_SIGNING_KEY_PRIVATE_KEY`), `attribution_*`, `kind`, `furthest_episode_number`, `last_episode_id`, `signup_wall_at` | псевдо | при удалении аккаунта строка остаётся без `user_id`; иначе — ничем | бессрочно; `/privacy` обещает 30 дней (#162) |
-| `visitors` | `aid` (UUID cookie `matio_aid`), `first_seen_at`, `first_path`, `referrer` (сырой `document.referrer`, ≤300 символов — может нести чужие query-параметры), `utm_*`, `country`, `user_id` → SET NULL, `linked_at` | псевдо | при удалении аккаунта остаётся без `user_id`; иначе — ничем | бессрочно; `/privacy` обещает 25 месяцев (#162) |
-| `visitor_days` | `aid` → CASCADE от `visitors`, `day`, `landed_home`, `show_viewed`, `wall_seen` | псевдо | каскад с `visitors` | как `visitors` |
-| `show_reminders` | `email`, `show_id`, `user_id` → SET NULL, `locale`, `ip_hash`, `created_at`, `notified_at` | PII | `unsubscribeEmail` (все строки адреса, `lib/email-unsubscribe.ts`) и удаление аккаунта: `user.deleted` удаляет все строки по адресу аккаунта + по `user_id` до каскада (анонимные строки с другим адресом не затрагиваются — их стирает только отписка) | бессрочно, отправленные тоже (#162) |
+| `watch_days` | `user_id` → CASCADE, `day` | псевдо | каскад с `users`; крон ретеншена | **25 месяцев** по `day` (крон, `lib/retention.ts`; окно «Audience-measurement data» `/privacy` §6 — вошедшая половина той же метрики: WAU/new/returning/lost; самый длинный диапазон дашборда — 366 дней) |
+| `trial_sessions` | `session_token` (UUID cookie `trial_session` **или** `matio_device_id` приложения), `show_id`, `started_at`/`expires_at`, `user_id` → SET NULL, `converted`, `last_position_seconds`, `ip_hash` (HMAC-SHA256 IP, соль = `MUX_SIGNING_KEY_PRIVATE_KEY`), `attribution_*`, `kind`, `furthest_episode_number`, `last_episode_id`, `signup_wall_at` | псевдо | крон ретеншена (анонимные строки); при удалении аккаунта строка теряет `user_id` (SET NULL) и попадает под крон следующим прогоном | **30 дней** по `started_at` для строк без `user_id` (`/privacy` §6 «Trial sessions … 30 days»); строки с `user_id` — данные аккаунта, живут с ним («Account: while your account exists») и уезжают ≤30 дней после стирания. Строки приложения (device UUID) — те же анонимные строки; после удаления на следующем воспроизведении минтится свежая |
+| `visitors` | `aid` (UUID cookie `matio_aid`), `first_seen_at`, `first_path`, `referrer` (сырой `document.referrer`, ≤300 символов — может нести чужие query-параметры), `utm_*`, `country`, `user_id` → SET NULL, `linked_at` | псевдо | крон ретеншена; при удалении аккаунта остаётся без `user_id` до своего окна | **25 месяцев** по `first_seen_at` (`/privacy` §6 «Audience-measurement data … up to 25 months»), независимо от `user_id` — источник/страна регистрации уже проштампованы в `users` |
+| `visitor_days` | `aid` → CASCADE от `visitors`, `day`, `landed_home`, `show_viewed`, `wall_seen` | псевдо | каскад с `visitors` | как `visitors` — день не может быть раньше `first_seen_at`, так что каскад забирает всё |
+| `show_reminders` | `email`, `show_id`, `user_id` → SET NULL, `locale`, `ip_hash`, `created_at`, `notified_at` | PII | `unsubscribeEmail` (все строки адреса, `lib/email-unsubscribe.ts`) и удаление аккаунта: `user.deleted` удаляет все строки по адресу аккаунта + по `user_id` до каскада (анонимные строки с другим адресом не затрагиваются — их стирает только отписка); отправленные — крон ретеншена | ожидающие (`notified_at IS NULL`) — до отправки или отписки; **отправленные — 30 дней после `notified_at`** (крон; `/privacy` §6 напоминания не называет — взят самый короткий срок политики, совпадает с 30-дневным логом доставки Resend; пометка юристу в реестре). Индекса по `notified_at` нет — подзапрос крона идёт seq-scan с `LIMIT`, что при десятках строк дешевле миграции; порог: выше ~10⁴ строк — частичный индекс `WHERE notified_at IS NOT NULL` одной миграцией (существующий `show_reminders_show_id_pending_idx` — обратная популяция, крону не служит) |
 | `guest_checkout_attempts` | `ip_hash`, `window_start`, `count` | псевдо | самопрунинг строк старше 2 ч (`lib/checkout-rate-limit.ts`) | 2 ч |
 | `marketing_links` | `created_by` → SET NULL (id админа) | внутреннее | SET NULL | бессрочно (админские ссылки) |
 
@@ -72,8 +72,11 @@
 от `users`. Новые колонки `episodes.branch_of_episode_id` /
 `fork_prompt_en/es` / `fork_window_seconds` — тоже контент.
 `watch_segments` — счётчики по (эпизод, день,
-10-секундный бакет), агрегат. `stripe_events` — id событий Stripe для
-идемпотентности, растёт бессрочно (#162).
+10-секундный бакет), агрегат — крон ретеншена его не трогает (не о человеке;
+кривая удержания старого эпизода читается по всем дням). `stripe_events` — id
+событий Stripe для идемпотентности, растёт бессрочно: намеренно вне #162
+(персональных данных нет; окно — отдельное решение, строка в
+`docs/registry.md`).
 
 ## 3. Что уходит во внешние сервисы — дословно какие поля
 
@@ -126,7 +129,6 @@ PR этапа 10 не требовалось; закрывающий PR убир
 
 | # | Дыра | Где |
 |---|---|---|
-| #162 | ни одной джобы ретеншена: `trial_sessions`, `visitors`/`visitor_days`, `watch_days`, отправленные `show_reminders`, `stripe_events` — бессрочно; `/privacy` обещает 30 дней / 25 месяцев; Vercel-логи короче обещанных 30 дней | вся БД |
 | #164 | стирание не доходит до процессоров (Stripe Customer, PostHog person с email); реестра заявок, по которому §7 ранбука восстановления велит повторять стирание, не существует | `docs/runbooks/db-restore.md` |
 | #164 (хвост) | у Stripe остаётся Customer (email, billing address) — `customers.del` при стирании не вызывается, решение владельца; PostHog person с `email` не удаляется; реестра заявок, по которому §7 ранбука восстановления велит повторять стирание, не существует (`erased_customers` — реестр только тех стёртых, у кого был Stripe customer; аккаунт без покупок следа не оставляет) | `docs/runbooks/db-restore.md`, `docs/registry.md` |
 | #165 | сырой IP и UA (`capi_ip`/`capi_ua`) живут в `subscription_data.metadata` у Stripe бессрочно после единственного `Purchase` | `lib/capi-identity.ts`, `lib/subscription-mirror.ts` |
@@ -137,7 +139,12 @@ AEPD; отсутствие возрастного гейта; расхожден
 (§1–§2). Удаление `show_reminders` вместе с аккаунтом — решение PR #161
 (до него строки намеренно переживали аккаунт).
 
-Закрыто: #161 — `user.deleted` стирает `users` + каскады + `show_reminders`
+Закрыто: #162 — ретеншен исполняет ежедневный крон (`lib/retention.ts` +
+`/api/cron/retention`); что осталось от него — не код, а текст: `/privacy`
+обещает «логи 30 дней», а Vercel хранит Hobby 1 ч / Pro 1 сутки, и §6 не
+называет ни отправленные напоминания, ни дни просмотра — обе пометки юристу
+в `docs/registry.md`; `CRON_SECRET` на обоих проектах Vercel — ops владельца.
+#161 — `user.deleted` стирает `users` + каскады + `show_reminders`
 по адресу; ops-хвост (подписка прод-эндпойнта Clerk на событие) — в
 `docs/registry.md`. #164, блокеры включения платежей (#155): живая подписка
 Stripe отменяется на конец периода тем же обработчиком, а стёртый customer

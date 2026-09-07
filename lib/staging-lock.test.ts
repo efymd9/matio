@@ -31,6 +31,14 @@ describe("isStagingLockOpenPath", () => {
     expect(isStagingLockOpenPath("/api/healthz/")).toBe(true);
   });
 
+  it("leaves the retention cron open — Vercel Cron carries its own bearer, not Basic", () => {
+    // The route refuses anything but `Bearer <CRON_SECRET>` itself; a Basic
+    // challenge here would only 401 the platform's nightly call on the bench.
+    expect(isStagingLockOpenPath("/api/cron/retention")).toBe(true);
+    expect(isStagingLockOpenPath("/api/cron")).toBe(false);
+    expect(isStagingLockOpenPath("/api/cron/other")).toBe(false);
+  });
+
   it("locks everything else, including the rest of the API", () => {
     // /api/t writes the visitor ledger: an open beacon would fill the bench's
     // tables with drive-by traffic.

@@ -31,6 +31,7 @@ const {
   clerkVerify,
   stripeUpdate,
   erasedCustomer,
+  sentryMessage,
 } = vi.hoisted(() => ({
   execute: vi.fn(),
   select: vi.fn(),
@@ -41,9 +42,15 @@ const {
   clerkVerify: vi.fn(),
   stripeUpdate: vi.fn(),
   erasedCustomer: vi.fn(),
+  sentryMessage: vi.fn(),
 }));
 vi.mock("@/db", () => ({ db: { execute, select, update, delete: del, insert } }));
 vi.mock("server-only", () => ({}));
+// Sentry is the second sink these paths report to (the Clerk erasure and the
+// retention cron both send a message with tags). Spied so the audit can read
+// what would leave the process — the scrubbers in lib/observability.ts are
+// exercised separately above; here the question is what the CALL carries.
+vi.mock("@sentry/nextjs", () => ({ captureMessage: sentryMessage }));
 
 // The erasure handler's one outbound call (cancel the live subscription at
 // Stripe) is a spy so its failure text can be seeded with a marker.
@@ -98,6 +105,7 @@ vi.mock("@/lib/mux-token", () => ({
 }));
 
 import { sendShowReminders } from "@/app/admin/reminder-actions";
+import { GET as retentionCron } from "@/app/api/cron/retention/route";
 import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
@@ -143,6 +151,7 @@ beforeEach(() => {
   clerkVerify.mockReset();
   stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
   erasedCustomer.mockReset().mockResolvedValue(false);
+  sentryMessage.mockReset();
 });
 
 afterEach(() => {
@@ -245,6 +254,53 @@ describe("log audit · /api/readyz", () => {
 
     expect(body).not.toContain(MARKER_SECRET);
     expect(body).not.toContain("db.example.invalid");
+  });
+});
+
+describe("log audit · /api/cron/retention (the daily deletion run)", () => {
+  const cronRequest = () =>
+    new Request("https://matio.tv/api/cron/retention", {
+      headers: { authorization: "Bearer dummy-cron-secret" },
+    });
+
+  it("logs a failed table by name, SQLSTATE and class — never the statement the driver quoted", async () => {
+    vi.stubEnv("CRON_SECRET", "dummy-cron-secret");
+    // The realistic worst case: the driver's error carries the row it choked
+    // on (a subscriber's address) and the URL it was talking to — on BOTH
+    // levels of Drizzle's wrapper, since the outer message repeats the query.
+    const driverText = `DELETE failed on row {email: ${MARKER_EMAIL}} at ${MARKER_DATABASE_URL}`;
+    const cause = Object.assign(new Error(driverText), {
+      name: "PostgresError",
+      code: "42P01",
+    });
+    execute.mockRejectedValue(
+      Object.assign(new Error(`Failed query: ${driverText}`), {
+        name: "DrizzleQueryError",
+        cause,
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await retentionCron(cronRequest());
+    const body = JSON.stringify(await res.json());
+    const sentry = JSON.stringify(sentryMessage.mock.calls);
+
+    expect(res.status).toBe(500);
+    expect(sentryMessage).toHaveBeenCalled(); // the fixture reached the second sink
+    for (const marker of [MARKER_EMAIL, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+      expect(body).not.toContain(marker);
+      expect(sentry).not.toContain(marker);
+    }
+    // What it DOES log, answer and send: which table, the driver's SQLSTATE,
+    // the error's class, and how far it got — enough to tell a missing table
+    // from a deadlock from a timeout without a single quoted value.
+    expect(logged()).toContain("trial_sessions");
+    expect(logged()).toContain("42P01");
+    expect(logged()).toContain("DrizzleQueryError");
+    expect(sentry).toContain('"code":"42P01"');
+    expect(body).toContain('"failed":[');
+    expect(body).toContain('"trial_sessions"');
   });
 });
 
