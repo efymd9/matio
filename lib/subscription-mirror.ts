@@ -9,7 +9,12 @@ import {
   toFirstColumns,
   toLastColumns,
 } from "@/lib/attribution";
-import { fromCapiMetadata, metadataHasCapiConsent } from "@/lib/capi-identity";
+import {
+  CAPI_IDENTITY_SCRUB,
+  fromCapiMetadata,
+  metadataHasCapiConsent,
+  metadataHasCapiIdentity,
+} from "@/lib/capi-identity";
 import { TRIAL_FEE_VALUE } from "@/lib/checkout-trial";
 import {
   claimGuestCheckout,
@@ -21,6 +26,7 @@ import {
   captureServerEvent,
   metadataHasPosthogConsent,
 } from "@/lib/posthog-server";
+import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 import { markUserTrialsConverted } from "@/lib/trial";
 
@@ -387,5 +393,47 @@ export async function mirrorSubscription(sub: Stripe.Subscription) {
   // session they own to converted = true so the playback path stops gating.
   if (mappedStatus === "active" || mappedStatus === "trialing") {
     await markUserTrialsConverted(user.id);
+  }
+
+  // Minimisation (#165): the _fbp/_fbc/raw-IP/UA snapshot in the metadata
+  // exists for exactly one moment — the Purchase above — and must not outlive
+  // it at Stripe. Erased once that moment is behind us: this mirror fired it
+  // (becameAccessGranting), an earlier one did (the row was already
+  // access-granting), or it can never come (terminal at Stripe). A sub still on
+  // its way there (`incomplete`, SCA pending) keeps its keys — erasing early
+  // would cost the real Purchase its match signals. Runs LAST so the money
+  // path is fully written before the best-effort vendor call.
+  const purchaseMomentPassed =
+    priorWasAccessGranting ||
+    grantsAccess ||
+    sub.status === "canceled" ||
+    sub.status === "incomplete_expired";
+  if (purchaseMomentPassed) {
+    await scrubCapiIdentity(sub);
+  }
+}
+
+// Best-effort and self-healing, like CAPI itself: a Stripe failure is logged
+// by id and swallowed (it must never roll back the webhook's idempotency
+// claim), and the next event for the same subscription — whose payload still
+// carries the keys — simply tries again. Idempotent by construction: Stripe
+// deletes a metadata key set to "", and deleting an absent key is a no-op. The
+// predicate is "keys present", not "consent present", so a genuine renewal
+// months later costs no Stripe call. Ids only in the log — the metadata IS the
+// data being erased. Cost: the update itself raises one extra
+// customer.subscription.updated per purchase — that echo reaches this mirror
+// with the keys already gone, so the predicate stops it before any Stripe call
+// (no loop, one redundant upsert).
+async function scrubCapiIdentity(sub: Stripe.Subscription): Promise<void> {
+  if (!metadataHasCapiIdentity(sub.metadata)) return;
+  try {
+    await getStripe().subscriptions.update(sub.id, {
+      metadata: { ...CAPI_IDENTITY_SCRUB },
+    });
+  } catch (err) {
+    console.warn("CAPI identity scrub failed", {
+      subId: sub.id,
+      error: err instanceof Error ? err.name : "unknown",
+    });
   }
 }

@@ -23,7 +23,9 @@ PR: данные не размножаются бесконтрольно, ст�
 
 Что уже есть в кодовой базе по теме (не изобретать заново): HMAC-хеш IP
 вместо сырого (`lib/trial.ts:hashClientIp`, тот же приём в
-`show_reminders.ip_hash`, `guest_checkout_attempts`); скрабберы Sentry
+`show_reminders.ip_hash`, `guest_checkout_attempts`); стирание CAPI-снимка
+(сырой IP/UA, `_fbp`/`_fbc`) из метаданных Stripe сразу после `Purchase`
+(`lib/subscription-mirror.ts`, #165); скрабберы Sentry
 (`lib/observability.ts`) и лог-аудит (`lib/log-audit.test.ts`); гейт
 маркетингового согласия в одном месте (`proxy.ts` + `lib/cookie-consent.ts`);
 отписка от писем с удалением всех строк адреса (`lib/email-unsubscribe.ts`);
