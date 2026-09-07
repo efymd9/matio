@@ -23,6 +23,7 @@
     "promote-to-admin": "tsx scripts/promote-to-admin.ts",
     "stripe:setup": "tsx scripts/stripe-setup.ts",
     "stripe:scrub-capi": "tsx scripts/scrub-capi-metadata.ts",
+    "export-user-data": "tsx scripts/export-user-data.ts",
     "test:locale": "vitest run lib/i18n/negotiate.test.ts lib/seo.test.ts",
     "backfill:mux-policy": "tsx scripts/backfill-mux-policy.ts",
     "seed:fake-shows": "tsx scripts/seed-fake-shows.ts",

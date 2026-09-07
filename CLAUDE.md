@@ -50,7 +50,11 @@ frame" section is a DRAFT pending a lawyer's review. What is already in force:
   it comes out the other end; the Sentry scrubbers it exercises live in
   `lib/observability.ts` with their own suite. The audit is meant to GROW: a
   new server path that logs, or a new field on the error payload, gets a case
-  there in the SAME PR.
+  there in the SAME PR. The one path that legitimately reads a person's whole
+  record is the art. 15/20 export (`pnpm export-user-data`, runbook
+  `docs/runbooks/gdpr-requests.md`): it goes to a `0600` file on the
+  operator's machine, never to stdout — the script prints counts and ids
+  only, and the audit pins that too.
 - **Personal data changes run through `/gdpr`.** Any PR that touches personal
   data — a new field / table / cache key holding user data, a new external
   service or SDK that sees it, a change to what emails, pushes, analytics
@@ -794,6 +798,18 @@ lib/
                            #   API key, plain fetch) — feeds the dashboard's
                            #   "Signup funnel" panel; under REQUIRE_SIGNUP the
                            #   anonymous top of funnel exists ONLY in PostHog
+  posthog-hogql.ts         # universal + PURE HogQL transport (runHogQL /
+                           #   hogTs, no env read) — re-exported by
+                           #   posthog-query.ts; split out because the export
+                           #   script below cannot import a server-only module
+  user-export.ts           # universal + PURE art. 15/20 export assembly:
+                           #   the document (8 person-keyed tables, Clerk/
+                           #   Stripe/PostHog best-effort → null + notes),
+                           #   summarizeExport (counts only), parseExportArgs
+  user-export-db.ts        # loadUserExportRows(db, userId) — the 8 reads by
+                           #   the keys in the data map (show_reminders by
+                           #   user_id OR email, visitor_days via the visitors
+                           #   found); Drizzle only, db injected
   i18n/                    # dictionaries.ts + server.ts + client.tsx (optimistic
                            #   LocaleProvider) + actions.ts + shared.ts +
                            #   negotiate.ts (pure Accept-Language/geo locale
@@ -866,6 +882,12 @@ scripts/
                            #   capi_fbp/fbc/ip/ua keys on EVERY Stripe sub
                            #   (explicit STRIPE_SECRET_KEY, no .env.local;
                            #   dry-run unless --apply; ids + key names only)
+  export-user-data.ts      # pnpm export-user-data <userId> [--out <file>] —
+                           #   art. 15/20 subject export (lib/user-export*.ts):
+                           #   every env var explicit (no .env.local),
+                           #   DATABASE_URL required → exit 2, vendors opt-in
+                           #   by key; JSON file 0600, stdout = counts only.
+                           #   Runbook: docs/runbooks/gdpr-requests.md
   check-subscription-dupes.ts # pnpm db:check-sub-dupes — pre-flight for 0008
                            #   (locale tests moved to lib/i18n/negotiate.test.ts
                            #    + lib/seo.test.ts — vitest, `pnpm test:locale`)
