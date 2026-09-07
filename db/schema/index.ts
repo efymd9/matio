@@ -14,3 +14,4 @@ export * from "./actors";
 export * from "./visitors";
 export * from "./watch_days";
 export * from "./watch_segments";
+export * from "./erased_customers";

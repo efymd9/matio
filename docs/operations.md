@@ -204,6 +204,11 @@ vercel env pull .env.vercel.production
    psql $DATABASE_URL -c "select (select count(*) from users where id = '<clerk id>') as users, (select count(*) from watch_progress where user_id = '<clerk id>') as progress, (select count(*) from visitors where user_id = '<clerk id>') as linked_visitors;"
    ```
    All three read `0`. Resend the same message from the Clerk webhook log → still 200, nothing changes.
+3. If the account had a Stripe customer, its id is now a tombstone, and a live subscription shows `cancel_at_period_end = true` in the Stripe dashboard (#164). Check by id, never by address:
+   ```bash
+   psql $DATABASE_URL -c "select count(*) from erased_customers where stripe_customer_id = '<cus_…>';"
+   ```
+   Reads `1`. A later Stripe webhook for that customer logs `customer belongs to an erased account — guest checkout NOT re-claimed` and creates nothing.
 
 ### Show → upload → publish
 

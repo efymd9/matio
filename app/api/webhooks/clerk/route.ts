@@ -3,7 +3,13 @@ import * as Sentry from "@sentry/nextjs";
 import { and, eq, gt, inArray, or } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
-import { showReminders, subscriptions, users } from "@/db/schema";
+import {
+  erasedCustomers,
+  showReminders,
+  subscriptions,
+  users,
+} from "@/db/schema";
+import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 
 // Webhooks run on Node, not Edge — verifyWebhook needs the raw request body
@@ -63,6 +69,15 @@ export async function POST(req: NextRequest) {
 // trial_sessions, visitors (visit history stays, de-identified),
 // marketing_links.created_by. show_reminders is the one PII table keyed on
 // the address rather than the account, so it is erased here explicitly.
+//
+// Stripe is the one processor this handler reaches (#164): a live
+// subscription is set to cancel at period end (best-effort — the erasure
+// never waits for Stripe), and the customer id is tombstoned in
+// erased_customers BEFORE the users row goes, so the customer's later
+// webhooks cannot re-create the account through claimGuestCheckout. The
+// Stripe Customer itself is NOT deleted here — whether to `customers.del`
+// (invoices are Stripe's own tax records either way) is the owner's call,
+// tracked in docs/registry.md.
 async function eraseDeletedUser(userId: string | undefined) {
   if (!userId) {
     // Clerk's "Send Example" payload and any malformed delivery: nothing to
@@ -84,10 +99,16 @@ async function eraseDeletedUser(userId: string | undefined) {
   }
 
   // Money guard. A live Stripe subscription outlives the account — Stripe
-  // keeps billing a customer who can no longer sign in. Erasure does not
-  // wait for that, but it must not be silent: the ids (never the address)
-  // go to the log so the subscription is cancelled and the Customer deleted
-  // at Stripe by hand — processor-side erasure is #164, not this handler.
+  // keeps billing a customer who can no longer sign in. The subscription is
+  // set to cancel at the end of the paid period (the viewer keeps what they
+  // paid for; nothing is charged after). `cancel_at_period_end: true` is
+  // idempotent at Stripe — a Clerk redelivery that reaches this point again
+  // re-sets the same flag. Best-effort: a Stripe failure must not stop the
+  // erasure (the account is the thing the user asked to be rid of), but it
+  // must not be silent either — the ids (never the address) go to the log
+  // AND to Sentry, because Vercel logs live a day and Sentry drops console
+  // breadcrumbs wholesale. A short request timeout keeps a slow Stripe from
+  // eating the function budget the DELETEs below still need.
   const [liveSub] = await db
     .select({ stripeSubscriptionId: subscriptions.stripeSubscriptionId })
     .from(subscriptions)
@@ -99,28 +120,61 @@ async function eraseDeletedUser(userId: string | undefined) {
       ),
     )
     .limit(1);
+  let cancelRequested = false;
   if (liveSub) {
-    // Vercel logs live a day and Sentry drops console breadcrumbs wholesale,
-    // so the money guard also raises a Sentry message — ids only. Until #164
-    // automates the Stripe side, this is the signal the owner acts on.
-    console.error(
-      "Clerk user.deleted: account had a LIVE Stripe subscription — cancel it at Stripe by hand (#164)",
-      {
-        userId,
-        stripeCustomerId: user.stripeCustomerId,
-        stripeSubscriptionId: liveSub.stripeSubscriptionId,
-      },
-    );
+    const ids = {
+      userId,
+      stripeCustomerId: user.stripeCustomerId,
+      stripeSubscriptionId: liveSub.stripeSubscriptionId,
+    };
+    try {
+      await getStripe().subscriptions.update(
+        liveSub.stripeSubscriptionId,
+        { cancel_at_period_end: true },
+        { timeout: STRIPE_CANCEL_TIMEOUT_MS },
+      );
+      cancelRequested = true;
+      console.info(
+        "Clerk user.deleted: live Stripe subscription set to cancel at period end",
+        ids,
+      );
+    } catch (err) {
+      // Stripe's error text is not echoed: it quotes request parameters,
+      // and the log-audit only allows ids and statuses through. Name, code
+      // and HTTP status are enough to tell "no such subscription" from
+      // "Stripe is down".
+      console.error(
+        "Clerk user.deleted: could NOT schedule the live Stripe subscription's cancellation — cancel it at Stripe by hand",
+        { ...ids, error: describeStripeError(err) },
+      );
+    }
     Sentry.captureMessage(
-      "clerk user.deleted: live Stripe subscription left behind (#164)",
+      cancelRequested
+        ? "clerk user.deleted: live Stripe subscription set to cancel at period end"
+        : "clerk user.deleted: live Stripe subscription NOT cancelled — cancel by hand",
       {
-        level: "warning",
+        level: cancelRequested ? "info" : "error",
         tags: {
           userId,
-          stripeSubscriptionId: liveSub.stripeSubscriptionId ?? "unknown",
+          stripeSubscriptionId: liveSub.stripeSubscriptionId,
+          cancelRequested: String(cancelRequested),
         },
       },
     );
+  }
+
+  // Tombstone the Stripe customer BEFORE the users row goes: from here on
+  // the customer's webhooks (the cancel-at-period-end update just
+  // requested, a renewal, the final subscription.deleted) find no local
+  // user, and a guest sub's `guest = "1"` metadata would otherwise send them
+  // into claimGuestCheckout to re-create the account. Write-if-absent, so a
+  // redelivery is a no-op; a failure here throws (500 → Clerk retries) —
+  // unlike the Stripe call above, this row is what makes the erasure stick.
+  if (user.stripeCustomerId) {
+    await db
+      .insert(erasedCustomers)
+      .values({ stripeCustomerId: user.stripeCustomerId })
+      .onConflictDoNothing({ target: erasedCustomers.stripeCustomerId });
   }
 
   // No transaction around the two DELETEs — on purpose: the only partial
@@ -152,6 +206,23 @@ async function eraseDeletedUser(userId: string | undefined) {
     reminderRows: reminders.length,
     stripeCustomer: user.stripeCustomerId !== null,
     liveSubscription: liveSub !== undefined,
+    cancelRequested,
   });
   return new Response("OK", { status: 200 });
+}
+
+// Per-request ceiling for the cancel-at-period-end call. Stripe answers in
+// well under a second; the ceiling exists so a Stripe stall cannot consume
+// the whole function budget before the local DELETEs run.
+const STRIPE_CANCEL_TIMEOUT_MS = 5_000;
+
+// The loggable shape of a failed Stripe call: class, Stripe error code and
+// HTTP status — never the message, which quotes what was sent.
+function describeStripeError(err: unknown) {
+  const e = err as { name?: unknown; code?: unknown; statusCode?: unknown };
+  return {
+    name: typeof e?.name === "string" ? e.name : "unknown",
+    code: typeof e?.code === "string" ? e.code : undefined,
+    statusCode: typeof e?.statusCode === "number" ? e.statusCode : undefined,
+  };
 }
