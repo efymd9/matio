@@ -21,13 +21,11 @@ updates:
     # Мажоры в недельную пачку НЕ входят. Волна 04.09.2026 (#150) приехала
     # красной ровно из-за четырёх мажоров в одном PR с 29 патчами — и вся
     # группа стала немержабельной. Мажор — это отдельный PR с миграцией
-    # (эти четыре — #157); миноры и патчи тех же пакетов приезжают штатно.
+    # (#157); миноры и патчи тех же пакетов приезжают штатно. Снятый с
+    # игнора пакет бот дальше ведёт сам: typescript и @types/node уже на
+    # актуальном мажоре (#157, 1/3), eslint и @mux/mux-node ждут своих PR.
     ignore:
-      - dependency-name: "typescript"
-        update-types: ["version-update:semver-major"]
       - dependency-name: "eslint"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@mux/mux-node"
         update-types: ["version-update:semver-major"]
