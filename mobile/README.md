@@ -62,12 +62,36 @@ xcrun simctl boot "iPhone 16 Pro"
 xcrun simctl openurl booted "exp://127.0.0.1:8081"
 ```
 
-For a native dev build (required once `react-native-video`, Cast, or any other custom native
-module lands):
+For a native dev build (required: `react-native-video` is a custom native module):
 
 ```bash
 npx expo run:ios --device "iPhone 16 Pro"
 ```
+
+**After a change to the plugin options in `app.json`** (phase 2 turned on background audio,
+notification controls and Android PiP through `react-native-video`'s plugin) the generated
+native projects are stale — regenerate them, do not patch `ios/` by hand:
+
+```bash
+rm -rf ios android && npx expo prebuild --clean
+```
+
+## Player
+
+One engine for both orientations — `src/watch/episode-feed.tsx`. Every episode of the show is
+a full-screen page in a `FlatList`; a page mounts a `<Video>` only while it is the current page
+or an immediate neighbour (a **pool** of three players for vertical shows, two for landscape).
+Neighbours are created paused and muted so they buffer ahead: the auto-advance starts on a warm
+player, no black frame, no token round-trip. Landscape shows arm the next page 45s before the
+end; vertical shows page on swipe. A locked episode's page is the sign-up wall.
+
+Retention buckets (`use-segment-tracker.ts`) flush through `segment-queue.ts`, an in-memory
+queue that retries network failures with backoff and on foreground, and drops anything the
+server refuses. It does not survive an app kill — see `docs/registry.md`.
+
+PiP, background audio and lock-screen controls are `react-native-video` props on the current
+page; the native side (iOS `audio` background mode, the Android media-playback foreground
+service, `supportsPictureInPicture`) is written by the plugin options in `app.json`.
 
 ### API base URL
 
