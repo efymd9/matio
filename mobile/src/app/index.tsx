@@ -47,10 +47,7 @@ export default function HomeScreen() {
         pathname: "/watch/[episodeId]",
         params: {
           episodeId: item.episodeId,
-          title: item.episodeTitle,
-          showTitle: item.show.title,
-          orientation: item.show.orientation,
-          episodeNumber: String(item.episodeNumber),
+          showSlug: item.show.slug,
           resume: String(item.positionSeconds),
         },
       }),
