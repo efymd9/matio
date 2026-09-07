@@ -818,6 +818,19 @@ An "adjust state during render" block reconciles state if the prop later changes
 
 ## TypeScript / build
 
+### TypeScript 7 ships no JavaScript compiler API — `pnpm lint` dies at load
+
+`typescript@7` is the native (Go) compiler. The npm package exports only `{ version, versionMajorMinor }` from `import "typescript"` (`lib/version.cjs`); the classic API (`ts.createProgram`, `ts.Extension`, `ts.ScriptTarget`, …) is gone, and its replacement (`typescript/unstable/*`) stays unstable until 7.1. What that does in this repo (measured on 7.0.2, 2026-09-07):
+
+- `pnpm typecheck` (`tsc --noEmit`) passes unchanged — our `tsconfig.json` uses nothing 7 removed (`target: es5`, `moduleResolution: node10`, `baseUrl`, `module: amd/umd/system`, `esModuleInterop: false`). No `ignoreDeprecations` needed.
+- `pnpm lint` crashes before checking a single file: `eslint-config-next` → `typescript-eslint@8` (peer `typescript >=4.8.4 <6.1.0`) reads `ts.Extension.Cjs` while its module loads → `TypeError: Cannot read properties of undefined (reading 'Cjs')`. Nothing in `eslint.config.mjs` triggers it — the parser itself needs the API, so there is no fix on our side. It unblocks upstream (typescript-eslint on the 7.1 API) or via the TypeScript team's dual install (`typescript: npm:@typescript/typescript6` for tools + the native compiler under an alias) — a dependency decision for the owner, tracked in #157.
+- `next build` is fine on Next 16.3+: `experimental.useTypeScriptCli` defaults to `true`, so Next spawns the project-local `tsc` instead of loading the API (diagnostics lose Next's route-specific code frames). Flip it to `false` on TS 7 and Next throws `TypeScript 7.x does not provide the compiler API required by Next.js`.
+- vitest, tsx, drizzle-kit and Storybook (`reactDocgen` is not `react-docgen-typescript`) never touch the API — all green.
+
+**Where we stand (2026-09-07): TypeScript 6.0.3**, the last JS-based release and the bridge to 7 — it still ships the compiler API typescript-eslint needs, flags everything 7 removes, and passed every gate without a single change. TS 7 waits on typescript-eslint supporting the 7.x API (7.1 promises a stable one); the row in `docs/registry.md` names the closing condition, and `.github/dependabot.yml` ignores `typescript` majors until then, so the bot does not re-propose 7 every week. When it unblocks, the upgrade is a version bump — the tsconfig needs nothing.
+
+`@types/node`'s major is the Node major it describes, not the one we run: `.nvmrc` pins 24 (every workflow reads it via `node-version-file`; Vercel runs Node 24 LTS). Types for a newer Node let a call typecheck and still throw at runtime — bump `@types/node` and `.nvmrc` together, never one without the other.
+
 ### Stale `.next/types/validator.ts`
 
 When you move or delete a route, `.next/types/validator.ts` can reference the deleted route by path, causing typecheck errors:
