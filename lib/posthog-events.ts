@@ -53,6 +53,11 @@ export type FunnelEvent =
   // Instant next-episode transition at `ended` (subscriber/member/free —
   // the legacy 60s trial keeps the countdown card instead).
   | "episode_auto_advanced"
+  // Branching video (#144): the viewer's pick at a fork, fired at the
+  // parent's `ended` alongside episode_auto_advanced. Properties are ids
+  // and flags only — show_slug, episode_id (the parent), choice_position
+  // (1-based), is_default, timed_out (nothing tapped → the default played).
+  | "fork_choice_made"
   // Pay-first /welcome page observability (the critical post-purchase
   // surface). All consent-gated like every client event:
   //   welcome_signin_succeeded — session established (method: 'ticket' for

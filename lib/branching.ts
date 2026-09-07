@@ -6,8 +6,9 @@
 // it can be published. No db, no env: the server actions (app/admin/actions.ts)
 // and the admin panel (components/admin/fork-panel.tsx) both import it, and
 // every rule here is table-testable (lib/branching.test.ts). The player half
-// — the overlay, the timer, the transition — is PR 2 (#144) and builds on
-// resolveNextStep below.
+// (#144) reads the same rules through resolveCandidates below — the overlay,
+// the timer and the transition live in components/watch/, the DECISION of
+// where an episode leads lives here.
 
 export const MAX_CHOICES = 3;
 export const FORK_WINDOW_MIN_SECONDS = 3;
@@ -38,22 +39,166 @@ export type ChoiceEdge = {
 //   0 rows  — a branch is an ending (series-end overlay); a regular episode
 //             keeps the linear `episodes[idx + 1]` behaviour.
 // This covers v1's reconvergence AND multiple endings with one schema.
-export type NextStep =
-  | { kind: "fork"; choices: ChoiceEdge[] }
+//
+// Generic over the choice row so the admin side (ChoiceEdge, es+en labels)
+// and the player side (PlayerChoice, one localized label) share the rule.
+export type NextStep<C = ChoiceEdge> =
+  | { kind: "fork"; choices: C[] }
   | { kind: "auto"; toEpisodeId: string }
   | { kind: "ending" }
   | { kind: "linear" };
 
-export function resolveNextStep(
-  episode: { branchOfEpisodeId: string | null },
-  choices: ChoiceEdge[],
-): NextStep {
+export function resolveNextStep<
+  C extends Pick<ChoiceEdge, "toEpisodeId" | "position">,
+>(episode: { branchOfEpisodeId: string | null }, choices: C[]): NextStep<C> {
   const sorted = [...choices].sort((a, b) => a.position - b.position);
   if (sorted.length >= 2) return { kind: "fork", choices: sorted };
   if (sorted.length === 1) {
     return { kind: "auto", toEpisodeId: sorted[0].toEpisodeId };
   }
   return episode.branchOfEpisodeId ? { kind: "ending" } : { kind: "linear" };
+}
+
+// ---------- player: candidates, listing, display numbers (#144) ----------
+
+// One option of a fork as the PLAYER receives it: the label is already
+// localized by the watch page (app/watch/[showSlug]/page.tsx picks es/en
+// from the row; the player never reads the locale for database copy).
+export type PlayerChoice = {
+  toEpisodeId: string;
+  position: number;
+  label: string;
+  isDefault: boolean;
+};
+
+// The subset of the Player's episode DTO these rules read.
+export type PlayerEpisodeLike = {
+  id: string;
+  number: number;
+  branchOfEpisodeId: string | null;
+  choices: PlayerChoice[] | null;
+};
+
+export type ForkOption<E> = {
+  episode: E;
+  label: string;
+  position: number;
+  isDefault: boolean;
+};
+
+// Where the player goes when `current` ends, resolved against the episodes
+// ACTUALLY on the page (ready + playable). A choice whose target is not in
+// the array is treated as absent — the publish guard forbids that state,
+// but the player must never crash on it, and a fork that lost all but one
+// option degrades to a silent transition rather than a one-button prompt.
+//   fork — show the prompt; `defaultOption` plays when the timer runs out
+//   next — one episode follows (linear run, silent reconvergence, or a
+//          degraded fork); nothing is asked
+//   end  — nothing follows (last listed episode, or a branch that is an
+//          ending): the series-end surface
+export type Candidates<E> =
+  | { kind: "fork"; options: ForkOption<E>[]; defaultOption: ForkOption<E> }
+  | { kind: "next"; episode: E }
+  | { kind: "end" };
+
+// The episodes a viewer may pick by position — everything that is not a
+// branch. Feeds every list the player renders (episodes overlay, prev/next
+// transport, counts) while the full array keeps the branches PLAYABLE.
+export function listedEpisodes<
+  E extends { branchOfEpisodeId: string | null },
+>(episodes: E[]): E[] {
+  return episodes.filter((e) => e.branchOfEpisodeId === null);
+}
+
+// 1-based position of `id` among the listed episodes; 0 for a branch (or an
+// unknown id) — the same answer the server's getOrderedReadyEpisodeIds gives
+// the funnel, so `episode_number` on the client events keeps its meaning and
+// the Meta Lead check (`position === 1`) can never fire on a branch.
+export function listedPosition<
+  E extends { id: string; branchOfEpisodeId: string | null },
+>(episodes: E[], id: string): number {
+  return listedEpisodes(episodes).findIndex((e) => e.id === id) + 1;
+}
+
+// The listed episode a branch continues — itself for a listed episode, the
+// parent (walking up nested branches) for a branch, null for an orphan
+// whose parent is not on the page. The anchor for everything the chrome
+// shows by position: the printed number, the "now playing" row of the
+// episodes overlay, the prev button.
+export function listedAncestor<E extends PlayerEpisodeLike>(
+  episodes: E[],
+  episode: E,
+): E | null {
+  const byId = new Map(episodes.map((e) => [e.id, e]));
+  let node: E | undefined = episode;
+  // Bounded walk: the publish guard refuses cycles, but a stale page could
+  // still hold one — never loop forever on a render path.
+  for (let hops = 0; node && hops <= episodes.length; hops++) {
+    if (node.branchOfEpisodeId === null) return node;
+    node = byId.get(node.branchOfEpisodeId);
+  }
+  return null;
+}
+
+// What the chrome PRINTS as the episode number. A listed episode: its
+// position. A branch: the number of the episode it continues — its listed
+// ancestor's — so the viewer reads "Ep. 3" throughout a fork on episode 3
+// and never "Ep. 903". An orphan branch falls back to its stored number.
+export function displayNumber<E extends PlayerEpisodeLike>(
+  episodes: E[],
+  episode: E,
+): number {
+  const anchor = listedAncestor(episodes, episode);
+  return anchor ? listedPosition(episodes, anchor.id) : episode.number;
+}
+
+export function resolveCandidates<E extends PlayerEpisodeLike>(
+  current: E,
+  episodes: E[],
+): Candidates<E> {
+  const byId = new Map(episodes.map((e) => [e.id, e]));
+  const step = resolveNextStep(current, current.choices ?? []);
+
+  if (step.kind === "fork") {
+    const options: ForkOption<E>[] = [];
+    for (const c of step.choices) {
+      const episode = byId.get(c.toEpisodeId);
+      if (!episode) continue;
+      options.push({
+        episode,
+        label: c.label,
+        position: c.position,
+        isDefault: c.isDefault,
+      });
+    }
+    if (options.length >= 2) {
+      return {
+        kind: "fork",
+        options,
+        // validateForkDraft always flags exactly one default; the first
+        // option stands in should a row ever lose it.
+        defaultOption: options.find((o) => o.isDefault) ?? options[0],
+      };
+    }
+    if (options.length === 1) {
+      return { kind: "next", episode: options[0].episode };
+    }
+    // Every target gone — fall through to the zero-row rule below.
+  } else if (step.kind === "auto") {
+    const episode = byId.get(step.toEpisodeId);
+    if (episode) return { kind: "next", episode };
+    // Target gone — fall through.
+  } else if (step.kind === "ending") {
+    return { kind: "end" };
+  }
+
+  // Linear: the next LISTED episode. A branch never falls through into the
+  // linear run — with its edges gone it is an ending.
+  if (current.branchOfEpisodeId !== null) return { kind: "end" };
+  const listed = listedEpisodes(episodes);
+  const idx = listed.findIndex((e) => e.id === current.id);
+  const next = idx >= 0 ? listed[idx + 1] : undefined;
+  return next ? { kind: "next", episode: next } : { kind: "end" };
 }
 
 // ---------- admin form: parse + validate ----------
