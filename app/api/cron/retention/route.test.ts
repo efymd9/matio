@@ -18,7 +18,7 @@ function request(authorization?: string) {
 const cleanRun = {
   deleted: { trial_sessions: 12, visitors: 3, watch_days: 0, show_reminders: 1 },
   failed: [],
-  truncated: false,
+  truncated: {},
   durationMs: 42,
 };
 

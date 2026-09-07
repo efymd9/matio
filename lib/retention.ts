@@ -1,4 +1,5 @@
 import "server-only";
+import * as Sentry from "@sentry/nextjs";
 import { and, isNotNull, isNull, lt, sql, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 
@@ -40,7 +41,8 @@ export const RETENTION_BATCH_SIZE = 1000;
 /**
  * Batches per table per run — a ceiling on one invocation's work (50k rows a
  * table a day). A backlog bigger than that is drained over consecutive days;
- * the run reports `truncated: true` so the log shows it is still catching up.
+ * the run reports the table under `truncated` so the log shows it is still
+ * catching up.
  */
 export const RETENTION_MAX_BATCHES_PER_TABLE = 50;
 
@@ -63,8 +65,15 @@ export interface RetentionPolicy {
   /** Real table name — what the log line and the response name. */
   name: RetentionTable;
   table: PgTable;
-  /** The key the batched DELETE selects on — a primary key, so the subselect is cheap and exact. */
-  key: SQL;
+  /**
+   * The primary key the batched DELETE selects on. One column, or the
+   * columns of a composite key — the statement builder renders them as a
+   * row constructor on the DELETE side and as a bare column list in the
+   * subselect (`(a, b) IN (SELECT a, b …)`); a parenthesised list in the
+   * SELECT would be ONE record-typed column and Postgres rejects it at parse
+   * time ("subquery has too few columns").
+   */
+  keyColumns: readonly PgColumn[];
   /** The column the window is measured against. Must be indexed — see db/schema. */
   column: PgColumn;
   /**
@@ -85,7 +94,7 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   {
     name: "trial_sessions",
     table: trialSessions,
-    key: sql`${trialSessions.id}`,
+    keyColumns: [trialSessions.id],
     column: trialSessions.startedAt,
     grain: "instant",
     window: { days: 30 },
@@ -101,33 +110,42 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
   {
     name: "visitors",
     table: visitors,
-    key: sql`${visitors.aid}`,
+    keyColumns: [visitors.aid],
     column: visitors.firstSeenAt,
     grain: "instant",
     window: { months: 25 },
     // `visitor_days` goes with it: FK ON DELETE CASCADE, and a day cannot
     // precede the identifier's first_seen_at, so nothing is left behind.
+    // The cascade can reach a day younger than 25 months, though: the
+    // `matio_aid` cookie lives 395 days and is never refreshed
+    // (VISITOR_COOKIE_MAX_AGE), so an identifier first seen 25 months ago
+    // may still hold days up to ~12 months old. 25 months is at least 758
+    // days; 758 − 395 = 363 — the youngest day this can remove sits just
+    // under the dashboard's 366-day maximum range, so a year-long custom
+    // range can lose a day or two at its far edge. Accepted: the window is
+    // §6's promise, not the dashboard's wish.
     promise:
       "§6 Audience-measurement data: the first-party audience identifier and the data recorded against it are kept for up to 25 months",
   },
   {
     name: "watch_days",
     table: watchDays,
-    key: sql`(${watchDays.userId}, ${watchDays.day})`,
+    keyColumns: [watchDays.userId, watchDays.day],
     column: watchDays.day,
     grain: "day",
     window: { months: 25 },
     // The signed-in half of the same measurement (rolling WAU, new /
     // returning / lost) — the same window as the anonymous half. The longest
     // dashboard range is a year (lib/admin-analytics-v2.ts clamps custom
-    // ranges to 366 days), well inside it.
+    // ranges to 366 days), well inside it — this table is keyed by day, so
+    // unlike `visitors` nothing younger than the window ever goes.
     promise:
       "§6 Audience-measurement data … up to 25 months (watch activity per day is the signed-in audience measurement)",
   },
   {
     name: "show_reminders",
     table: showReminders,
-    key: sql`${showReminders.id}`,
+    keyColumns: [showReminders.id],
     column: showReminders.notifiedAt,
     grain: "instant",
     window: { days: 30 },
@@ -181,6 +199,17 @@ export function expiredWhere(policy: RetentionPolicy, now: Date): SQL {
   return (policy.extra ? and(older, policy.extra) : undefined) ?? older;
 }
 
+/** The key as the DELETE compares it: a bare column, or a row constructor for a composite key. */
+export function comparisonKey(policy: RetentionPolicy): SQL {
+  const list = sql.join([...policy.keyColumns], sql`, `);
+  return policy.keyColumns.length === 1 ? list : sql`(${list})`;
+}
+
+/** The key as the subselect projects it: always a bare column list — never wrapped, see `keyColumns`. */
+export function projectionKey(policy: RetentionPolicy): SQL {
+  return sql.join([...policy.keyColumns], sql`, `);
+}
+
 /**
  * One batched DELETE. `key IN (SELECT key … LIMIT n)` is the portable way to
  * bound a DELETE in Postgres (DELETE has no LIMIT of its own); the subselect
@@ -191,7 +220,36 @@ export function deleteBatchSql(
   now: Date,
   batchSize: number,
 ): SQL {
-  return sql`DELETE FROM ${policy.table} WHERE ${policy.key} IN (SELECT ${policy.key} FROM ${policy.table} WHERE ${expiredWhere(policy, now)} LIMIT ${batchSize})`;
+  return sql`DELETE FROM ${policy.table} WHERE ${comparisonKey(policy)} IN (SELECT ${projectionKey(policy)} FROM ${policy.table} WHERE ${expiredWhere(policy, now)} LIMIT ${batchSize})`;
+}
+
+/**
+ * The order tables are visited on a given day. Rotates daily so a table with
+ * a backlog that eats the whole time budget cannot starve the ones behind it
+ * night after night — each table is first once every four days.
+ */
+export function policyOrder(now: Date): readonly RetentionPolicy[] {
+  const n = RETENTION_POLICIES.length;
+  const start = Math.floor(now.getTime() / DAY_MS) % n;
+  return RETENTION_POLICIES.map((_, i) => RETENTION_POLICIES[(start + i) % n]);
+}
+
+/**
+ * What can be said about a failed statement without quoting it: the error's
+ * class and the driver's SQLSTATE (42P01 undefined_table, 40P01 deadlock,
+ * 57014 query_canceled, …). Drizzle 0.44+ wraps the PostgresError in a
+ * DrizzleQueryError with the original on `.cause` — walked the same way as
+ * lib/db-errors.ts. The message is deliberately NOT read: the driver quotes
+ * the statement in it, and a constraint error can quote the row.
+ */
+export function describeDbError(e: unknown): { name: string; code: string | null } {
+  const name = e instanceof Error ? e.name : typeof e;
+  for (let err = e, depth = 0; err && depth < 5; depth++) {
+    const code = (err as { code?: unknown }).code;
+    if (typeof code === "string") return { name, code };
+    err = (err as { cause?: unknown }).cause;
+  }
+  return { name, code: null };
 }
 
 export interface RetentionRunResult {
@@ -199,8 +257,13 @@ export interface RetentionRunResult {
   deleted: Record<RetentionTable, number>;
   /** Tables whose statement failed; the rest of the run still happened. */
   failed: RetentionTable[];
-  /** A batch cap or the time budget stopped the run early — the next run continues. */
-  truncated: boolean;
+  /**
+   * Tables the run left with expired rows still in place — a batch cap, the
+   * time budget, or the budget running out before the table's turn. The next
+   * run continues; a table that keeps appearing here has a backlog the daily
+   * ceiling cannot drain.
+   */
+  truncated: Partial<Record<RetentionTable, true>>;
   durationMs: number;
 }
 
@@ -216,9 +279,12 @@ export interface RetentionRunOptions {
  * and the others still get their turn, because one broken statement must not
  * leave every other ledger growing.
  *
- * Logs COUNTERS AND TABLE NAMES ONLY — never a caught error. The driver quotes
- * the statement and can quote the row it choked on, and this is a path the log
- * audit (lib/log-audit.test.ts) seeds with user text for exactly that reason.
+ * Logs COUNTERS, TABLE NAMES AND ERROR CODES ONLY — never a caught error's
+ * text. The driver quotes the statement and can quote the row it choked on,
+ * and this is a path the log audit (lib/log-audit.test.ts) seeds with user
+ * text for exactly that reason. Failures also go to Sentry as a message with
+ * the same three tags: Vercel's runtime log lives a day, and "the retention
+ * cron has been red for a week" must be visible somewhere that keeps it.
  */
 export async function runRetention(
   options: RetentionRunOptions = {},
@@ -237,13 +303,13 @@ export async function runRetention(
     show_reminders: 0,
   } satisfies Record<RetentionTable, number>;
   const failed: RetentionTable[] = [];
-  let truncated = false;
+  const truncated: Partial<Record<RetentionTable, true>> = {};
 
-  for (const policy of RETENTION_POLICIES) {
+  for (const policy of policyOrder(now)) {
     try {
       for (let batch = 0; ; batch++) {
         if (batch >= maxBatchesPerTable || Date.now() - startedAt > budgetMs) {
-          truncated = true;
+          truncated[policy.name] = true;
           break;
         }
         const result = await db.execute(deleteBatchSql(policy, now, batchSize));
@@ -252,11 +318,19 @@ export async function runRetention(
         deleted[policy.name] += removed;
         if (removed < batchSize) break;
       }
-    } catch {
+    } catch (err) {
       failed.push(policy.name);
-      console.error("retention: table failed", {
+      const { name, code } = describeDbError(err);
+      const report = {
         table: policy.name,
+        code,
+        name,
         deletedBeforeFailure: deleted[policy.name],
+      };
+      console.error("retention: table failed", report);
+      Sentry.captureMessage("retention: table failed", {
+        level: "error",
+        tags: { table: policy.name, code: code ?? "none", name },
       });
     }
   }
