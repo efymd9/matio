@@ -12,12 +12,17 @@ const h = vi.hoisted(() => ({
   episode: undefined as
     | { id: string; showId: string; access: string; durationSeconds: number | null }
     | undefined,
-  session: undefined as { id: string } | undefined,
+  // Existing trial_sessions rows as (token, show) pairs; the fake answers the
+  // lookup by matching the eq() clauses the write sends — see the lib suite.
+  sessions: [] as Array<{ token: string; showId: string }>,
   inserts: [] as Array<{ table: unknown; values: unknown; conflict: unknown }>,
   updates: [] as Array<{ table: unknown; set: unknown }>,
+  updateError: null as Error | null,
   hasActiveSubscription: vi.fn(),
   orderedEpisodeIds: vi.fn(),
 }));
+
+type EqClause = { column: unknown; value: unknown };
 
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: h.userId }),
@@ -26,15 +31,22 @@ vi.mock("@/db", () => ({
   db: {
     select: () => ({
       from: (table: unknown) => {
-        const isTrial = table === "trial_sessions";
-        const limit = async () => {
-          if (isTrial) return h.session ? [h.session] : [];
-          return h.episode ? [h.episode] : [];
-        };
+        const isTrial = (table as { table?: string } | null)?.table === "trial_sessions";
+        const episodeLimit = async () => (h.episode ? [h.episode] : []);
         return {
-          where: () => ({ limit }),
+          where: (clause: unknown) => ({
+            limit: async () => {
+              if (!isTrial) return episodeLimit();
+              const eqs = clause as EqClause[];
+              const token = eqs.find((e) => e.column === "trial_sessions.session_token")?.value;
+              const showId = eqs.find((e) => e.column === "trial_sessions.show_id")?.value;
+              return h.sessions.some((s) => s.token === token && s.showId === showId)
+                ? [{ id: "sess-1" }]
+                : [];
+            },
+          }),
           innerJoin: () => ({
-            innerJoin: () => ({ where: () => ({ limit }) }),
+            innerJoin: () => ({ where: () => ({ limit: episodeLimit }) }),
           }),
         };
       },
@@ -53,7 +65,11 @@ vi.mock("@/db", () => ({
     update: (table: unknown) => ({
       set: (set: unknown) => {
         h.updates.push({ table, set });
-        return { where: async () => undefined };
+        return {
+          where: async () => {
+            if (h.updateError) throw h.updateError;
+          },
+        };
       },
     }),
   },
@@ -62,7 +78,12 @@ vi.mock("@/db/schema", () => ({
   episodes: {},
   seasons: {},
   shows: {},
-  trialSessions: "trial_sessions",
+  trialSessions: {
+    table: "trial_sessions",
+    id: "trial_sessions.id",
+    sessionToken: "trial_sessions.session_token",
+    showId: "trial_sessions.show_id",
+  },
   watchProgress: {
     table: "watch_progress",
     userId: "watch_progress.user_id",
@@ -78,8 +99,8 @@ vi.mock("@/db/schema", () => ({
   },
 }));
 vi.mock("drizzle-orm", () => ({
-  and: () => undefined,
-  eq: () => undefined,
+  and: (...clauses: unknown[]) => clauses,
+  eq: (column: unknown, value: unknown) => ({ column, value }),
   isNull: () => undefined,
   sql: (strings: TemplateStringsArray, ...values: unknown[]) =>
     strings.raw.reduce(
@@ -128,9 +149,10 @@ function segmentWrites(): SegmentUpsert[] {
 beforeEach(() => {
   h.userId = null;
   h.episode = { id: EPISODE, showId: SHOW, access: "free", durationSeconds: 600 };
-  h.session = { id: "sess-1" };
+  h.sessions = [{ token: DEVICE, showId: SHOW }];
   h.inserts = [];
   h.updates = [];
+  h.updateError = null;
   h.hasActiveSubscription.mockReset().mockResolvedValue(false);
   h.orderedEpisodeIds.mockReset().mockResolvedValue([EPISODE, EPISODE_2]);
   vi.stubEnv("PAYMENTS_ENABLED", "");
@@ -139,6 +161,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("POST /api/v1/watch-segments — input", () => {
@@ -202,7 +225,7 @@ describe("POST /api/v1/watch-segments — identity", () => {
   });
 
   it("is 403 for a device with no playback session on the show", async () => {
-    h.session = undefined;
+    h.sessions = [];
     const res = await POST(post({ episodeId: EPISODE, buckets: [1] }));
     expect(res.status).toBe(403);
     // Not a wall the client can route to — no reason field.
@@ -210,9 +233,18 @@ describe("POST /api/v1/watch-segments — identity", () => {
     expect(h.inserts).toEqual([]);
   });
 
+  it("is 403 for a device whose session row is on a DIFFERENT show — the row is per (token, show)", async () => {
+    // The device started show B; that proves nothing about show A, whose
+    // shared counters must not move on it.
+    h.sessions = [{ token: DEVICE, showId: "show-B" }];
+    const res = await POST(post({ episodeId: EPISODE, buckets: [1] }));
+    expect(res.status).toBe(403);
+    expect(h.inserts).toEqual([]);
+  });
+
   it("prefers the Bearer session over the device id and credits the progress row", async () => {
     h.userId = "user_1";
-    h.session = undefined; // would refuse an anonymous caller
+    h.sessions = []; // would refuse an anonymous caller
     const res = await POST(post({ episodeId: EPISODE, buckets: [1, 2, 3] }));
 
     expect(res.status).toBe(200);
@@ -221,6 +253,18 @@ describe("POST /api/v1/watch-segments — identity", () => {
     expect(h.updates[0].set).toEqual({
       totalWatchedSeconds: `${watchProgress.totalWatchedSeconds} + 30`,
     });
+  });
+
+  it("answers 200 with accepted when the credit fails after the counter landed — a retry would inflate views", async () => {
+    h.userId = "user_1";
+    h.updateError = new Error("connection reset");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const res = await POST(post({ episodeId: EPISODE, buckets: [1, 2, 3] }));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true, accepted: 3 });
+    expect(segmentWrites()).toHaveLength(1);
   });
 });
 
@@ -265,10 +309,12 @@ describe("POST /api/v1/watch-segments — paid mode", () => {
     vi.stubEnv("PAYMENTS_ENABLED", "1");
   });
 
-  it("keeps anonymous previews off the retention curve", async () => {
+  it("keeps anonymous previews off the retention curve, with no reason to route on", async () => {
+    // The token route may have answered 200 (trial) or subscribe_required
+    // for the very same episode; a flush refusal must not contradict it.
     const res = await POST(post({ episodeId: EPISODE, buckets: [1] }));
     expect(res.status).toBe(403);
-    expect((await res.json()).error.reason).toBe("signup_required");
+    expect((await res.json()).error).not.toHaveProperty("reason");
     expect(h.inserts).toEqual([]);
   });
 

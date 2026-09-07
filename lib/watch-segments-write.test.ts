@@ -11,28 +11,44 @@ const h = vi.hoisted(() => ({
   episode: undefined as
     | { id: string; showId: string; access: string; durationSeconds: number | null }
     | undefined,
-  session: undefined as { id: string } | undefined,
+  // The trial_sessions rows that exist: (token, show) pairs. The fake
+  // answers the lookup by matching the eq() clauses the write actually
+  // sends, so a query keyed on the wrong show finds nothing — that is the
+  // invariant under test, not a convenience.
+  sessions: [] as Array<{ token: string; showId: string }>,
+  trialWhere: [] as unknown[],
   inserts: [] as Array<{ table: unknown; values: unknown; conflict: unknown }>,
   updates: [] as Array<{ table: unknown; set: unknown }>,
+  updateError: null as Error | null,
   hasActiveSubscription: vi.fn(),
   orderedEpisodeIds: vi.fn(),
 }));
+
+type EqClause = { column: unknown; value: unknown };
 
 vi.mock("@/db", () => ({
   db: {
     select: () => ({
       from: (table: unknown) => {
-        const isTrial = table === "trial_sessions";
-        const limit = async () => {
-          if (isTrial) return h.session ? [h.session] : [];
-          return h.episode ? [h.episode] : [];
-        };
+        const isTrial = (table as { table?: string } | null)?.table === "trial_sessions";
+        const episodeLimit = async () => (h.episode ? [h.episode] : []);
         return {
-          // trial_sessions: from().where().limit()
-          where: () => ({ limit }),
+          // trial_sessions: from().where(and(eq(token), eq(show))).limit()
+          where: (clause: unknown) => ({
+            limit: async () => {
+              if (!isTrial) return episodeLimit();
+              h.trialWhere.push(clause);
+              const eqs = clause as EqClause[];
+              const token = eqs.find((e) => e.column === "trial_sessions.session_token")?.value;
+              const showId = eqs.find((e) => e.column === "trial_sessions.show_id")?.value;
+              return h.sessions.some((s) => s.token === token && s.showId === showId)
+                ? [{ id: "sess-1" }]
+                : [];
+            },
+          }),
           // episodes ⋈ seasons ⋈ shows: from().innerJoin().innerJoin().where().limit()
           innerJoin: () => ({
-            innerJoin: () => ({ where: () => ({ limit }) }),
+            innerJoin: () => ({ where: () => ({ limit: episodeLimit }) }),
           }),
         };
       },
@@ -51,7 +67,11 @@ vi.mock("@/db", () => ({
     update: (table: unknown) => ({
       set: (set: unknown) => {
         h.updates.push({ table, set });
-        return { where: async () => undefined };
+        return {
+          where: async () => {
+            if (h.updateError) throw h.updateError;
+          },
+        };
       },
     }),
   },
@@ -60,7 +80,12 @@ vi.mock("@/db/schema", () => ({
   episodes: { id: "episodes.id", status: "episodes.status", access: "episodes.access" },
   seasons: { id: "seasons.id", showId: "seasons.show_id" },
   shows: { id: "shows.id", status: "shows.status", deletedAt: "shows.deleted_at" },
-  trialSessions: "trial_sessions",
+  trialSessions: {
+    table: "trial_sessions",
+    id: "trial_sessions.id",
+    sessionToken: "trial_sessions.session_token",
+    showId: "trial_sessions.show_id",
+  },
   watchProgress: {
     table: "watch_progress",
     userId: "watch_progress.user_id",
@@ -76,8 +101,10 @@ vi.mock("@/db/schema", () => ({
   },
 }));
 vi.mock("drizzle-orm", () => ({
-  and: () => undefined,
-  eq: () => undefined,
+  // and()/eq() keep their arguments so the trial_sessions fake can see WHICH
+  // (token, show) the write asked for.
+  and: (...clauses: unknown[]) => clauses,
+  eq: (column: unknown, value: unknown) => ({ column, value }),
   isNull: () => undefined,
   // Renders the tagged template to plain text so a test can read the SQL a
   // write carries — the `views + 1` IS the counter contract.
@@ -120,9 +147,11 @@ function segmentWrites(): SegmentUpsert[] {
 
 beforeEach(() => {
   h.episode = { id: EPISODE, showId: SHOW, access: "free", durationSeconds: 600 };
-  h.session = { id: "sess-1" };
+  h.sessions = [{ token: DEVICE, showId: SHOW }];
+  h.trialWhere = [];
   h.inserts = [];
   h.updates = [];
+  h.updateError = null;
   h.hasActiveSubscription.mockReset().mockResolvedValue(false);
   h.orderedEpisodeIds.mockReset().mockResolvedValue([EPISODE, EPISODE_2]);
   vi.stubEnv("PAYMENTS_ENABLED", "");
@@ -130,6 +159,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("saveWatchSegmentsFor — input", () => {
@@ -256,6 +286,27 @@ describe("saveWatchSegmentsFor — signed-in credit", () => {
     expect(h.hasActiveSubscription).not.toHaveBeenCalled();
     expect(segmentWrites()).toHaveLength(1);
   });
+
+  it("still reports saved when the credit fails after the counter landed, logging ids only", async () => {
+    // The two writes are not one transaction. A failure here must NOT read
+    // as a failed flush: the caller would retry, and every landed retry is
+    // another +1 on views. The driver's message quotes the statement —
+    // none of it may reach the console.
+    const quoted = "update watch_progress set total_watched_seconds = ... where user_id = 'user_1' — leak.marker@example.invalid";
+    h.updateError = new Error(quoted);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await saveWatchSegmentsFor(user, EPISODE, [1, 2, 3]);
+
+    expect(result).toEqual({ outcome: "saved", accepted: 3 });
+    expect(segmentWrites()).toHaveLength(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0][0]);
+    expect(line).toContain(EPISODE);
+    expect(line).toContain("user_1");
+    expect(line).not.toContain("leak.marker");
+    expect(line).not.toContain("update watch_progress");
+  });
 });
 
 describe("saveWatchSegmentsFor — anonymous callers", () => {
@@ -267,8 +318,29 @@ describe("saveWatchSegmentsFor — anonymous callers", () => {
     expect(h.updates).toEqual([]);
   });
 
-  it("refuses a token with no session row — presence alone must not move shared counters", async () => {
-    h.session = undefined;
+  it("looks the session row up by (token, THIS episode's show) — never by token alone", async () => {
+    await saveWatchSegmentsFor(anonymousOpen, EPISODE, [1]);
+
+    expect(h.trialWhere).toEqual([
+      [
+        { column: "trial_sessions.session_token", value: DEVICE },
+        { column: "trial_sessions.show_id", value: SHOW },
+      ],
+    ]);
+  });
+
+  it("refuses a device whose only session row is on ANOTHER show", async () => {
+    // A row on show B proves the device started show B, nothing about show A —
+    // the shared counters of A must not move on it.
+    h.sessions = [{ token: DEVICE, showId: "show-B" }];
+    await expect(saveWatchSegmentsFor(anonymousOpen, EPISODE, [1])).resolves.toEqual({
+      outcome: "no_session",
+    });
+    expect(h.inserts).toEqual([]);
+  });
+
+  it("refuses a token with no session row at all — presence alone must not move shared counters", async () => {
+    h.sessions = [];
     await expect(saveWatchSegmentsFor(anonymousOpen, EPISODE, [1])).resolves.toEqual({
       outcome: "no_session",
     });

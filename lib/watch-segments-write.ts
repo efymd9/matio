@@ -163,17 +163,33 @@ export async function saveWatchSegmentsFor(
     // (position 0) would surface a ghost 0%-progress tile in the
     // continue-watching rail. Losing ≤20s of the cumulative counter on
     // the very first flush is the cheaper error.
-    await db
-      .update(watchProgress)
-      .set({
-        totalWatchedSeconds: sql`${watchProgress.totalWatchedSeconds} + ${watched}`,
-      })
-      .where(
-        and(
-          eq(watchProgress.userId, caller.userId),
-          eq(watchProgress.episodeId, episodeId),
-        ),
+    try {
+      await db
+        .update(watchProgress)
+        .set({
+          totalWatchedSeconds: sql`${watchProgress.totalWatchedSeconds} + ${watched}`,
+        })
+        .where(
+          and(
+            eq(watchProgress.userId, caller.userId),
+            eq(watchProgress.episodeId, episodeId),
+          ),
+        );
+    } catch {
+      // The counter upsert above has ALREADY landed and the two writes are
+      // not one transaction. Surfacing this as a failure would make the
+      // caller retry the whole flush, and every landed retry is another
+      // +1 on views — an inflated curve, not eventual consistency. The
+      // credit is the cheaper loss. Ids only: the driver's message quotes
+      // the statement it choked on.
+      console.warn(
+        `[watch-segments] total_watched credit skipped ${JSON.stringify({
+          episodeId,
+          userId: caller.userId,
+          accepted: clean.length,
+        })}`,
       );
+    }
   }
 
   return { outcome: "saved", accepted: clean.length };

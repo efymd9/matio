@@ -73,9 +73,11 @@ export async function POST(req: NextRequest) {
     if (gate.mode === "tiers") {
       // Paid mode: anonymous playback is the 60s preview, which is
       // deliberately kept off the retention curve (see the web action).
-      return apiError("forbidden", "Sign in to keep watching.", {
-        reason: "signup_required",
-      });
+      // No reason field: this refusal is analytics policy, not a wall — the
+      // token route may well have answered 200 (trial) or subscribe_required
+      // for the same episode, and the client routes walls off THAT answer,
+      // never off a flush.
+      return apiError("forbidden", "Anonymous playback is not counted.");
     }
     caller = {
       kind: "anonymous",

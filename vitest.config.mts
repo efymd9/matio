@@ -88,7 +88,7 @@ export default defineConfig({
       // → 25.6 (#97: retention-бакеты для мобильного — общий
       //   lib/watch-segments-write.ts и /api/v1/watch-segments покрыты на 100%,
       //   веб-экшен saveWatchSegments впервые под тестом;
-      //   25.72/25.50/21.06/20.70 по прогону, те же 0.1 запаса).
+      //   25.75/25.52/21.06/20.70 по прогону, те же 0.1 запаса).
       thresholds: {
         lines: 25.6,
         functions: 20.6,

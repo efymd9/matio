@@ -23,13 +23,20 @@ import { WATCH_SEGMENT_FLUSH_MAX_BUCKETS } from "@/shared/api-types";
 // episode rather than one per 20s, and a retry after a lost response
 // double-counts as little as possible.
 
-type Flush = { episodeId: string; buckets: number[] };
+type Flush = { episodeId: string; buckets: number[]; attempts: number };
 
 // ≈ 30 minutes of uncoalescable 20s flushes. Beyond that the oldest are
 // dropped — measurement degrades, memory does not grow.
 const MAX_QUEUED_FLUSHES = 90;
 const RETRY_BASE_MS = 5_000;
 const RETRY_MAX_MS = 60_000;
+// A flush that has failed this many times is dropped, not retried again.
+// The counter upsert is not idempotent across retries (each landed attempt
+// is +1 on views), so an endless retry against a server that accepts the
+// upsert and then fails is not "eventually consistent" — it is a curve
+// inflated by one view per attempt. Five tries cover a tunnel; they do not
+// cover a broken backend.
+const MAX_ATTEMPTS = 5;
 
 const queue: Flush[] = [];
 let inFlight: Flush | null = null;
@@ -53,7 +60,7 @@ export function enqueueWatchSegments(episodeId: string, buckets: number[]) {
   }
 
   if (queue.length >= MAX_QUEUED_FLUSHES) queue.shift();
-  queue.push({ episodeId, buckets: [...new Set(buckets)] });
+  queue.push({ episodeId, buckets: [...new Set(buckets)], attempts: 0 });
   void drain();
 }
 
@@ -75,12 +82,13 @@ async function drain(): Promise<void> {
   while (queue.length > 0) {
     const head = queue[0];
     inFlight = head;
+    head.attempts += 1;
     try {
       await api.saveWatchSegments({ episodeId: head.episodeId, buckets: head.buckets });
       queue.shift();
       retryDelay = RETRY_BASE_MS;
     } catch (err) {
-      if (isRefusal(err)) {
+      if (isRefusal(err) || head.attempts >= MAX_ATTEMPTS) {
         queue.shift();
         continue;
       }
