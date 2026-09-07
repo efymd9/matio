@@ -1,24 +1,28 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
 import { DIRECT_BUCKET } from "@/lib/admin-analytics";
+import { hogTs, runHogQL, type PosthogQueryConfig } from "@/lib/posthog-hogql";
 import { UTM_SOURCE_ALIASES } from "@/lib/utm";
 
-// Server-side PostHog HogQL client. Plain fetch + Bearer auth (no SDK) —
-// same bounded-external-call contract as lib/mux-data.ts. Two consumers:
-// the legacy dashboard's signup-funnel panel (dormant, paid mode) and
-// lib/posthog-sessions.ts (/admin/analytics/sessions), which imports the
-// exported config/hogTs/runHogQL primitives.
+// Server-side PostHog HogQL client. The transport itself (plain fetch +
+// Bearer auth, no SDK, bounded — same contract as lib/mux-data.ts) lives in
+// the universal lib/posthog-hogql.ts and is re-exported from here unchanged
+// for the app's consumers: the legacy dashboard's signup-funnel panel
+// (dormant, paid mode) and lib/posthog-sessions.ts
+// (/admin/analytics/sessions). The split exists because
+// scripts/export-user-data.ts (art. 15/20 subject export) needs the same
+// transport and a tsx script cannot import a `server-only` module. The env
+// read stays HERE, server-only: the personal API key never leaves the
+// server bundle.
 //
 // Requires a PostHog **personal API key** with the query:read scope — the
 // public phc_… project key (NEXT_PUBLIC_POSTHOG_KEY) cannot run queries —
 // plus the numeric project id. Unconfigured → the panel degrades to a
 // connect hint, never breaks the page.
-//
-// The query API lives on the app host (eu.posthog.com), NOT the ingestion
-// host in POSTHOG_HOST (eu.i.posthog.com) — hence the separate env var.
 
-const POSTHOG_API_HOST =
-  process.env.POSTHOG_API_HOST ?? "https://eu.posthog.com";
+export { hogTs, runHogQL } from "@/lib/posthog-hogql";
+export type { PosthogQueryConfig } from "@/lib/posthog-hogql";
+
 // The /query endpoint is rate-limited per personal API key — cache
 // aggressively; the panel is a 5-minute-fresh aggregate, not a live feed.
 const REVALIDATE_SECONDS = 300;
@@ -63,8 +67,6 @@ export type SignupFunnelResult =
   | { status: "not_configured" }
   | { status: "error"; message: string };
 
-export type PosthogQueryConfig = { key: string; projectId: string };
-
 export function getPosthogQueryConfig(): PosthogQueryConfig | null {
   const key = process.env.POSTHOG_PERSONAL_API_KEY;
   const projectId = process.env.POSTHOG_PROJECT_ID;
@@ -86,44 +88,6 @@ export function signupFunnelWindow(
     from: new Date(Math.floor(from.getTime() / CACHE_ROUND_MS) * CACHE_ROUND_MS),
     to: new Date(Math.ceil(to.getTime() / CACHE_ROUND_MS) * CACHE_ROUND_MS),
   };
-}
-
-// 'YYYY-MM-DD HH:MM:SS' for HogQL toDateTime — the project timezone is UTC,
-// so the ISO slice is already in the right zone.
-export function hogTs(d: Date): string {
-  return d.toISOString().slice(0, 19).replace("T", " ");
-}
-
-export async function runHogQL(
-  cfg: PosthogQueryConfig,
-  query: string,
-): Promise<unknown[][]> {
-  const res = await fetch(
-    `${POSTHOG_API_HOST}/api/projects/${cfg.projectId}/query/`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query: { kind: "HogQLQuery", query } }),
-      // POSTs bypass the fetch data cache anyway; caching happens at the
-      // unstable_cache layer below where errors are NOT persisted.
-      cache: "no-store",
-      // A hung PostHog response must never stall the dashboard render —
-      // the TimeoutError lands in getSignupFunnelStats's catch and degrades
-      // to the panel's error state (same contract as lib/mux-data.ts).
-      signal: AbortSignal.timeout(3500),
-    },
-  );
-  if (res.status === 401 || res.status === 403) {
-    throw new Error(
-      `PostHog query API ${res.status} — check that the personal API key has the query:read scope and that POSTHOG_PROJECT_ID (${cfg.projectId}) is a project the key can access.`,
-    );
-  }
-  if (!res.ok) throw new Error(`PostHog query API ${res.status}`);
-  const body = (await res.json()) as { results?: unknown[][] };
-  return body.results ?? [];
 }
 
 // Two round-trips per cache miss: totals + by-source. The totals can't be

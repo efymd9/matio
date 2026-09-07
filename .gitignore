@@ -40,6 +40,11 @@ yarn-error.log*
 .env*
 !.env.example
 
+# GDPR subject-access exports (pnpm export-user-data): one person's whole
+# record. The script defaults to the OS temp dir; this closes the case where
+# --out points into the tree and a routine `git add -A` follows.
+export-*.json
+
 # vercel
 .vercel
 

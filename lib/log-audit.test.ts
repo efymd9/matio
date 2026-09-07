@@ -111,6 +111,7 @@ import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
+import { assembleUserExport, summarizeExport } from "@/lib/user-export";
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -730,5 +731,136 @@ describe("log audit · Stripe subscription mirror (CAPI identity scrub, #165)", 
     }
     // What it DOES log: the subscription id, enough to re-run the sweep by hand.
     expect(logged()).toContain(SUB_ID);
+  });
+});
+
+describe("log audit · subject-access export summary (scripts/export-user-data.ts, #163)", () => {
+  // The export FILE is the person's data by definition — the address, the
+  // name, the billing address are supposed to be in it. What the script
+  // prints to the operator's terminal (and what lands in a shell log) is
+  // the summary, and that may carry counts and ids only. Two worst cases:
+  // a full export where every vendor answered, and a run where every vendor
+  // failed with an error that quotes the address back.
+  const MARKER_STREET = "42 Leak Marker Street";
+  const USER_ID = "user_marker";
+
+  function seededRows() {
+    return {
+      users: [
+        {
+          id: USER_ID,
+          email: MARKER_EMAIL,
+          role: "user",
+          stripeCustomerId: "cus_marker",
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          signupOrigin: "clerk_signup",
+          country: "ES",
+          attributionFirstSource: null,
+          attributionFirstMedium: null,
+          attributionFirstCampaign: null,
+          attributionLastSource: null,
+          attributionLastMedium: null,
+          attributionLastCampaign: null,
+        },
+      ],
+      subscriptions: [],
+      watch_progress: [],
+      watch_days: [],
+      trial_sessions: [],
+      visitors: [],
+      visitor_days: [],
+      show_reminders: [{ id: "rem_marker", email: MARKER_EMAIL }],
+    } as unknown as Parameters<typeof assembleUserExport>[0]["rows"];
+  }
+
+  it("summarises a full export by counts and ids — never the address, the name or the street", async () => {
+    const result = await assembleUserExport({
+      userId: USER_ID,
+      rows: seededRows(),
+      clients: {
+        clerk: {
+          users: {
+            getUser: async () => ({
+              id: USER_ID,
+              emailAddresses: [{ emailAddress: MARKER_EMAIL, verification: { status: "verified" } }],
+              firstName: "Leak",
+              lastName: "Marker",
+              createdAt: 1,
+              lastSignInAt: null,
+            }),
+          },
+        },
+        stripe: {
+          customers: {
+            retrieve: async (id) => ({
+              id,
+              email: MARKER_EMAIL,
+              name: MARKER_NAME,
+              address: { line1: MARKER_STREET, city: "Madrid", country: "ES" },
+              created: 1,
+            }),
+          },
+          invoices: {
+            list: async function* () {
+              yield { id: "in_marker", number: "0001", currency: "usd", status: "paid" };
+            },
+          },
+        },
+        posthog: {
+          runHogQL: async (query) =>
+            query.startsWith("SELECT event,")
+              ? [["$pageview", "t", JSON.stringify({ $current_url: `https://matio.tv/?email=${MARKER_EMAIL}` })]]
+              : [["person-marker", "t", true, JSON.stringify({ email: MARKER_EMAIL, name: MARKER_NAME })]],
+        },
+      },
+    });
+    // The document itself has to be dirty, or the summary check proves nothing.
+    const document = JSON.stringify(result);
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STREET]) {
+      expect(document).toContain(marker);
+    }
+
+    const summary = summarizeExport(result);
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STREET, "Leak"]) {
+      expect(summary).not.toContain(marker);
+    }
+    // What it DOES print: the subject id and the counts.
+    expect(summary).toContain(USER_ID);
+    expect(summary).toContain("show_reminders=1");
+    expect(summary).toContain("stripe=received (invoices=1)");
+  });
+
+  it("keeps a vendor's error text out of the notes and the summary", async () => {
+    // Clerk and Stripe quote request parameters in their messages; a naive
+    // `err.message` in a note would put the address into the file's notes
+    // AND onto the terminal.
+    const quoted = (name: string) =>
+      Object.assign(new Error(`No such customer for ${MARKER_NAME} <${MARKER_EMAIL}>`), {
+        name,
+        statusCode: 404,
+      });
+    const result = await assembleUserExport({
+      userId: USER_ID,
+      rows: seededRows(),
+      clients: {
+        clerk: { users: { getUser: async () => { throw quoted("ClerkAPIResponseError"); } } },
+        stripe: {
+          customers: { retrieve: async () => { throw quoted("StripeInvalidRequestError"); } },
+          invoices: { list: async function* () {} },
+        },
+        posthog: { runHogQL: async () => { throw quoted("Error"); } },
+      },
+    });
+
+    expect(result.processors).toEqual({ clerk: null, stripe: null, posthog: null });
+    const notes = result.notes.join("\n");
+    const summary = summarizeExport(result);
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(notes).not.toContain(marker);
+      expect(summary).not.toContain(marker);
+    }
+    // What it DOES keep: the error's name and status, enough to know what to retry.
+    expect(notes).toContain("StripeInvalidRequestError/404");
   });
 });

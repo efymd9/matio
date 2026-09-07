@@ -864,6 +864,10 @@ Or use `tsx --env-file=.env.local script.ts` — Node loads env before the scrip
 
 Plain `.ts` scripts run by `tsx` are CommonJS by default. CJS doesn't allow top-level await. Wrap in `async function main()` instead.
 
+### tsx scripts cannot import a `server-only` module
+
+`import "server-only"` is a marker package whose default export **throws at load** ("This module cannot be imported from a Client Component module") — only the `react-server` export condition maps it to an empty file, and `tsx` runs plain Node without that condition. So a script that imports `lib/stripe.ts`, `lib/posthog-query.ts` or any other `server-only` module dies before its first line, even though nothing about it is client-side. Two ways out, both used in `scripts/`: construct the vendor client in the script itself (`new Stripe(key)` in `scrub-capi-metadata.ts`, `clerkClient()` from `@clerk/nextjs/server` — that module is NOT server-only and works under tsx), or lift the pure part into a universal module the server-only one re-exports (`lib/posthog-hogql.ts` ← `lib/posthog-query.ts`, done for `export-user-data.ts`). Keep the env reads on the server-only side: the universal half must hold no secret of its own.
+
 ## Neon / postgres-js
 
 ### `max: 1` for serverless functions

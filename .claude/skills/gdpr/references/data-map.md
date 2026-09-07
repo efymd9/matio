@@ -30,6 +30,7 @@
 | **Sentry** (org-регион EU) | ЕС | ошибки/трейсы: `user.id` (Clerk id) и только он, URL без query, UA, `content-type`/`content-length`; без cookies, тел, breadcrumbs консоли, replay, feedback | ошибки 30/90 дней по плану |
 | **Устройство — браузер** | у пользователя | cookies (таблица в §4), `localStorage`-флаги дедупа событий (`matio:fb:lead`, `matio:fb:creg:<Clerk id>`, `matio:ph:signup:<Clerk id>`, `matio:oaiq:signup:<Clerk id>`, `matio:oaiq:purchase:<sub id>`), настройки media-chrome (mute) | до очистки браузера |
 | **Устройство — приложение (Expo)** | у пользователя | `expo-secure-store`: Clerk session JWT; `matio_device_id` — UUID (аналог `matio_aid`; **iOS keychain переживает переустановку**); `matio_locale` — выбранный язык (`es`/`en`, предпочтение, не идентификатор; #96). Только в памяти процесса (не на диске): очередь неотправленных 10-секундных бакетов просмотра — `episode_id` + номера бакетов, без позиции и без идентификатора (`mobile/src/watch/segment-queue.ts`, #97) | SecureStore — до удаления/сброса; очередь — до закрытия приложения |
+| **Машина оператора** (ответ на запрос субъекта, #163) | у оператора | `export-<Clerk id>-<дата>.json` от `pnpm export-user-data` — полная запись ОДНОГО человека (восемь таблиц §2 + профиль Clerk, Customer/инвойсы Stripe, персона/события PostHog), права `0600`; при отправке — зашифрованный архив (`age -p`) | до отправки ответа, затем удалить (`docs/runbooks/gdpr-requests.md` §3, шаг 5); в репозиторий, issue и чат агента не попадает |
 
 ## 2. Таблицы по чувствительности
 
@@ -128,7 +129,6 @@ PR этапа 10 не требовалось; закрывающий PR убир
 
 | # | Дыра | Где |
 |---|---|---|
-| #163 | доступ/портируемость (ст. 15/20): ни скрипта экспорта, ни ранбука | — |
 | #164 | стирание не доходит до процессоров (Stripe Customer, PostHog person с email); реестра заявок, по которому §7 ранбука восстановления велит повторять стирание, не существует | `docs/runbooks/db-restore.md` |
 | #164 (хвост) | у Stripe остаётся Customer (email, billing address) — `customers.del` при стирании не вызывается, решение владельца; PostHog person с `email` не удаляется; реестра заявок, по которому §7 ранбука восстановления велит повторять стирание, не существует (`erased_customers` — реестр только тех стёртых, у кого был Stripe customer; аккаунт без покупок следа не оставляет) | `docs/runbooks/db-restore.md`, `docs/registry.md` |
 | #165 | сырой IP и UA (`capi_ip`/`capi_ua`) живут в `subscription_data.metadata` у Stripe бессрочно после единственного `Purchase` | `lib/capi-identity.ts`, `lib/subscription-mirror.ts` |
@@ -149,4 +149,8 @@ AEPD; отсутствие возрастного гейта; расхожден
 `docs/registry.md`. #164, блокеры включения платежей (#155): живая подписка
 Stripe отменяется на конец периода тем же обработчиком, а стёртый customer
 id тумбстоунится в `erased_customers`, чтобы вебхук Stripe с `guest = "1"`
-не воскресил аккаунт через `claimGuestCheckout`.
+не воскресил аккаунт через `claimGuestCheckout`. #163 — доступ и
+портируемость: `pnpm export-user-data <userId>` (`scripts/export-user-data.ts`
+поверх `lib/user-export*.ts`) собирает восемь таблиц §2 плюс Clerk / Stripe /
+PostHog best-effort в JSON-файл `0600`; приём, верификация, ответ и реестр
+заявок — `docs/runbooks/gdpr-requests.md`.

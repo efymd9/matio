@@ -33,6 +33,7 @@ Poster/hero drag-and-drop needs `BLOB_READ_WRITE_TOKEN` (injected by the connect
 | `pnpm db:check-sub-dupes` | Pre-flight gate for migration 0008 (partial unique on access-granting subs). Exits non-zero if any user has multiple rows in active/trialing/past_due — clean those up before `db:migrate` or 0008 will fail to apply on a fresh env. |
 | `pnpm promote-to-admin <email>` | `UPDATE users SET role='admin' WHERE email=…` |
 | `pnpm stripe:setup` | Idempotently create/find the two Stripe products+prices; prints `STRIPE_PRICE_*` env lines |
+| `DATABASE_URL=… pnpm export-user-data <userId> [--out <file>]` | GDPR art. 15/20 subject-access export for one Clerk id: the 8 person-keyed tables + Clerk / Stripe / PostHog (best-effort, each only when its key is passed: `CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `POSTHOG_PERSONAL_API_KEY` + `POSTHOG_PROJECT_ID`). Reads NO `.env.local` — every variable explicit; no `DATABASE_URL` → exit 2. Writes one JSON file (mode 0600), prints counts only. Full procedure: [runbooks/gdpr-requests.md](./runbooks/gdpr-requests.md) |
 
 ## DB migrations
 
