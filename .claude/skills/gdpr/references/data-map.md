@@ -40,7 +40,8 @@
 
 | Таблица | Персональные поля | Класс | Как стирается | Ретеншен |
 |---|---|---|---|---|
-| `users` | `id` (Clerk id), `email`, `role`, `stripe_customer_id`, `signup_origin`, `country`, `attribution_{first,last}_{source,medium,campaign}`, `created_at` | PII | корень каскада: вебхук Clerk `user.deleted` → `DELETE FROM users` (`app/api/webhooks/clerk/route.ts`; идемпотентно; при живой подписке Stripe — стирает и пишет `console.error` с id для ручной отмены) | пока есть аккаунт |
+| `users` | `id` (Clerk id), `email`, `role`, `stripe_customer_id`, `signup_origin`, `country`, `attribution_{first,last}_{source,medium,campaign}`, `created_at` | PII | корень каскада: вебхук Clerk `user.deleted` → `DELETE FROM users` (`app/api/webhooks/clerk/route.ts`; идемпотентно). До DELETE: живая подписка Stripe получает `cancel_at_period_end: true` (best-effort, лог + Sentry по id), а `stripe_customer_id` пишется в `erased_customers` (см. ниже) | пока есть аккаунт |
+| `erased_customers` | `stripe_customer_id`, `erased_at` | псевдо (только id клиента Stripe — ни адреса, ни Clerk id; без FK — строка `users` уже стёрта) | **не стирается — это тумбстоун**: `claimGuestCheckout` (единственный путь, создающий аккаунт из клиента Stripe) не запускается для id из этой таблицы — иначе следующий вебхук Stripe по клиенту (`guest = "1"` в метаданных подписки не истекает) воскресил бы Clerk-пользователя и `users` с адресом. Проверяется в `mirrorSubscription` (ветка «нет пользователя») и на `/welcome` (`lib/guest-checkout.ts:isErasedCustomer`) | бессрочно — «не воскрешать» не имеет срока: Stripe хранит клиента как налоговую запись годами, и его вебхуки могут прийти через годы. Ст. 17(3)(b)/(e)-образное основание: минимальная запись, нужная, чтобы стирание было необратимым |
 | `subscriptions` | `user_id` → CASCADE, `stripe_subscription_id`, `status`, `plan`, `current_period_end`, `cancel_at_period_end`, `attribution_*`, `created_at`/`updated_at` | псевдо | каскад с `users` | с аккаунтом; налоговые записи — у Stripe, не здесь |
 | `watch_progress` | `user_id` → CASCADE, `episode_id`, `position_seconds`, `max_position_seconds`, `total_watched_seconds`, `completed`, `first_watched_at`, `updated_at` | псевдо (история просмотра) | каскад с `users` | с аккаунтом |
 | `watch_days` | `user_id` → CASCADE, `day` | псевдо | каскад с `users` | с аккаунтом (#162 — окно для аналитики) |
@@ -68,6 +69,7 @@
 |---|---|---|---|
 | **Clerk** | регистрация/вход; `claimGuestCheckout` | всё, что вводит пользователь в Clerk UI; сервер: `users.createUser({emailAddress:[email], skipPasswordRequirement:true})`, `signInTokens.createSignInToken` (id) | договор |
 | **Stripe** | `createAuthCheckoutSession` / `createGuestCheckoutSession` | `customers.create({email, metadata:{userId}})`; Checkout Session `locale`, `client_reference_id` (claim token); `subscription_data.metadata`: `userId`, `attr_first_*`/`attr_last_*` (UTM), `capi_consent`, **`capi_ip` (сырой IP)**, **`capi_ua`**, `capi_fbp`, `capi_fbc`, `ph_consent`, `guest`, `claim_token`, `trial_token`; billing address и карта — вводятся у Stripe | договор; `capi_*` и `ph_*` — только при маркетинговом согласии; `capi_ip/ua` не чистятся после использования (#165) |
+| **Stripe** (стирание) | вебхук Clerk `user.deleted` | `subscriptions.update(<sub id>, {cancel_at_period_end: true})` — только id подписки, ничего о пользователе; Customer не удаляется (`customers.del` — решение владельца, `docs/registry.md`) | ст. 17 — исполнение запроса |
 | **Meta CAPI** (`lib/meta-capi.ts`) | вебхук Stripe, переход в access-granting | `Purchase`: `em` = SHA-256(email), `external_id` = SHA-256(Clerk id), `fbp`, `fbc`, `client_ip_address` (сырой), `client_user_agent`, `event_id` = sub id, `value`/`currency`, `content_ids` | `capi_consent` из метаданных |
 | **Meta Pixel** (браузер) | по странице | `PageView`, `ViewContent`, `Lead`, `InitiateCheckout`, `CompleteRegistration` + `_fbp`/`_fbc`, IP/UA запроса — самим пикселем | `cookie_consent.marketing` |
 | **PostHog** (браузер) | по странице | `$pageview`, `show_viewed`, `trial_play_started`, `signup_wall_shown`, `signup_completed`, `checkout_started`, … со свойствами `show_slug`, `episode_number`, `mode`, `auth`, `gate`; супер-свойства `locale`, `locale_source`; `identify(userId, {email})` после входа; session replay с маской всех input/text; UTM нормализуются в `before_send` | `cookie_consent.marketing` |
@@ -109,7 +111,7 @@ PR этапа 10 не требовалось; закрывающий PR убир
 |---|---|---|
 | #162 | ни одной джобы ретеншена: `trial_sessions`, `visitors`/`visitor_days`, `watch_days`, отправленные `show_reminders`, `stripe_events` — бессрочно; `/privacy` обещает 30 дней / 25 месяцев; Vercel-логи короче обещанных 30 дней | вся БД |
 | #163 | доступ/портируемость (ст. 15/20): ни скрипта экспорта, ни ранбука | — |
-| #164 | стирание не доходит до процессоров (Stripe Customer, PostHog person с email); реестра заявок, по которому §7 ранбука восстановления велит повторять стирание, не существует | `docs/runbooks/db-restore.md` |
+| #164 (хвост) | у Stripe остаётся Customer (email, billing address) — `customers.del` при стирании не вызывается, решение владельца; PostHog person с `email` не удаляется; реестра заявок, по которому §7 ранбука восстановления велит повторять стирание, не существует (`erased_customers` — реестр только тех стёртых, у кого был Stripe customer; аккаунт без покупок следа не оставляет) | `docs/runbooks/db-restore.md`, `docs/registry.md` |
 | #165 | сырой IP и UA (`capi_ip`/`capi_ua`) живут в `subscription_data.metadata` у Stripe бессрочно после единственного `Purchase` | `lib/capi-identity.ts`, `lib/subscription-mirror.ts` |
 
 Не дыры, а решения владельца (пометки для юриста — список в PR этапа 10):
@@ -120,4 +122,7 @@ AEPD; отсутствие возрастного гейта; расхожден
 
 Закрыто: #161 — `user.deleted` стирает `users` + каскады + `show_reminders`
 по адресу; ops-хвост (подписка прод-эндпойнта Clerk на событие) — в
-`docs/registry.md`.
+`docs/registry.md`. #164, блокеры включения платежей (#155): живая подписка
+Stripe отменяется на конец периода тем же обработчиком, а стёртый customer
+id тумбстоунится в `erased_customers`, чтобы вебхук Stripe с `guest = "1"`
+не воскресил аккаунт через `claimGuestCheckout`.

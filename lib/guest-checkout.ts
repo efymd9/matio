@@ -3,7 +3,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 import type Stripe from "stripe";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { subscriptions, users } from "@/db/schema";
+import { erasedCustomers, subscriptions, users } from "@/db/schema";
 import {
   applyUserAttributionPayload,
   fromStripeMetadata,
@@ -47,6 +47,25 @@ export const GUEST_METADATA_KEYS = {
 
 export function isGuestSubscription(sub: Stripe.Subscription): boolean {
   return (sub.metadata ?? {})[GUEST_METADATA_KEYS.guest] === "1";
+}
+
+// Art. 17 tombstone check. `claimGuestCheckout` below is the ONE code path
+// that materialises an account out of a Stripe customer — and `guest = "1"`
+// never leaves the subscription's metadata, so after the account is erased
+// (Clerk `user.deleted` → `erased_customers`), every later Stripe event for
+// that customer (the cancel-at-period-end update, a renewal, the final
+// `customer.subscription.deleted`) and a replayed /welcome URL would walk in
+// here and re-create the Clerk user plus the `users` row with the address.
+// Both claim callers ask this FIRST and skip the claim on a hit. Not a
+// payments-mode flag (those are banned from the mirror/claim path): the
+// tombstone is data about one customer, and it reads the same in both modes.
+export async function isErasedCustomer(customerId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ erasedAt: erasedCustomers.erasedAt })
+    .from(erasedCustomers)
+    .where(eq(erasedCustomers.stripeCustomerId, customerId))
+    .limit(1);
+  return row !== undefined;
 }
 
 export type GuestClaim = {

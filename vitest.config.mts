@@ -85,11 +85,14 @@ export default defineConfig({
       // → 24.1 (#31: токены теней/градиентов — листы Shadows/Gradients и
       //   история Icon исполняют lib/design.ts и icon.tsx целиком;
       //   24.28/24.00/19.22/19.96 по прогону, те же 0.1 запаса).
+      // → 25.8 (#164: стирание у Stripe — lib/subscription-mirror.ts впервые
+      //   исполняется своим сьютом, вебхук Clerk отменяет подписку и пишет
+      //   тумбстоун; 25.93/20.84/20.72/25.60 по прогону, те же 0.1 запаса).
       thresholds: {
-        lines: 24.8,
-        functions: 20.3,
-        branches: 19.7,
-        statements: 24.6,
+        lines: 25.8,
+        functions: 20.7,
+        branches: 20.6,
+        statements: 25.5,
       },
     },
 
