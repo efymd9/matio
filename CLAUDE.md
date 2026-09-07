@@ -356,6 +356,24 @@ urgent — it costs one command.
   2026-09-01; before that its only run was a manual `workflow_dispatch`
   (2026-08-06). `db-backup` runs daily and green; its start drifts hours off
   the nominal 03:40 UTC — normal Actions queueing.
+- **Data retention is a daily cron, and the windows are `/privacy`'s, not
+  ours (2026-09-07, #162).** `lib/retention.ts` holds the policies as data —
+  table, indexed column, window, and the §6 sentence the window is copied
+  from (`trial_sessions` 30 days for anonymous rows; `visitors` → cascaded
+  `visitor_days` and `watch_days` 25 months; sent `show_reminders` 30 days
+  after `notified_at`) — and `runRetention()` executes them as
+  `DELETE … WHERE key IN (SELECT key … LIMIT 1000)` batches (≤50 per table,
+  40s budget, a failing table is named and the rest still run). Vercel Cron
+  hits `/api/cron/retention` at 04:10 UTC (after the 03:40 backup) with
+  `Bearer CRON_SECRET`; no secret = 401 for everyone and nothing deleted.
+  What it never touches: `users` / `subscriptions` / `watch_progress` (they
+  live with the account and go through the Clerk `user.deleted` cascade),
+  `stripe_events` (ids only — its window is a separate owner decision,
+  registry), `watch_segments` (aggregates). A new table with personal data
+  adds a policy here — or says in the data map why it lives with the
+  account; where the promise and engineering taste disagree, the promise
+  wins, because it is what the viewer was told. The policy list is pinned
+  by `lib/retention.test.ts`; the run's logging is under the log audit.
 
 ### Observability
 
@@ -518,7 +536,7 @@ urgent — it costs one command.
 - Server actions for mutations, route handlers for webhooks and token issuance.
 - shadcn components live in `components/ui/`. Custom components in `components/`.
 - Drizzle schemas in `db/schema/*.ts`, one file per logical domain.
-- Env vars: Clerk = `CLERK_*`, Stripe = `STRIPE_*` + `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (client `pk_…` for in-site Embedded Checkout), Mux = `MUX_*`, Meta = `META_*` / `META_CAPI_ACCESS_TOKEN_{n}` / `NEXT_PUBLIC_META_PIXEL_ID` / `NEXT_PUBLIC_META_PIXEL_IDS`, PostHog = `POSTHOG_*` / `NEXT_PUBLIC_POSTHOG_*`, Google Analytics = `NEXT_PUBLIC_GA_MEASUREMENT_ID` (GA4 `G-…`; blank → off), ChatGPT Ads = `NEXT_PUBLIC_OPENAI_PIXEL_ID` (blank → off), Vercel Blob = `BLOB_READ_WRITE_TOKEN`, Resend = `RESEND_API_KEY` (blank → email off; optional `RESEND_FROM` / `RESEND_REPLY_TO` sender overrides), Sentry = `NEXT_PUBLIC_SENTRY_DSN` (blank → the SDK never initialises; optional `NEXT_PUBLIC_APP_ENV` for the browser's stage marker and `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` for build-time source-map upload). Kill-switches (runtime reads, bind-at-deploy): `PAYMENTS_ENABLED` (unset = free mode), `REQUIRE_SIGNUP` (=1 in prod), `PAY_FIRST_CHECKOUT`. Mobile levers (no store release needed): `APP_MIN_SUPPORTED_BUILD` / `APP_LATEST_BUILD` / `APP_SIGNUP_GATE_EPISODES` / `APP_DOWNLOADS_ENABLED` / `APP_CAST_ENABLED`. Bench: `STAGING_LOCK_PASSWORD`. Backups split across TWO stores — `BACKUP_STORE_ID` in Vercel but `BACKUP_AGE_SECRET_KEY` / `BACKUP_DATABASE_URL` / `BLOB_READ_WRITE_TOKEN` in GitHub-Actions secrets (keys get lost on exactly this gap). Never log secrets.
+- Env vars: Clerk = `CLERK_*`, Stripe = `STRIPE_*` + `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (client `pk_…` for in-site Embedded Checkout), Mux = `MUX_*`, Meta = `META_*` / `META_CAPI_ACCESS_TOKEN_{n}` / `NEXT_PUBLIC_META_PIXEL_ID` / `NEXT_PUBLIC_META_PIXEL_IDS`, PostHog = `POSTHOG_*` / `NEXT_PUBLIC_POSTHOG_*`, Google Analytics = `NEXT_PUBLIC_GA_MEASUREMENT_ID` (GA4 `G-…`; blank → off), ChatGPT Ads = `NEXT_PUBLIC_OPENAI_PIXEL_ID` (blank → off), Vercel Blob = `BLOB_READ_WRITE_TOKEN`, Resend = `RESEND_API_KEY` (blank → email off; optional `RESEND_FROM` / `RESEND_REPLY_TO` sender overrides), Sentry = `NEXT_PUBLIC_SENTRY_DSN` (blank → the SDK never initialises; optional `NEXT_PUBLIC_APP_ENV` for the browser's stage marker and `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` for build-time source-map upload). Kill-switches (runtime reads, bind-at-deploy): `PAYMENTS_ENABLED` (unset = free mode), `REQUIRE_SIGNUP` (=1 in prod), `PAY_FIRST_CHECKOUT`. Mobile levers (no store release needed): `APP_MIN_SUPPORTED_BUILD` / `APP_LATEST_BUILD` / `APP_SIGNUP_GATE_EPISODES` / `APP_DOWNLOADS_ENABLED` / `APP_CAST_ENABLED`. Bench: `STAGING_LOCK_PASSWORD`. Vercel Cron: `CRON_SECRET` (the bearer the platform sends to `/api/cron/retention`; unset → the route answers 401 to everyone and deletes nothing — set it on BOTH projects, `vercel.json` is shared). Backups split across TWO stores — `BACKUP_STORE_ID` in Vercel but `BACKUP_AGE_SECRET_KEY` / `BACKUP_DATABASE_URL` / `BLOB_READ_WRITE_TOKEN` in GitHub-Actions secrets (keys get lost on exactly this gap). Never log secrets.
 - Webhook route handlers declare `export const runtime = "nodejs";` (raw body + DB).
 - Server-only modules use `import "server-only";` so they can't leak into a client bundle.
 - All images go through `next/image`. `images.remotePatterns` in `next.config.ts` allowlists `image.mux.com` (Mux thumbnails) and `*.public.blob.vercel-storage.com` (Blob-hosted poster/hero artwork) — any other host throws at render on the public pages. Use `fill` + `sizes` for absolutely-positioned cover images; raw `<img>` is reserved for cases where the Safari < 16.4 `aspect-ratio` quirk requires pinning the img's own intrinsic ratio (see `components/site/poster.tsx`) and for admin-only previews of arbitrary URLs.
@@ -582,6 +600,10 @@ app/
       upload-image/        # /api/admin/upload-image — Vercel Blob client-upload
                            #   token issuer (admin-gated; poster/hero artwork)
     billing-portal/        # /api/billing-portal — 302 to Stripe Customer Portal
+    cron/retention/        # /api/cron/retention — Vercel Cron target (daily,
+                           #   vercel.json): runs lib/retention.ts; Bearer
+                           #   CRON_SECRET only, 401 to all when unset;
+                           #   answers counters + table names, nothing else
     email/
       unsubscribe/         # RFC 8058 one-click unsubscribe (POST target of the
                            #   List-Unsubscribe header; GET redirects to the
@@ -732,6 +754,12 @@ lib/
   reminder-email.ts        # server-only es/en "new episode" email renderer —
                            #   copy lives here, NOT in dictionaries.ts (that
                            #   module ships in the client bundle)
+  retention.ts             # server-only data retention: RETENTION_POLICIES
+                           #   (table → indexed column → window → the /privacy
+                           #   §6 sentence it comes from) + runRetention()
+                           #   (batched `key IN (SELECT … LIMIT 1000)` DELETEs,
+                           #   per-table failure isolation, counters only) —
+                           #   see "Data retention" rule
   email-unsubscribe.ts     # HMAC unsubscribe tokens + URL builders +
                            #   unsubscribeEmail() (deletes ALL rows for the
                            #   address; salt = MUX_SIGNING_KEY_PRIVATE_KEY,
@@ -860,6 +888,8 @@ public/press/              # press-kit ZIP + thumbs (committed, served static)
 mobile/                    # Expo app (npm, OUTSIDE the pnpm workspace)
 vercel.json                # regions=['fra1'] (co-located with Neon eu-central-1)
                            # + Cache-Control headers for /shows/* static assets
+                           # + crons: /api/cron/retention daily 04:10 UTC
+                           #   (fires on BOTH projects — the file is shared)
 scripts/
   promote-to-admin.ts      # pnpm promote-to-admin <email>
   stripe-setup.ts          # pnpm stripe:setup — "Matio Membership" $38/mo
