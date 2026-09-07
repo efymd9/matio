@@ -43,7 +43,14 @@
         }
       ],
       "expo-secure-store",
-      "react-native-video"
+      [
+        "react-native-video",
+        {
+          "enableBackgroundAudio": true,
+          "enableNotificationControls": true,
+          "enableAndroidPictureInPicture": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

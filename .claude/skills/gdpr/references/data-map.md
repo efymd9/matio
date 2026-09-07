@@ -29,7 +29,7 @@
 | **OpenAI** (ChatGPT Ads pixel `oaiq`) | Ирландия / США | `page_viewed`, `registration_completed`/`subscription_created` с `event_id` = `signup:<Clerk id>` или Stripe subscription id, `plan_id`, `amount`, `currency`; cookie `__oppref` (click id), IP/UA запроса | по правилам OpenAI |
 | **Sentry** (org-регион EU) | ЕС | ошибки/трейсы: `user.id` (Clerk id) и только он, URL без query, UA, `content-type`/`content-length`; без cookies, тел, breadcrumbs консоли, replay, feedback | ошибки 30/90 дней по плану |
 | **Устройство — браузер** | у пользователя | cookies (таблица в §4), `localStorage`-флаги дедупа событий (`matio:fb:lead`, `matio:fb:creg:<Clerk id>`, `matio:ph:signup:<Clerk id>`, `matio:oaiq:signup:<Clerk id>`, `matio:oaiq:purchase:<sub id>`), настройки media-chrome (mute) | до очистки браузера |
-| **Устройство — приложение (Expo)** | у пользователя | `expo-secure-store`: Clerk session JWT; `matio_device_id` — UUID (аналог `matio_aid`; **iOS keychain переживает переустановку**); `matio_locale` — выбранный язык (`es`/`en`, предпочтение, не идентификатор; #96) | до удаления/сброса |
+| **Устройство — приложение (Expo)** | у пользователя | `expo-secure-store`: Clerk session JWT; `matio_device_id` — UUID (аналог `matio_aid`; **iOS keychain переживает переустановку**); `matio_locale` — выбранный язык (`es`/`en`, предпочтение, не идентификатор; #96). Только в памяти процесса (не на диске): очередь неотправленных 10-секундных бакетов просмотра — `episode_id` + номера бакетов, без позиции и без идентификатора (`mobile/src/watch/segment-queue.ts`, #97) | SecureStore — до удаления/сброса; очередь — до закрытия приложения |
 
 ## 2. Таблицы по чувствительности
 
@@ -55,6 +55,13 @@
 ### Не персональные (для полноты схемы)
 
 `shows`, `seasons`, `episodes`, `actors` (виртуальные, вымышленные),
+`show_actors` — контент. `watch_segments` — счётчики по (эпизод, день,
+10-секундный бакет), агрегат; с #97 их пишет и приложение через
+`POST /api/v1/watch-segments` (Bearer или `matio_device_id`; анонимный
+вызов засчитывается только при наличии строки `trial_sessions` устройства
+на это шоу и в пределах позиционного гейта) — тот же агрегат, никаких новых
+полей; для вошедшего тот же вызов прибавляет `watch_progress.total_watched_seconds`
+(псевдо, каскад с `users`, см. выше). `stripe_events` — id событий Stripe для
 `show_actors` — контент. `episode_choices` (#143, ветвящееся видео) — рёбра
 графа развилок между эпизодами: `from/to_episode_id`, `position`,
 `label_en/es`, `is_default` — контент, вводится админом; выбор ЗРИТЕЛЯ на

@@ -527,6 +527,58 @@ Verified: web lint/typecheck/tests green; `npx tsc --noEmit` in `mobile/` clean;
 export --platform ios` produced the Hermes bundle. **Not verified on a device or simulator** —
 none was reachable in the session; the owner's checklist is in the PR.
 
+**Phase 2, 2026-09-07 (#97) — player parity.** No new dependencies (FlashList is not installed,
+so the feed is a `FlatList` with `windowSize={3}`; PiP/background come from `react-native-video`
+props + its config plugin).
+
+- **`POST /api/v1/watch-segments`** — the retention flush. The web action's core moved to
+  `lib/watch-segments-write.ts:saveWatchSegmentsFor` and BOTH surfaces call it: the timeline
+  bound, the dedupe, the `(episode, day, bucket)` upsert with `views + 1`, the session-row proof
+  for anonymous callers, the UPDATE-only `total_watched_seconds` credit. The caller is either
+  `{user}` (Bearer) or `{sessionToken, maxPosition}` — the web passes the cookie with
+  `maxPosition: null` (open free mode only, as before); the app passes the device id with the
+  gate's `N`, and the write itself checks the episode's position in the show's ready ordering.
+  That check exists because a device that watched episode 1 already holds a session row for the
+  show, and the row alone would let a forged flush paint counters onto episode 2. Answers:
+  `{ok, accepted}` (accepted = buckets that survived the bound), 400/401/403/404; paid mode keeps
+  anonymous previews off the curve (403), exactly like the web.
+- **Client tracker** (`src/watch/use-segment-tracker.ts`): the web semantics — mark on every
+  progress sample, once per continuous pass (`lastMarked`), a seek re-arms so rewatch peaks show,
+  flush every 20s / at the cap / at `ended` / on `AppState` background / on unmount. Flushes go
+  through **`segment-queue.ts`**, an in-memory queue: network and 5xx failures back off
+  (5s → 60s) and retry on foreground (the closest "reconnected" signal without NetInfo); any 4xx
+  is dropped as final; consecutive flushes for one episode coalesce under the 120 cap. Not
+  persisted across an app kill — registry row.
+- **One engine, pooled** (`src/watch/episode-feed.tsx`): every episode is a full-screen page of a
+  `FlatList`; a page mounts a `<Video>` only while it is current or an immediate neighbour, so at
+  most three players exist for a vertical show (prev / current / next) and two for a landscape
+  one (current / next). Neighbours are created **paused and muted**, so they buffer their opening
+  seconds — when one becomes current it starts on a warm player: **the auto-advance has no black
+  frame and no token round-trip**, which is what the web gets from its hidden preloader plus the
+  same-element src swap (element identity does not matter natively, §6.2). Landscape: the next
+  page's token is fetched and its player mounted `PRELOAD_LEAD_SECONDS` (45s) before the end,
+  and `ended` jumps without animation. Vertical: `pagingEnabled`, a swipe is the next/previous
+  episode, neighbours warm immediately (a swipe can come any time) and `ended` scrolls to the
+  next page. **Same gate as the show page**: a locked episode's page IS the sign-up wall
+  (`isEpisodeLockedForApp`), so an auto-advance or a swipe lands on the ask, and the token route
+  still enforces it underneath (a 403 on a page renders the wall too).
+- **Token refresh** at expiry−60s for the current page (1s/2s/4s backoff, 4xx terminal, old
+  token keeps playing); the reload lands back on the saved playhead via `onLoad`. A legacy 60s
+  preview token (paid mode) is not refreshed — its expiry is the paywall, as on the web.
+- **PiP + background audio + now-playing**: `enterPictureInPictureOnLeave` / `playInBackground`
+  / `playWhenInactive` / `showNotificationControls` on the current page only, `source.metadata`
+  (title / show / poster) for the lock screen; `app.json` turns on the plugin's
+  `enableBackgroundAudio` (iOS `UIBackgroundModes: audio`), `enableNotificationControls` (the
+  Android `mediaPlayback` foreground service) and `enableAndroidPictureInPicture`. **Native
+  config changed → `expo prebuild --clean` before the next dev build.** AirPlay: the native
+  transport's route button on landscape shows; Control Center for vertical (registry).
+- Route params shrank to `episodeId` + `showSlug` (+ `resume`): the feed loads the show itself,
+  so the show page and the rail no longer pass title/orientation/number along.
+
+Verified: web lint/typecheck/tests green, `pnpm qa:styles` clean; `npx tsc --noEmit` in
+`mobile/` clean; `npx expo export --platform ios` produced the Hermes bundle. **Not verified on
+a device or simulator** — none reachable in the session; the owner's checklist is in the PR.
+
 ## 15. Traps
 
 - **`/api/v1` is inside the Clerk matcher already** — don't add a second auth layer. Do add

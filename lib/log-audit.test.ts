@@ -101,6 +101,7 @@ import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
+import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
 
 /** Render a console argument the way a log aggregator would see it. */
@@ -529,6 +530,86 @@ describe("log audit · /api/v1/progress (the app's watch-progress save)", () => 
     ).rejects.toThrow();
 
     expect(insert).toHaveBeenCalled(); // the fixture reached the write
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+    }
+  });
+});
+
+describe("log audit · /api/v1/watch-segments (the app's retention flush)", () => {
+  // Same threat model as the progress save — client text where an id
+  // belongs, a driver that quotes the row — plus the ONE place this path
+  // logs on its own: a failed progress credit after the counter landed.
+  const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+  function post(body: unknown): Parameters<typeof saveSegments>[0] {
+    return { headers: new Headers(), json: async () => body } as unknown as Parameters<
+      typeof saveSegments
+    >[0];
+  }
+
+  const lookup = {
+    from: () => lookup,
+    innerJoin: () => lookup,
+    where: () => lookup,
+    limit: async () => [{ id: EPISODE, showId: "show_1", access: "free", durationSeconds: 600 }],
+  };
+
+  it("rejects a body carrying user text without echoing it anywhere", async () => {
+    const logged = captureConsole();
+
+    const res = await saveSegments(post({ episodeId: MARKER_EMAIL, buckets: [1] }));
+
+    expect(res.status).toBe(400);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(JSON.stringify(await res.json())).not.toContain(MARKER_EMAIL);
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("lets a failed counter upsert surface without logging the row the driver quoted", async () => {
+    vi.stubEnv("DATABASE_URL", MARKER_DATABASE_URL);
+    select.mockImplementation(() => lookup);
+    insert.mockImplementation(() => {
+      throw new Error(
+        `insert into watch_segments (episode_id, day, bucket) values ('${EPISODE}', '${MARKER_NAME} <${MARKER_EMAIL}>', 1) — ${MARKER_DATABASE_URL}`,
+      );
+    });
+    const logged = captureConsole();
+
+    await expect(saveSegments(post({ episodeId: EPISODE, buckets: [1] }))).rejects.toThrow();
+
+    expect(insert).toHaveBeenCalled(); // the fixture reached the counter write
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+    }
+  });
+
+  it("logs a failed progress credit by ids only — never the statement the driver quoted", async () => {
+    // The counter landed; the credit fell over. The route answers 200 (a
+    // retry would inflate views) and writes ONE warning — which must carry
+    // the ids and nothing the driver echoed.
+    vi.stubEnv("DATABASE_URL", MARKER_DATABASE_URL);
+    select.mockImplementation(() => lookup);
+    insert.mockImplementation(() => ({
+      values: () => ({ onConflictDoUpdate: async () => undefined }),
+    }));
+    update.mockImplementation(() => ({
+      set: () => ({
+        where: async () => {
+          throw new Error(
+            `update watch_progress set total_watched_seconds = 30 where user_id = '${MARKER_NAME} <${MARKER_EMAIL}>' — ${MARKER_DATABASE_URL}`,
+          );
+        },
+      }),
+    }));
+    const logged = captureConsole();
+
+    const res = await saveSegments(post({ episodeId: EPISODE, buckets: [1, 2, 3] }));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true, accepted: 3 });
+    expect(update).toHaveBeenCalled(); // the fixture reached the credit
+    expect(logged()).toContain(EPISODE); // the id IS logged — that is the point of the line
     for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
       expect(logged()).not.toContain(marker);
     }

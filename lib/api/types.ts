@@ -195,6 +195,40 @@ export type ContinueResponse = {
   items: ContinueWatchingEntry[];
 };
 
+// ---------------------------------------------------------------- retention
+
+// The bucket grain and per-flush cap are part of this contract: a bucket is
+// floor(playhead / WATCH_SEGMENT_BUCKET_SECONDS), and a flush carrying more
+// than WATCH_SEGMENT_FLUSH_MAX_BUCKETS is refused. Re-exported from the
+// universal constants module so the app and the server can never disagree
+// on either number (lib/watch-segments.ts has no imports of its own).
+export {
+  WATCH_SEGMENT_BUCKET_SECONDS,
+  WATCH_SEGMENT_FLUSH_MAX_BUCKETS,
+} from "../watch-segments";
+
+// POST /api/v1/watch-segments — the app's audience-retention flush, the
+// native twin of the web player's saveWatchSegments action. Identity is the
+// Bearer session when signed in, else the device-id header (anonymous
+// flushes are accepted only for episodes the positional signup gate opens,
+// and only once the device holds a playback session for the show — the
+// token route mints it). Best-effort analytics: a refused flush is a
+// status code the client drops, never a retry loop.
+export type SaveWatchSegmentsRequest = {
+  episodeId: string;
+  // Distinct 10s buckets traversed since the last flush; 1..120 entries,
+  // each a non-negative integer.
+  buckets: number[];
+};
+
+export type SaveWatchSegmentsResponse = {
+  ok: true;
+  // How many buckets were counted after the server bounded them to the
+  // episode's timeline — a buffered playhead past the end is dropped, not
+  // rejected. Zero is a valid answer.
+  accepted: number;
+};
+
 // Returned in ApiErrorBody.reason on a 403, same values the web player routes
 // on: "signup_required" → sign-up wall, "subscribe_required" → paywall.
 export type PlaybackDenialReason = "signup_required" | "subscribe_required";
