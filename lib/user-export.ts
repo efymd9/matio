@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import type {
   ShowReminder,
   Subscription,
@@ -114,13 +116,24 @@ export type StripeInvoiceLike = {
   hosted_invoice_url?: string | null;
 };
 
+/** The one Stripe request option this module sets (SDK `RequestOptions`). */
+export type StripeRequestOptionsLike = { timeout?: number };
+
 export type StripeClientLike = {
-  customers: { retrieve(id: string): Promise<StripeCustomerLike> };
+  customers: {
+    // Stripe's signature is (id, params?, options?) — the request options
+    // ride in the THIRD slot, so the second is passed as undefined on purpose.
+    retrieve(
+      id: string,
+      params: undefined,
+      options?: StripeRequestOptionsLike,
+    ): Promise<StripeCustomerLike>;
+  };
   invoices: {
-    list(params: {
-      customer: string;
-      limit?: number;
-    }): AsyncIterable<StripeInvoiceLike>;
+    list(
+      params: { customer: string; limit?: number },
+      options?: StripeRequestOptionsLike,
+    ): AsyncIterable<StripeInvoiceLike>;
   };
 };
 
@@ -201,10 +214,46 @@ export function isSubjectId(value: string): boolean {
   return SUBJECT_ID_RE.test(value);
 }
 
+// ── Time budgets ────────────────────────────────────────────────────────
+// A subject export is the heaviest read each vendor sees from this project
+// (PostHog: up to 10 000 events with properties), so it gets its own
+// budgets — the dashboard's 3.5s HogQL default would time out on any real
+// history. Generous, but finite: an operator at a terminal must not wait
+// on a hung vendor forever, and a timeout is just another `failed (…)`
+// note — the database half still ships.
+
+export const CLERK_TIMEOUT_MS = 15_000;
+export const STRIPE_TIMEOUT_MS = 30_000;
+export const POSTHOG_EXPORT_TIMEOUT_MS = 30_000;
+
+/**
+ * Clerk's SDK takes no AbortSignal, so its call is raced against a clock.
+ * The rejection is named like fetch's own so the note reads the same:
+ * `failed (TimeoutError)`.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const clock = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        Object.assign(new Error(`timed out after ${ms}ms`), {
+          name: "TimeoutError",
+        }),
+      );
+    }, ms);
+  });
+  return Promise.race([promise, clock]).finally(() => clearTimeout(timer));
+}
+
 // ── PostHog queries ─────────────────────────────────────────────────────
-// Deliberately no timestamp bound: a subject-access answer is the whole
-// history, not a window. Validated against the live project (syntax only,
-// against a nonexistent id) on 2026-09-07.
+// Both statements resolve the PERSON behind the Clerk id through
+// `person_distinct_ids` and read by `person_id`: the events posthog-js
+// captured before `identify()` (components/site/posthog-provider.tsx) sit on
+// the same person under the anonymous distinct_id, and a `distinct_id =`
+// filter would silently drop them. Deliberately no timestamp bound: a
+// subject-access answer is the whole history, not a window. Validated
+// against the live project (syntax only, against a nonexistent id) on
+// 2026-09-07.
 
 export const POSTHOG_EVENTS_LIMIT = 10_000;
 
@@ -215,12 +264,16 @@ function hogLiteral(subjectId: string): string {
   return `'${subjectId}'`;
 }
 
+function personIdSubquery(distinctId: string): string {
+  return `(SELECT person_id FROM person_distinct_ids WHERE distinct_id = ${hogLiteral(distinctId)})`;
+}
+
 export function posthogEventsQuery(distinctId: string): string {
-  return `SELECT event, timestamp, properties FROM events WHERE distinct_id = ${hogLiteral(distinctId)} ORDER BY timestamp LIMIT ${POSTHOG_EVENTS_LIMIT}`;
+  return `SELECT event, timestamp, properties FROM events WHERE person_id IN ${personIdSubquery(distinctId)} ORDER BY timestamp LIMIT ${POSTHOG_EVENTS_LIMIT}`;
 }
 
 export function posthogPersonQuery(distinctId: string): string {
-  return `SELECT id, created_at, is_identified, properties FROM persons WHERE id IN (SELECT person_id FROM person_distinct_ids WHERE distinct_id = ${hogLiteral(distinctId)}) LIMIT 1`;
+  return `SELECT id, created_at, is_identified, properties FROM persons WHERE id IN ${personIdSubquery(distinctId)} LIMIT 1`;
 }
 
 // ── Vendor fetchers ─────────────────────────────────────────────────────
@@ -255,7 +308,7 @@ async function fetchClerk(
   client: ClerkClientLike,
   userId: string,
 ): Promise<ClerkExport> {
-  const user = await client.users.getUser(userId);
+  const user = await withTimeout(client.users.getUser(userId), CLERK_TIMEOUT_MS);
   return {
     id: user.id,
     emailAddresses: user.emailAddresses.map((e) => ({
@@ -274,12 +327,13 @@ async function fetchStripe(
   customerId: string,
   notes: string[],
 ): Promise<StripeExport> {
-  const customer = await client.customers.retrieve(customerId);
+  const options = { timeout: STRIPE_TIMEOUT_MS };
+  const customer = await client.customers.retrieve(customerId, undefined, options);
   const invoices: StripeExport["invoices"] = [];
-  for await (const inv of client.invoices.list({
-    customer: customerId,
-    limit: 100,
-  })) {
+  for await (const inv of client.invoices.list(
+    { customer: customerId, limit: 100 },
+    options,
+  )) {
     invoices.push({
       id: inv.id,
       number: inv.number ?? null,
@@ -497,7 +551,7 @@ export function summarizeExport(result: UserExport): string {
 export const USAGE =
   "usage: DATABASE_URL=<host> pnpm export-user-data <userId> [--out <file>]\n" +
   "  userId  — the Clerk id (users.id), e.g. user_2abc…; look it up in Clerk by the requester's address\n" +
-  "  --out   — where to write the JSON (default ./export-<userId>-<YYYY-MM-DD>.json, mode 0600)\n" +
+  "  --out   — where to write the JSON (default: the OS temp dir, export-<userId>-<YYYY-MM-DD>.json — outside the repo, the path is printed; mode 0600)\n" +
   "  Optional, best-effort: CLERK_SECRET_KEY, STRIPE_SECRET_KEY, POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID.\n" +
   "  Nothing is read from .env.local on purpose — every variable is passed explicitly.";
 
@@ -546,6 +600,12 @@ export function parseExportArgs(argv: readonly string[]): ParsedExportArgs {
   return { ok: true, userId, out };
 }
 
-export function defaultExportPath(userId: string, now: Date): string {
-  return `./export-${userId}-${now.toISOString().slice(0, 10)}.json`;
+/**
+ * `dir` is the OS temp dir in the script (`os.tmpdir()`), never the working
+ * directory: the default must not land inside the repository, where a
+ * routine `git add -A` would stage a person's record (`.gitignore` also
+ * covers `export-*.json`, belt and braces).
+ */
+export function defaultExportPath(userId: string, now: Date, dir: string): string {
+  return join(dir, `export-${userId}-${now.toISOString().slice(0, 10)}.json`);
 }

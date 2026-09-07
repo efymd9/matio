@@ -15,8 +15,12 @@
 // hand.
 //
 // Output: one JSON file, mode 0600 — it IS the person's data; delete it once
-// the reply has gone out. Stdout carries counts and ids only, never a value.
+// the reply has gone out. Without --out it lands in the OS temp dir (never
+// the working directory: that is the repository, and `git add -A` is
+// routine here — `.gitignore` covers `export-*.json` on top). Stdout
+// carries counts, ids and the path only, never a value.
 import { chmodSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import Stripe from "stripe";
 
 import { runHogQL } from "../lib/posthog-hogql";
@@ -24,6 +28,7 @@ import {
   assembleUserExport,
   defaultExportPath,
   parseExportArgs,
+  POSTHOG_EXPORT_TIMEOUT_MS,
   summarizeExport,
   USAGE,
 } from "../lib/user-export";
@@ -43,7 +48,7 @@ if (!process.env.DATABASE_URL) {
 }
 
 const { userId } = parsed;
-const outPath = parsed.out ?? defaultExportPath(userId, new Date());
+const outPath = parsed.out ?? defaultExportPath(userId, new Date(), tmpdir());
 
 async function main() {
   // Dynamic imports so the database client and Clerk's server module load
@@ -65,7 +70,9 @@ async function main() {
     posthogKey && posthogProject
       ? {
           runHogQL: (query: string) =>
-            runHogQL({ key: posthogKey, projectId: posthogProject }, query),
+            runHogQL({ key: posthogKey, projectId: posthogProject }, query, {
+              timeoutMs: POSTHOG_EXPORT_TIMEOUT_MS,
+            }),
         }
       : null;
 

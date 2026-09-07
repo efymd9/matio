@@ -18,9 +18,21 @@ function jsonResponse(status: number, body: unknown) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("runHogQL", () => {
+  it("bounds the request with the caller's budget — the dashboard default, or the one passed in", async () => {
+    const budget = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", async () => jsonResponse(200, { results: [] }));
+
+    await runHogQL(cfg, "SELECT 1");
+    expect(budget).toHaveBeenLastCalledWith(3500);
+
+    await runHogQL(cfg, "SELECT 1", { timeoutMs: 30_000 });
+    expect(budget).toHaveBeenLastCalledWith(30_000);
+  });
+
   it("POSTs a HogQLQuery to the project's query endpoint with the personal key as Bearer", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { results: [["$pageview", 3]] }));
     vi.stubGlobal("fetch", fetchMock);

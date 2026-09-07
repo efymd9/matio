@@ -5,9 +5,11 @@ import { PgDialect, type PgTable } from "drizzle-orm/pg-core";
 import type { User } from "@/db/schema";
 import {
   assembleUserExport,
+  CLERK_TIMEOUT_MS,
   defaultExportPath,
   errorLabel,
   EXPORT_TABLES,
+  STRIPE_TIMEOUT_MS,
   parseExportArgs,
   POSTHOG_EVENTS_LIMIT,
   posthogEventsQuery,
@@ -324,7 +326,29 @@ describe("assembleUserExport · vendors", () => {
     expect(result.notes.join("\n")).not.toContain("subject@example.invalid");
   });
 
-  it("stripe: the customer by users.stripe_customer_id plus every invoice through auto-pagination", async () => {
+  it("clerk: a call that never answers is cut off after its budget → null + a TimeoutError note", async () => {
+    // Clerk's SDK takes no AbortSignal; the race against the clock is what
+    // keeps an operator's terminal from hanging on a stuck vendor.
+    vi.useFakeTimers();
+    try {
+      const pending = assembleUserExport({
+        userId: USER_ID,
+        rows: emptyRows({ users: [account] }),
+        clients: { clerk: { users: { getUser: () => new Promise<never>(() => {}) } } },
+      });
+      await vi.advanceTimersByTimeAsync(CLERK_TIMEOUT_MS);
+      const result = await pending;
+
+      expect(result.processors.clerk).toBeNull();
+      expect(result.notes).toContain(
+        "clerk: failed (TimeoutError) — export by hand (docs/runbooks/gdpr-requests.md)",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stripe: the customer by users.stripe_customer_id plus every invoice through auto-pagination, each request on a 30s budget", async () => {
     const retrieve = vi.fn(stripeClient().customers.retrieve);
     const list = vi.fn(stripeClient().invoices.list);
 
@@ -334,8 +358,12 @@ describe("assembleUserExport · vendors", () => {
       clients: { stripe: { customers: { retrieve }, invoices: { list } } },
     });
 
-    expect(retrieve).toHaveBeenCalledWith("cus_subject");
-    expect(list).toHaveBeenCalledWith({ customer: "cus_subject", limit: 100 });
+    // (id, params, options) — Stripe's request options are the third argument.
+    expect(retrieve).toHaveBeenCalledWith("cus_subject", undefined, { timeout: STRIPE_TIMEOUT_MS });
+    expect(list).toHaveBeenCalledWith(
+      { customer: "cus_subject", limit: 100 },
+      { timeout: STRIPE_TIMEOUT_MS },
+    );
     expect(result.processors.stripe).toEqual({
       customer: {
         id: "cus_subject",
@@ -401,7 +429,7 @@ describe("assembleUserExport · vendors", () => {
     );
   });
 
-  it("posthog: events by distinct_id (properties parsed) and the person behind it", async () => {
+  it("posthog: events by the person behind the distinct_id (properties parsed) and the person itself", async () => {
     const queries: string[] = [];
     const posthog: PosthogClientLike = {
       runHogQL: async (query) => {
@@ -467,9 +495,13 @@ describe("assembleUserExport · vendors", () => {
 });
 
 describe("HogQL for the subject", () => {
-  it("quotes the id into both statements and caps the events", () => {
+  it("keys BOTH statements by the person behind the id — pre-identify events included — and caps the events", () => {
+    // Events captured before posthog-js `identify()` sit on the same person
+    // under the anonymous distinct_id; a `distinct_id =` filter would drop
+    // them, so the events statement resolves the person exactly like the
+    // person statement does.
     expect(posthogEventsQuery("user_2abc")).toBe(
-      "SELECT event, timestamp, properties FROM events WHERE distinct_id = 'user_2abc' ORDER BY timestamp LIMIT 10000",
+      "SELECT event, timestamp, properties FROM events WHERE person_id IN (SELECT person_id FROM person_distinct_ids WHERE distinct_id = 'user_2abc') ORDER BY timestamp LIMIT 10000",
     );
     expect(posthogPersonQuery("user_2abc")).toBe(
       "SELECT id, created_at, is_identified, properties FROM persons WHERE id IN (SELECT person_id FROM person_distinct_ids WHERE distinct_id = 'user_2abc') LIMIT 1",
@@ -564,7 +596,14 @@ describe("parseExportArgs", () => {
     expect(parseExportArgs(["a@b.invalid"])).toMatchObject({ reason: "invalid_user_id" });
   });
 
-  it("names the default file after the subject and the day", () => {
-    expect(defaultExportPath("user_2abc", NOW)).toBe("./export-user_2abc-2026-09-07.json");
+  it("names the default file after the subject and the day, inside the directory it is given", () => {
+    // The script passes os.tmpdir() — never the working directory, which is
+    // the repository; a default there would be one `git add -A` from a leak.
+    expect(defaultExportPath("user_2abc", NOW, "/var/tmp")).toBe(
+      "/var/tmp/export-user_2abc-2026-09-07.json",
+    );
+    expect(defaultExportPath("user_2abc", NOW, "/var/tmp/")).toBe(
+      "/var/tmp/export-user_2abc-2026-09-07.json",
+    );
   });
 });

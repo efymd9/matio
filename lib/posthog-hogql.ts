@@ -23,9 +23,21 @@ export function hogTs(d: Date): string {
   return d.toISOString().slice(0, 19).replace("T", " ");
 }
 
+export type RunHogQLOptions = {
+  /**
+   * Request budget. The default is the dashboard's: a hung PostHog must not
+   * stall a render. The subject-access export (lib/user-export.ts) passes
+   * its own, larger one — it reads up to 10 000 events in one statement.
+   */
+  timeoutMs?: number;
+};
+
+export const HOGQL_DEFAULT_TIMEOUT_MS = 3500;
+
 export async function runHogQL(
   cfg: PosthogQueryConfig,
   query: string,
+  { timeoutMs = HOGQL_DEFAULT_TIMEOUT_MS }: RunHogQLOptions = {},
 ): Promise<unknown[][]> {
   const res = await fetch(
     `${POSTHOG_API_HOST}/api/projects/${cfg.projectId}/query/`,
@@ -39,10 +51,10 @@ export async function runHogQL(
       // POSTs bypass the fetch data cache anyway; caching happens at the
       // unstable_cache layer in the callers where errors are NOT persisted.
       cache: "no-store",
-      // A hung PostHog response must never stall the dashboard render —
-      // the TimeoutError lands in the caller's catch and degrades to the
-      // panel's error state (same contract as lib/mux-data.ts).
-      signal: AbortSignal.timeout(3500),
+      // The TimeoutError lands in the caller's catch: the dashboard panel
+      // degrades to its error state (same contract as lib/mux-data.ts), the
+      // export records `failed (TimeoutError)` and ships the rest.
+      signal: AbortSignal.timeout(timeoutMs),
     },
   );
   if (res.status === 401 || res.status === 403) {
