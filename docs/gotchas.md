@@ -827,7 +827,9 @@ An "adjust state during render" block reconciles state if the prop later changes
 - `next build` is fine on Next 16.3+: `experimental.useTypeScriptCli` defaults to `true`, so Next spawns the project-local `tsc` instead of loading the API (diagnostics lose Next's route-specific code frames). Flip it to `false` on TS 7 and Next throws `TypeScript 7.x does not provide the compiler API required by Next.js`.
 - vitest, tsx, drizzle-kit and Storybook (`reactDocgen` is not `react-docgen-typescript`) never touch the API — all green.
 
-`@types/node`'s major is the Node major it describes, not the one we run: `.nvmrc` pins 22 (CI too). Types for a newer Node let a call typecheck and still throw at runtime — keep the two aligned when bumping either.
+**Where we stand (2026-09-07): TypeScript 6.0.3**, the last JS-based release and the bridge to 7 — it still ships the compiler API typescript-eslint needs, flags everything 7 removes, and passed every gate without a single change. TS 7 waits on typescript-eslint supporting the 7.x API (7.1 promises a stable one); the row in `docs/registry.md` names the closing condition, and `.github/dependabot.yml` ignores `typescript` majors until then, so the bot does not re-propose 7 every week. When it unblocks, the upgrade is a version bump — the tsconfig needs nothing.
+
+`@types/node`'s major is the Node major it describes, not the one we run: `.nvmrc` pins 24 (every workflow reads it via `node-version-file`; Vercel runs Node 24 LTS). Types for a newer Node let a call typecheck and still throw at runtime — bump `@types/node` and `.nvmrc` together, never one without the other.
 
 ### Stale `.next/types/validator.ts`
 
