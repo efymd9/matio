@@ -106,8 +106,8 @@ export default defineConfig({
       //   floor(CI, 0.1) по логу первого прогона CI).
       thresholds: {
         lines: 33.5,
-        functions: 27.8,
-        branches: 27.8,
+        functions: 27.9,
+        branches: 28.1,
         statements: 33.1,
       },
     },
