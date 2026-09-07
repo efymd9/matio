@@ -183,6 +183,10 @@ Can't pass multiple environments in one call. For preview, you also need a git b
 
 **Build settings**: framework auto-detected as Next.js. Routes are dynamic (`ƒ`) by default since they hit DB / cookies.
 
+**Cron** (`crons` in `vercel.json`): one job — `/api/cron/retention` daily at 04:10 UTC (after the 03:40 `db-backup`, so the night's dump still holds what the run deletes for the backup's own 35 days). Vercel calls the path with GET and `Authorization: Bearer <CRON_SECRET>`; the route (`app/api/cron/retention/route.ts`) refuses anything else and refuses EVERYTHING while `CRON_SECRET` is unset — fail closed, nothing deleted, 401s in the cron log. The windows themselves live in `lib/retention.ts` and are copied from `/privacy` §6.
+
+**Env var**: `CRON_SECRET` — generate like `FLAGS_SECRET`; set on **both** projects (prod + staging), because `vercel.json` — and therefore the cron — is shared. Hobby-plan crons run once a day within the scheduled hour; the job is idempotent, so a late or doubled invocation is harmless. Runs are visible in the project's Cron Jobs tab and as the `retention: run complete` log line (counters per table).
+
 ## Vercel Blob (show artwork)
 
 **Used for**: admin-uploaded poster + hero images on shows. Videos stay on Mux; Blob is images only.

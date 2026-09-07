@@ -32,8 +32,11 @@ export const NOINDEX_VALUE = "noindex, nofollow";
 
 // Paths that answer WITHOUT the password. Uptime pings and the release smoke
 // test must not carry credentials, and /api/healthz returns nothing but the
-// version, commit and environment of the running build.
-const OPEN_PATHS = new Set(["/api/healthz"]);
+// version, commit and environment of the running build. The retention cron
+// is open for the same reason: Vercel Cron calls it with its own
+// `Authorization: Bearer <CRON_SECRET>` (a Basic challenge would just 401 the
+// platform every night), and the route refuses anything but that bearer.
+const OPEN_PATHS = new Set(["/api/healthz", "/api/cron/retention"]);
 
 export type StagingLockVerdict = "allow" | "challenge";
 

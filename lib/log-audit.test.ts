@@ -98,6 +98,7 @@ vi.mock("@/lib/mux-token", () => ({
 }));
 
 import { sendShowReminders } from "@/app/admin/reminder-actions";
+import { GET as retentionCron } from "@/app/api/cron/retention/route";
 import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
@@ -243,6 +244,37 @@ describe("log audit · /api/readyz", () => {
 
     expect(body).not.toContain(MARKER_SECRET);
     expect(body).not.toContain("db.example.invalid");
+  });
+});
+
+describe("log audit · /api/cron/retention (the daily deletion run)", () => {
+  const cronRequest = () =>
+    new Request("https://matio.tv/api/cron/retention", {
+      headers: { authorization: "Bearer dummy-cron-secret" },
+    });
+
+  it("logs a failed table by name and counter — never the statement the driver quoted", async () => {
+    vi.stubEnv("CRON_SECRET", "dummy-cron-secret");
+    // The realistic worst case: the driver's error carries the row it choked
+    // on (a subscriber's address) and the URL it was talking to.
+    execute.mockRejectedValue(
+      new Error(
+        `DELETE failed on row {email: ${MARKER_EMAIL}} at ${MARKER_DATABASE_URL}`,
+      ),
+    );
+    const logged = captureConsole();
+
+    const res = await retentionCron(cronRequest());
+    const body = JSON.stringify(await res.json());
+
+    expect(res.status).toBe(500);
+    for (const marker of [MARKER_EMAIL, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+      expect(body).not.toContain(marker);
+    }
+    // What it DOES log and answer: which table, and how far it got.
+    expect(logged()).toContain("trial_sessions");
+    expect(body).toContain('"failed":["trial_sessions","visitors","watch_days","show_reminders"]');
   });
 });
 
