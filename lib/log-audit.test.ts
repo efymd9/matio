@@ -137,6 +137,7 @@ beforeEach(() => {
   update.mockReset();
   del.mockReset();
   insert.mockReset();
+  stripeUpdate.mockReset();
   batchSend.mockReset();
   clerkVerify.mockReset();
   stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
@@ -613,5 +614,65 @@ describe("log audit · /api/v1/watch-segments (the app's retention flush)", () =
     for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
       expect(logged()).not.toContain(marker);
     }
+  });
+});
+
+describe("log audit · Stripe subscription mirror (CAPI identity scrub, #165)", () => {
+  // The one place the project holds a raw IP: the Purchase snapshot in the
+  // subscription's Stripe metadata, erased right after the event. The worst
+  // case this path logs is the erase itself failing with an error that quotes
+  // the request — values included — while the users row it just read carries
+  // the address. Only the subscription id may come out.
+  const MARKER_IP = "203.0.113.77";
+  const MARKER_UA = "Mozilla/5.0 (LeakMarker; rv:1.0)";
+  const SUB_ID = "sub_marker";
+
+  function selectChain(rows: unknown[]) {
+    const chain = {
+      from: () => chain,
+      where: () => chain,
+      limit: async () => rows,
+    };
+    return chain;
+  }
+
+  it("logs a failed scrub by subscription id only — never the IP, the UA or the address", async () => {
+    vi.stubEnv("STRIPE_PRICE_MONTHLY", "price_monthly_dummy");
+    select
+      .mockImplementationOnce(() => selectChain([{ id: "user_1", email: MARKER_EMAIL }]))
+      .mockImplementationOnce(() => selectChain([])); // no prior row: the Purchase moment
+    insert.mockImplementation(() => ({
+      values: () => ({ onConflictDoUpdate: async () => undefined }),
+    }));
+    update.mockImplementation(() => ({ set: () => ({ where: async () => undefined }) }));
+    const stripeMessage = `Invalid metadata on ${SUB_ID}: capi_ip=${MARKER_IP} capi_ua=${MARKER_UA}`;
+    expect(stripeMessage).toContain(MARKER_IP); // the fixture must be dirty
+    stripeUpdate.mockRejectedValue(new Error(stripeMessage));
+    const logged = captureConsole();
+
+    await mirrorSubscription({
+      id: SUB_ID,
+      customer: "cus_marker",
+      status: "active",
+      trial_start: null,
+      cancel_at_period_end: false,
+      cancel_at: null,
+      metadata: { capi_consent: "1", capi_ip: MARKER_IP, capi_ua: MARKER_UA },
+      items: {
+        data: [
+          {
+            price: { id: "price_monthly_dummy", unit_amount: 3800, currency: "usd" },
+            current_period_end: 1_900_000_000,
+          },
+        ],
+      },
+    } as never);
+
+    expect(stripeUpdate).toHaveBeenCalledTimes(1); // the fixture reached the scrub
+    for (const marker of [MARKER_IP, MARKER_UA, MARKER_EMAIL]) {
+      expect(logged()).not.toContain(marker);
+    }
+    // What it DOES log: the subscription id, enough to re-run the sweep by hand.
+    expect(logged()).toContain(SUB_ID);
   });
 });

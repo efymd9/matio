@@ -269,7 +269,7 @@ describe("Clerk webhook · user.deleted × a live Stripe subscription (#164)", (
     expect(h.stripeUpdate).toHaveBeenCalledWith(
       "sub_dummy",
       { cancel_at_period_end: true },
-      { timeout: 5_000 },
+      { timeout: 5_000, maxNetworkRetries: 2 },
     );
     expect(h.deletes.map((d) => d.table)).toEqual(["show_reminders", "users"]);
 

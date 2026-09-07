@@ -131,7 +131,10 @@ async function eraseDeletedUser(userId: string | undefined) {
       await getStripe().subscriptions.update(
         liveSub.stripeSubscriptionId,
         { cancel_at_period_end: true },
-        { timeout: STRIPE_CANCEL_TIMEOUT_MS },
+        {
+          timeout: STRIPE_CANCEL_TIMEOUT_MS,
+          maxNetworkRetries: STRIPE_CANCEL_RETRIES,
+        },
       );
       cancelRequested = true;
       console.info(
@@ -215,6 +218,14 @@ async function eraseDeletedUser(userId: string | undefined) {
 // well under a second; the ceiling exists so a Stripe stall cannot consume
 // the whole function budget before the local DELETEs run.
 const STRIPE_CANCEL_TIMEOUT_MS = 5_000;
+// The SDK retries connection failures, timeouts and 5xx; the count is stated
+// here so the worst case is a decision, not a surprise: 3 attempts × 5s plus
+// backoff ≈ 17s, well inside the function budget. Retries are safe (stripe-node
+// keys every POST with an idempotency key) and worth having: Svix's own
+// redelivery cannot repeat THIS call — by then the local rows are gone and the
+// handler finds no user — so after the last attempt the loud error log above
+// is the only recovery path.
+const STRIPE_CANCEL_RETRIES = 2;
 
 // The loggable shape of a failed Stripe call: class, Stripe error code and
 // HTTP status — never the message, which quotes what was sent.
