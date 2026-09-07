@@ -43,8 +43,8 @@ export default function ShowScreen() {
 
   // A locked episode routes to sign-in instead of the player: the wall is the
   // point of the gate, and bouncing off a 403 would be a wasted round trip.
-  // The show's orientation rides along so the player picks its chrome
-  // without a second fetch.
+  // The player loads the show itself (the feed pages every episode), so only
+  // the slug rides along.
   const openEpisode = useCallback(
     (show: ShowDetail, episode: EpisodeSummary, locked: boolean) => {
       if (locked) {
@@ -53,13 +53,7 @@ export default function ShowScreen() {
       }
       router.push({
         pathname: "/watch/[episodeId]",
-        params: {
-          episodeId: episode.id,
-          title: episode.title,
-          showTitle: show.title,
-          orientation: show.orientation,
-          episodeNumber: String(episode.number),
-        },
+        params: { episodeId: episode.id, showSlug: show.slug },
       });
     },
     [router],

@@ -2,7 +2,7 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import type { CatalogResponse, ShowSummary } from "@/lib/api/types";
-import { absoluteMediaUrl, apiOk } from "@/lib/api/v1";
+import { absoluteMediaUrl, apiOk, linearShowsOnly } from "@/lib/api/v1";
 
 // GET /api/v1/catalog — every published show, with its ready-episode count.
 //
@@ -47,7 +47,16 @@ export async function GET() {
     .from(shows)
     .leftJoin(seasons, eq(seasons.showId, shows.id))
     .leftJoin(episodes, eq(episodes.seasonId, seasons.id))
-    .where(and(eq(shows.status, "published"), isNull(shows.deletedAt)))
+    // Shows with branching content are absent from the app entirely (#143)
+    // — the native player cannot render a fork. WHERE-only; the DTO is
+    // unchanged.
+    .where(
+      and(
+        eq(shows.status, "published"),
+        isNull(shows.deletedAt),
+        linearShowsOnly(),
+      ),
+    )
     // Grouping by the primary key lets Postgres functionally determine every
     // other selected shows column, so they don't each need listing.
     .groupBy(shows.id)

@@ -7,6 +7,8 @@ import type {
   PlaybackTokenResponse,
   SaveProgressRequest,
   SaveProgressResponse,
+  SaveWatchSegmentsRequest,
+  SaveWatchSegmentsResponse,
   ShowDetail,
 } from "@/shared/api-types";
 import { getDeviceId } from "./device";
@@ -167,6 +169,11 @@ export const api = {
   saveProgress: (body: SaveProgressRequest) =>
     request<SaveProgressResponse>("/api/v1/progress", { method: "POST", body }),
   continueWatching: () => request<ContinueResponse>("/api/v1/continue"),
+  // Retention buckets. Signed-in or device-keyed; the server bounds them to
+  // the episode and the positional gate. Goes through the offline queue in
+  // watch/segment-queue.ts, never called directly by a screen.
+  saveWatchSegments: (body: SaveWatchSegmentsRequest) =>
+    request<SaveWatchSegmentsResponse>("/api/v1/watch-segments", { method: "POST", body }),
 };
 
 // Mux HLS URL for a signed playback ID. Kept here so the URL shape lives next

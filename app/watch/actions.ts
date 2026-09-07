@@ -10,22 +10,15 @@ import {
   showReminders,
   shows,
   trialSessions,
-  watchProgress,
-  watchSegments,
 } from "@/db/schema";
 import { stampVisitorWallSeen } from "@/lib/visitor";
-import {
-  WATCH_SEGMENT_BUCKET_SECONDS,
-  WATCH_SEGMENT_FLUSH_MAX_BUCKETS,
-} from "@/lib/watch-segments";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { getLocale } from "@/lib/i18n/server";
-import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
-  POSITION_SECONDS_MAX,
   clampPositionSeconds,
   saveWatchProgressForUser,
 } from "@/lib/watch-progress";
+import { saveWatchSegmentsFor } from "@/lib/watch-segments-write";
 import {
   getOrderedReadyEpisodeIds,
   showHasTierGating,
@@ -37,12 +30,6 @@ import {
   hashClientIp,
   stampSignupWall,
 } from "@/lib/trial";
-
-// Shape-guard for ids headed into uuid columns from client-invocable
-// actions whose contract is silent-return (a malformed value would
-// otherwise throw a masked DB error instead).
-const UUID_RE_STRICT =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Signed-in progress save. The write itself — position clamp, monotonic
 // max_position_seconds, completed's flip-on-rewatch semantics, the
@@ -64,116 +51,32 @@ export async function saveWatchProgress(
 // Audience-retention counter flush. The player marks each 10s bucket the
 // playhead traverses (deduped for continuous playback, re-counted after a
 // seek — that's what makes rewatch peaks visible) and flushes every ~20s.
-// Increments the per-(episode, day, bucket) aggregate, plus the caller's
-// cumulative watched-seconds on their progress row when signed in.
-// Best-effort analytics: invalid input returns silently, never throws.
+// The write itself — timeline bound, dedupe, the per-(episode, day, bucket)
+// increment, the session-row proof for anonymous callers, the signed-in
+// watched-seconds credit — lives in lib/watch-segments-write.ts and is
+// shared with the app's POST /api/v1/watch-segments. This action decides
+// only WHO may flush from the web and keeps its historical silent-return
+// contract: the outcome is deliberately dropped, invalid input never throws.
 export async function saveWatchSegments(episodeId: string, buckets: number[]) {
-  // Shape-guard before the uuid column ever sees the value — this action's
-  // contract is silent-return, never a masked DB throw.
-  if (typeof episodeId !== "string" || !UUID_RE_STRICT.test(episodeId)) return;
-  if (!Array.isArray(buckets) || buckets.length === 0) return;
-  if (buckets.length > WATCH_SEGMENT_FLUSH_MAX_BUCKETS) return;
-
   const { userId } = await auth();
+  if (userId) {
+    await saveWatchSegmentsFor({ kind: "user", userId }, episodeId, buckets);
+    return;
+  }
   // Anonymous flushes are only legitimate where anonymous playback exists:
   // open free mode (no signup gate). Signup-gate era → signed-in only;
   // paid-mode anonymous previews are deliberately excluded (a 60s-capped
   // preview cohort would paint a fake everyone-leaves-at-60s cliff onto
-  // the episode's retention curve).
-  const sessionToken = userId
-    ? null
-    : ((await cookies()).get(TRIAL_COOKIE)?.value ?? null);
-  if (!userId) {
-    if (paymentsEnabled() || signupRequired()) return;
-    if (!sessionToken) return;
-  }
-
-  const [ep] = await db
-    .select({
-      id: episodes.id,
-      showId: seasons.showId,
-      access: episodes.access,
-      durationSeconds: episodes.durationSeconds,
-    })
-    .from(episodes)
-    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
-    .innerJoin(shows, eq(seasons.showId, shows.id))
-    .where(
-      and(
-        eq(episodes.id, episodeId),
-        eq(episodes.status, "ready"),
-        eq(shows.status, "published"),
-        isNull(shows.deletedAt),
-      ),
-    )
-    .limit(1);
-  if (!ep) return;
-
-  // Same ownership gate as saveWatchProgress: no counters for content the
-  // caller couldn't legitimately play.
-  if (userId && paymentsEnabled() && !(await hasActiveSubscription(userId))) {
-    if (ep.access === "subscriber") return;
-  }
-  // Anonymous callers must hold a REAL session row for this show — cookie
-  // presence alone would let any junk value increment the shared counters.
-  // (The row is minted by the token route at playback start, so honest
-  // anonymous viewers always have one before their first flush.)
-  if (!userId) {
-    const [sess] = await db
-      .select({ id: trialSessions.id })
-      .from(trialSessions)
-      .where(
-        and(
-          eq(trialSessions.sessionToken, sessionToken!),
-          eq(trialSessions.showId, ep.showId),
-        ),
-      )
-      .limit(1);
-    if (!sess) return;
-  }
-
-  // Bound buckets to the episode's actual timeline (unknown duration →
-  // the same 24h ceiling the position clamp uses).
-  const maxBucket = Math.floor(
-    (ep.durationSeconds ?? POSITION_SECONDS_MAX) / WATCH_SEGMENT_BUCKET_SECONDS,
+  // the episode's retention curve). Open free mode has no positional gate
+  // on the web, hence maxPosition: null.
+  if (paymentsEnabled() || signupRequired()) return;
+  const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
+  if (!sessionToken) return;
+  await saveWatchSegmentsFor(
+    { kind: "anonymous", sessionToken, maxPosition: null },
+    episodeId,
+    buckets,
   );
-  const clean = [
-    ...new Set(
-      buckets.filter(
-        (b) => Number.isInteger(b) && b >= 0 && b <= maxBucket,
-      ),
-    ),
-  ];
-  if (clean.length === 0) return;
-
-  const day = new Date().toISOString().slice(0, 10);
-  await db
-    .insert(watchSegments)
-    .values(clean.map((bucket) => ({ episodeId, day, bucket, views: 1 })))
-    .onConflictDoUpdate({
-      target: [watchSegments.episodeId, watchSegments.day, watchSegments.bucket],
-      set: { views: sql`${watchSegments.views} + 1` },
-    });
-
-  if (userId) {
-    const watched = clean.length * WATCH_SEGMENT_BUCKET_SECONDS;
-    // UPDATE-only, deliberately not an upsert: a flush can precede the
-    // first 10s progress save, but inserting a placeholder row here
-    // (position 0) would surface a ghost 0%-progress tile in the
-    // continue-watching rail. Losing ≤20s of the cumulative counter on
-    // the very first flush is the cheaper error.
-    await db
-      .update(watchProgress)
-      .set({
-        totalWatchedSeconds: sql`${watchProgress.totalWatchedSeconds} + ${watched}`,
-      })
-      .where(
-        and(
-          eq(watchProgress.userId, userId),
-          eq(watchProgress.episodeId, episodeId),
-        ),
-      );
-  }
 }
 
 // Trial-mode position save: keyed on (session_token, show_id), looked up via

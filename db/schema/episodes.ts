@@ -6,6 +6,7 @@ import {
   timestamp,
   unique,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { seasons } from "./seasons";
 
@@ -54,6 +55,28 @@ export const episodes = pgTable(
     status: episodeStatus("status").notNull().default("processing"),
     access: episodeAccess("access").notNull().default("subscriber"),
     releasedAt: timestamp("released_at", { withTimezone: true }),
+    // Branching video (#143). A branch is an ORDINARY episode row — same
+    // upload pipeline, same token route, same watch_progress — that is
+    // reachable only through a choice on its parent's fork: NOT NULL here
+    // means "hide from every public list" (show page, JSON-LD, funnel
+    // positions, episodes overlay, the app's catalog). The episode the
+    // branches converge back into is a plain row with NULL. Convention:
+    // branches are numbered 900+ so the (season, number) unique key never
+    // collides with the linear run. SET NULL on parent delete: the branch
+    // survives as a regular episode (its video is real content) instead of
+    // vanishing with the fork.
+    branchOfEpisodeId: uuid("branch_of_episode_id").references(
+      (): AnyPgColumn => episodes.id,
+      { onDelete: "set null" },
+    ),
+    // Viewer-facing fork prompt, one per SITE locale (es/en — the admin
+    // panel's ru/en is a different system). Shown only when the episode has
+    // ≥2 rows in episode_choices; see lib/branching.ts for the semantics.
+    forkPromptEn: text("fork_prompt_en"),
+    forkPromptEs: text("fork_prompt_es"),
+    // Seconds before the end at which the prompt appears — also the length
+    // of the choice timer. Admin-set per fork, validated 3–30 in the action.
+    forkWindowSeconds: integer("fork_window_seconds").notNull().default(10),
   },
   (t) => [unique("episodes_season_id_number_unique").on(t.seasonId, t.number)],
 );

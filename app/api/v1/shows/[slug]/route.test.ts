@@ -6,6 +6,7 @@ const h = vi.hoisted(() => ({
   show: undefined as Record<string, unknown> | undefined,
   episodes: [] as Record<string, unknown>[],
   thumbnail: vi.fn(),
+  showWhere: undefined as unknown,
 }));
 
 // Two sequential queries: the show, then its episodes. The fake dispatches on
@@ -14,7 +15,10 @@ vi.mock("@/db", () => ({
   db: {
     select: () => ({
       from: () => ({
-        where: () => ({ limit: async () => (h.show ? [h.show] : []) }),
+        where: (clause: unknown) => {
+          h.showWhere = clause;
+          return { limit: async () => (h.show ? [h.show] : []) };
+        },
         innerJoin: () => ({
           where: () => ({ orderBy: async () => h.episodes }),
         }),
@@ -24,12 +28,17 @@ vi.mock("@/db", () => ({
 }));
 vi.mock("@/db/schema", () => ({ episodes: {}, seasons: {}, shows: {} }));
 vi.mock("drizzle-orm", () => ({
-  and: () => undefined,
+  and: (...clauses: unknown[]) => clauses,
   asc: () => undefined,
   eq: () => undefined,
   isNull: () => undefined,
 }));
 vi.mock("@/lib/mux-token", () => ({ muxThumbnailUrl: h.thumbnail }));
+// Same exclusion as /v1/catalog — presence in the WHERE is what is asserted.
+vi.mock("@/lib/api/v1", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/v1")>()),
+  linearShowsOnly: () => "linear-shows-only",
+}));
 
 import { GET } from "./route";
 
@@ -138,5 +147,12 @@ describe("GET /api/v1/shows/:slug", () => {
     expect(res.status).toBe(200);
     expect(body.episodes).toEqual([]);
     expect(body.episodeCount).toBe(0);
+  });
+
+  it("is 404 for a show with branching content, like it is absent from the catalog", async () => {
+    // Excluded in the show lookup's WHERE (#143), so the answer is the same
+    // not_found as for an unpublished show — nothing leaks about the branch.
+    await GET(req(), ctx());
+    expect(h.showWhere).toContainEqual("linear-shows-only");
   });
 });

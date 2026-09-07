@@ -8,6 +8,7 @@ import { db } from "@/db";
 import {
   actors,
   episodeAccess,
+  episodeChoices,
   episodes,
   seasons,
   showActors,
@@ -17,6 +18,15 @@ import {
   type NewShow,
 } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin";
+import {
+  parseForkForm,
+  validateBranchGraph,
+  validateForkDraft,
+  type ForkErrorCode,
+  type ForkWriteSet,
+  type PublishGuardCode,
+  type PublishGuardResult,
+} from "@/lib/branching";
 import { CATALOG_TAG } from "@/lib/catalog";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { getMux } from "@/lib/mux";
@@ -96,14 +106,17 @@ function checkbox(formData: FormData, key: string): boolean {
 // message is masked in production builds, so an admin typing an uppercase
 // slug used to get the generic error boundary with zero explanation
 // (incident 2026-07-16, REF 4219756871). Same pattern as the tracked-links
-// actions. Shared by the show and actor forms.
+// actions. Shared by the show, actor and fork forms (the fork and publish
+// codes come from lib/branching.ts, the pure rule module).
 export type AdminFormErrorCode =
   | "title_required"
   | "name_required"
   | "slug_required"
   | "slug_invalid"
   | "slug_taken"
-  | "unknown";
+  | "unknown"
+  | ForkErrorCode
+  | PublishGuardCode;
 
 export type AdminFormState =
   | { status: "idle" }
@@ -176,6 +189,17 @@ export async function updateShow(
   const parsed = showValues(formData);
   if (!parsed.ok) return { status: "error", code: parsed.code };
 
+  // Publish guard (#143): a show whose choice graph is broken — a prompt
+  // with one option, a choice into a not-ready episode, a cycle — cannot be
+  // saved as published. Runs on every published save, not only on the
+  // draft → published edge, so a fork broken AFTER publishing (a branch
+  // re-uploaded and still processing) is reported the next time the owner
+  // touches the show instead of silently staying live.
+  if (parsed.values.status === "published") {
+    const guard = await checkBranchGraph(id);
+    if (!guard.ok) return { status: "error", code: guard.code };
+  }
+
   try {
     // Snapshot the current artwork so we can clean up any Blob object that's
     // being replaced or cleared by this edit (see deleteOrphanedBlob) — and
@@ -226,6 +250,10 @@ export async function updateShow(
           and(
             isNull(episodes.releasedAt),
             eq(episodes.status, "ready"),
+            // A branch is not a release (#143): stamping it would put a
+            // marker on the analytics pulse chart and a row in release
+            // retention for something no viewer can reach by position.
+            isNull(episodes.branchOfEpisodeId),
             inArray(
               episodes.seasonId,
               db
@@ -327,12 +355,31 @@ export async function createSeason(showId: string, formData: FormData) {
 
 export async function deleteSeason(id: string, showId: string) {
   await requireAdmin();
-  // Scope the delete to (season_id, show_id) so a crafted form post
-  // with mismatched ids can't reach across shows. The form sends both
-  // ids; the relationship is enforced here.
-  await db
-    .delete(seasons)
-    .where(and(eq(seasons.id, id), eq(seasons.showId, showId)));
+  await db.transaction(async (tx) => {
+    // Branching (#143): episode_choices.to_episode_id is ON DELETE RESTRICT,
+    // and Postgres checks it per cascaded ROW, not per statement — so the
+    // season cascade fails with 23503 (→ the masked generic error page)
+    // whenever a choice still points at one of its episodes: a branch that
+    // sits physically before its parent in the season, or a fork whose
+    // parent lives in another season. Drop the incoming edges first, in
+    // the same transaction; outgoing ones cascade with their episode.
+    // Scoped to (season_id, show_id) like the delete below, so a crafted
+    // post cannot strip another show's forks either.
+    const seasonEpisodes = tx
+      .select({ id: episodes.id })
+      .from(episodes)
+      .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+      .where(and(eq(seasons.id, id), eq(seasons.showId, showId)));
+    await tx
+      .delete(episodeChoices)
+      .where(inArray(episodeChoices.toEpisodeId, seasonEpisodes));
+    // Scope the delete to (season_id, show_id) so a crafted form post
+    // with mismatched ids can't reach across shows. The form sends both
+    // ids; the relationship is enforced here.
+    await tx
+      .delete(seasons)
+      .where(and(eq(seasons.id, id), eq(seasons.showId, showId)));
+  });
   revalidatePath(`/admin/shows/${showId}`);
 }
 
@@ -508,8 +555,225 @@ export async function deleteEpisode(
     )
     .limit(1);
   if (!chain) throw new Error("Episode not in this season/show");
+  // A target of someone's choice is protected by the RESTRICT FK: the
+  // episode page hides the delete button for such rows and explains why,
+  // so reaching this throw takes a forged post.
   await db.delete(episodes).where(eq(episodes.id, id));
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
+}
+
+// ---------- branching video (#143) ----------
+
+// The (episode, season, show) chain check every branching action runs
+// first. A mismatch is a forged post crossing shows — an integrity
+// failure, thrown like deleteEpisode's, never a typed form error.
+async function requireEpisodeChain(
+  episodeId: string,
+  seasonId: string,
+  showId: string,
+) {
+  const [chain] = await db
+    .select({ id: episodes.id })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .where(
+      and(
+        eq(episodes.id, episodeId),
+        eq(episodes.seasonId, seasonId),
+        eq(seasons.showId, showId),
+      ),
+    )
+    .limit(1);
+  if (!chain) throw new Error("Episode not in this season/show");
+}
+
+// Every episode of the show with what the branching rules need to know
+// about it. Candidates for a choice target / branch parent, and the nodes
+// of the publish guard's graph.
+async function loadShowEpisodesForBranching(showId: string) {
+  return db
+    .select({
+      id: episodes.id,
+      status: episodes.status,
+      branchOfEpisodeId: episodes.branchOfEpisodeId,
+      forkPromptEn: episodes.forkPromptEn,
+      forkPromptEs: episodes.forkPromptEs,
+    })
+    .from(episodes)
+    .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+    .where(eq(seasons.showId, showId));
+}
+
+// The ONE write of a fork: the episode's branching columns plus its whole
+// choice set, replaced wholesale in a transaction. Idempotent by
+// construction — running it twice with the same values yields the same
+// rows (delete-all + insert-all inside one transaction; choice ids are
+// not referenced anywhere, so minting new ones is free).
+async function writeForkSet(episodeId: string, values: ForkWriteSet) {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(episodes)
+      .set({
+        branchOfEpisodeId: values.branchOfEpisodeId,
+        forkPromptEn: values.forkPromptEn,
+        forkPromptEs: values.forkPromptEs,
+        forkWindowSeconds: values.forkWindowSeconds,
+      })
+      .where(eq(episodes.id, episodeId));
+    await tx
+      .delete(episodeChoices)
+      .where(eq(episodeChoices.fromEpisodeId, episodeId));
+    if (values.choices.length > 0) {
+      await tx.insert(episodeChoices).values(
+        values.choices.map((c) => ({
+          fromEpisodeId: episodeId,
+          toEpisodeId: c.toEpisodeId,
+          position: c.position,
+          labelEn: c.labelEn,
+          labelEs: c.labelEs,
+          isDefault: c.isDefault,
+        })),
+      );
+    }
+  });
+}
+
+function revalidateBranching(showId: string, seasonId: string, episodeId: string) {
+  revalidatePath(
+    `/admin/shows/${showId}/seasons/${seasonId}/episodes/${episodeId}`,
+  );
+  revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
+}
+
+// Saves the episode page's "Branching" panel: the branch-of parent, the
+// fork prompt (es/en), the timer and up to three options. Typed codes
+// for everything the owner can get wrong (lib/branching.ts has the rules
+// and their tests); the only throw is the chain integrity guard.
+export async function upsertEpisodeChoices(
+  episodeId: string,
+  seasonId: string,
+  showId: string,
+  _prev: AdminFormState,
+  formData: FormData,
+): Promise<AdminFormState> {
+  await requireAdmin();
+  await requireEpisodeChain(episodeId, seasonId, showId);
+
+  const candidates = await loadShowEpisodesForBranching(showId);
+  const validated = validateForkDraft(
+    episodeId,
+    parseForkForm(formData),
+    candidates,
+  );
+  if (!validated.ok) return { status: "error", code: validated.code };
+
+  try {
+    await writeForkSet(episodeId, validated.values);
+  } catch (e) {
+    console.error("upsertEpisodeChoices failed", e);
+    return { status: "error", code: "unknown" };
+  }
+
+  revalidateBranching(showId, seasonId, episodeId);
+  return { status: "ok" };
+}
+
+// Removes one saved option and rewrites the rest through the same rules as
+// a save, so the row that stays can never be an invalid fork: a prompt
+// with a single remaining option is refused (the panel's Save — clear the
+// prompt, keep one row — is the way to turn a fork into a silent hop).
+export async function deleteEpisodeChoice(
+  choiceId: string,
+  episodeId: string,
+  seasonId: string,
+  showId: string,
+): Promise<AdminFormState> {
+  await requireAdmin();
+  await requireEpisodeChain(episodeId, seasonId, showId);
+
+  const [episode] = await db
+    .select({
+      branchOfEpisodeId: episodes.branchOfEpisodeId,
+      forkPromptEn: episodes.forkPromptEn,
+      forkPromptEs: episodes.forkPromptEs,
+      forkWindowSeconds: episodes.forkWindowSeconds,
+    })
+    .from(episodes)
+    .where(eq(episodes.id, episodeId))
+    .limit(1);
+  if (!episode) throw new Error("Episode not found");
+
+  const remaining = await db
+    .select({
+      id: episodeChoices.id,
+      toEpisodeId: episodeChoices.toEpisodeId,
+      labelEn: episodeChoices.labelEn,
+      labelEs: episodeChoices.labelEs,
+      isDefault: episodeChoices.isDefault,
+    })
+    .from(episodeChoices)
+    .where(eq(episodeChoices.fromEpisodeId, episodeId))
+    .orderBy(asc(episodeChoices.position));
+  const kept = remaining.filter((c) => c.id !== choiceId);
+  const defaultIndex = kept.findIndex((c) => c.isDefault);
+
+  const candidates = await loadShowEpisodesForBranching(showId);
+  const validated = validateForkDraft(
+    episodeId,
+    {
+      branchOfEpisodeId: episode.branchOfEpisodeId,
+      forkPromptEn: episode.forkPromptEn,
+      forkPromptEs: episode.forkPromptEs,
+      forkWindowSeconds: episode.forkWindowSeconds,
+      choices: kept.map((c) => ({
+        toEpisodeId: c.toEpisodeId,
+        labelEn: c.labelEn,
+        labelEs: c.labelEs,
+      })),
+      defaultPosition: defaultIndex >= 0 ? defaultIndex + 1 : null,
+    },
+    candidates,
+  );
+  if (!validated.ok) return { status: "error", code: validated.code };
+
+  try {
+    await writeForkSet(episodeId, validated.values);
+  } catch (e) {
+    console.error("deleteEpisodeChoice failed", e);
+    return { status: "error", code: "unknown" };
+  }
+
+  revalidateBranching(showId, seasonId, episodeId);
+  return { status: "ok" };
+}
+
+// Publish guard: DFS over the show's choice graph from every episode a
+// viewer reaches by position (lib/branching.ts:validateBranchGraph).
+async function checkBranchGraph(showId: string): Promise<PublishGuardResult> {
+  const nodes = await loadShowEpisodesForBranching(showId);
+  if (nodes.length === 0) return { ok: true };
+  const edges = await db
+    .select({
+      fromEpisodeId: episodeChoices.fromEpisodeId,
+      toEpisodeId: episodeChoices.toEpisodeId,
+      position: episodeChoices.position,
+    })
+    .from(episodeChoices)
+    .where(
+      inArray(
+        episodeChoices.fromEpisodeId,
+        nodes.map((n) => n.id),
+      ),
+    );
+  return validateBranchGraph(
+    nodes.map((n) => ({
+      id: n.id,
+      status: n.status,
+      branchOfEpisodeId: n.branchOfEpisodeId,
+      hasForkPrompt: !!(n.forkPromptEn || n.forkPromptEs),
+    })),
+    edges,
+  );
 }
 
 // ---------- virtual actors ----------

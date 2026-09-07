@@ -21,13 +21,22 @@ updates:
     # Мажоры в недельную пачку НЕ входят. Волна 04.09.2026 (#150) приехала
     # красной ровно из-за четырёх мажоров в одном PR с 29 патчами — и вся
     # группа стала немержабельной. Мажор — это отдельный PR с миграцией
-    # (эти четыре — #157); миноры и патчи тех же пакетов приезжают штатно.
+    # (#157); миноры и патчи тех же пакетов приезжают штатно.
+    #
+    # @types/node в игноре НЕТ нарочно: его мажор — это мажор Node, который
+    # он описывает, и поднимать его нужно ВМЕСТЕ с .nvmrc (типы = рантайм;
+    # все workflow читают версию из .nvmrc), а не по отдельности. PR бота на
+    # @types/node мержится только парой с .nvmrc — и с проверкой, что Vercel
+    # на том же LTS.
     ignore:
+      # TS 7 — нативный компилятор без JS-API; typescript-eslint (зависимость
+      # eslint-config-next) без API не загружается, `pnpm lint` падает до
+      # первого файла. Сидим на 6.0.3 (последний JS-релиз). Снять, когда
+      # закроется строка в docs/registry.md: typescript-eslint поддерживает
+      # TS 7 API / TS 7.1 стабилизировал API.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
       - dependency-name: "eslint"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@mux/mux-node"
         update-types: ["version-update:semver-major"]

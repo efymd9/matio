@@ -10,7 +10,9 @@ vi.mock("server-only", () => ({}));
 // Drizzle schema is the real one (its FK actions are the cascade), and the
 // predicates the handler hands the driver are rendered to SQL and asserted —
 // what is under test is WHICH rows the handler asks Postgres to touch, and
-// that an unsigned request touches none.
+// that an unsigned request touches none. Stripe is a spy: what matters is
+// which subscription the handler asks Stripe to cancel, and that Stripe
+// failing changes nothing about the erasure.
 const h = vi.hoisted(() => ({
   userRow: undefined as
     | { email: string; stripeCustomerId: string | null }
@@ -19,6 +21,12 @@ const h = vi.hoisted(() => ({
   selects: [] as { table: string; where: unknown }[],
   deletes: [] as { table: string; where: unknown }[],
   inserts: [] as { table: string; values: unknown }[],
+  // Every write in the order the handler issued it — the tombstone has to
+  // land BEFORE the users row goes.
+  writes: [] as string[],
+  insertFails: undefined as Error | undefined,
+  stripeUpdate: vi.fn(),
+  sentryMessage: vi.fn(),
 }));
 
 vi.mock("@/db", async () => {
@@ -43,6 +51,7 @@ vi.mock("@/db", async () => {
         where: (where: unknown) => {
           const name = getTableName(table);
           h.deletes.push({ table: name, where });
+          h.writes.push(`delete ${name}`);
           return Object.assign(Promise.resolve(undefined), {
             returning: async () =>
               name === "show_reminders" ? [{ id: "rem_1" }, { id: "rem_2" }] : [],
@@ -52,13 +61,22 @@ vi.mock("@/db", async () => {
       insert: (table: Table) => ({
         values: (values: unknown) => ({
           onConflictDoNothing: async () => {
-            h.inserts.push({ table: getTableName(table), values });
+            if (h.insertFails) throw h.insertFails;
+            const name = getTableName(table);
+            h.inserts.push({ table: name, values });
+            h.writes.push(`insert ${name}`);
           },
         }),
       }),
     },
   };
 });
+
+vi.mock("@/lib/stripe", () => ({
+  getStripe: () => ({ subscriptions: { update: h.stripeUpdate } }),
+}));
+
+vi.mock("@sentry/nextjs", () => ({ captureMessage: h.sentryMessage }));
 
 import * as schema from "@/db/schema";
 import { POST } from "./route";
@@ -124,6 +142,10 @@ beforeEach(() => {
   h.selects.length = 0;
   h.deletes.length = 0;
   h.inserts.length = 0;
+  h.writes.length = 0;
+  h.insertFails = undefined;
+  h.stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
+  h.sentryMessage.mockReset();
   vi.stubEnv("CLERK_WEBHOOK_SIGNING_SECRET", SIGNING_SECRET);
   vi.spyOn(console, "info").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -204,11 +226,77 @@ describe("Clerk webhook · user.deleted", () => {
 
     expect(res.status).toBe(200);
     expect(h.deletes).toEqual([]);
+    expect(h.inserts).toEqual([]);
+    expect(h.stripeUpdate).not.toHaveBeenCalled();
   });
 
-  it("still erases an account with a live Stripe subscription, but says so by id", async () => {
+  it("stays quiet about a legacy Stripe customer without a live subscription", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    expect(res.status).toBe(200);
+    expect(error).not.toHaveBeenCalled();
+    expect(h.stripeUpdate).not.toHaveBeenCalled();
+    expect(h.sentryMessage).not.toHaveBeenCalled();
+    expect(h.deletes.map((d) => d.table)).toEqual(["show_reminders", "users"]);
+  });
+
+  it("acknowledges a payload without an id and touches nothing", async () => {
+    const res = await POST(signed(userDeleted()));
+
+    expect(res.status).toBe(200);
+    expect(h.selects).toEqual([]);
+    expect(h.deletes).toEqual([]);
+  });
+});
+
+describe("Clerk webhook · user.deleted × a live Stripe subscription (#164)", () => {
+  beforeEach(() => {
     h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
     h.liveSub = { stripeSubscriptionId: "sub_dummy" };
+  });
+
+  it("asks Stripe to cancel it at period end, then erases", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    expect(res.status).toBe(200);
+    expect(h.stripeUpdate).toHaveBeenCalledTimes(1);
+    expect(h.stripeUpdate).toHaveBeenCalledWith(
+      "sub_dummy",
+      { cancel_at_period_end: true },
+      { timeout: 5_000 },
+    );
+    expect(h.deletes.map((d) => d.table)).toEqual(["show_reminders", "users"]);
+
+    // Nothing left for a human to do at Stripe → no error-level noise, but
+    // the ids are on record (info + a Sentry audit line).
+    expect(error).not.toHaveBeenCalled();
+    expect(info.mock.calls[0][0]).toContain("cancel at period end");
+    expect(info.mock.calls[0][1]).toEqual({
+      userId: USER_ID,
+      stripeCustomerId: "cus_dummy",
+      stripeSubscriptionId: "sub_dummy",
+    });
+    expect(h.sentryMessage).toHaveBeenCalledTimes(1);
+    expect(h.sentryMessage.mock.calls[0][1]).toMatchObject({
+      level: "info",
+      tags: { userId: USER_ID, stripeSubscriptionId: "sub_dummy" },
+    });
+    expect(info.mock.calls.at(-1)?.[1]).toMatchObject({ cancelRequested: true });
+  });
+
+  it("still erases when Stripe refuses, and says so by id — never throws", async () => {
+    const stripeError = Object.assign(new Error("No such subscription"), {
+      name: "StripeInvalidRequestError",
+      code: "resource_missing",
+      statusCode: 404,
+    });
+    h.stripeUpdate.mockRejectedValue(stripeError);
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
     const res = await POST(signed(userDeleted(USER_ID)));
@@ -217,12 +305,95 @@ describe("Clerk webhook · user.deleted", () => {
     expect(h.deletes.map((d) => d.table)).toEqual(["show_reminders", "users"]);
     expect(error).toHaveBeenCalledTimes(1);
     const [message, details] = error.mock.calls[0];
-    expect(message).toContain("LIVE Stripe subscription");
+    expect(message).toContain("cancel it at Stripe by hand");
     expect(details).toEqual({
       userId: USER_ID,
       stripeCustomerId: "cus_dummy",
       stripeSubscriptionId: "sub_dummy",
+      error: {
+        name: "StripeInvalidRequestError",
+        code: "resource_missing",
+        statusCode: 404,
+      },
     });
+    expect(h.sentryMessage.mock.calls[0][0]).toContain("NOT cancelled");
+    expect(h.sentryMessage.mock.calls[0][1]).toMatchObject({
+      level: "error",
+      tags: { cancelRequested: "false" },
+    });
+  });
+
+  it("survives a Stripe failure that is not an Error at all", async () => {
+    h.stripeUpdate.mockRejectedValue("socket hang up");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    expect(res.status).toBe(200);
+    expect(error.mock.calls[0][1]).toMatchObject({
+      error: { name: "unknown", code: undefined, statusCode: undefined },
+    });
+    expect(h.deletes.map((d) => d.table)).toEqual(["show_reminders", "users"]);
+  });
+
+  it("a retry that finds the row still there repeats the same harmless request", async () => {
+    // A crash after the Stripe call but before the DELETEs (the 500 makes
+    // Clerk redeliver) — the second run sets the same flag again; Stripe
+    // treats cancel_at_period_end: true as idempotent.
+    await POST(signed(userDeleted(USER_ID)));
+    await POST(signed(userDeleted(USER_ID)));
+
+    expect(h.stripeUpdate).toHaveBeenCalledTimes(2);
+    expect(h.stripeUpdate.mock.calls[0]).toEqual(h.stripeUpdate.mock.calls[1]);
+  });
+});
+
+describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)", () => {
+  it("tombstones the Stripe customer BEFORE the users row goes", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
+
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    expect(res.status).toBe(200);
+    expect(h.writes).toEqual([
+      "insert erased_customers",
+      "delete show_reminders",
+      "delete users",
+    ]);
+    expect(h.inserts).toEqual([
+      { table: "erased_customers", values: { stripeCustomerId: "cus_dummy" } },
+    ]);
+  });
+
+  it("writes the tombstone with or without a live subscription", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
+    h.liveSub = { stripeSubscriptionId: "sub_dummy" };
+
+    await POST(signed(userDeleted(USER_ID)));
+
+    expect(h.inserts.map((i) => i.table)).toEqual(["erased_customers"]);
+  });
+
+  it("writes no tombstone for an account that never had a Stripe customer", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: null };
+
+    await POST(signed(userDeleted(USER_ID)));
+
+    expect(h.inserts).toEqual([]);
+    expect(h.writes).toEqual(["delete show_reminders", "delete users"]);
+  });
+
+  it("holds the erasure back (500 → Clerk retries) when the tombstone cannot be written", async () => {
+    // The Stripe call is best-effort; the tombstone is not — without it the
+    // customer's next webhook resurrects the account. Nothing may be deleted
+    // before it is on disk.
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
+    h.insertFails = new Error("connection reset");
+
+    await expect(POST(signed(userDeleted(USER_ID)))).rejects.toThrow(
+      "connection reset",
+    );
+    expect(h.deletes).toEqual([]);
   });
 
   it("looks for a live subscription with the access-granting predicate", async () => {
@@ -241,24 +412,6 @@ describe("Clerk webhook · user.deleted", () => {
     ]);
   });
 
-  it("stays quiet about a legacy Stripe customer without a live subscription", async () => {
-    h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const res = await POST(signed(userDeleted(USER_ID)));
-
-    expect(res.status).toBe(200);
-    expect(error).not.toHaveBeenCalled();
-    expect(h.deletes.map((d) => d.table)).toEqual(["show_reminders", "users"]);
-  });
-
-  it("acknowledges a payload without an id and touches nothing", async () => {
-    const res = await POST(signed(userDeleted()));
-
-    expect(res.status).toBe(200);
-    expect(h.selects).toEqual([]);
-    expect(h.deletes).toEqual([]);
-  });
 });
 
 describe("Clerk webhook · user.created (unchanged)", () => {
@@ -321,5 +474,13 @@ describe("Clerk webhook · what DELETE FROM users takes with it", () => {
     const [fk] = getTableConfig(schema.visitorDays).foreignKeys;
     expect(getTableConfig(fk.reference().foreignTable).name).toBe("visitors");
     expect(fk.onDelete).toBe("cascade");
+  });
+
+  it("erased_customers has no foreign key at all — the tombstone must outlive the users row", () => {
+    // Keyed on the Stripe customer id, not the user: a FK to users would be
+    // cascaded away by the very DELETE the tombstone exists to survive.
+    const { foreignKeys, columns } = getTableConfig(schema.erasedCustomers);
+    expect(foreignKeys).toEqual([]);
+    expect(columns.map((c) => c.name)).toEqual(["stripe_customer_id", "erased_at"]);
   });
 });

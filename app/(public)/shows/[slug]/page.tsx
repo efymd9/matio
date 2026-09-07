@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { actors, episodes, seasons, showActors } from "@/db/schema";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
@@ -140,7 +140,15 @@ export default async function ShowDetailPage({
             access: episodes.access,
           })
           .from(episodes)
-          .where(inArray(episodes.seasonId, seasonIds))
+          // Branches (#143) never appear on a public list: not in the
+          // episode rows, not in the JSON-LD count — a crawler must not
+          // index "Episode 901: she hugs him".
+          .where(
+            and(
+              inArray(episodes.seasonId, seasonIds),
+              isNull(episodes.branchOfEpisodeId),
+            ),
+          )
           .orderBy(asc(episodes.number));
 
   const allEpisodes: EpisodeRowData[] = rawEpisodes.map((e) => {

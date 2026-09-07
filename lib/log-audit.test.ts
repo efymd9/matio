@@ -29,7 +29,8 @@ const {
   insert,
   batchSend,
   clerkVerify,
-  stripeSubUpdate,
+  stripeUpdate,
+  erasedCustomer,
 } = vi.hoisted(() => ({
   execute: vi.fn(),
   select: vi.fn(),
@@ -38,15 +39,26 @@ const {
   insert: vi.fn(),
   batchSend: vi.fn(),
   clerkVerify: vi.fn(),
-  stripeSubUpdate: vi.fn(),
+  stripeUpdate: vi.fn(),
+  erasedCustomer: vi.fn(),
 }));
 vi.mock("@/db", () => ({ db: { execute, select, update, delete: del, insert } }));
 vi.mock("server-only", () => ({}));
 
-// The subscription mirror's only Stripe call is the metadata scrub; the SDK
-// client is replaced so the audit can make that call fail on demand.
+// The erasure handler's one outbound call (cancel the live subscription at
+// Stripe) is a spy so its failure text can be seeded with a marker.
 vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({ subscriptions: { update: stripeSubUpdate } }),
+  getStripe: () => ({ subscriptions: { update: stripeUpdate } }),
+}));
+// The Stripe mirror's guest branch: the tombstone answer is the switch under
+// audit; the claim itself must never be reached from a tombstoned customer.
+vi.mock("@/lib/guest-checkout", () => ({
+  isGuestSubscription: (sub: { metadata?: Record<string, string> }) =>
+    (sub.metadata ?? {}).guest === "1",
+  isErasedCustomer: erasedCustomer,
+  claimGuestCheckout: async () => {
+    throw new Error("claim must not run for an erased customer");
+  },
 }));
 
 // The Clerk webhook's signature check is exercised in its own suite
@@ -89,6 +101,7 @@ import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
+import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
 
 /** Render a console argument the way a log aggregator would see it. */
@@ -124,9 +137,11 @@ beforeEach(() => {
   update.mockReset();
   del.mockReset();
   insert.mockReset();
+  stripeUpdate.mockReset();
   batchSend.mockReset();
   clerkVerify.mockReset();
-  stripeSubUpdate.mockReset();
+  stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
+  erasedCustomer.mockReset().mockResolvedValue(false);
 });
 
 afterEach(() => {
@@ -356,7 +371,11 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     };
   }
 
-  it("erases an account with a live subscription without logging its address", async () => {
+  function insertChain() {
+    return { values: () => ({ onConflictDoNothing: async () => undefined }) };
+  }
+
+  function deletedWithLiveSubscription() {
     clerkVerify.mockResolvedValue({
       type: "user.deleted",
       object: "event",
@@ -369,22 +388,80 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
       .mockImplementationOnce(() =>
         selectChain([{ stripeSubscriptionId: "sub_dummy" }]),
       );
+    insert.mockImplementation(insertChain);
     del.mockImplementation(() => deleteChain([{ id: "rem_1" }]));
+    return new Request("https://matio.tv/api/webhooks/clerk", {
+      method: "POST",
+    }) as never;
+  }
+
+  it("erases an account with a live subscription without logging its address", async () => {
+    const req = deletedWithLiveSubscription();
     const logged = captureConsole();
 
-    const res = await clerkWebhook(
-      new Request("https://matio.tv/api/webhooks/clerk", {
-        method: "POST",
-      }) as never,
-    );
+    const res = await clerkWebhook(req);
 
     expect(res.status).toBe(200);
     expect(logged()).not.toContain(MARKER_EMAIL);
-    // What it DOES log: the ids the owner needs to finish the job at Stripe.
+    // What it DOES log: the ids that tie the Stripe-side record together.
     expect(logged()).toContain(USER_ID);
     expect(logged()).toContain("sub_dummy");
   });
+
+  it("does not echo Stripe's error text when the cancellation fails", async () => {
+    // Stripe quotes request parameters in its messages; seed the address
+    // there so a naive `err.message` in the log would be caught.
+    stripeUpdate.mockRejectedValue(
+      Object.assign(new Error(`No such customer: ${MARKER_EMAIL}`), {
+        name: "StripeInvalidRequestError",
+        code: "resource_missing",
+        statusCode: 404,
+      }),
+    );
+    const req = deletedWithLiveSubscription();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).toContain("sub_dummy");
+    expect(logged()).toContain("resource_missing");
+  });
 });
+
+describe("log audit · Stripe mirror refusing an erased customer", () => {
+  it("logs the refusal by ids, not by the customer's address", async () => {
+    // A webhook payload carries the customer expanded — with the email —
+    // and the users lookup finds nothing (erased). The refusal line is the
+    // only thing this path writes.
+    select.mockImplementation(() => ({
+      from: () => ({ where: () => ({ limit: async () => [] }) }),
+    }));
+    erasedCustomer.mockResolvedValue(true);
+    const logged = captureConsole();
+
+    await mirrorSubscription({
+      id: "sub_marker",
+      object: "subscription",
+      status: "active",
+      metadata: { guest: "1", userId: "user_marker" },
+      customer: {
+        id: "cus_marker",
+        object: "customer",
+        email: MARKER_EMAIL,
+        name: MARKER_NAME,
+      },
+      items: { data: [] },
+    } as never);
+
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).not.toContain(MARKER_NAME);
+    expect(logged()).toContain("cus_marker");
+    expect(logged()).toContain("sub_marker");
+  });
+});
+
 
 describe("log audit · /api/v1/progress (the app's watch-progress save)", () => {
   // The body is client-controlled text headed for a uuid column; the
@@ -460,6 +537,86 @@ describe("log audit · /api/v1/progress (the app's watch-progress save)", () => 
   });
 });
 
+describe("log audit · /api/v1/watch-segments (the app's retention flush)", () => {
+  // Same threat model as the progress save — client text where an id
+  // belongs, a driver that quotes the row — plus the ONE place this path
+  // logs on its own: a failed progress credit after the counter landed.
+  const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+  function post(body: unknown): Parameters<typeof saveSegments>[0] {
+    return { headers: new Headers(), json: async () => body } as unknown as Parameters<
+      typeof saveSegments
+    >[0];
+  }
+
+  const lookup = {
+    from: () => lookup,
+    innerJoin: () => lookup,
+    where: () => lookup,
+    limit: async () => [{ id: EPISODE, showId: "show_1", access: "free", durationSeconds: 600 }],
+  };
+
+  it("rejects a body carrying user text without echoing it anywhere", async () => {
+    const logged = captureConsole();
+
+    const res = await saveSegments(post({ episodeId: MARKER_EMAIL, buckets: [1] }));
+
+    expect(res.status).toBe(400);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(JSON.stringify(await res.json())).not.toContain(MARKER_EMAIL);
+    expect(select).not.toHaveBeenCalled();
+  });
+
+  it("lets a failed counter upsert surface without logging the row the driver quoted", async () => {
+    vi.stubEnv("DATABASE_URL", MARKER_DATABASE_URL);
+    select.mockImplementation(() => lookup);
+    insert.mockImplementation(() => {
+      throw new Error(
+        `insert into watch_segments (episode_id, day, bucket) values ('${EPISODE}', '${MARKER_NAME} <${MARKER_EMAIL}>', 1) — ${MARKER_DATABASE_URL}`,
+      );
+    });
+    const logged = captureConsole();
+
+    await expect(saveSegments(post({ episodeId: EPISODE, buckets: [1] }))).rejects.toThrow();
+
+    expect(insert).toHaveBeenCalled(); // the fixture reached the counter write
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+    }
+  });
+
+  it("logs a failed progress credit by ids only — never the statement the driver quoted", async () => {
+    // The counter landed; the credit fell over. The route answers 200 (a
+    // retry would inflate views) and writes ONE warning — which must carry
+    // the ids and nothing the driver echoed.
+    vi.stubEnv("DATABASE_URL", MARKER_DATABASE_URL);
+    select.mockImplementation(() => lookup);
+    insert.mockImplementation(() => ({
+      values: () => ({ onConflictDoUpdate: async () => undefined }),
+    }));
+    update.mockImplementation(() => ({
+      set: () => ({
+        where: async () => {
+          throw new Error(
+            `update watch_progress set total_watched_seconds = 30 where user_id = '${MARKER_NAME} <${MARKER_EMAIL}>' — ${MARKER_DATABASE_URL}`,
+          );
+        },
+      }),
+    }));
+    const logged = captureConsole();
+
+    const res = await saveSegments(post({ episodeId: EPISODE, buckets: [1, 2, 3] }));
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ ok: true, accepted: 3 });
+    expect(update).toHaveBeenCalled(); // the fixture reached the credit
+    expect(logged()).toContain(EPISODE); // the id IS logged — that is the point of the line
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+    }
+  });
+});
+
 describe("log audit · Stripe subscription mirror (CAPI identity scrub, #165)", () => {
   // The one place the project holds a raw IP: the Purchase snapshot in the
   // subscription's Stripe metadata, erased right after the event. The worst
@@ -490,7 +647,7 @@ describe("log audit · Stripe subscription mirror (CAPI identity scrub, #165)", 
     update.mockImplementation(() => ({ set: () => ({ where: async () => undefined }) }));
     const stripeMessage = `Invalid metadata on ${SUB_ID}: capi_ip=${MARKER_IP} capi_ua=${MARKER_UA}`;
     expect(stripeMessage).toContain(MARKER_IP); // the fixture must be dirty
-    stripeSubUpdate.mockRejectedValue(new Error(stripeMessage));
+    stripeUpdate.mockRejectedValue(new Error(stripeMessage));
     const logged = captureConsole();
 
     await mirrorSubscription({
@@ -511,7 +668,7 @@ describe("log audit · Stripe subscription mirror (CAPI identity scrub, #165)", 
       },
     } as never);
 
-    expect(stripeSubUpdate).toHaveBeenCalledTimes(1); // the fixture reached the scrub
+    expect(stripeUpdate).toHaveBeenCalledTimes(1); // the fixture reached the scrub
     for (const marker of [MARKER_IP, MARKER_UA, MARKER_EMAIL]) {
       expect(logged()).not.toContain(marker);
     }

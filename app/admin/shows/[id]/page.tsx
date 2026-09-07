@@ -100,7 +100,15 @@ export default async function EditShowPage({
     })
     .from(episodes)
     .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
-    .where(and(eq(seasons.showId, show.id), eq(episodes.status, "ready")))
+    // Never a branch (#143): its deep link resolves to nothing a reader can
+    // open, and sendShowReminders refuses it anyway.
+    .where(
+      and(
+        eq(seasons.showId, show.id),
+        eq(episodes.status, "ready"),
+        isNull(episodes.branchOfEpisodeId),
+      ),
+    )
     .orderBy(desc(seasons.number), desc(episodes.number));
 
   const isPublished = show.status === "published";

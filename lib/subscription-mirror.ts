@@ -16,7 +16,11 @@ import {
   metadataHasCapiIdentity,
 } from "@/lib/capi-identity";
 import { TRIAL_FEE_VALUE } from "@/lib/checkout-trial";
-import { claimGuestCheckout, isGuestSubscription } from "@/lib/guest-checkout";
+import {
+  claimGuestCheckout,
+  isErasedCustomer,
+  isGuestSubscription,
+} from "@/lib/guest-checkout";
 import { sendCapiEvents } from "@/lib/meta-capi";
 import {
   captureServerEvent,
@@ -86,6 +90,19 @@ export async function mirrorSubscription(sub: Stripe.Subscription) {
     .limit(1);
   if (!user) {
     if (isGuestSubscription(sub)) {
+      // "No user" has two meanings for a guest sub, and only one of them is
+      // the pay-first design. The other is an ERASED account (art. 17): the
+      // users row is gone on purpose, and the claim below would bring it —
+      // and the Clerk user, and the address — back. The tombstone written by
+      // the erasure handler tells them apart. Consume the event (return, not
+      // throw): a retry could never change the answer.
+      if (await isErasedCustomer(customerId)) {
+        console.warn(
+          "Stripe webhook: customer belongs to an erased account — guest checkout NOT re-claimed",
+          { customerId, subId: sub.id },
+        );
+        return;
+      }
       // Pay-first checkout: no user existed before payment by design.
       // Claim creates the Clerk user from the checkout email and binds
       // the customer to the users mirror row; a failure here throws so

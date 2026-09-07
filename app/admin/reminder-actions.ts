@@ -87,6 +87,9 @@ export async function sendShowReminders(
           eq(episodes.id, episodeId),
           eq(seasons.showId, showId),
           eq(episodes.status, "ready"),
+          // A branch (#143) is reachable only through a fork choice — its
+          // ?ep= deep link lands on episode 1, so it is never announced.
+          isNull(episodes.branchOfEpisodeId),
           eq(shows.status, "published"),
           isNull(shows.deletedAt),
         ),
