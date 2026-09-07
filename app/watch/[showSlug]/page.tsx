@@ -150,24 +150,32 @@ export default async function WatchPage({
   // here — the player never reads the locale for row copy (its dictionary
   // covers only the prompt's own chrome). Targets are resolved against the
   // playable array client-side (resolveCandidates drops a missing one).
+  // The query runs only for a show that HAS a branch — this page is
+  // force-dynamic, so a linear show would otherwise pay it on every render
+  // (a choice between two listed episodes with no branch anywhere in the
+  // show is not a case the admin form produces on purpose, and is not
+  // honoured).
   const locale = await getLocale();
-  const edges = await db
-    .select({
-      fromEpisodeId: episodeChoices.fromEpisodeId,
-      toEpisodeId: episodeChoices.toEpisodeId,
-      position: episodeChoices.position,
-      labelEn: episodeChoices.labelEn,
-      labelEs: episodeChoices.labelEs,
-      isDefault: episodeChoices.isDefault,
-    })
-    .from(episodeChoices)
-    .where(
-      inArray(
-        episodeChoices.fromEpisodeId,
-        ordered.map((e) => e.id),
-      ),
-    )
-    .orderBy(asc(episodeChoices.position));
+  const hasBranches = ordered.some((e) => e.branchOfEpisodeId !== null);
+  const edges = hasBranches
+    ? await db
+        .select({
+          fromEpisodeId: episodeChoices.fromEpisodeId,
+          toEpisodeId: episodeChoices.toEpisodeId,
+          position: episodeChoices.position,
+          labelEn: episodeChoices.labelEn,
+          labelEs: episodeChoices.labelEs,
+          isDefault: episodeChoices.isDefault,
+        })
+        .from(episodeChoices)
+        .where(
+          inArray(
+            episodeChoices.fromEpisodeId,
+            ordered.map((e) => e.id),
+          ),
+        )
+        .orderBy(asc(episodeChoices.position))
+    : [];
   const choicesByParent = new Map<string, PlayerChoice[]>();
   for (const edge of edges) {
     const list = choicesByParent.get(edge.fromEpisodeId) ?? [];
@@ -199,7 +207,16 @@ export default async function WatchPage({
   // the member tier is unlocked, so they play everything unchanged.
   const paymentsOn = paymentsEnabled();
   const signupGate = signupRequired();
-  const gated = !paymentsOn || ordered.some((e) => e.access !== "subscriber");
+  // Listed episodes only — the twin of showHasTierGating's
+  // `isNull(branchOfEpisodeId)` (lib/episode-access.ts): since #144 `ordered`
+  // carries the branches too, and a hidden free/member branch must not flip
+  // an all-subscriber show to per-episode walls in paid mode. Keep the two
+  // predicates identical.
+  const gated =
+    !paymentsOn ||
+    ordered.some(
+      (e) => e.branchOfEpisodeId === null && e.access !== "subscriber",
+    );
 
   const playable: PlayerEpisode[] = ordered
     .filter((e) => !!e.muxPlaybackId)

@@ -9,6 +9,7 @@ import { canAutoplayMuted } from "@/lib/can-autoplay";
 import { useMarketingConsent } from "@/lib/use-marketing-consent";
 import { useVerticalLayout } from "@/lib/use-vertical-layout";
 import {
+  FORK_WINDOW_MAX_SECONDS,
   displayNumber,
   listedAncestor,
   listedEpisodes,
@@ -161,8 +162,15 @@ const PRELOAD_LEAD_SECONDS = 45;
 
 // Branching (#144): the subscriber token-refresh remount is held while the
 // fork prompt is open or the episode is this close to its end — the gapless
-// transition installs a fresh token moments later anyway.
+// transition installs a fresh token moments later anyway. The hold is
+// BOUNDED: it lifts on its own after the longest possible window plus a
+// margin (the flag is only ever rewritten by `timeupdate`, so a paused
+// element would otherwise keep it up until the token expired), and it never
+// applies to a paused element at all — a remount of a paused element is
+// harmless (nothing is playing to interrupt, and the restore path does not
+// call play() for a paused snapshot).
 const REFRESH_HOLD_TAIL_SECONDS = 15;
+const REFRESH_HOLD_MAX_MS = (FORK_WINDOW_MAX_SECONDS + 5) * 1000;
 
 // A prefetched playback token for one transition candidate. `mode` carries
 // the response's tier so the gapless install can fire the free/member
@@ -871,15 +879,26 @@ function EpisodePlayback({
     const hasAbort = typeof AbortController !== "undefined";
     const abort = hasAbort ? new AbortController() : null;
     let cancelled = false;
-    const timer = setTimeout(async () => {
-      // Branching (#144): the refresh REMOUNTS <MuxVideo> — never in the
-      // middle of a choice, nor in the last seconds of an episode, where
-      // the gapless transition is about to install a fresh token anyway.
-      // Wait the hold out (at most fork window + tail; the old token still
-      // has the whole lead window left).
-      while (!cancelled && refreshHoldRef.current) {
+    // Branching (#144): the refresh REMOUNTS <MuxVideo> — never in the
+    // middle of a choice, nor in the last seconds of a PLAYING episode,
+    // where the gapless transition is about to install a fresh token
+    // anyway. Polled here and again right before the remount (the prompt
+    // may open during the fetch). Bounded by REFRESH_HOLD_MAX_MS from the
+    // timer firing and lifted for a paused element — see the constant.
+    const firedAt = () => Date.now();
+    const waitWhileHeld = async (deadline: number) => {
+      while (
+        !cancelled &&
+        refreshHoldRef.current &&
+        videoRef.current?.paused === false &&
+        Date.now() < deadline
+      ) {
         await new Promise((r) => setTimeout(r, 1_000));
       }
+    };
+    const timer = setTimeout(async () => {
+      const deadline = firedAt() + REFRESH_HOLD_MAX_MS;
+      await waitWhileHeld(deadline);
       if (cancelled) return;
       const backoffs = [0, 1_000, 2_000, 4_000];
       for (let i = 0; i < backoffs.length; i++) {
@@ -912,10 +931,8 @@ function EpisodePlayback({
               // required because the wrapper ignores tokens-only changes —
               // and it's the ONLY remaining remount of a live element.
               // The prompt may have opened during the fetch — re-check the
-              // hold before committing the remount (#144).
-              while (!cancelled && refreshHoldRef.current) {
-                await new Promise((r) => setTimeout(r, 1_000));
-              }
+              // hold before committing the remount (#144), same bound.
+              await waitWhileHeld(deadline);
               if (cancelled) return;
               const el = videoRef.current;
               if (el) {
@@ -1752,6 +1769,18 @@ function EpisodePlayback({
             ? (fork.options.find((o) => o.episode.id === forkChosenId) ??
               fork.defaultOption)
             : null;
+          // The choice is a fact of the fork, whatever the target does next
+          // (plays, hits a wall, or shows the trial's up-next card) — fire it
+          // here, before the branching below. Ids and flags only.
+          if (pick) {
+            capturePostHog("fork_choice_made", {
+              show_slug: showSlug,
+              episode_id: current.id,
+              choice_position: pick.position,
+              is_default: pick.isDefault,
+              timed_out: forkChosenId === null,
+            });
+          }
           const target: PlayerEpisode | null = pick ? pick.episode : next;
           if (target) {
             if (isEpisodeLocked(target.tier, mode)) {
@@ -1782,15 +1811,6 @@ function EpisodePlayback({
                 from_episode: currentPosition,
                 to_episode: targetPosition,
               });
-              if (pick) {
-                capturePostHog("fork_choice_made", {
-                  show_slug: showSlug,
-                  episode_id: current.id,
-                  choice_position: pick.position,
-                  is_default: pick.isDefault,
-                  timed_out: forkChosenId === null,
-                });
-              }
               lastSavedRef.current = 0;
               firstFrameFiredRef.current = false;
               tierStartFiredRef.current = false;

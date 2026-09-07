@@ -1042,10 +1042,15 @@ infra/
   pick ?? default ?? next` — same `<video>`, playbackId + token together,
   no new `key`. The subscriber token-refresh remount is HELD (`refreshHoldRef`,
   polled before the fetch and again before `setRefreshNonce`) while the
-  prompt is open or the end is < 15s away. PostHog: `fork_choice_made
-  {show_slug, episode_id, choice_position, is_default, timed_out}` next to
-  `episode_auto_advanced` (whose `to_episode` is 0 for a branch); no Meta
-  event. Trial (paid-mode 60s preview) keeps its up-next card — the "next"
+  prompt is open or the end is < 15s away — but only for a PLAYING element
+  and never longer than `REFRESH_HOLD_MAX_MS` (longest window + 5s) from the
+  timer firing: the flag is rewritten only by `timeupdate`, so a paused
+  element would otherwise hold until the token expired (test: "the token
+  refresh is held on a PLAYING element…"). PostHog: `fork_choice_made
+  {show_slug, episode_id, choice_position, is_default, timed_out}` fires at
+  the parent's `ended` BEFORE the target branches (so a wall or the trial
+  card still record the choice), `episode_auto_advanced` on the gapless path
+  only (its `to_episode` is 0 for a branch); no Meta event. Trial (paid-mode 60s preview) keeps its up-next card — the "next"
   of a fork parent is its default there and on the transport's next button.
   Deferred (registry): the owner's live pick among the five variants, the
   device measurement behind the `metadata` preload trade-off, overlays in

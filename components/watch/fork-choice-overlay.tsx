@@ -124,9 +124,13 @@ export function ForkChoiceOverlay({
               {prompt}
             </p>
           </div>
+          {/* Announced only in the last three seconds: focus lands on the
+              default when the prompt opens (the screen reader reads it
+              then), and a per-second live region would narrate a 30s window
+              ("Auto in 9s… 8s…"). */}
           <p
             className="shrink-0 font-mono text-xs font-semibold tabular-nums text-cream/65"
-            aria-live="polite"
+            aria-live={seconds <= 3 ? "polite" : "off"}
             aria-atomic="true"
           >
             {t.forkOverlay.autoIn(seconds)}

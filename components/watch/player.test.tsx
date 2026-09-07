@@ -39,6 +39,9 @@ const probe = vi.hoisted(() => ({
     envKey: unknown;
     disableTracking: unknown;
     disableCookies: unknown;
+    // Wall clock of the initialize (fake under vi.useFakeTimers) — lets the
+    // refresh-hold test read the schedule off the log.
+    at: number;
   }>,
   teardowns: 0,
   destroys: 0,
@@ -79,7 +82,14 @@ vi.mock("@mux/mux-video-react", async () => {
     React.useEffect(() => {
       const el = inner.current;
       if (!el) return;
-      probe.inits.push({ el, playbackId, envKey, disableTracking, disableCookies });
+      probe.inits.push({
+        el,
+        playbackId,
+        envKey,
+        disableTracking,
+        disableCookies,
+        at: Date.now(),
+      });
       el.setAttribute("src", `https://stream.mux.com/${String(playbackId)}.m3u8`);
       if (!disableTracking) {
         const handle = {
@@ -530,6 +540,10 @@ const LONG = { timeout: 5_000 };
 function clock(video: HTMLVideoElement, duration: number) {
   let currentTime = 0;
   let ended = false;
+  // jsdom's element reports `paused === true` (play() is a stub); the
+  // refresh-hold test flips it to model a playing element.
+  let paused = true;
+  Object.defineProperty(video, "paused", { configurable: true, get: () => paused });
   Object.defineProperty(video, "duration", { configurable: true, get: () => duration });
   Object.defineProperty(video, "currentTime", {
     configurable: true,
@@ -552,7 +566,24 @@ function clock(video: HTMLVideoElement, duration: number) {
         ended = true;
         video.dispatchEvent(new Event("ended"));
       }),
+    setPaused: (v: boolean) => {
+      paused = v;
+    },
   };
+}
+
+// Under fake timers Testing Library's waitFor cannot poll, so: advance the
+// clock in small steps until the condition holds (or give up loudly).
+async function advanceUntil(cond: () => boolean, stepMs = 50, maxSteps = 200) {
+  for (let i = 0; i < maxSteps; i++) {
+    if (cond()) return;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(stepMs);
+    });
+  }
+  throw new Error(
+    `advanceUntil: condition never held (inits=${probe.inits.map((i) => `${String(i.playbackId)}@${i.at}`).join(",")}, fetches=${tokenFetches().join(",")}, now=${Date.now()})`,
+  );
 }
 
 const tokenFetches = () =>
@@ -588,6 +619,11 @@ describe("Player — branching video (#144)", () => {
 
       // 50s from the end: nothing yet. 40s: every candidate's token is
       // prefetched, and only the DEFAULT's stream warms (preload=auto).
+      // NB: `video[preload=…]` is readable here only because the probe
+      // passes the prop through to the DOM; the real @mux/mux-video-react
+      // (0.31.2) hands `preload` to playback-core's setPreload and puts no
+      // attribute on the element. The assertion is about which candidate
+      // the player marks warm, not about the DOM contract.
       c.seek(550);
       expect(tokenFetches()).toEqual(["ep-2"]);
       c.seek(560);
@@ -772,6 +808,76 @@ describe("Player — branching video (#144)", () => {
     const c = clock(video, 600);
     await c.end();
     expect(onPixelReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("the token refresh is held on a PLAYING element inside the tail, lifts on pause, and never waits past its bound", async () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
+    });
+    try {
+      // A 70s token: the refresh timer fires 10s after install (60s lead).
+      vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith("/api/playback-token")) {
+          const ep = new URL(url, "http://localhost").searchParams.get("episode_id");
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ token: `tok-${ep}-${Date.now()}`, expiresIn: 70, mode: "member" }),
+          } as unknown as Response;
+        }
+        throw new Error(`offline: ${url}`);
+      });
+      const ep2Fetches = () => tokenFetches().filter((id) => id === "ep-2").length;
+      // The visible element's initializes only — inside the tail the hidden
+      // preloaders (pb-901 / pb-902) initialize too.
+      const ep2Inits = () => probe.inits.filter((i) => i.playbackId === "pb-2");
+
+      renderPlayer("horizontal", { episodes: BRANCHING, initialEpisodeId: "ep-2" });
+      await advanceUntil(() => ep2Inits().length === 1);
+      const first = ep2Inits()[0].el;
+      expect(ep2Fetches()).toBe(1);
+
+      // PAUSED inside the tail (5s from the end): the hold flag is up, but a
+      // paused element is not held — the refresh fires on schedule (10s
+      // after install) and remounts the element.
+      const c1 = clock(first, 600);
+      c1.seek(595);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_500);
+      });
+      await advanceUntil(() => ep2Inits().length === 2);
+      expect(ep2Fetches()).toBe(2);
+      expect(ep2Inits()[1].el).not.toBe(first);
+
+      // PLAYING inside the tail on the fresh element: the next refresh (10s
+      // after the new token) waits — no fetch while the hold is up…
+      const second = ep2Inits()[1].el;
+      const c2 = clock(second, 600);
+      c2.setPaused(false);
+      c2.seek(595);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_500);
+      });
+      expect(ep2Fetches()).toBe(2);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(ep2Fetches()).toBe(2);
+      expect(ep2Inits()).toHaveLength(2);
+
+      // …but the flag is only ever rewritten by timeupdate, so a stalled
+      // clock would otherwise hold forever: past the bound (35s after the
+      // timer fired) the refresh goes ahead regardless.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      await advanceUntil(() => ep2Fetches() === 3);
+      await advanceUntil(() => ep2Inits().length === 3);
+      expect(ep2Inits()[2].el).not.toBe(second);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("the episodes list shows the linear run only, with the parent as now playing during a branch", async () => {
