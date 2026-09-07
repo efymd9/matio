@@ -7,6 +7,7 @@ import { auth } from "@clerk/nextjs/server";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  episodeChoices,
   episodes,
   seasons,
   shows,
@@ -14,13 +15,15 @@ import {
   watchProgress,
 } from "@/db/schema";
 import { Player, type PlayerEpisode } from "@/components/watch/player";
+import type { PlayerChoice } from "@/lib/branching";
 import { WatchShell } from "@/components/watch/watch-shell";
 import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
 import { PurchaseBeacon } from "@/components/site/purchase-beacon";
 import { verifyCheckoutReturn } from "@/lib/checkout-return-verify";
 import { Icon } from "@/components/site/icon";
 import { muxThumbnailUrl } from "@/lib/mux-token";
-import { getDict } from "@/lib/i18n/server";
+import { getDict, getLocale } from "@/lib/i18n/server";
+import type { Locale } from "@/lib/i18n/dictionaries";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import {
   applyUserAttribution,
@@ -45,6 +48,18 @@ import { linkVisitorToUser } from "@/lib/visitor";
 export const metadata: Metadata = {
   robots: { index: false, follow: true },
 };
+
+// Fork copy lives on the rows in both site locales (#143); the player gets
+// ONE string per field, picked here. A row missing one locale falls back to
+// the other rather than to nothing — the admin form requires both for a
+// real fork, so this only ever covers a half-typed silent transition.
+function inLocale(
+  locale: Locale,
+  es: string | null,
+  en: string | null,
+): string | null {
+  return locale === "es" ? (es || en) : (en || es);
+}
 
 export default async function WatchPage({
   params,
@@ -98,20 +113,21 @@ export default async function WatchPage({
       access: episodes.access,
       introStartSeconds: episodes.introStartSeconds,
       introEndSeconds: episodes.introEndSeconds,
+      branchOfEpisodeId: episodes.branchOfEpisodeId,
+      forkPromptEn: episodes.forkPromptEn,
+      forkPromptEs: episodes.forkPromptEs,
+      forkWindowSeconds: episodes.forkWindowSeconds,
     })
     .from(episodes)
     .where(
       and(
         inArray(episodes.seasonId, seasonIds),
         eq(episodes.status, "ready"),
-        // Branching video, PR 1 of 2 (#143): branches stay off this page
-        // entirely. The Player's `episodes` prop feeds BOTH its episodes
-        // overlay and its `episodes[idx + 1]` auto-advance, so until PR 2
-        // (#144) teaches it about choices, a branch in that array would be
-        // listed in the overlay and auto-played after the last linear
-        // episode. PR 2 threads the branches through as playable-but-
-        // unlisted; this filter is the seam it replaces.
-        isNull(episodes.branchOfEpisodeId),
+        // Branching video (#144): branches are INCLUDED — playable but
+        // unlisted. The Player keeps them in its `episodes` array (a
+        // choice or a ?ep= deep link lands on one) and filters every list
+        // it renders through listedEpisodes(); its transition reads the
+        // choice graph (resolveCandidates), never `episodes[idx + 1]`.
       ),
     )
     .orderBy(asc(episodes.seasonId), asc(episodes.number));
@@ -128,6 +144,41 @@ export default async function WatchPage({
     const sb = seasonNumberById.get(b.seasonId) ?? 0;
     return sa - sb || a.number - b.number;
   });
+
+  // Branching (#144): the edges of every ready episode in one query,
+  // grouped by parent. Labels and the prompt are picked in the SITE locale
+  // here — the player never reads the locale for row copy (its dictionary
+  // covers only the prompt's own chrome). Targets are resolved against the
+  // playable array client-side (resolveCandidates drops a missing one).
+  const locale = await getLocale();
+  const edges = await db
+    .select({
+      fromEpisodeId: episodeChoices.fromEpisodeId,
+      toEpisodeId: episodeChoices.toEpisodeId,
+      position: episodeChoices.position,
+      labelEn: episodeChoices.labelEn,
+      labelEs: episodeChoices.labelEs,
+      isDefault: episodeChoices.isDefault,
+    })
+    .from(episodeChoices)
+    .where(
+      inArray(
+        episodeChoices.fromEpisodeId,
+        ordered.map((e) => e.id),
+      ),
+    )
+    .orderBy(asc(episodeChoices.position));
+  const choicesByParent = new Map<string, PlayerChoice[]>();
+  for (const edge of edges) {
+    const list = choicesByParent.get(edge.fromEpisodeId) ?? [];
+    list.push({
+      toEpisodeId: edge.toEpisodeId,
+      position: edge.position,
+      label: inLocale(locale, edge.labelEs, edge.labelEn) ?? "",
+      isDefault: edge.isDefault,
+    });
+    choicesByParent.set(edge.fromEpisodeId, list);
+  }
 
   // Tier-gated iff any ready episode is open below the subscriber tier
   // (mirrors showHasTierGating in lib/episode-access.ts). All-subscriber
@@ -179,6 +230,10 @@ export default async function WatchPage({
           : signupGate
             ? ("member" as const)
             : ("free" as const),
+        branchOfEpisodeId: e.branchOfEpisodeId,
+        forkPrompt: inLocale(locale, e.forkPromptEs, e.forkPromptEn),
+        forkWindowSeconds: e.forkWindowSeconds,
+        choices: choicesByParent.get(e.id) ?? null,
       };
     });
 
@@ -187,7 +242,9 @@ export default async function WatchPage({
   }
 
   // Resolve ?ep=<id>; fall back to first playable when the query param
-  // doesn't match (treat unknown ids as "start over").
+  // doesn't match (treat unknown ids as "start over"). A branch id resolves
+  // too (#144) — the continue-watching tile and the post-signup redirect
+  // land on the branch itself, and the player prints its parent's number.
   const initial = epParam
     ? (playable.find((e) => e.id === epParam) ?? playable[0])
     : playable[0];

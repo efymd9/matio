@@ -8,6 +8,15 @@ import MuxVideo from "@mux/mux-video-react";
 import { canAutoplayMuted } from "@/lib/can-autoplay";
 import { useMarketingConsent } from "@/lib/use-marketing-consent";
 import { useVerticalLayout } from "@/lib/use-vertical-layout";
+import {
+  displayNumber,
+  listedAncestor,
+  listedEpisodes,
+  listedPosition,
+  resolveCandidates,
+  type Candidates,
+  type PlayerChoice,
+} from "@/lib/branching";
 import { VerticalChrome } from "./vertical-chrome";
 
 // Public Mux Data env key (distinct from the API token / signing key). Empty
@@ -68,6 +77,10 @@ const SignupWall = dynamic(
   () => import("./signup-wall").then((m) => m.SignupWall),
   { ssr: false },
 );
+const ForkChoiceOverlay = dynamic(
+  () => import("./fork-choice-overlay").then((m) => m.ForkChoiceOverlay),
+  { ssr: false },
+);
 
 export type PlayerEpisode = {
   id: string;
@@ -85,6 +98,17 @@ export type PlayerEpisode = {
   thumbnailUrl: string | null;
   // Access tier on episode-gated shows; "free" everywhere on legacy shows.
   tier: EpisodeTier;
+  // Branching video (#144). A branch (branchOfEpisodeId set) is PLAYABLE
+  // but unlisted: it stays in the Player's `episodes` array so a choice or
+  // a ?ep= deep link can land on it, while every list the player renders
+  // goes through listedEpisodes(). `forkPrompt` and the choice labels are
+  // already in the site locale (the watch page picks es/en); `choices` is
+  // null on a plain linear episode. What an edge set MEANS is decided by
+  // lib/branching.ts:resolveCandidates.
+  branchOfEpisodeId: string | null;
+  forkPrompt: string | null;
+  forkWindowSeconds: number;
+  choices: PlayerChoice[] | null;
 };
 
 // Tier of an episode on an episode-gated show, as computed server-side by
@@ -134,6 +158,21 @@ const SUPPORTS_ASPECT_RATIO =
 // serves media segments with week-long deterministic cache URLs, so the
 // preloader's fetches become browser-cache hits for the visible player.
 const PRELOAD_LEAD_SECONDS = 45;
+
+// Branching (#144): the subscriber token-refresh remount is held while the
+// fork prompt is open or the episode is this close to its end — the gapless
+// transition installs a fresh token moments later anyway.
+const REFRESH_HOLD_TAIL_SECONDS = 15;
+
+// A prefetched playback token for one transition candidate. `mode` carries
+// the response's tier so the gapless install can fire the free/member
+// episode-start funnel events (the fetch effect — their usual emitter — is
+// skipped on that path).
+type TokenPrefetch = {
+  token: string;
+  expiresAt: number;
+  mode: "free" | "member" | null;
+};
 
 type EndState = "paywall" | "signupWall" | "rateLimited" | "unavailable";
 
@@ -264,11 +303,15 @@ export function Player({
     () => episodes.find((e) => e.id === currentEpisodeId) ?? episodes[0],
     [episodes, currentEpisodeId],
   );
-  const currentIdx = episodes.findIndex((e) => e.id === current.id);
-  const next: PlayerEpisode | null =
-    currentIdx >= 0 && currentIdx < episodes.length - 1
-      ? episodes[currentIdx + 1]
-      : null;
+  // Where the current episode leads (#144): a fork (prompt + default), a
+  // single follower (the linear run, or a branch's silent reconvergence),
+  // or the end. The full `episodes` array keeps the branches — the
+  // `find(...) ?? episodes[0]` above over a filtered array would silently
+  // restart the show from episode 1 the moment a branch id arrived by ?ep=.
+  const candidates = useMemo(
+    () => resolveCandidates(current, episodes),
+    [current, episodes],
+  );
 
   // Only honor server-provided resume on the episode this mount started
   // on; subsequent swaps/advances start from 0 by design.
@@ -319,7 +362,7 @@ export function Player({
     <EpisodePlayback
       key={mountKey}
       current={current}
-      next={next}
+      candidates={candidates}
       episodes={episodes}
       mode={mode}
       showId={showId}
@@ -346,7 +389,7 @@ export function Player({
 
 function EpisodePlayback({
   current,
-  next,
+  candidates,
   episodes,
   mode,
   showId,
@@ -369,7 +412,7 @@ function EpisodePlayback({
   orientation,
 }: {
   current: PlayerEpisode;
-  next: PlayerEpisode | null;
+  candidates: Candidates<PlayerEpisode>;
   episodes: PlayerEpisode[];
   mode: Mode;
   showId: string;
@@ -393,6 +436,21 @@ function EpisodePlayback({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const t = useT();
+  // Where this episode leads (#144), resolved by the shell. `next` is the
+  // single follower or a fork's default — what the transport's next button
+  // and the trial up-next card jump to, and what plays on a silent timeout.
+  const fork = candidates.kind === "fork" ? candidates : null;
+  const next: PlayerEpisode | null =
+    candidates.kind === "next"
+      ? candidates.episode
+      : fork
+        ? fork.defaultOption.episode
+        : null;
+  // Every episode the transition may land on — the token prefetch targets.
+  const candidateEpisodes = useMemo(
+    () => (fork ? fork.options.map((o) => o.episode) : next ? [next] : []),
+    [fork, next],
+  );
   // Portrait/TikTok chrome — only for vertical shows on mobile-width
   // viewports (desktop keeps the standard letterboxing player). Drives the
   // container sizing and which chrome renders below; nothing in the playback
@@ -508,19 +566,28 @@ function EpisodePlayback({
   // <video> element — and that element identity is what carries WebKit's
   // per-element autoplay blessing from one episode into the next.
   const [refreshNonce, setRefreshNonce] = useState(0);
-  // Prefetched token for the next episode, fetched shortly before the
-  // current one ends so auto-advance skips the token round-trip. `mode`
-  // carries the response's tier so the gapless install can fire the
-  // free/member episode-start funnel events (the fetch effect — their
-  // usual emitter — is skipped on that path).
-  const [nextPrefetch, setNextPrefetch] = useState<{
-    episodeId: string;
-    token: string;
-    expiresAt: number;
-    mode: "free" | "member" | null;
-  } | null>(null);
-  // One prefetch attempt per episode; reset in the onEnded advance path.
-  const prefetchAttemptedRef = useRef(false);
+  // Prefetched tokens for every candidate of the transition (#144: a fork
+  // has up to three, a linear run one), keyed by episode id and fetched
+  // shortly before the current episode ends so the gapless path skips the
+  // token round-trip.
+  const [prefetches, setPrefetches] = useState<Record<string, TokenPrefetch>>(
+    {},
+  );
+  // One prefetch attempt per candidate per episode; reset in the onEnded
+  // advance path.
+  const prefetchAttemptedRef = useRef<Set<string>>(new Set());
+  // Fork prompt (#144): open while the playhead is inside the parent's
+  // fork window (the timeupdate consumer below), the viewer's pick, and the
+  // whole seconds left — the countdown the overlay shows IS the video
+  // clock. The pick is read by the `ended` handler, which takes it (or the
+  // default) down the same gapless path as auto-advance.
+  const [forkOpen, setForkOpen] = useState(false);
+  const [forkRemaining, setForkRemaining] = useState(0);
+  const [forkChosenId, setForkChosenId] = useState<string | null>(null);
+  // True while the prompt is open or the end is < REFRESH_HOLD_TAIL_SECONDS
+  // away: the subscriber token-refresh remount must not land in the middle
+  // of a choice (see the refresh effect).
+  const refreshHoldRef = useRef(false);
   // "Tap for sound" pill — autoplay landed in the muted fallback.
   const [showUnmutePill, setShowUnmutePill] = useState(false);
   // Autoplay fully blocked (e.g. iOS Low Power Mode): playback-core leaves
@@ -566,24 +633,37 @@ function EpisodePlayback({
   // we can tell "play attempted but never rendered" from "actually played".
   const firstFrameFiredRef = useRef(false);
 
-  const episodeLabel = `S${current.seasonNumber}·E${current.number}`;
+  // Viewer-facing numbering (#144): everything shown by position reads the
+  // LISTED run — a branch prints its parent's number ("Ep. 3" throughout a
+  // fork on episode 3, never "Ep. 903"), and the position-keyed funnel
+  // events keep the server's meaning (a branch is position 0, exactly like
+  // getOrderedReadyEpisodeIds), so the Meta Lead check in onEnded can never
+  // fire on a branch.
+  const listed = useMemo(() => listedEpisodes(episodes), [episodes]);
+  const anchor = listedAncestor(episodes, current) ?? current;
+  const currentNumber = displayNumber(episodes, current);
+  const episodeLabel = `S${current.seasonNumber}·E${currentNumber}`;
 
-  // 1-based position of the current episode in the playable ordering —
-  // matches the server's position semantics for funnel events.
-  const currentPosition = episodes.findIndex((e) => e.id === current.id) + 1;
+  // 1-based position of the current episode on the listed run (0 for a
+  // branch) — matches the server's position semantics for funnel events.
+  const currentPosition = listedPosition(episodes, current.id);
   // Whether the current episode is above this viewer's tier. All wall
   // triggers (deep link, episodes-overlay tap, auto-advance into a locked
   // episode) funnel through here: swapping to a locked episode remounts
   // this component, which renders the wall full-surface instead of
   // fetching a token.
   const currentLocked = isEpisodeLocked(current.tier, mode);
-  // Previous episode in the playable ordering (null on the first). Powers the
-  // center-transport prev button; swaps via the same manual-swap machinery as
-  // the episodes overlay / up-next (onSwap remounts the inner player).
+  // Previous episode on the listed run (null on the first). For a branch,
+  // "previous" is the episode it forked from — replaying the parent is the
+  // v1 way to choose again (no re-choose on a seek back; owner decision).
+  // Swaps via the same manual-swap machinery as the episodes overlay /
+  // up-next (onSwap remounts the inner player).
   const prev: PlayerEpisode | null =
-    currentPosition > 1 ? episodes[currentPosition - 2] : null;
-  const firstMemberEpisode = episodes.find((e) => e.tier === "member") ?? null;
-  const memberCount = episodes.filter((e) => e.tier === "member").length;
+    currentPosition > 1
+      ? listed[currentPosition - 2]
+      : (episodes.find((e) => e.id === current.branchOfEpisodeId) ?? null);
+  const firstMemberEpisode = listed.find((e) => e.tier === "member") ?? null;
+  const memberCount = listed.filter((e) => e.tier === "member").length;
   // free/member episode-start funnel events fire once per episode mount.
   const tierStartFiredRef = useRef(false);
 
@@ -601,9 +681,12 @@ function EpisodePlayback({
   // only.
   if (current.id !== prevEpisodeId) {
     setPrevEpisodeId(current.id);
-    // A leftover prefetch here belongs to a previous episode's "next" (the
-    // advance path already consumed and cleared its own) — drop it.
-    if (nextPrefetch) setNextPrefetch(null);
+    // Leftover prefetches here belong to a previous episode's candidates
+    // (the advance path already consumed and cleared its own) — drop them.
+    if (Object.keys(prefetches).length > 0) setPrefetches({});
+    setForkOpen(false);
+    setForkRemaining(0);
+    setForkChosenId(null);
     setEndState(null);
     setLastSaved(0);
     setShowSkipIntro(false);
@@ -789,6 +872,15 @@ function EpisodePlayback({
     const abort = hasAbort ? new AbortController() : null;
     let cancelled = false;
     const timer = setTimeout(async () => {
+      // Branching (#144): the refresh REMOUNTS <MuxVideo> — never in the
+      // middle of a choice, nor in the last seconds of an episode, where
+      // the gapless transition is about to install a fresh token anyway.
+      // Wait the hold out (at most fork window + tail; the old token still
+      // has the whole lead window left).
+      while (!cancelled && refreshHoldRef.current) {
+        await new Promise((r) => setTimeout(r, 1_000));
+      }
+      if (cancelled) return;
       const backoffs = [0, 1_000, 2_000, 4_000];
       for (let i = 0; i < backoffs.length; i++) {
         if (cancelled) return;
@@ -819,6 +911,12 @@ function EpisodePlayback({
               // until React commits the new element. The nonce remount is
               // required because the wrapper ignores tokens-only changes —
               // and it's the ONLY remaining remount of a live element.
+              // The prompt may have opened during the fetch — re-check the
+              // hold before committing the remount (#144).
+              while (!cancelled && refreshHoldRef.current) {
+                await new Promise((r) => setTimeout(r, 1_000));
+              }
+              if (cancelled) return;
               const el = videoRef.current;
               if (el) {
                 resumeAfterRefreshRef.current = el.currentTime;
@@ -1030,6 +1128,38 @@ function EpisodePlayback({
     return () => el.removeEventListener("timeupdate", update);
   }, [current.introStartSeconds, current.introEndSeconds, playback]);
 
+  // Fork prompt window (#144) — the fourth timeupdate consumer, shaped like
+  // the skip-intro chip: open while `duration - currentTime` is inside the
+  // parent's fork window, closed outside it (a seek back out of the window
+  // closes it; a pick already made stays). The overlay's countdown is this
+  // same clock in whole seconds — the transition itself happens at `ended`
+  // through the gapless path, so a pause pauses the countdown and nothing
+  // here ever pauses the video. Guards mirror the prefetch effect's: right
+  // after an advance the element still reports the FINISHED episode. Also
+  // computes the token-refresh hold (prompt open, or the end < tail away).
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el || !playback || playback.episodeId !== current.id) return;
+    const windowSeconds = fork ? current.forkWindowSeconds : 0;
+    const update = () => {
+      const dur = el.duration;
+      if (!Number.isFinite(dur) || dur <= 0 || el.ended) return;
+      const remaining = dur - (el.currentTime ?? 0);
+      refreshHoldRef.current =
+        remaining <= Math.max(windowSeconds, REFRESH_HOLD_TAIL_SECONDS);
+      if (!fork) return;
+      const open = remaining <= windowSeconds;
+      setForkOpen(open);
+      if (open) setForkRemaining(Math.max(0, Math.ceil(remaining)));
+    };
+    update();
+    el.addEventListener("timeupdate", update);
+    return () => {
+      el.removeEventListener("timeupdate", update);
+      refreshHoldRef.current = false;
+    };
+  }, [playback, current.id, current.forkWindowSeconds, fork]);
+
   // First-play attempt — owned here rather than via <MuxVideo autoPlay>:
   // playback-core's "any" chain retries muted on ANY play() rejection,
   // including the AbortError fired when the USER pauses during startup,
@@ -1075,24 +1205,27 @@ function EpisodePlayback({
     };
   }, [playback, current.id, autoplayWanted]);
 
-  // Prefetch the next episode's playback token once the playhead is within
-  // PRELOAD_LEAD_SECONDS of the end, so auto-advance skips the token
-  // round-trip (the hidden preloader element below warms the stream
-  // itself). Trial mode is excluded: its token TTL is the preview's
-  // remaining seconds — a prefetched trial token is dead by the time it's
-  // needed, and a 60s preview ends at the paywall, not the next episode.
-  // Prefetch failures are deliberately silent: the advance path falls back
-  // to a fetch-on-swap, which still reuses the live element.
+  // Prefetch the playback token of EVERY transition candidate (#144: the
+  // single follower, or all of a fork's options) once the playhead is
+  // within PRELOAD_LEAD_SECONDS of the end, so the gapless path skips the
+  // token round-trip whichever way the viewer goes (the hidden preloaders
+  // below warm the streams themselves). Trial mode is excluded: its token
+  // TTL is the preview's remaining seconds — a prefetched trial token is
+  // dead by the time it's needed, and a 60s preview ends at the paywall,
+  // not the next episode. Prefetch failures are deliberately silent: the
+  // advance path falls back to a fetch-on-swap, which still reuses the
+  // live element.
   useEffect(() => {
     if (!playback || playback.episodeId !== current.id) return;
     if (mode === "trial") return;
-    if (!next || isEpisodeLocked(next.tier, mode)) return;
+    const targets = candidateEpisodes.filter(
+      (e) => !isEpisodeLocked(e.tier, mode),
+    );
+    if (targets.length === 0) return;
     const el = videoRef.current;
     if (!el) return;
-    const nextId = next.id;
     let cancelled = false;
     const check = () => {
-      if (prefetchAttemptedRef.current) return;
       // Right after an auto-advance the element still holds the FINISHED
       // episode (ended, remaining 0) until the new src installs — without
       // this guard the boundary check() would prefetch the next-NEXT
@@ -1101,35 +1234,40 @@ function EpisodePlayback({
       const dur = el.duration;
       if (!Number.isFinite(dur) || dur <= 0) return;
       if (dur - el.currentTime > PRELOAD_LEAD_SECONDS) return;
-      prefetchAttemptedRef.current = true;
-      fetch(`/api/playback-token?episode_id=${encodeURIComponent(nextId)}`, {
-        cache: "no-store",
-      })
-        .then(async (r) => {
-          if (!r.ok || cancelled) return;
-          const data = (await r.json()) as {
-            token: unknown;
-            expiresIn: unknown;
-            mode?: unknown;
-          };
-          if (
-            typeof data.token !== "string" ||
-            typeof data.expiresIn !== "number" ||
-            cancelled
-          ) {
-            return;
-          }
-          setNextPrefetch({
-            episodeId: nextId,
-            token: data.token,
-            expiresAt: Date.now() + data.expiresIn * 1000,
-            mode:
-              data.mode === "free" || data.mode === "member"
-                ? data.mode
-                : null,
-          });
-        })
-        .catch(() => {});
+      for (const target of targets) {
+        if (prefetchAttemptedRef.current.has(target.id)) continue;
+        prefetchAttemptedRef.current.add(target.id);
+        const targetId = target.id;
+        fetch(
+          `/api/playback-token?episode_id=${encodeURIComponent(targetId)}`,
+          { cache: "no-store" },
+        )
+          .then(async (r) => {
+            if (!r.ok || cancelled) return;
+            const data = (await r.json()) as {
+              token: unknown;
+              expiresIn: unknown;
+              mode?: unknown;
+            };
+            if (
+              typeof data.token !== "string" ||
+              typeof data.expiresIn !== "number" ||
+              cancelled
+            ) {
+              return;
+            }
+            const prefetched: TokenPrefetch = {
+              token: data.token,
+              expiresAt: Date.now() + data.expiresIn * 1000,
+              mode:
+                data.mode === "free" || data.mode === "member"
+                  ? data.mode
+                  : null,
+            };
+            setPrefetches((p) => ({ ...p, [targetId]: prefetched }));
+          })
+          .catch(() => {});
+      }
     };
     check();
     el.addEventListener("timeupdate", check);
@@ -1137,7 +1275,7 @@ function EpisodePlayback({
       cancelled = true;
       el.removeEventListener("timeupdate", check);
     };
-  }, [playback, current.id, mode, next]);
+  }, [playback, current.id, mode, candidateEpisodes]);
 
   // Autoplay-block detection. A failed first-play attempt leaves the
   // element paused with no event (e.g. the capability probe passed but the
@@ -1212,11 +1350,9 @@ function EpisodePlayback({
         showSlug={showSlug}
         showId={showId}
         showTitle={showTitle}
-        episodeLabel={`S${signupWallTarget.seasonNumber}·E${signupWallTarget.number}`}
+        episodeLabel={`S${signupWallTarget.seasonNumber}·E${displayNumber(episodes, signupWallTarget)}`}
         targetEpisodeId={signupWallTarget.id}
-        episodeNumber={
-          episodes.findIndex((e) => e.id === signupWallTarget.id) + 1
-        }
+        episodeNumber={listedPosition(episodes, signupWallTarget.id)}
         memberCount={memberCount}
         backdropThumbnailUrl={current.thumbnailUrl}
         gate={signupGate}
@@ -1608,13 +1744,22 @@ function EpisodePlayback({
               void saveWatchProgress(current.id, t, true).catch(() => {});
             }
           }
-          if (next) {
-            if (isEpisodeLocked(next.tier, mode)) {
+          // Where to go (#144): at a fork, the viewer's pick — or the
+          // default when the clock ran out untouched; otherwise the single
+          // follower. Null = nothing follows (last listed episode, or a
+          // branch that is an ending): the series-end surfaces below.
+          const pick = fork
+            ? (fork.options.find((o) => o.episode.id === forkChosenId) ??
+              fork.defaultOption)
+            : null;
+          const target: PlayerEpisode | null = pick ? pick.episode : next;
+          if (target) {
+            if (isEpisodeLocked(target.tier, mode)) {
               // Auto-advance into the locked episode: the swap remounts the
               // inner player which renders the right wall full-surface, and
               // ?ep=<locked id> lands in the URL so the post-signup redirect
               // resumes exactly there. No up-next countdown into a wall.
-              onSwap(next.id);
+              onSwap(target.id);
             } else if (mode === "trial") {
               // Legacy 60s preview: keep the countdown card. The preview
               // ends at the paywall, not the next episode — instant
@@ -1622,52 +1767,61 @@ function EpisodePlayback({
               // the user didn't choose.
               onOverlayChange("upnext");
             } else {
-              // Instant auto-advance: same <video> element, new src.
-              // Install the prefetched token here (falling back to the
-              // fetch effect when it's missing or about to expire) — the
-              // first-play effect then starts the new episode on the
-              // still-blessed element. This handler is the only entry into
-              // the gapless path, so all per-episode refs reset here too
-              // (the render-phase block handles the visual state).
+              // Instant auto-advance: same <video> element, new src — and
+              // a fork transition is exactly this path with the viewer
+              // choosing `target`. Install the prefetched token here
+              // (falling back to the fetch effect when it's missing or
+              // about to expire) — the first-play effect then starts the
+              // new episode on the still-blessed element. This handler is
+              // the only entry into the gapless path, so all per-episode
+              // refs reset here too (the render-phase block handles the
+              // visual state).
+              const targetPosition = listedPosition(episodes, target.id);
               capturePostHog("episode_auto_advanced", {
                 show_slug: showSlug,
                 from_episode: currentPosition,
-                to_episode: currentPosition + 1,
+                to_episode: targetPosition,
               });
+              if (pick) {
+                capturePostHog("fork_choice_made", {
+                  show_slug: showSlug,
+                  episode_id: current.id,
+                  choice_position: pick.position,
+                  is_default: pick.isDefault,
+                  timed_out: forkChosenId === null,
+                });
+              }
               lastSavedRef.current = 0;
               firstFrameFiredRef.current = false;
               tierStartFiredRef.current = false;
-              prefetchAttemptedRef.current = false;
+              prefetchAttemptedRef.current = new Set();
               errorTimesRef.current = [];
               resumeAfterRefreshRef.current = null;
               wasPlayingRef.current = false;
               pausedByUserRef.current = false;
-              if (
-                nextPrefetch &&
-                nextPrefetch.episodeId === next.id &&
-                nextPrefetch.expiresAt > Date.now() + 5_000
-              ) {
+              const prefetched = prefetches[target.id];
+              if (prefetched && prefetched.expiresAt > Date.now() + 5_000) {
                 setPlayback({
-                  episodeId: next.id,
-                  playbackId: next.playbackId,
-                  token: nextPrefetch.token,
-                  expiresAt: nextPrefetch.expiresAt,
+                  episodeId: target.id,
+                  playbackId: target.playbackId,
+                  token: prefetched.token,
+                  expiresAt: prefetched.expiresAt,
                 });
                 // The fetch effect — the usual emitter of the tier-start
                 // funnel events — is skipped on this path, so fire from
                 // the prefetched response's mode instead.
                 if (
-                  nextPrefetch.mode === "free" ||
-                  nextPrefetch.mode === "member"
+                  prefetched.mode === "free" ||
+                  prefetched.mode === "member"
                 ) {
                   tierStartFiredRef.current = true;
                   capturePostHog(
-                    nextPrefetch.mode === "free"
+                    prefetched.mode === "free"
                       ? "free_episode_started"
                       : "member_episode_started",
                     {
                       show_slug: showSlug,
-                      episode_number: currentPosition + 1,
+                      episode_number: targetPosition,
                     },
                   );
                 }
@@ -1676,9 +1830,9 @@ function EpisodePlayback({
               // on its end frame) so the element survives; the token-fetch
               // effect sees playback.episodeId !== current.id and swaps in
               // place (firing the tier events itself).
-              setNextPrefetch(null);
-              setChipEpisodeId(next.id);
-              onAdvance(next.id);
+              setPrefetches({});
+              setChipEpisodeId(target.id);
+              onAdvance(target.id);
             }
           } else if (mode === "subscriber" || freeMode) {
             // Last episode of the show finished. Subscribers see the
@@ -1714,9 +1868,9 @@ function EpisodePlayback({
           showTitle={showTitle}
           episodeTitle={current.title}
           episodeLabel={episodeLabel}
-          episodeNumber={current.number}
+          episodeNumber={currentNumber}
           durationSeconds={current.durationSeconds}
-          episodesCount={episodes.length}
+          episodesCount={listed.length}
           hasNext={!!next}
           hasCaptions={hasCaptions}
           locked={locked}
@@ -1766,7 +1920,7 @@ function EpisodePlayback({
               {showTitle ?? current.title}
             </h1>
             <p className="mt-1 truncate text-[11px] font-semibold leading-none text-cream/60 sm:text-xs">
-              {t.home.epShort(current.number)} · {current.title}
+              {t.home.epShort(currentNumber)} · {current.title}
             </p>
           </div>
           {/* Right cluster of translucent-black circles. AirPlay + captions
@@ -1933,7 +2087,7 @@ function EpisodePlayback({
           instant cut doesn't disorient. */}
       {chipEpisodeId === current.id && !locked ? (
         <div className="pointer-events-none absolute left-1/2 top-5 z-20 max-w-[80%] -translate-x-1/2 truncate rounded-full border border-rust/30 bg-black/60 px-4 py-2 text-xs font-semibold text-cream backdrop-blur-xl">
-          {t.player.upNextBtn} · {t.home.epShort(current.number)} — {current.title}
+          {t.player.upNextBtn} · {t.home.epShort(currentNumber)} — {current.title}
         </div>
       ) : null}
         </>
@@ -2064,34 +2218,52 @@ function EpisodePlayback({
         </>
       )}
 
-      {/* Hidden next-episode preloader: starts ~PRELOAD_LEAD_SECONDS before
-          the end and buffers ~30s of the upcoming episode, landing its
-          segments in the browser HTTP cache for the visible player's
-          re-init (Mux segment URLs are deterministic and cacheable for a
-          week; playlists are no-store but tiny). display:none — never
-          slotted as media; Mux Data force-disabled so it can't count
-          phantom views or drop viewer cookies. */}
-      {nextPrefetch && next && nextPrefetch.episodeId === next.id ? (
-        <MuxVideo
-          key={nextPrefetch.episodeId}
-          style={{ display: "none" }}
-          aria-hidden
-          muted
-          playsInline
-          preload="auto"
-          playbackId={next.playbackId}
-          tokens={{ playback: nextPrefetch.token }}
-          streamType="on-demand"
-          disableTracking
-          disableCookies
-        />
-      ) : null}
+      {/* Hidden preloaders — one per transition candidate (#144). The one
+          that plays if nothing is tapped (the single follower, or a fork's
+          default / the viewer's pick) warms from ~PRELOAD_LEAD_SECONDS at
+          preload="auto": ~30s of its stream lands in the browser HTTP cache
+          for the visible player's re-init (Mux segment URLs are
+          deterministic and cacheable for a week; playlists are no-store but
+          tiny). A fork's OTHER options mount only while the prompt is open,
+          at preload="metadata" (manifest + first segment) — three full
+          buffers in the last seconds would starve the visible player on a
+          slow link. A pick promotes its option to "auto" in place: the
+          wrapper forwards preload changes through setPreload, no remount.
+          display:none — never slotted as media; Mux Data force-disabled
+          (hard-coded, NOT the visible element's consent form) so a
+          preloader can neither count phantom views nor drop viewer cookies
+          before consent. */}
+      {candidateEpisodes.map((e) => {
+        const prefetched = prefetches[e.id];
+        if (!prefetched) return null;
+        const willPlay =
+          !fork || e.id === (forkChosenId ?? fork.defaultOption.episode.id);
+        if (!willPlay && !forkOpen) return null;
+        return (
+          <MuxVideo
+            key={e.id}
+            style={{ display: "none" }}
+            aria-hidden
+            muted
+            playsInline
+            preload={willPlay ? "auto" : "metadata"}
+            playbackId={e.playbackId}
+            tokens={{ playback: prefetched.token }}
+            streamType="on-demand"
+            disableTracking
+            disableCookies
+          />
+        );
+      })}
 
       {/* Overlays */}
+      {/* The episodes list is the LISTED run only — a branch is reachable
+          through a choice, never by position; while one plays, the row
+          of the episode it continues reads as "now playing". */}
       {overlay === "episodes" ? (
         <EpisodesOverlay
-          episodes={episodes}
-          currentEpisodeId={current.id}
+          episodes={listed}
+          currentEpisodeId={anchor.id}
           showSlug={showSlug}
           mode={mode}
           onSelect={onSwap}
@@ -2112,6 +2284,24 @@ function EpisodePlayback({
           showTitle={showTitle ?? current.title}
           defaultEmail={userEmail}
           onDismiss={() => onOverlayChange("none")}
+        />
+      ) : null}
+      {/* Fork prompt (#144): portaled like the others (media-chrome treats
+          a click inside its subtree as a play/pause gesture), one overlay
+          for both chromes. Open only inside the parent's fork window; the
+          pick lands in forkChosenId and the `ended` handler takes it. */}
+      {fork && forkOpen ? (
+        <ForkChoiceOverlay
+          prompt={current.forkPrompt ?? ""}
+          options={fork.options.map((o) => ({
+            episodeId: o.episode.id,
+            label: o.label,
+            isDefault: o.isDefault,
+          }))}
+          chosenId={forkChosenId}
+          remainingSeconds={forkRemaining}
+          windowSeconds={current.forkWindowSeconds}
+          onChoose={setForkChosenId}
         />
       ) : null}
     </MediaController>

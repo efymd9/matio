@@ -172,6 +172,14 @@ export const es = {
     cancel: "Cancelar",
     playingIn: (s: number) => `Empieza en ${s} s`,
   },
+  // Chrome of the fork prompt only — the prompt itself and the option
+  // labels are viewer copy on the episode rows (fork_prompt_es / label_es).
+  forkOverlay: {
+    label: "Tú decides",
+    autoTag: "Auto",
+    chosenTag: "Elegido",
+    autoIn: (s: number) => `Automático en ${s} s`,
+  },
   seriesEndOverlay: {
     label: "Aviso para el próximo episodio",
     kicker: "Eso es todo · por ahora",
@@ -650,6 +658,12 @@ export const en: Dict = {
     watchNow: "Watch now",
     cancel: "Cancel",
     playingIn: (s: number) => `Playing in ${s}s`,
+  },
+  forkOverlay: {
+    label: "Your call",
+    autoTag: "Auto",
+    chosenTag: "Chosen",
+    autoIn: (s: number) => `Auto in ${s}s`,
   },
   seriesEndOverlay: {
     label: "Next episode reminder",

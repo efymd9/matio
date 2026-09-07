@@ -44,6 +44,7 @@ vi.mock("@/db", () => ({
             : chain;
         },
         innerJoin: () => chain,
+        leftJoin: () => chain,
         where: (clause: unknown) => {
           h.where.push(clause);
           return chain;
@@ -54,6 +55,11 @@ vi.mock("@/db", () => ({
       return chain;
     },
   },
+}));
+vi.mock("drizzle-orm/pg-core", () => ({
+  // The parent self-join (#144): an alias is the same column set under a
+  // different table name.
+  alias: (table: Record<string, string>, name: string) => ({ ...table, table: name }),
 }));
 vi.mock("@/db/schema", () => ({
   episodes: {
@@ -114,6 +120,7 @@ function row(overrides: Record<string, unknown> = {}) {
     completed: false,
     updatedAt: new Date("2026-09-01T10:00:00Z"),
     branchOfEpisodeId: null,
+    parentNumber: null,
     ...overrides,
   };
 }
@@ -129,6 +136,7 @@ function branchRow(overrides: Record<string, unknown> = {}) {
     durationSeconds: 600,
     completed: true,
     branchOfEpisodeId: "ep-2",
+    parentNumber: 2,
     ...overrides,
   });
 }
@@ -278,16 +286,32 @@ describe("getContinueWatching — branching video", () => {
     expect(item.episodeId).toBe("ep-3");
   });
 
-  it("gives a branch in progress no tile until the player can resume one (#144)", async () => {
-    // Its ?ep= deep link falls back to episode 1 today — a tile promising
-    // "resume 901" that lands elsewhere is worse than none. No fall-through
-    // to an older row of the show either (same rule as a finished row).
+  it("resumes a branch in progress under its PARENT's number (#144)", async () => {
+    // The watch page resolves a branch id from ?ep= since #144, so the tile
+    // deep-links to the branch itself; it prints "Ep. 2" (the parent), the
+    // same number the player shows — never 901. The row is the LATEST
+    // touch, so the older ep-2 row does not resurface.
     h.rows = [
       branchRow({ completed: false, positionSeconds: 100 }),
       row({ episodeId: "ep-2", positionSeconds: 300 }),
     ];
     h.choiceRows = [continuation()];
-    expect(await getContinueWatching()).toEqual([]);
+    const items = await getContinueWatching();
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      episodeId: "b-901",
+      episodeNumber: 2,
+      episodeTitle: "She hugs him",
+      positionSeconds: 100,
+      durationSeconds: 600,
+    });
+  });
+
+  it("falls back to the branch's own number when the parent row is gone", async () => {
+    h.rows = [branchRow({ completed: false, positionSeconds: 100, parentNumber: null })];
+    h.choiceRows = [continuation()];
+    const [item] = await getContinueWatching();
+    expect(item.episodeNumber).toBe(901);
   });
 
   it("drops a finished branch that is an ending (no choices)", async () => {

@@ -212,25 +212,76 @@ function mockViewport(mobile: boolean) {
   });
 }
 
-const EPISODES: PlayerEpisode[] = [1, 2].map((n) => ({
-  id: `ep-${n}`,
-  number: n,
-  seasonNumber: 1,
-  title: `Episode ${n}`,
-  description: null,
-  durationSeconds: 600,
-  playbackId: `pb-${n}`,
-  introStartSeconds: null,
-  introEndSeconds: null,
-  thumbnailUrl: null,
-  tier: "free",
-}));
+function episode(
+  id: string,
+  number: number,
+  overrides: Partial<PlayerEpisode> = {},
+): PlayerEpisode {
+  return {
+    id,
+    number,
+    seasonNumber: 1,
+    title: `Episode ${number}`,
+    description: null,
+    durationSeconds: 600,
+    playbackId: `pb-${id.replace(/^ep-/, "")}`,
+    introStartSeconds: null,
+    introEndSeconds: null,
+    thumbnailUrl: null,
+    tier: "free",
+    branchOfEpisodeId: null,
+    forkPrompt: null,
+    forkWindowSeconds: 10,
+    choices: null,
+    ...overrides,
+  };
+}
 
-function renderPlayer(orientation: "horizontal" | "vertical" = "horizontal") {
+const EPISODES: PlayerEpisode[] = [episode("ep-1", 1), episode("ep-2", 2)];
+
+// A branching show (#144), in the order the watch page delivers it — the
+// linear run first, branches (900+) after: ep-2 forks into Kiss (901) and
+// Hug (902, the default), both reconverge silently into ep-3; 931 is an
+// ending hanging off ep-3.
+const BRANCHING: PlayerEpisode[] = [
+  episode("ep-1", 1),
+  episode("ep-2", 2, {
+    forkPrompt: "Kiss him or hug him?",
+    forkWindowSeconds: 10,
+    choices: [
+      { toEpisodeId: "b-901", position: 1, label: "Kiss him", isDefault: false },
+      { toEpisodeId: "b-902", position: 2, label: "Hug him", isDefault: true },
+    ],
+  }),
+  episode("ep-3", 3),
+  episode("b-901", 901, {
+    title: "She kisses him",
+    playbackId: "pb-901",
+    branchOfEpisodeId: "ep-2",
+    choices: [{ toEpisodeId: "ep-3", position: 1, label: "", isDefault: false }],
+  }),
+  episode("b-902", 902, {
+    title: "She hugs him",
+    playbackId: "pb-902",
+    branchOfEpisodeId: "ep-2",
+    choices: [{ toEpisodeId: "ep-3", position: 1, label: "", isDefault: false }],
+  }),
+  episode("b-931", 931, {
+    title: "The end",
+    playbackId: "pb-931",
+    branchOfEpisodeId: "ep-3",
+    choices: [],
+  }),
+];
+
+function renderPlayer(
+  orientation: "horizontal" | "vertical" = "horizontal",
+  opts: { episodes?: PlayerEpisode[]; initialEpisodeId?: string } = {},
+) {
   return render(
     <Player
-      episodes={EPISODES}
-      initialEpisodeId="ep-1"
+      episodes={opts.episodes ?? EPISODES}
+      initialEpisodeId={opts.initialEpisodeId ?? "ep-1"}
       mode="member"
       showId="show-1"
       showSlug="the-scarlet-oath"
@@ -459,5 +510,279 @@ describe("Player — Mux Data consent on the live element", () => {
     expect(probe.inits[1].el).toBe(video);
     expect(screen.getByTestId("mux-video")).toBe(video);
     expect(video.mux?.deleted).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Branching video (#144): the fork prompt and the transition it drives. The
+// clock is the <video>'s own — the tests set duration/currentTime on the
+// element and fire `timeupdate`, exactly what a playing stream does; the
+// transition is asserted on the probe's initialize log: the SAME element,
+// a new playbackId, no remount (the invariant that carries WebKit's
+// autoplay blessing across the seam).
+import { capturePostHog } from "@/lib/posthog-events";
+import { onPixelReady } from "@/lib/meta-pixel-events";
+
+function clock(video: HTMLVideoElement, duration: number) {
+  let currentTime = 0;
+  let ended = false;
+  Object.defineProperty(video, "duration", { configurable: true, get: () => duration });
+  Object.defineProperty(video, "currentTime", {
+    configurable: true,
+    get: () => currentTime,
+    set: (v: number) => {
+      currentTime = v;
+    },
+  });
+  Object.defineProperty(video, "ended", { configurable: true, get: () => ended });
+  return {
+    // Move the playhead and let the player's timeupdate consumers see it.
+    seek: (t: number) =>
+      act(() => {
+        currentTime = t;
+        video.dispatchEvent(new Event("timeupdate"));
+      }),
+    end: () =>
+      act(async () => {
+        currentTime = duration;
+        ended = true;
+        video.dispatchEvent(new Event("ended"));
+      }),
+  };
+}
+
+const tokenFetches = () =>
+  vi
+    .mocked(fetch)
+    .mock.calls.map(([input]) => String(input))
+    .filter((u) => u.startsWith("/api/playback-token"))
+    .map((u) => new URL(u, "http://localhost").searchParams.get("episode_id"));
+
+const visibleVideo = () =>
+  // The probe tags every MuxVideo (hidden preloaders included); the
+  // slotted one is the player's.
+  document.querySelector<HTMLVideoElement>('video[slot="media"]')!;
+
+describe("Player — branching video (#144)", () => {
+  beforeEach(() => {
+    vi.mocked(capturePostHog).mockClear();
+    vi.mocked(onPixelReady).mockClear();
+    setConsent(false);
+  });
+
+  it.each(["horizontal", "vertical"] as const)(
+    "[%s] prompt opens inside the window, the pick swaps in on the same element",
+    async (orientation) => {
+      mockViewport(orientation === "vertical");
+      renderPlayer(orientation, { episodes: BRANCHING, initialEpisodeId: "ep-2" });
+      const video = (await screen.findByTestId("mux-video")) as HTMLVideoElement;
+      await waitFor(() => expect(probe.inits).toHaveLength(1));
+      expect(probe.inits[0].playbackId).toBe("pb-2");
+      // The parent prints its own position…
+      expect(screen.getAllByText(/Ep\. 2/).length).toBeGreaterThan(0);
+      const c = clock(video, 600);
+
+      // 50s from the end: nothing yet. 40s: every candidate's token is
+      // prefetched, and only the DEFAULT's stream warms (preload=auto).
+      c.seek(550);
+      expect(tokenFetches()).toEqual(["ep-2"]);
+      c.seek(560);
+      await waitFor(() =>
+        expect(tokenFetches()).toEqual(["ep-2", "b-901", "b-902"]),
+      );
+      await waitFor(() =>
+        expect(document.querySelectorAll('video[preload="auto"]')).toHaveLength(1),
+      );
+      expect(document.querySelector('video[preload="metadata"]')).toBeNull();
+      expect(screen.queryByRole("group", { name: en.forkOverlay.label })).toBeNull();
+
+      // 8s from the end: the prompt is open, the default is focused and
+      // tagged, the countdown reads the video clock, and the non-default
+      // preloader mounts at preload=metadata.
+      c.seek(592);
+      const group = await screen.findByRole("group", { name: en.forkOverlay.label });
+      expect(group.textContent).toContain("Kiss him or hug him?");
+      const kiss = screen.getByRole("button", { name: /kiss him/i });
+      const hug = screen.getByRole("button", { name: /hug him/i });
+      expect(document.activeElement).toBe(hug);
+      expect(hug.textContent).toMatch(/auto/i);
+      expect(screen.getByText(en.forkOverlay.autoIn(8))).toBeTruthy();
+      await waitFor(() =>
+        expect(document.querySelector('video[preload="metadata"]')).not.toBeNull(),
+      );
+
+      // The pick: pressed, and its preloader is promoted to a full warm-up
+      // in place (the default's drops to metadata) — no remount of anything.
+      const initsBefore = probe.inits.length;
+      await act(async () => {
+        kiss.click();
+      });
+      expect(kiss.getAttribute("aria-pressed")).toBe("true");
+      expect(kiss.textContent).toMatch(/chosen/i);
+      expect(hug.textContent).not.toMatch(/auto/i);
+      expect(probe.inits).toHaveLength(initsBefore);
+      const preloaders = [...document.querySelectorAll<HTMLVideoElement>("video")].filter(
+        (v) => v !== video,
+      );
+      expect(preloaders.map((v) => [v.getAttribute("src"), v.getAttribute("preload")])).toEqual(
+        expect.arrayContaining([
+          ["https://stream.mux.com/pb-901.m3u8", "auto"],
+          ["https://stream.mux.com/pb-902.m3u8", "metadata"],
+        ]),
+      );
+
+      // The end: the branch installs on the SAME element with its
+      // prefetched token — no extra token fetch, no remount — the prompt
+      // closes, and the chrome keeps printing the parent's number.
+      await c.end();
+      await waitFor(() =>
+        expect(probe.inits.some((i) => i.el === video && i.playbackId === "pb-901")).toBe(true),
+      );
+      expect(visibleVideo()).toBe(video);
+      expect(tokenFetches()).toEqual(["ep-2", "b-901", "b-902"]);
+      expect(screen.queryByRole("group", { name: en.forkOverlay.label })).toBeNull();
+      expect(screen.getAllByText(/Ep\. 2/).length).toBeGreaterThan(0);
+      expect(screen.queryByText(/901/)).toBeNull();
+      expect(nav.replace).toHaveBeenCalledWith(
+        expect.stringContaining("ep=b-901"),
+        expect.anything(),
+      );
+      expect(capturePostHog).toHaveBeenCalledWith("fork_choice_made", {
+        show_slug: "the-scarlet-oath",
+        episode_id: "ep-2",
+        choice_position: 1,
+        is_default: false,
+        timed_out: false,
+      });
+      expect(capturePostHog).toHaveBeenCalledWith("episode_auto_advanced", {
+        show_slug: "the-scarlet-oath",
+        from_episode: 2,
+        to_episode: 0,
+      });
+    },
+  );
+
+  it("nothing tapped: the default plays at the end, never a pause", async () => {
+    renderPlayer("horizontal", { episodes: BRANCHING, initialEpisodeId: "ep-2" });
+    const video = (await screen.findByTestId("mux-video")) as HTMLVideoElement;
+    await waitFor(() => expect(probe.inits).toHaveLength(1));
+    const c = clock(video, 600);
+    c.seek(560);
+    await waitFor(() => expect(tokenFetches()).toHaveLength(3));
+    c.seek(595);
+    await screen.findByRole("group", { name: en.forkOverlay.label });
+    expect(screen.getByText(en.forkOverlay.autoIn(5))).toBeTruthy();
+
+    await c.end();
+    await waitFor(() =>
+      expect(probe.inits.some((i) => i.el === video && i.playbackId === "pb-902")).toBe(true),
+    );
+    expect(media.pause).not.toHaveBeenCalled();
+    expect(capturePostHog).toHaveBeenCalledWith("fork_choice_made", {
+      show_slug: "the-scarlet-oath",
+      episode_id: "ep-2",
+      choice_position: 2,
+      is_default: true,
+      timed_out: true,
+    });
+  });
+
+  it("seeking back out of the window closes the prompt; the pick survives", async () => {
+    renderPlayer("horizontal", { episodes: BRANCHING, initialEpisodeId: "ep-2" });
+    const video = (await screen.findByTestId("mux-video")) as HTMLVideoElement;
+    await waitFor(() => expect(probe.inits).toHaveLength(1));
+    const c = clock(video, 600);
+    c.seek(593);
+    const kiss = await screen.findByRole("button", { name: /kiss him/i });
+    await act(async () => {
+      kiss.click();
+    });
+    c.seek(500);
+    await waitFor(() =>
+      expect(screen.queryByRole("group", { name: en.forkOverlay.label })).toBeNull(),
+    );
+    c.seek(594);
+    const again = await screen.findByRole("button", { name: /kiss him/i });
+    expect(again.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("a branch with one choice reconverges silently — no prompt, same element", async () => {
+    renderPlayer("horizontal", { episodes: BRANCHING, initialEpisodeId: "b-901" });
+    const video = (await screen.findByTestId("mux-video")) as HTMLVideoElement;
+    await waitFor(() => expect(probe.inits).toHaveLength(1));
+    expect(probe.inits[0].playbackId).toBe("pb-901");
+    // A branch prints its parent's number, and its prev is that parent.
+    expect(screen.getAllByText(/Ep\. 2/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/901/)).toBeNull();
+    const c = clock(video, 600);
+    c.seek(560);
+    await waitFor(() => expect(tokenFetches()).toEqual(["b-901", "ep-3"]));
+    c.seek(595);
+    await act(async () => {});
+    expect(screen.queryByRole("group", { name: en.forkOverlay.label })).toBeNull();
+
+    await c.end();
+    await waitFor(() =>
+      expect(probe.inits.some((i) => i.el === video && i.playbackId === "pb-3")).toBe(true),
+    );
+    expect(capturePostHog).not.toHaveBeenCalledWith("fork_choice_made", expect.anything());
+    expect(capturePostHog).toHaveBeenCalledWith("episode_auto_advanced", {
+      show_slug: "the-scarlet-oath",
+      from_episode: 0,
+      to_episode: 3,
+    });
+    expect(screen.getAllByText(/Ep\. 3/).length).toBeGreaterThan(0);
+  });
+
+  it("a branch that is an ending reaches the series-end sheet and never fires Lead", async () => {
+    renderPlayer("horizontal", { episodes: BRANCHING, initialEpisodeId: "b-931" });
+    const video = (await screen.findByTestId("mux-video")) as HTMLVideoElement;
+    await waitFor(() => expect(probe.inits).toHaveLength(1));
+    const c = clock(video, 600);
+    c.seek(560);
+    await act(async () => {});
+    // Nothing follows an ending — no prefetch at all.
+    expect(tokenFetches()).toEqual(["b-931"]);
+    await c.end();
+    await screen.findByText(en.seriesEndOverlay.kicker);
+    expect(probe.inits).toHaveLength(1);
+    expect(capturePostHog).not.toHaveBeenCalledWith("episode_auto_advanced", expect.anything());
+    // Meta Lead is "finished the FIRST episode" — a branch is position 0.
+    expect(onPixelReady).not.toHaveBeenCalled();
+  });
+
+  it("the last listed episode ends the show even though branches follow it in the array", async () => {
+    renderPlayer("horizontal", { episodes: BRANCHING, initialEpisodeId: "ep-3" });
+    const video = (await screen.findByTestId("mux-video")) as HTMLVideoElement;
+    await waitFor(() => expect(probe.inits).toHaveLength(1));
+    const c = clock(video, 600);
+    await c.end();
+    await screen.findByText(en.seriesEndOverlay.kicker);
+    expect(probe.inits).toHaveLength(1);
+  });
+
+  it("Lead fires at the end of episode 1 only", async () => {
+    renderPlayer("horizontal", { episodes: BRANCHING, initialEpisodeId: "ep-1" });
+    const video = (await screen.findByTestId("mux-video")) as HTMLVideoElement;
+    await waitFor(() => expect(probe.inits).toHaveLength(1));
+    const c = clock(video, 600);
+    await c.end();
+    expect(onPixelReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("the episodes list shows the linear run only, with the parent as now playing during a branch", async () => {
+    renderPlayer("horizontal", { episodes: BRANCHING, initialEpisodeId: "b-902" });
+    await screen.findByTestId("mux-video");
+    await act(async () => {
+      screen.getByRole("button", { name: en.player.episodesBtn }).click();
+    });
+    const dialog = await screen.findByRole("dialog", { name: en.episodesOverlay.title });
+    expect(dialog.textContent).toContain(en.episodesOverlay.count(3));
+    expect(dialog.textContent).not.toContain("902");
+    expect(dialog.textContent).not.toContain("hugs him");
+    // The "now playing" marker sits on episode 2 — the one the branch continues.
+    const rows = [...dialog.querySelectorAll("li")];
+    const playing = rows.find((li) => li.textContent?.includes(en.episodesOverlay.nowPlaying));
+    expect(playing?.textContent).toContain("2. Episode 2");
   });
 });
