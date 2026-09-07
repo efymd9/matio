@@ -93,10 +93,10 @@ export default defineConfig({
       //   28.92/24.84/23.40/28.72 по прогону поверх свежего main (#31
       //   влит), те же 0.1 запаса).
       thresholds: {
-        lines: 29.7,
-        functions: 25.1,
-        branches: 24.6,
-        statements: 29.5,
+        lines: 30.8,
+        functions: 25.6,
+        branches: 25.5,
+        statements: 30.5,
       },
     },
 
