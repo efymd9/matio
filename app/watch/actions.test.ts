@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   userId: null as string | null,
   cookie: undefined as string | undefined,
   save: vi.fn(),
+  saveSegments: vi.fn(),
   select: vi.fn(),
 }));
 
@@ -57,8 +58,11 @@ vi.mock("@/lib/watch-progress", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/watch-progress")>();
   return { ...actual, saveWatchProgressForUser: h.save };
 });
+vi.mock("@/lib/watch-segments-write", () => ({
+  saveWatchSegmentsFor: h.saveSegments,
+}));
 
-import { saveTrialPosition, saveWatchProgress } from "./actions";
+import { saveTrialPosition, saveWatchProgress, saveWatchSegments } from "./actions";
 
 const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
@@ -66,7 +70,10 @@ beforeEach(() => {
   h.userId = null;
   h.cookie = undefined;
   h.save.mockReset().mockResolvedValue("saved");
+  h.saveSegments.mockReset().mockResolvedValue({ outcome: "saved", accepted: 1 });
   h.select.mockReset();
+  vi.stubEnv("PAYMENTS_ENABLED", "");
+  vi.stubEnv("REQUIRE_SIGNUP", "");
 });
 
 afterEach(() => {
@@ -91,6 +98,59 @@ describe("saveWatchProgress (web server action)", () => {
     for (const outcome of ["invalid_position", "not_found", "forbidden"]) {
       h.save.mockResolvedValueOnce(outcome);
       await expect(saveWatchProgress(EPISODE, 12, false)).resolves.toBeUndefined();
+    }
+  });
+});
+
+// The retention flush after its core moved to lib/watch-segments-write.ts.
+// The action keeps exactly ONE decision — who may flush from the web — and
+// the contract the player relies on: void, never a throw.
+describe("saveWatchSegments (web server action)", () => {
+  it("hands a signed-in flush to the shared write as the user, arguments untouched", async () => {
+    h.userId = "user_1";
+    await expect(saveWatchSegments(EPISODE, [1, 2])).resolves.toBeUndefined();
+    expect(h.saveSegments).toHaveBeenCalledTimes(1);
+    expect(h.saveSegments).toHaveBeenCalledWith(
+      { kind: "user", userId: "user_1" },
+      EPISODE,
+      [1, 2],
+    );
+  });
+
+  it("flushes an anonymous viewer by trial cookie in open free mode, with no positional gate", async () => {
+    h.cookie = "trial-token";
+    await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
+    expect(h.saveSegments).toHaveBeenCalledWith(
+      { kind: "anonymous", sessionToken: "trial-token", maxPosition: null },
+      EPISODE,
+      [3],
+    );
+  });
+
+  it("drops an anonymous flush under the signup gate — anonymous playback does not exist there", async () => {
+    vi.stubEnv("REQUIRE_SIGNUP", "1");
+    h.cookie = "trial-token";
+    await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
+    expect(h.saveSegments).not.toHaveBeenCalled();
+  });
+
+  it("keeps paid-mode anonymous previews off the retention curve", async () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    h.cookie = "trial-token";
+    await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
+    expect(h.saveSegments).not.toHaveBeenCalled();
+  });
+
+  it("is a silent no-op with neither a session nor a cookie", async () => {
+    await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
+    expect(h.saveSegments).not.toHaveBeenCalled();
+  });
+
+  it("stays void whatever the write decides — the player never reads an answer", async () => {
+    h.userId = "user_1";
+    for (const outcome of ["invalid_input", "not_found", "forbidden", "no_session"]) {
+      h.saveSegments.mockResolvedValueOnce({ outcome });
+      await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
     }
   });
 });

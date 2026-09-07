@@ -85,11 +85,15 @@ export default defineConfig({
       // → 24.1 (#31: токены теней/градиентов — листы Shadows/Gradients и
       //   история Icon исполняют lib/design.ts и icon.tsx целиком;
       //   24.28/24.00/19.22/19.96 по прогону, те же 0.1 запаса).
+      // → 25.6 (#97: retention-бакеты для мобильного — общий
+      //   lib/watch-segments-write.ts и /api/v1/watch-segments покрыты на 100%,
+      //   веб-экшен saveWatchSegments впервые под тестом;
+      //   25.72/25.50/21.06/20.70 по прогону, те же 0.1 запаса).
       thresholds: {
-        lines: 24.8,
-        functions: 20.3,
-        branches: 19.7,
-        statements: 24.6,
+        lines: 25.6,
+        functions: 20.6,
+        branches: 20.9,
+        statements: 25.4,
       },
     },
 
