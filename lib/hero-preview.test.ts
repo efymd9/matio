@@ -27,6 +27,7 @@ vi.mock("drizzle-orm", () => ({
   asc: () => undefined,
   eq: () => undefined,
   inArray: () => undefined,
+  isNull: () => undefined,
 }));
 vi.mock("@/lib/mux-token", () => ({ signMuxPlaybackToken: h.sign }));
 vi.mock("@/lib/trial", () => ({ TRIAL_DURATION_SECONDS: 60 }));

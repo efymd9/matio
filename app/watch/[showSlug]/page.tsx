@@ -104,6 +104,14 @@ export default async function WatchPage({
       and(
         inArray(episodes.seasonId, seasonIds),
         eq(episodes.status, "ready"),
+        // Branching video, PR 1 of 2 (#143): branches stay off this page
+        // entirely. The Player's `episodes` prop feeds BOTH its episodes
+        // overlay and its `episodes[idx + 1]` auto-advance, so until PR 2
+        // (#144) teaches it about choices, a branch in that array would be
+        // listed in the overlay and auto-played after the last linear
+        // episode. PR 2 threads the branches through as playable-but-
+        // unlisted; this filter is the seam it replaces.
+        isNull(episodes.branchOfEpisodeId),
       ),
     )
     .orderBy(asc(episodes.seasonId), asc(episodes.number));

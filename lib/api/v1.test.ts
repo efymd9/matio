@@ -2,12 +2,40 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
+// linearShowsOnly builds a correlated subquery; the builder is faked to a
+// recording chain so the test can read the clause it correlates on.
+const h = vi.hoisted(() => ({ where: undefined as unknown }));
+vi.mock("@/db", () => ({
+  db: {
+    select: () => {
+      const chain = {
+        from: () => chain,
+        innerJoin: () => chain,
+        where: (clause: unknown) => {
+          h.where = clause;
+          return "subquery";
+        },
+      };
+      return chain;
+    },
+  },
+}));
+vi.mock("drizzle-orm", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("drizzle-orm")>()),
+  and: (...clauses: unknown[]) => clauses,
+  eq: (column: unknown, value: unknown) => ({ eq: [column, value] }),
+  isNotNull: (column: unknown) => ({ isNotNull: column }),
+  notExists: (subquery: unknown) => ({ notExists: subquery }),
+}));
+
+import { episodes, seasons, shows } from "@/db/schema";
 import {
   absoluteMediaUrl,
   apiError,
   apiOk,
   DEVICE_ID_HEADER,
   envInt,
+  linearShowsOnly,
   readDeviceId,
   resolveSignupGate,
 } from "./v1";
@@ -108,6 +136,18 @@ describe("resolveSignupGate", () => {
     vi.stubEnv("PAYMENTS_ENABLED", "");
     vi.stubEnv("REQUIRE_SIGNUP", "");
     expect(resolveSignupGate()).toEqual({ mode: "none" });
+  });
+});
+
+describe("linearShowsOnly", () => {
+  it("is NOT EXISTS over the outer show's branch episodes, any status", async () => {
+    // A single branch row of ANY status hides the show from the app: the
+    // native player cannot render a fork (#143), and an admin building one
+    // on a live show must not break phones already in the field.
+    expect(linearShowsOnly()).toEqual({ notExists: "subquery" });
+    expect(h.where).toContainEqual({ eq: [seasons.showId, shows.id] });
+    expect(h.where).toContainEqual({ isNotNull: episodes.branchOfEpisodeId });
+    expect(h.where).not.toContainEqual({ eq: [episodes.status, "ready"] });
   });
 });
 

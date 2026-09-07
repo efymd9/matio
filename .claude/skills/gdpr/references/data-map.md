@@ -54,7 +54,15 @@
 ### Не персональные (для полноты схемы)
 
 `shows`, `seasons`, `episodes`, `actors` (виртуальные, вымышленные),
-`show_actors` — контент. `watch_segments` — счётчики по (эпизод, день,
+`show_actors` — контент. `episode_choices` (#143, ветвящееся видео) — рёбра
+графа развилок между эпизодами: `from/to_episode_id`, `position`,
+`label_en/es`, `is_default` — контент, вводится админом; выбор ЗРИТЕЛЯ на
+развилке нигде отдельно не пишется — он материализуется как обычная строка
+`watch_progress` (или `trial_sessions.last_episode_id`) на эпизоде-ветке,
+то есть в уже существующем классе «история просмотра» с тем же каскадом
+от `users`. Новые колонки `episodes.branch_of_episode_id` /
+`fork_prompt_en/es` / `fork_window_seconds` — тоже контент.
+`watch_segments` — счётчики по (эпизод, день,
 10-секундный бакет), агрегат. `stripe_events` — id событий Stripe для
 идемпотентности, растёт бессрочно (#162).
 

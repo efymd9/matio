@@ -510,6 +510,59 @@ export const ru = {
       `Удалить эпизод ${n} «${title}»? Это действие необратимо.`,
     deleteThisEpisode: "Удалить этот эпизод",
   },
+  // Ветвящееся видео (#143): панель «Ветвление» на странице эпизода. Здесь
+  // только копия админки — вопрос и подписи, которые видит ЗРИТЕЛЬ, вводятся
+  // на es/en (локали сайта) и хранятся в episodes / episode_choices.
+  fork: {
+    panelKicker: "Ветвление",
+    panelTitle: "Ветка и развилка",
+    panelHint:
+      "Ветка — обычный эпизод, до которого зритель доходит только выбрав его на развилке родителя; в списках его нет. Развилка — вопрос в конце эпизода с 2–3 вариантами.",
+    branchOfLabel: "Ветка эпизода →",
+    branchOfNone: "— обычный эпизод —",
+    branchOfHint: (floor: number) =>
+      `Ветки скрыты со всех публичных страниц. Нумеруйте их с ${floor}, чтобы не пересекаться с обычной нумерацией сезона.`,
+    forkTitle: "Развилка",
+    forkHint:
+      "0 вариантов — обычное продолжение. 1 вариант — тихий переход без вопроса (так ветка возвращается в общий эпизод; цель — любой готовый эпизод). 2–3 варианта — вопрос зрителю; цели — только ветки этого эпизода.",
+    promptEn: "Вопрос · EN",
+    promptEs: "Вопрос · ES",
+    promptPlaceholderEn: "Kiss or hug?",
+    promptPlaceholderEs: "¿Beso o abrazo?",
+    windowLabel: "Таймер",
+    windowHint: (min: number, max: number) =>
+      `${min}–${max} секунд до конца эпизода: за сколько показать вопрос и сколько ждать выбора`,
+    choicesTitle: "Варианты",
+    choiceN: (n: number) => `Вариант ${n}`,
+    labelEn: "Подпись · EN",
+    labelEs: "Подпись · ES",
+    target: "Куда ведёт",
+    targetNone: "— выберите эпизод —",
+    targetBranchOfThis: "ветка этого эпизода",
+    targetNotReady: "не готов",
+    defaultChoice: "По умолчанию, если зритель не выбрал",
+    addChoice: "Добавить вариант",
+    removeChoice: "Убрать",
+    removePending: "Убираем…",
+    previewTitle: "Как увидит зритель",
+    previewLocaleAria: "Язык превью",
+    previewTimer: (s: number) => `${s} с`,
+    previewAuto: (target: string) =>
+      `Без вопроса: после этого эпизода сразу играет «${target}».`,
+    previewEnding:
+      "Концовка: после этой ветки плеер покажет финал сериала.",
+    previewLinear:
+      "Обычное продолжение: дальше играет следующий эпизод по списку.",
+    previewEmptyPrompt: "(вопрос не задан)",
+    previewEmptyLabel: "(без подписи)",
+    savePending: "Сохранение…",
+    save: "Сохранить ветвление",
+    saved: "Сохранено",
+    branchBadge: "ветка",
+    branchOfBadge: (n: number) => `ветка E${n}`,
+    deleteBlockedByChoices:
+      "Этот эпизод — цель развилки или перехода другого эпизода. Сначала уберите его из вариантов там, потом удаляйте.",
+  },
   // Спецификация «Аналитика» 18.07.2026 — free-mode дашборд: «цепляет ли
   // контент настолько, что люди возвращаются?». Собственный first-party
   // счётчик (matio_aid) + леджеры просмотров.
@@ -771,6 +824,32 @@ export const ru = {
     slugTaken: "Такой slug уже занят — выберите другой.",
     unknown: "Не удалось сохранить. Попробуйте ещё раз.",
     notSaved: "Не сохранено",
+    // Ветвление (#143): панель на странице эпизода + publish-guard сериала.
+    forkWindowOutOfRange:
+      "Таймер развилки — целое число от 3 до 30 секунд.",
+    branchParentInvalid:
+      "Родитель ветки — другой эпизод этого же сериала.",
+    tooManyChoices: "На развилке не больше трёх вариантов.",
+    choiceTargetRequired: "У каждого варианта должен быть выбран эпизод.",
+    choiceTargetInvalid: "Цель варианта — другой эпизод этого же сериала.",
+    choiceTargetNotReady:
+      "Цель варианта ещё не готова — видео не обработано.",
+    duplicateChoiceTarget: "Два варианта ведут в один и тот же эпизод.",
+    forkNeedsTwoChoices:
+      "Для развилки с вопросом нужно минимум два варианта. Уберите вопрос — останется тихий переход.",
+    forkPromptRequired: "Задайте вопрос на обоих языках — EN и ES.",
+    choiceLabelRequired:
+      "Заполните подписи всех вариантов на обоих языках — EN и ES.",
+    choiceTargetNotBranch:
+      "Варианты развилки ведут только в ветки этого эпизода: у цели должно стоять «Ветка эпизода → этот эпизод».",
+    publishForkIncomplete:
+      "Публикация заблокирована: у одного из эпизодов задан вопрос развилки, но меньше двух вариантов.",
+    publishBranchNotReady:
+      "Публикация заблокирована: одна из веток или целей перехода ещё не готова.",
+    publishChoiceTargetNotBranch:
+      "Публикация заблокирована: вариант развилки ведёт в эпизод, который больше не ветка своего родителя.",
+    publishBranchCycle:
+      "Публикация заблокирована: переходы между эпизодами образуют цикл.",
   },
   statusSelect: {
     draft: "Черновик",
@@ -1397,6 +1476,56 @@ export const en: AdminDict = {
       `Delete episode ${n} "${title}"? This cannot be undone.`,
     deleteThisEpisode: "Delete this episode",
   },
+  fork: {
+    panelKicker: "Branching",
+    panelTitle: "Branch and fork",
+    panelHint:
+      "A branch is a regular episode the viewer reaches only by picking it on its parent's fork; it appears in no list. A fork is a question at the end of an episode with 2–3 options.",
+    branchOfLabel: "Branch of episode →",
+    branchOfNone: "— regular episode —",
+    branchOfHint: (floor: number) =>
+      `Branches are hidden from every public page. Number them from ${floor} so they never collide with the season's regular numbering.`,
+    forkTitle: "Fork",
+    forkHint:
+      "0 options — the regular next episode. 1 option — a silent transition, no question (this is how a branch converges back; the target may be any ready episode). 2–3 options — the viewer is asked; targets must be branches of this episode.",
+    promptEn: "Question · EN",
+    promptEs: "Question · ES",
+    promptPlaceholderEn: "Kiss or hug?",
+    promptPlaceholderEs: "¿Beso o abrazo?",
+    windowLabel: "Timer",
+    windowHint: (min: number, max: number) =>
+      `${min}–${max} seconds before the end: when the question appears and how long the viewer has`,
+    choicesTitle: "Options",
+    choiceN: (n: number) => `Option ${n}`,
+    labelEn: "Label · EN",
+    labelEs: "Label · ES",
+    target: "Leads to",
+    targetNone: "— pick an episode —",
+    targetBranchOfThis: "branch of this episode",
+    targetNotReady: "not ready",
+    defaultChoice: "Default when the viewer doesn't pick",
+    addChoice: "Add option",
+    removeChoice: "Remove",
+    removePending: "Removing…",
+    previewTitle: "What the viewer sees",
+    previewLocaleAria: "Preview language",
+    previewTimer: (s: number) => `${s}s`,
+    previewAuto: (target: string) =>
+      `No question: after this episode “${target}” plays right away.`,
+    previewEnding:
+      "Ending: after this branch the player shows the series finale.",
+    previewLinear:
+      "Regular continuation: the next episode in the list plays.",
+    previewEmptyPrompt: "(no question yet)",
+    previewEmptyLabel: "(no label)",
+    savePending: "Saving…",
+    save: "Save branching",
+    saved: "Saved",
+    branchBadge: "branch",
+    branchOfBadge: (n: number) => `branch of E${n}`,
+    deleteBlockedByChoices:
+      "This episode is the target of another episode's fork or transition. Remove it from the options there first, then delete.",
+  },
   analyticsSpec: {
     eyebrow: "Analytics",
     heading: "Do viewers come back",
@@ -1643,6 +1772,32 @@ export const en: AdminDict = {
     slugTaken: "That slug is already taken — pick another.",
     unknown: "Couldn’t save. Try again.",
     notSaved: "Not saved",
+    forkWindowOutOfRange:
+      "The fork timer must be a whole number from 3 to 30 seconds.",
+    branchParentInvalid:
+      "A branch's parent must be another episode of this show.",
+    tooManyChoices: "A fork has at most three options.",
+    choiceTargetRequired: "Every option needs an episode to lead to.",
+    choiceTargetInvalid:
+      "An option must lead to another episode of this show.",
+    choiceTargetNotReady:
+      "An option leads to an episode that isn't ready — its video hasn't finished processing.",
+    duplicateChoiceTarget: "Two options lead to the same episode.",
+    forkNeedsTwoChoices:
+      "A fork with a question needs at least two options. Clear the question to keep a silent transition.",
+    forkPromptRequired: "Set the question in both languages — EN and ES.",
+    choiceLabelRequired:
+      "Fill in every option's label in both languages — EN and ES.",
+    choiceTargetNotBranch:
+      "Fork options can only lead to branches of this episode: the target must have “Branch of episode → this episode”.",
+    publishForkIncomplete:
+      "Publishing blocked: an episode has a fork question but fewer than two options.",
+    publishBranchNotReady:
+      "Publishing blocked: a branch or transition target isn't ready yet.",
+    publishChoiceTargetNotBranch:
+      "Publishing blocked: a fork option leads to an episode that is no longer a branch of its parent.",
+    publishBranchCycle:
+      "Publishing blocked: the transitions between episodes form a cycle.",
   },
   statusSelect: {
     draft: "Draft",
