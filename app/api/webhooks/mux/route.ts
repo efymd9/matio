@@ -56,6 +56,10 @@ export async function POST(req: NextRequest) {
           and(
             eq(episodes.id, target.id),
             isNull(episodes.releasedAt),
+            // A branch (#143) is not a release — no pulse marker, no
+            // release-retention row for an episode nobody reaches by
+            // position. Same rule as the publish action's stamp.
+            isNull(episodes.branchOfEpisodeId),
             inArray(
               episodes.seasonId,
               db

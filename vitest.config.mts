@@ -85,11 +85,18 @@ export default defineConfig({
       // → 24.1 (#31: токены теней/градиентов — листы Shadows/Gradients и
       //   история Icon исполняют lib/design.ts и icon.tsx целиком;
       //   24.28/24.00/19.22/19.96 по прогону, те же 0.1 запаса).
+      // → 28.8 (#143: ветвящееся видео — lib/branching.ts (правила графа),
+      //   экшены развилки и publish-guard, панель fork-panel в jsdom,
+      //   continue-watching через ветку, WHERE-исключения /api/v1, паритет
+      //   секции fork админ-словаря; после ревью — deleteSeason в
+      //   транзакции, вебхук Mux и рассылка впервые под тестами;
+      //   28.92/24.84/23.40/28.72 по прогону поверх свежего main (#31
+      //   влит), те же 0.1 запаса).
       thresholds: {
-        lines: 24.8,
-        functions: 20.3,
-        branches: 19.7,
-        statements: 24.6,
+        lines: 28.8,
+        functions: 24.7,
+        branches: 23.3,
+        statements: 28.6,
       },
     },
 

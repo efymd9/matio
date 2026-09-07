@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { episodes, seasons, shows } from "@/db/schema";
+import { episodeChoices, episodes, seasons, shows } from "@/db/schema";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
+import { ForkPanel } from "@/components/admin/fork-panel";
 import { FormSubmitButton } from "@/components/admin/form-submit-button";
 import { IntroRangeFields } from "@/components/admin/intro-range-fields";
 import { UploadWidget } from "@/components/admin/upload-widget";
@@ -63,11 +64,53 @@ export default async function EditEpisodePage({
       access: episodes.access,
       introStartSeconds: episodes.introStartSeconds,
       introEndSeconds: episodes.introEndSeconds,
+      branchOfEpisodeId: episodes.branchOfEpisodeId,
+      forkPromptEn: episodes.forkPromptEn,
+      forkPromptEs: episodes.forkPromptEs,
+      forkWindowSeconds: episodes.forkWindowSeconds,
     })
     .from(episodes)
     .where(and(eq(episodes.id, episodeId), eq(episodes.seasonId, season.id)))
     .limit(1);
   if (!episode) notFound();
+
+  // Branching (#143): the panel's candidates (every other episode of the
+  // show), this episode's saved options, and whether some OTHER episode's
+  // choice points here — in which case the RESTRICT FK would refuse a
+  // delete, so the page says so instead of letting the form hit a throw.
+  const [otherEpisodes, savedChoices, [pointedAt]] = await Promise.all([
+    db
+      .select({
+        id: episodes.id,
+        number: episodes.number,
+        title: episodes.title,
+        status: episodes.status,
+        branchOfEpisodeId: episodes.branchOfEpisodeId,
+      })
+      .from(episodes)
+      .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+      .where(and(eq(seasons.showId, show.id), ne(episodes.id, episode.id)))
+      .orderBy(asc(seasons.number), asc(episodes.number)),
+    db
+      .select({
+        id: episodeChoices.id,
+        toEpisodeId: episodeChoices.toEpisodeId,
+        labelEn: episodeChoices.labelEn,
+        labelEs: episodeChoices.labelEs,
+        isDefault: episodeChoices.isDefault,
+      })
+      .from(episodeChoices)
+      .where(eq(episodeChoices.fromEpisodeId, episode.id))
+      .orderBy(asc(episodeChoices.position)),
+    db
+      .select({ id: episodeChoices.id })
+      .from(episodeChoices)
+      .where(eq(episodeChoices.toEpisodeId, episode.id))
+      .limit(1),
+  ]);
+  const parent = episode.branchOfEpisodeId
+    ? otherEpisodes.find((e) => e.id === episode.branchOfEpisodeId)
+    : undefined;
 
   let previewThumb: string | null = null;
   if (episode.status === "ready" && episode.muxPlaybackId) {
@@ -90,10 +133,19 @@ export default async function EditEpisodePage({
         kicker={t.episode.kickerSeasonEpisode(season.number, episode.number)}
         title={episode.title}
         pills={
-          <EpisodeStatusBadge
-            status={episode.status}
-            hasAsset={!!episode.muxAssetId}
-          />
+          <>
+            <EpisodeStatusBadge
+              status={episode.status}
+              hasAsset={!!episode.muxAssetId}
+            />
+            {episode.branchOfEpisodeId ? (
+              <span className="rounded-full border border-gold/40 px-2.5 py-1 text-[11px] font-semibold text-gold">
+                {parent
+                  ? t.fork.branchOfBadge(parent.number)
+                  : t.fork.branchBadge}
+              </span>
+            ) : null}
+          </>
         }
       />
 
@@ -241,15 +293,36 @@ export default async function EditEpisodePage({
         </form>
       </Panel>
 
+      {/* Branching — branch-of parent + fork editor (#143) */}
+      <ForkPanel
+        episodeId={episode.id}
+        seasonId={season.id}
+        showId={show.id}
+        values={{
+          branchOfEpisodeId: episode.branchOfEpisodeId,
+          forkPromptEn: episode.forkPromptEn ?? "",
+          forkPromptEs: episode.forkPromptEs ?? "",
+          forkWindowSeconds: episode.forkWindowSeconds,
+          choices: savedChoices,
+        }}
+        options={otherEpisodes}
+      />
+
       {/* Danger zone */}
       <DangerPanel description={t.episode.deleteDescription}>
-        <form action={deleteEpisode.bind(null, episode.id, season.id, show.id)}>
-          <ConfirmDeleteButton
-            message={t.episode.deleteConfirm(episode.number, episode.title)}
+        {pointedAt ? (
+          <p className="text-sm text-cream/60">{t.fork.deleteBlockedByChoices}</p>
+        ) : (
+          <form
+            action={deleteEpisode.bind(null, episode.id, season.id, show.id)}
           >
-            {t.episode.deleteThisEpisode}
-          </ConfirmDeleteButton>
-        </form>
+            <ConfirmDeleteButton
+              message={t.episode.deleteConfirm(episode.number, episode.title)}
+            >
+              {t.episode.deleteThisEpisode}
+            </ConfirmDeleteButton>
+          </form>
+        )}
       </DangerPanel>
     </div>
   );

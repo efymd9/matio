@@ -1,5 +1,5 @@
 import { preconnect, prefetchDNS } from "react-dom";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons } from "@/db/schema";
 import { ContinueWatchingRow } from "@/components/site/continue-watching-row";
@@ -83,7 +83,13 @@ export default async function HomePage({
         .from(episodes)
         .innerJoin(seasons, eq(seasons.id, episodes.seasonId))
         .where(
-          and(eq(seasons.showId, featured.id), eq(episodes.status, "ready")),
+          and(
+            eq(seasons.showId, featured.id),
+            eq(episodes.status, "ready"),
+            // Branches are not listed episodes (#143) — same count the show
+            // page advertises.
+            isNull(episodes.branchOfEpisodeId),
+          ),
         ),
       resolveHeroPreview(featured.id),
       getContinueWatching(),

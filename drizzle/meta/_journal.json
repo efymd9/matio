@@ -169,6 +169,13 @@
       "when": 1784396965205,
       "tag": "0023_equal_random",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788700081603,
+      "tag": "0024_gigantic_skin",
+      "breakpoints": true
     }
   ]
 }
