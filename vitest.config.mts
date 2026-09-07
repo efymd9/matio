@@ -85,11 +85,15 @@ export default defineConfig({
       // → 24.1 (#31: токены теней/градиентов — листы Shadows/Gradients и
       //   история Icon исполняют lib/design.ts и icon.tsx целиком;
       //   24.28/24.00/19.22/19.96 по прогону, те же 0.1 запаса).
+      // → 26.8 (#165: стирание CAPI-снимка из метаданных Stripe — зеркало
+      //   подписки `lib/subscription-mirror.ts` впервые исполняется тестами
+      //   целиком, плюс кейс в лог-аудите; 26.95/26.64/21.59/22.02 по прогону,
+      //   те же 0.1 запаса).
       thresholds: {
-        lines: 24.8,
-        functions: 20.3,
-        branches: 19.7,
-        statements: 24.6,
+        lines: 26.8,
+        functions: 21.9,
+        branches: 21.4,
+        statements: 26.5,
       },
     },
 

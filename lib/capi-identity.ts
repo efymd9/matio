@@ -71,6 +71,40 @@ export const CAPI_METADATA_KEYS = {
   ua: "capi_ua",
 } as const;
 
+// The four match signals — everything toCapiMetadata writes EXCEPT the consent
+// sentinel. They exist for one moment (the Purchase event, fired on the
+// transition into an access-granting status) and are erased from Stripe right
+// after it (lib/subscription-mirror.ts, #165): a raw IP must not outlive the
+// event it was captured for. `capi_consent` stays — it is a flag, not data.
+export const CAPI_IDENTITY_KEYS = [
+  CAPI_METADATA_KEYS.fbp,
+  CAPI_METADATA_KEYS.fbc,
+  CAPI_METADATA_KEYS.ip,
+  CAPI_METADATA_KEYS.ua,
+] as const;
+
+// Stripe deletes a metadata key whose value is set to the empty string, so this
+// patch — sent through subscriptions.update — removes all four in one call and
+// is a no-op for keys already gone (idempotent by construction).
+export const CAPI_IDENTITY_SCRUB: Readonly<
+  Record<(typeof CAPI_IDENTITY_KEYS)[number], "">
+> = {
+  [CAPI_METADATA_KEYS.fbp]: "",
+  [CAPI_METADATA_KEYS.fbc]: "",
+  [CAPI_METADATA_KEYS.ip]: "",
+  [CAPI_METADATA_KEYS.ua]: "",
+};
+
+// Whether the subscription still carries any of the four signals — the
+// predicate for the scrub, so a sub whose keys are already gone (a genuine
+// renewal months later) costs no Stripe call at all.
+export function metadataHasCapiIdentity(
+  meta: Record<string, string> | null | undefined,
+): boolean {
+  const m = meta ?? {};
+  return CAPI_IDENTITY_KEYS.some((key) => Boolean(m[key]));
+}
+
 // Flatten identity into Stripe metadata. Always includes the consent sentinel
 // (the caller only calls this when consent is present) so the webhook can tell
 // "consented, identity happened to be empty" from "no consent at all".

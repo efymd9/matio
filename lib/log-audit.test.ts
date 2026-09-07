@@ -21,19 +21,33 @@ const MARKER_NAME = "Leak Marker";
 const MARKER_SECRET = "dummy-db-password";
 const MARKER_DATABASE_URL = `postgres://matio:${MARKER_SECRET}@db.example.invalid/matio`;
 
-const { execute, select, update, del, insert, batchSend, clerkVerify } = vi.hoisted(
-  () => ({
-    execute: vi.fn(),
-    select: vi.fn(),
-    update: vi.fn(),
-    del: vi.fn(),
-    insert: vi.fn(),
-    batchSend: vi.fn(),
-    clerkVerify: vi.fn(),
-  }),
-);
+const {
+  execute,
+  select,
+  update,
+  del,
+  insert,
+  batchSend,
+  clerkVerify,
+  stripeSubUpdate,
+} = vi.hoisted(() => ({
+  execute: vi.fn(),
+  select: vi.fn(),
+  update: vi.fn(),
+  del: vi.fn(),
+  insert: vi.fn(),
+  batchSend: vi.fn(),
+  clerkVerify: vi.fn(),
+  stripeSubUpdate: vi.fn(),
+}));
 vi.mock("@/db", () => ({ db: { execute, select, update, delete: del, insert } }));
 vi.mock("server-only", () => ({}));
+
+// The subscription mirror's only Stripe call is the metadata scrub; the SDK
+// client is replaced so the audit can make that call fail on demand.
+vi.mock("@/lib/stripe", () => ({
+  getStripe: () => ({ subscriptions: { update: stripeSubUpdate } }),
+}));
 
 // The Clerk webhook's signature check is exercised in its own suite
 // (app/api/webhooks/clerk/route.test.ts); here the event is handed over
@@ -75,6 +89,7 @@ import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
+import { mirrorSubscription } from "@/lib/subscription-mirror";
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -111,6 +126,7 @@ beforeEach(() => {
   insert.mockReset();
   batchSend.mockReset();
   clerkVerify.mockReset();
+  stripeSubUpdate.mockReset();
 });
 
 afterEach(() => {
@@ -441,5 +457,65 @@ describe("log audit · /api/v1/progress (the app's watch-progress save)", () => 
     for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
       expect(logged()).not.toContain(marker);
     }
+  });
+});
+
+describe("log audit · Stripe subscription mirror (CAPI identity scrub, #165)", () => {
+  // The one place the project holds a raw IP: the Purchase snapshot in the
+  // subscription's Stripe metadata, erased right after the event. The worst
+  // case this path logs is the erase itself failing with an error that quotes
+  // the request — values included — while the users row it just read carries
+  // the address. Only the subscription id may come out.
+  const MARKER_IP = "203.0.113.77";
+  const MARKER_UA = "Mozilla/5.0 (LeakMarker; rv:1.0)";
+  const SUB_ID = "sub_marker";
+
+  function selectChain(rows: unknown[]) {
+    const chain = {
+      from: () => chain,
+      where: () => chain,
+      limit: async () => rows,
+    };
+    return chain;
+  }
+
+  it("logs a failed scrub by subscription id only — never the IP, the UA or the address", async () => {
+    vi.stubEnv("STRIPE_PRICE_MONTHLY", "price_monthly_dummy");
+    select
+      .mockImplementationOnce(() => selectChain([{ id: "user_1", email: MARKER_EMAIL }]))
+      .mockImplementationOnce(() => selectChain([])); // no prior row: the Purchase moment
+    insert.mockImplementation(() => ({
+      values: () => ({ onConflictDoUpdate: async () => undefined }),
+    }));
+    update.mockImplementation(() => ({ set: () => ({ where: async () => undefined }) }));
+    const stripeMessage = `Invalid metadata on ${SUB_ID}: capi_ip=${MARKER_IP} capi_ua=${MARKER_UA}`;
+    expect(stripeMessage).toContain(MARKER_IP); // the fixture must be dirty
+    stripeSubUpdate.mockRejectedValue(new Error(stripeMessage));
+    const logged = captureConsole();
+
+    await mirrorSubscription({
+      id: SUB_ID,
+      customer: "cus_marker",
+      status: "active",
+      trial_start: null,
+      cancel_at_period_end: false,
+      cancel_at: null,
+      metadata: { capi_consent: "1", capi_ip: MARKER_IP, capi_ua: MARKER_UA },
+      items: {
+        data: [
+          {
+            price: { id: "price_monthly_dummy", unit_amount: 3800, currency: "usd" },
+            current_period_end: 1_900_000_000,
+          },
+        ],
+      },
+    } as never);
+
+    expect(stripeSubUpdate).toHaveBeenCalledTimes(1); // the fixture reached the scrub
+    for (const marker of [MARKER_IP, MARKER_UA, MARKER_EMAIL]) {
+      expect(logged()).not.toContain(marker);
+    }
+    // What it DOES log: the subscription id, enough to re-run the sweep by hand.
+    expect(logged()).toContain(SUB_ID);
   });
 });
