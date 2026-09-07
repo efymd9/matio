@@ -676,7 +676,9 @@ components/
   watch/                   # player, paywall, playback-status, overlays
                            #   (series-end-overlay captures reminder emails
                            #   into show_reminders — see "Episode reminder
-                           #   emails" rule)
+                           #   emails" rule; fork-choice-overlay — the
+                           #   branching prompt, Lab-first variant A, see
+                           #   "Branching video" → Player)
   welcome/                 # ticket-sign-in (consumes the Clerk sign-in ticket
                            #   client-side; email-code fallback)
 db/
@@ -869,7 +871,9 @@ sentry-client-init.ts      # browser Sentry.init (no Session Replay, no
                            #   feedback widget — both record the viewer)
 sentry.server.config.ts    # Node init  — all three spread the same
 sentry.edge.config.ts      # edge init     privacy options from lib/observability
-lab/                       # UI Lab gallery pages (token sheet, golden.ts)
+lab/                       # UI Lab gallery pages (token sheet, golden.ts,
+                           #   fork-choice variant board + the four Lab-only
+                           #   alternatives to the shipped fork prompt)
 tools/claude/              # board + watcher + janitor scripts (see above)
 tools/qa/                  # no-magic-styles.sh (CI style gate)
 tools/lab/                 # the Lab outside vitest: `vitest` shim + alias
@@ -949,7 +953,8 @@ infra/
   (`components/watch/vertical-chrome.tsx` vs the horizontal transport), gated
   by `lib/use-vertical-layout.ts` (vertical && viewport ≤768px). Any player
   edit has to be checked in both orientations.
-- **Branching video (2026-09-06, #143 — PR 1 of 2; the player is #144)**:
+- **Branching video (2026-09-06 #143 schema + admin; 2026-09-07 #144 the
+  player)**:
   Bandersnatch-style forks. **A branch is an ordinary `episodes` row** with
   `branch_of_episode_id` set (self-FK, `SET NULL`; migration 0024 —
   expand-only, no contract phase), so the whole upload / webhook / token /
@@ -970,16 +975,17 @@ infra/
   `showHasTierGating` (a hidden free/member branch must not flip an
   all-subscriber show to per-episode walls), the home hero's "first
   episode" + episode count, the reminder-email picker + `sendShowReminders`
-  (a branch answers `episode_invalid` — its `?ep=` deep link is dead), and
-  the watch page's Player `episodes` prop (PR 1 filters them out entirely —
-  that prop feeds both the overlay and `episodes[idx + 1]`; PR 2 threads
-  them through as playable-but-unlisted). A branch is **not a release**:
+  (a branch answers `episode_invalid` — its reminder deep link would be
+  dead), and every list the watch player renders (see the player paragraph
+  — the Player's `episodes` prop itself KEEPS the branches, playable but
+  unlisted). A branch is **not a release**:
   both `released_at` stamps (publish action + Mux ready webhook) skip it, so
   no pulse marker / release-retention row appears for it.
   `lib/continue-watching.ts` leads a FINISHED branch on to its single silent
   continuation (one extra query, only when a branch row is present) instead
-  of dropping the show from the rail, and gives an UNFINISHED branch no tile
-  until #144 can resume one. The mobile `/api/v1` excludes a branch-bearing
+  of dropping the show from the rail, and resumes an UNFINISHED branch under
+  its PARENT's number (a `parent_episode` self-join alias in both candidate
+  queries — the tile reads "Ep. 2" for branch 902, like the player). The mobile `/api/v1` excludes a branch-bearing
   show WHOLESALE (`linearShowsOnly()` in `lib/api/v1.ts`, WHERE-only in
   `catalog` + `shows/[slug]`; DTOs untouched). **`deleteSeason` deletes the
   choices pointing INTO the season first, in the same transaction** — the
@@ -999,9 +1005,58 @@ infra/
   `publish_choice_target_not_branch` / `publish_branch_cycle` — on EVERY
   published save, not only the draft→published edge. `deleteEpisode` on a
   choice target is refused by the FK; the page hides the button and says why.
-  Deferred (registry): re-choose on seek-back, choice stats, mobile support,
-  the paid-mode trial-mint rate limit. Rationale and rejected designs: [ADR
-  0001](./docs/adr/0001-branching-video-graph.md).
+  **Player (#144, `components/watch/player.tsx`)**: the watch page delivers
+  ALL ready episodes (branches included — the `isNull(branch_of_episode_id)`
+  filter is gone) plus each one's `episode_choices` as a `PlayerEpisode` DTO
+  with `branchOfEpisodeId` / `forkPrompt` / `forkWindowSeconds` / `choices`
+  (prompt + labels picked in the SITE locale on the server via `inLocale`;
+  the player reads no locale for row copy). The shell resolves
+  `lib/branching.ts:resolveCandidates(current, episodes)` → `fork` (options
+  + default) / `next` (linear run or a branch's silent reconvergence) /
+  `end` — the `find(...) ?? episodes[0]` over a FILTERED array would restart
+  the show from episode 1 the moment a branch id arrived by `?ep=`, which is
+  why the branches stay in the array. **Everything shown by position reads
+  the LISTED run** (`listedEpisodes` / `listedPosition` / `displayNumber` /
+  `listedAncestor`): the episodes overlay, prev/next transport, counts, the
+  wall target; a branch prints its parent's number ("Ep. 2" throughout a
+  fork on episode 2, never "Ep. 902"), its prev is its parent (the v1 way to
+  choose again), and the position-keyed funnel events keep the server's
+  meaning (a branch is position 0 — so the Meta Lead check
+  `currentPosition === 1` can never fire on a branch). **Prefetch is
+  per-candidate** (`prefetches` map + `prefetchAttemptedRef` set): every
+  candidate's token from `PRELOAD_LEAD_SECONDS` out; hidden preloaders —
+  the default (or single follower) at `preload="auto"` as before, a fork's
+  other options only while the prompt is open at `preload="metadata"`, a
+  pick promoted to `auto` in place (the wrapper forwards `preload` via
+  `setPreload`, no remount); all preloaders keep the HARD-CODED
+  `disableTracking`/`disableCookies`/no-`envKey` form. **The prompt**
+  (`components/watch/fork-choice-overlay.tsx`, body-portaled like every
+  overlay, one for both chromes; Lab-first variant A of five —
+  `lab/fork-choice-variants.tsx`, `Lab/Fork choice`) opens from the fourth
+  `timeupdate` consumer (skip-intro shape, `el.ended` + snapshot guards)
+  while `duration − currentTime ≤ fork_window_seconds`; **its countdown IS
+  the video clock** (whole seconds; a pause pauses it; nothing ever pauses
+  the video), the pick lands in `forkChosenId` (changeable until the end;
+  a seek back out of the window closes the prompt, the pick survives), and
+  the transition is the existing gapless `onEnded` path with `target =
+  pick ?? default ?? next` — same `<video>`, playbackId + token together,
+  no new `key`. The subscriber token-refresh remount is HELD (`refreshHoldRef`,
+  polled before the fetch and again before `setRefreshNonce`) while the
+  prompt is open or the end is < 15s away — but only for a PLAYING element
+  and never longer than `REFRESH_HOLD_MAX_MS` (longest window + 5s) from the
+  timer firing: the flag is rewritten only by `timeupdate`, so a paused
+  element would otherwise hold until the token expired (test: "the token
+  refresh is held on a PLAYING element…"). PostHog: `fork_choice_made
+  {show_slug, episode_id, choice_position, is_default, timed_out}` fires at
+  the parent's `ended` BEFORE the target branches (so a wall or the trial
+  card still record the choice), `episode_auto_advanced` on the gapless path
+  only (its `to_episode` is 0 for a branch); no Meta event. Trial (paid-mode 60s preview) keeps its up-next card — the "next"
+  of a fork parent is its default there and on the transport's next button.
+  Deferred (registry): the owner's live pick among the five variants, the
+  device measurement behind the `metadata` preload trade-off, overlays in
+  element fullscreen (pre-existing), re-choose on seek-back, choice stats,
+  mobile support, the paid-mode trial-mint rate limit. Rationale and
+  rejected designs: [ADR 0001](./docs/adr/0001-branching-video-graph.md).
 - **Mux re-upload safety**: `createMuxUpload` only creates the upload URL — it does NOT clear the episode's playback fields. The clearing happens in `markEpisodeReprocessing`, which the upload widget calls from upchunk's `success` event. A cancelled mid-upload no longer permanently breaks the episode (Mux's webhook refuses to overwrite a different existing `asset_id`). Two numbers in this path are anti-regressions, not decoration: `uploads.create({ timeout: 86_400 })` (`app/admin/actions.ts` — Mux's one-hour default doesn't survive a multi-GB master and filled the account with `timed_out` uploads, #130), and upchunk's `retryCodes: [0, 408, 429, 500, 502, 503, 504]` + `attempts: 10` + `dynamicChunkSize` capped at 20MB (`components/admin/upload-widget.tsx` — the default list has no `0`, and a dropped connection is exactly status 0, so every network hiccup used to kill the upload on the FIRST try, #131). After success the widget polls `router.refresh()` every 10s (≤15 min) until the `episodeStatus` prop from the episode page reads `ready` (#136) — removing that prop unhooks the poller.
 - **Show artwork (poster/hero)**: drag-and-drop in the show form uploads **client-direct to Vercel Blob** — `components/admin/image-upload-field.tsx` calls `upload()` from `@vercel/blob/client`, which gets a scoped token from `/api/admin/upload-image` (`handleUpload`; admin-gated via `getCurrentAdmin()`, image content-types only, ≤15 MB, pathname pinned to `shows/(poster|hero)-*`, `addRandomSuffix` so nothing is ever overwritten). The file bytes never touch our functions (same philosophy as the Mux/upchunk video path — sidesteps the ~4.5 MB body limit). The returned URL lands in the existing `posterImageUrl`/`heroImageUrl` form fields, so `createShow`/`updateShow` persist it unchanged; `updateShow` best-effort `del()`s the previous Blob object when artwork is replaced/cleared (scoped to our Blob host — legacy same-origin `/shows/*.png` values are left alone and still work). The URL input remains as a fallback for same-origin paths; arbitrary external hosts will throw in `next/image` on the public pages (not in the `remotePatterns` allowlist).
 - Playback always goes through `/api/playback-token` → signed Mux JWT. Subscriber TTL: 1 hour (auto-refreshed). Trial TTL: `min(remaining, TRIAL_DURATION_SECONDS)`.

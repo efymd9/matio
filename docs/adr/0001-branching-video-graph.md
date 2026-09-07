@@ -91,3 +91,44 @@ stays untouched with a numbering convention (branches from 900).
   become columns on `episode_choices`, not a rewrite), or if branches need
   their own tier — today a branch inherits nothing; it has its own `access`
   like any episode, and the admin sets it.
+
+## Addendum 2026-09-07 — the player (#144)
+
+Three decisions with lasting consequences were taken while building the
+viewer half on top of this graph; they are recorded here rather than only in
+code comments because each rules out a plausible alternative.
+
+- **The fork is a transition, not a second player state.** The prompt's
+  countdown is the parent's own remaining time (`duration − currentTime`),
+  and the branch installs through the existing gapless auto-advance path at
+  `ended` — the same `<video>` element, playbackId and token swapped
+  together, no remount. Rejected: a separate timer that pauses the video at
+  zero (a pause loses WebKit's per-element autoplay blessing; on iOS the
+  resume then needs a fresh gesture — the owner's "never pause" decision),
+  and a keyed remount of the element per branch (same loss, on every fork).
+  Consequence: the viewer can change the pick until the very end, a pause
+  pauses the countdown, and the seam is exactly as good as auto-advance
+  between two linear episodes — which the content rules (a choice tail of
+  8–10s, a scene cut at the fork, one export pass for all branches) have to
+  make invisible.
+- **Branches stay in the player's `episodes` array; lists are derived.**
+  The watch page no longer filters `branch_of_episode_id IS NULL`; instead
+  the player computes the listed run (`listedEpisodes`), positions
+  (`listedPosition`, 0 for a branch — the server's convention) and the
+  printed number (`displayNumber` — the listed ancestor's position, so a
+  branch reads as the episode it continues). Rejected: filtering in the
+  page and carrying a side-channel of branches — `episodes.find(id) ??
+  episodes[0]` over a filtered array silently restarts the show when a
+  branch id arrives by `?ep=` (the rail's resume tile, the post-signup
+  redirect).
+- **Bandwidth over readiness for the options nobody picked.** Every
+  candidate's token is prefetched 45s out, but only the option that will
+  play if nothing is tapped gets a full hidden warm-up (`preload="auto"`);
+  the others mount at `preload="metadata"` while the prompt is open and are
+  promoted in place on a pick. Decided by arithmetic (three 30s buffers in a
+  ≤30s window exceed a Fast-3G link), not by the device measurement the
+  spec asked for — no branching show exists on a bench yet. The registry
+  row says how to close it.
+
+The prompt's look is Lab-first variant A of five (`Lab/Fork choice`); the
+owner has not yet picked live — a registry row, not an ADR decision.
