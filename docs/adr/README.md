@@ -37,4 +37,4 @@ what has to be revisited if a stated assumption stops holding.
 
 ## Records
 
-_(none yet)_
+- [0001. Branching video: a branch is an episode row, the graph is `episode_choices`](./0001-branching-video-graph.md) — Accepted, 2026-09-06

@@ -4,7 +4,10 @@ vi.mock("server-only", () => ({}));
 
 // The query builder is faked down to the shape this route uses; what matters
 // is the DTO the app receives, since a shipped binary parses exactly it.
-const h = vi.hoisted(() => ({ rows: [] as Record<string, unknown>[] }));
+const h = vi.hoisted(() => ({
+  rows: [] as Record<string, unknown>[],
+  where: undefined as unknown,
+}));
 
 vi.mock("@/db", () => ({
   db: {
@@ -12,9 +15,10 @@ vi.mock("@/db", () => ({
       from: () => ({
         leftJoin: () => ({
           leftJoin: () => ({
-            where: () => ({
-              groupBy: () => ({ orderBy: async () => h.rows }),
-            }),
+            where: (clause: unknown) => {
+              h.where = clause;
+              return { groupBy: () => ({ orderBy: async () => h.rows }) };
+            },
           }),
         }),
       }),
@@ -23,11 +27,17 @@ vi.mock("@/db", () => ({
 }));
 vi.mock("@/db/schema", () => ({ episodes: {}, seasons: {}, shows: {} }));
 vi.mock("drizzle-orm", () => ({
-  and: () => undefined,
+  and: (...clauses: unknown[]) => clauses,
   desc: () => undefined,
   eq: () => undefined,
   isNull: () => undefined,
   sql: Object.assign(() => undefined, { raw: () => undefined }),
+}));
+// The branching-show exclusion is a correlated subquery built in lib/api/v1;
+// its own test proves its shape — here only its PRESENCE in the WHERE matters.
+vi.mock("@/lib/api/v1", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/v1")>()),
+  linearShowsOnly: () => "linear-shows-only",
 }));
 
 import { GET } from "./route";
@@ -97,5 +107,12 @@ describe("GET /api/v1/catalog", () => {
     const res = await GET();
     expect(res.status).toBe(200);
     expect((await res.json()).shows).toEqual([]);
+  });
+
+  it("leaves shows with branching content out of the catalog", async () => {
+    // The native player has no fork overlay (#143): a branch-bearing show
+    // would play as a broken linear run, so it is excluded in the WHERE.
+    await GET();
+    expect(h.where).toContainEqual("linear-shows-only");
   });
 });
