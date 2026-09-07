@@ -9,6 +9,7 @@ import { fromStripeMetadata } from "@/lib/attribution";
 import {
   CHECKOUT_CLAIM_COOKIE,
   claimGuestCheckout,
+  isErasedCustomer,
   isGuestSubscription,
 } from "@/lib/guest-checkout";
 import { getDict } from "@/lib/i18n/server";
@@ -110,6 +111,16 @@ export default async function WelcomePage({
     // Non-guest sessions (the signed-in flow) never land here; a guest
     // session without an expanded subscription is a Stripe anomaly the
     // webhook will reconcile — nothing useful to render either way.
+    redirect("/");
+  }
+  // A /welcome URL replayed (history, a shared link) after the account it
+  // created was erased: the claim below would re-create it. Same tombstone
+  // the webhook mirror checks; same "nothing to render" answer.
+  if (
+    await isErasedCustomer(
+      typeof sub.customer === "string" ? sub.customer : sub.customer.id,
+    )
+  ) {
     redirect("/");
   }
 

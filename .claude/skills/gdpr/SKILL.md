@@ -145,7 +145,10 @@ PR: данные не размножаются бесконтрольно, ст�
   быть подписан на `user.deleted` (пока нет — строка в `docs/registry.md`).
   Тест `app/api/webhooks/clerk/route.test.ts` пришпиливает полную карту FK на
   `users`: новая таблица со ссылкой на `users` без `onDelete` ломает тест —
-  и это правильно, потому что иначе она ломала бы стирание.
+  и это правильно, потому что иначе она ломала бы стирание. Таблица БЕЗ FK
+  на `users` карту не меняет — так устроен `erased_customers` (тумбстоун
+  обязан пережить DELETE, поэтому ключ — Stripe customer id, не user id);
+  тот же тест пришпиливает, что у него FK нет вовсе.
 - **Каскады FK от `users.id`** (`db/schema/*`, проверено по коду):
   `CASCADE` — `subscriptions`, `watch_progress`, `watch_days`; `SET NULL` —
   `trial_sessions.user_id`, `visitors.user_id` (история визитов остаётся
@@ -163,11 +166,17 @@ PR: данные не размножаются бесконтрольно, ст�
 - **Файлы/медиа**: у пользователей нет загрузок. Чистить нечего.
 - **Джобы**: фоновых джоб с данными пользователей нет; рассылка — ручная
   кнопка в админке, читает `show_reminders` в момент нажатия.
-- **Процессоры**: Clerk — источник истины; Stripe Customer и PostHog person
-  (с `email`) остаются и требуют отдельных вызовов (#164) — живую подписку
-  Stripe обработчик `user.deleted` не ждёт: стирает локально и пишет
-  `console.error` с id пользователя/customer/subscription (не адрес), отмену
-  в Stripe делает человек; Resend — логи
+- **Процессоры**: Clerk — источник истины. Stripe — обработчик
+  `user.deleted` сам ставит живой подписке `cancel_at_period_end: true`
+  (best-effort: сбой Stripe стирание не останавливает, но уходит в лог и
+  Sentry по id) и ДО `DELETE FROM users` пишет `stripe_customer_id` в
+  тумбстоун `erased_customers` — без него следующий вебхук Stripe по этому
+  клиенту (`guest = "1"` в метаданных не истекает) воссоздал бы Clerk-
+  пользователя и `users` с адресом через `claimGuestCheckout`;
+  `mirrorSubscription` и `/welcome` спрашивают тумбстоун ПЕРЕД claim.
+  Stripe Customer (email, billing address) при этом остаётся — `customers.del`
+  = решение владельца (`docs/registry.md`); PostHog person (с `email`)
+  требует отдельного вызова (хвост #164); Resend — логи
   истекают через 30 дней сами; Meta/Google/OpenAI держат хешированный email
   и клиентские id событий — per-user удаления у них нет; Sentry — только
   `user.id`, истекает по ретеншену плана.

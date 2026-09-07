@@ -21,19 +21,45 @@ const MARKER_NAME = "Leak Marker";
 const MARKER_SECRET = "dummy-db-password";
 const MARKER_DATABASE_URL = `postgres://matio:${MARKER_SECRET}@db.example.invalid/matio`;
 
-const { execute, select, update, del, insert, batchSend, clerkVerify } = vi.hoisted(
-  () => ({
-    execute: vi.fn(),
-    select: vi.fn(),
-    update: vi.fn(),
-    del: vi.fn(),
-    insert: vi.fn(),
-    batchSend: vi.fn(),
-    clerkVerify: vi.fn(),
-  }),
-);
+const {
+  execute,
+  select,
+  update,
+  del,
+  insert,
+  batchSend,
+  clerkVerify,
+  stripeUpdate,
+  erasedCustomer,
+} = vi.hoisted(() => ({
+  execute: vi.fn(),
+  select: vi.fn(),
+  update: vi.fn(),
+  del: vi.fn(),
+  insert: vi.fn(),
+  batchSend: vi.fn(),
+  clerkVerify: vi.fn(),
+  stripeUpdate: vi.fn(),
+  erasedCustomer: vi.fn(),
+}));
 vi.mock("@/db", () => ({ db: { execute, select, update, delete: del, insert } }));
 vi.mock("server-only", () => ({}));
+
+// The erasure handler's one outbound call (cancel the live subscription at
+// Stripe) is a spy so its failure text can be seeded with a marker.
+vi.mock("@/lib/stripe", () => ({
+  getStripe: () => ({ subscriptions: { update: stripeUpdate } }),
+}));
+// The Stripe mirror's guest branch: the tombstone answer is the switch under
+// audit; the claim itself must never be reached from a tombstoned customer.
+vi.mock("@/lib/guest-checkout", () => ({
+  isGuestSubscription: (sub: { metadata?: Record<string, string> }) =>
+    (sub.metadata ?? {}).guest === "1",
+  isErasedCustomer: erasedCustomer,
+  claimGuestCheckout: async () => {
+    throw new Error("claim must not run for an erased customer");
+  },
+}));
 
 // The Clerk webhook's signature check is exercised in its own suite
 // (app/api/webhooks/clerk/route.test.ts); here the event is handed over
@@ -76,6 +102,7 @@ import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
+import { mirrorSubscription } from "@/lib/subscription-mirror";
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -112,6 +139,8 @@ beforeEach(() => {
   insert.mockReset();
   batchSend.mockReset();
   clerkVerify.mockReset();
+  stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
+  erasedCustomer.mockReset().mockResolvedValue(false);
 });
 
 afterEach(() => {
@@ -341,7 +370,11 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     };
   }
 
-  it("erases an account with a live subscription without logging its address", async () => {
+  function insertChain() {
+    return { values: () => ({ onConflictDoNothing: async () => undefined }) };
+  }
+
+  function deletedWithLiveSubscription() {
     clerkVerify.mockResolvedValue({
       type: "user.deleted",
       object: "event",
@@ -354,22 +387,80 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
       .mockImplementationOnce(() =>
         selectChain([{ stripeSubscriptionId: "sub_dummy" }]),
       );
+    insert.mockImplementation(insertChain);
     del.mockImplementation(() => deleteChain([{ id: "rem_1" }]));
+    return new Request("https://matio.tv/api/webhooks/clerk", {
+      method: "POST",
+    }) as never;
+  }
+
+  it("erases an account with a live subscription without logging its address", async () => {
+    const req = deletedWithLiveSubscription();
     const logged = captureConsole();
 
-    const res = await clerkWebhook(
-      new Request("https://matio.tv/api/webhooks/clerk", {
-        method: "POST",
-      }) as never,
-    );
+    const res = await clerkWebhook(req);
 
     expect(res.status).toBe(200);
     expect(logged()).not.toContain(MARKER_EMAIL);
-    // What it DOES log: the ids the owner needs to finish the job at Stripe.
+    // What it DOES log: the ids that tie the Stripe-side record together.
     expect(logged()).toContain(USER_ID);
     expect(logged()).toContain("sub_dummy");
   });
+
+  it("does not echo Stripe's error text when the cancellation fails", async () => {
+    // Stripe quotes request parameters in its messages; seed the address
+    // there so a naive `err.message` in the log would be caught.
+    stripeUpdate.mockRejectedValue(
+      Object.assign(new Error(`No such customer: ${MARKER_EMAIL}`), {
+        name: "StripeInvalidRequestError",
+        code: "resource_missing",
+        statusCode: 404,
+      }),
+    );
+    const req = deletedWithLiveSubscription();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).toContain("sub_dummy");
+    expect(logged()).toContain("resource_missing");
+  });
 });
+
+describe("log audit · Stripe mirror refusing an erased customer", () => {
+  it("logs the refusal by ids, not by the customer's address", async () => {
+    // A webhook payload carries the customer expanded — with the email —
+    // and the users lookup finds nothing (erased). The refusal line is the
+    // only thing this path writes.
+    select.mockImplementation(() => ({
+      from: () => ({ where: () => ({ limit: async () => [] }) }),
+    }));
+    erasedCustomer.mockResolvedValue(true);
+    const logged = captureConsole();
+
+    await mirrorSubscription({
+      id: "sub_marker",
+      object: "subscription",
+      status: "active",
+      metadata: { guest: "1", userId: "user_marker" },
+      customer: {
+        id: "cus_marker",
+        object: "customer",
+        email: MARKER_EMAIL,
+        name: MARKER_NAME,
+      },
+      items: { data: [] },
+    } as never);
+
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).not.toContain(MARKER_NAME);
+    expect(logged()).toContain("cus_marker");
+    expect(logged()).toContain("sub_marker");
+  });
+});
+
 
 describe("log audit · /api/v1/progress (the app's watch-progress save)", () => {
   // The body is client-controlled text headed for a uuid column; the
