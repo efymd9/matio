@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons } from "@/db/schema";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
@@ -58,6 +58,8 @@ export async function resolveHeroPreview(showId: string): Promise<HeroPreview> {
           featuredSeasons.map((s) => s.id),
         ),
         eq(episodes.status, "ready"),
+        // "First episode" means first LISTED episode — never a branch (#143).
+        isNull(episodes.branchOfEpisodeId),
       ),
     )
     .orderBy(asc(episodes.number))

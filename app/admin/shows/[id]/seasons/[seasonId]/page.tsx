@@ -51,12 +51,16 @@ export default async function SeasonPage({
       muxAssetId: episodes.muxAssetId,
       muxPlaybackId: episodes.muxPlaybackId,
       muxPlaybackPolicy: episodes.muxPlaybackPolicy,
+      branchOfEpisodeId: episodes.branchOfEpisodeId,
     })
     .from(episodes)
     .where(eq(episodes.seasonId, season.id))
     .orderBy(asc(episodes.number));
 
   const readyCount = seasonEpisodes.filter((e) => e.status === "ready").length;
+  // Branch badge (#143): "branch of E3" when the parent sits in this season,
+  // a bare "branch" otherwise (cross-season parents are legal, just rare).
+  const numberById = new Map(seasonEpisodes.map((e) => [e.id, e.number]));
 
   return (
     <div className="mx-auto max-w-3xl space-y-7">
@@ -135,6 +139,15 @@ export default async function SeasonPage({
                         status={episode.status}
                         hasAsset={!!episode.muxAssetId}
                       />
+                      {episode.branchOfEpisodeId ? (
+                        <span className="rounded-full border border-gold/40 px-2 py-0.5 text-[10px] font-semibold text-gold">
+                          {numberById.has(episode.branchOfEpisodeId)
+                            ? t.fork.branchOfBadge(
+                                numberById.get(episode.branchOfEpisodeId)!,
+                              )
+                            : t.fork.branchBadge}
+                        </span>
+                      ) : null}
                     </div>
                     {episode.description ? (
                       <p className="mt-1 line-clamp-1 text-xs text-cream/45">

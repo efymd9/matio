@@ -1,5 +1,5 @@
 {
-  "id": "3e282d2a-fdd0-4517-9f28-b3a0c4fad44f",
+  "id": "8862e3bf-5630-45cd-86db-6b5566e9a82c",
   "prevId": "497bbda1-846f-4f56-a583-f70f72f2557e",
   "version": "7",
   "dialect": "postgresql",
@@ -165,6 +165,116 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.episode_choices": {
+      "name": "episode_choices",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "from_episode_id": {
+          "name": "from_episode_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "to_episode_id": {
+          "name": "to_episode_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label_en": {
+          "name": "label_en",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "label_es": {
+          "name": "label_es",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_default": {
+          "name": "is_default",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {
+        "episode_choices_from_default_unique": {
+          "name": "episode_choices_from_default_unique",
+          "columns": [
+            {
+              "expression": "from_episode_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"episode_choices\".\"is_default\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "episode_choices_from_episode_id_episodes_id_fk": {
+          "name": "episode_choices_from_episode_id_episodes_id_fk",
+          "tableFrom": "episode_choices",
+          "tableTo": "episodes",
+          "columnsFrom": [
+            "from_episode_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "episode_choices_to_episode_id_episodes_id_fk": {
+          "name": "episode_choices_to_episode_id_episodes_id_fk",
+          "tableFrom": "episode_choices",
+          "tableTo": "episodes",
+          "columnsFrom": [
+            "to_episode_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "episode_choices_from_position_unique": {
+          "name": "episode_choices_from_position_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "from_episode_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.episodes": {
       "name": "episodes",
       "schema": "",
@@ -257,6 +367,31 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "branch_of_episode_id": {
+          "name": "branch_of_episode_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fork_prompt_en": {
+          "name": "fork_prompt_en",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fork_prompt_es": {
+          "name": "fork_prompt_es",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fork_window_seconds": {
+          "name": "fork_window_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 10
         }
       },
       "indexes": {},
@@ -273,6 +408,19 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "episodes_branch_of_episode_id_episodes_id_fk": {
+          "name": "episodes_branch_of_episode_id_episodes_id_fk",
+          "tableFrom": "episodes",
+          "tableTo": "episodes",
+          "columnsFrom": [
+            "branch_of_episode_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -286,32 +434,6 @@
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.erased_customers": {
-      "name": "erased_customers",
-      "schema": "",
-      "columns": {
-        "stripe_customer_id": {
-          "name": "stripe_customer_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "erased_at": {
-          "name": "erased_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

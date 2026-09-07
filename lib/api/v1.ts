@@ -1,6 +1,9 @@
 import "server-only";
+import { and, eq, isNotNull, notExists, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
+import { db } from "@/db";
+import { episodes, seasons, shows } from "@/db/schema";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { SITE_URL } from "@/lib/seo";
 import type { ApiErrorBody, ApiErrorCode, SignupGate } from "./types";
@@ -8,6 +11,29 @@ import type { ApiErrorBody, ApiErrorCode, SignupGate } from "./types";
 // Server-side helpers for the /api/v1 mobile surface. The wire TYPES live in
 // ./types.ts (universal, shared with the app); this module is the server half
 // and must never be imported by a client bundle.
+
+// WHERE clause for the show queries in /v1/catalog and /v1/shows/:slug: only
+// shows WITHOUT branching content (#143). The native player has no fork
+// overlay, so a show that carries a branch would play as a broken linear
+// run — the owner's decision is to hide such shows from the app wholesale
+// rather than teach the DTOs about branches (lib/api/types.ts is untouched).
+// Correlated NOT EXISTS against the outer `shows` row; a single branch
+// episode of ANY status hides the show, which is also what makes an admin
+// building a fork on a live show safe for phones already in the field.
+export function linearShowsOnly() {
+  return notExists(
+    db
+      .select({ one: sql`1` })
+      .from(episodes)
+      .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+      .where(
+        and(
+          eq(seasons.showId, shows.id),
+          isNotNull(episodes.branchOfEpisodeId),
+        ),
+      ),
+  );
+}
 
 // The app's audience-measurement identifier — the native equivalent of the
 // matio_aid cookie. proxy.ts:applyVisitorCookie deliberately early-returns on

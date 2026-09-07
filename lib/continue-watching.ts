@@ -1,9 +1,10 @@
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
-import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { db } from "@/db";
 import {
+  episodeChoices,
   episodes,
   seasons,
   shows,
@@ -48,26 +49,51 @@ const MAX_ITEMS = 12;
 // leaves the rail instead of sitting at a full progress bar forever.
 const FINISHED_FRACTION = 0.95;
 
+type CandidateRow = {
+  slug: string;
+  title: string;
+  orientation: ShowOrientation;
+  heroImageUrl: string | null;
+  posterImageUrl: string | null;
+  episodeId: string;
+  episodeNumber: number;
+  episodeTitle: string;
+  positionSeconds: number;
+  durationSeconds: number | null;
+  completed: boolean;
+  updatedAt: Date;
+  // Branching video (#143): set when the row's episode is a branch.
+  branchOfEpisodeId: string | null;
+};
+
+// Where a finished BRANCH leads next: the target of its single silent
+// choice (the reconvergence hop), keyed by the branch's episode id. Only
+// single-choice branches map — a fork at the end of a branch needs the
+// viewer's pick, and an ending has nowhere to go.
+type Continuation = {
+  episodeId: string;
+  episodeNumber: number;
+  episodeTitle: string;
+  durationSeconds: number | null;
+};
+
 // Collapse rows (already sorted most-recent-first) to one tile per show,
 // capped at MAX_ITEMS. The LATEST row per show decides its fate: if that
 // row is finished (completed flag or ≥95% watched) or its duration is
 // still unknown, the show gets no tile — falling through to an older row
 // would resurface a stale episode/position.
+//
+// Branches (#143) are handled in two halves. A FINISHED branch whose single
+// choice leads on becomes a tile for THAT episode at 0:00 — a linear episode
+// leaves the rail when finished because auto-advance writes the next row
+// within seconds; a branch's silent hop is the same moment, but a viewer who
+// stops exactly at the seam would otherwise lose the show from the rail. An
+// UNFINISHED branch yields no tile at all until the player can play one
+// (#144): today its ?ep= deep link falls back to episode 1, and a tile that
+// promises "resume 901" and lands elsewhere is worse than no tile.
 function collapse(
-  rows: Array<{
-    slug: string;
-    title: string;
-    orientation: ShowOrientation;
-    heroImageUrl: string | null;
-    posterImageUrl: string | null;
-    episodeId: string;
-    episodeNumber: number;
-    episodeTitle: string;
-    positionSeconds: number;
-    durationSeconds: number | null;
-    completed: boolean;
-    updatedAt: Date;
-  }>,
+  rows: CandidateRow[],
+  continuations: Map<string, Continuation>,
 ): ContinueWatchingItem[] {
   const seen = new Set<string>();
   const items: ContinueWatchingItem[] = [];
@@ -79,26 +105,93 @@ function collapse(
     const duration = row.durationSeconds;
     if (!duration || duration <= 0) continue;
     const fraction = Math.min(1, Math.max(0, row.positionSeconds / duration));
-    if (row.completed || fraction >= FINISHED_FRACTION) continue;
-    items.push({
-      show: {
-        slug: row.slug,
-        title: row.title,
-        orientation: row.orientation,
-        heroImageUrl: row.heroImageUrl,
-        posterImageUrl: row.posterImageUrl,
-      },
-      episodeId: row.episodeId,
-      episodeNumber: row.episodeNumber,
-      episodeTitle: row.episodeTitle,
-      positionSeconds: row.positionSeconds,
-      durationSeconds: duration,
-      fraction,
-      updatedAt: row.updatedAt,
-    });
+    const finished = row.completed || fraction >= FINISHED_FRACTION;
+    const next = finished && row.branchOfEpisodeId
+      ? continuations.get(row.episodeId)
+      : undefined;
+    if (finished && !next) continue;
+    // Until #144 a branch cannot be resumed (see above) — no tile.
+    if (!finished && row.branchOfEpisodeId) continue;
+    const show = {
+      slug: row.slug,
+      title: row.title,
+      orientation: row.orientation,
+      heroImageUrl: row.heroImageUrl,
+      posterImageUrl: row.posterImageUrl,
+    };
+    if (next) {
+      const nextDuration = next.durationSeconds;
+      if (!nextDuration || nextDuration <= 0) continue;
+      items.push({
+        show,
+        episodeId: next.episodeId,
+        episodeNumber: next.episodeNumber,
+        episodeTitle: next.episodeTitle,
+        positionSeconds: 0,
+        durationSeconds: nextDuration,
+        fraction: 0,
+        updatedAt: row.updatedAt,
+      });
+    } else {
+      items.push({
+        show,
+        episodeId: row.episodeId,
+        episodeNumber: row.episodeNumber,
+        episodeTitle: row.episodeTitle,
+        positionSeconds: row.positionSeconds,
+        durationSeconds: duration,
+        fraction,
+        updatedAt: row.updatedAt,
+      });
+    }
     if (items.length >= MAX_ITEMS) break;
   }
   return items;
+}
+
+// Resolves the silent continuation of every branch among the candidate
+// rows in one query; no branches → no query. Forks (≥2 choices) and
+// endings (0) deliberately yield no entry — see collapse().
+async function loadContinuations(
+  rows: CandidateRow[],
+): Promise<Map<string, Continuation>> {
+  const map = new Map<string, Continuation>();
+  const branchIds = rows
+    .filter((r) => r.branchOfEpisodeId !== null)
+    .map((r) => r.episodeId);
+  if (branchIds.length === 0) return map;
+
+  const edges = await db
+    .select({
+      fromEpisodeId: episodeChoices.fromEpisodeId,
+      episodeId: episodes.id,
+      episodeNumber: episodes.number,
+      episodeTitle: episodes.title,
+      durationSeconds: episodes.durationSeconds,
+    })
+    .from(episodeChoices)
+    .innerJoin(episodes, eq(episodes.id, episodeChoices.toEpisodeId))
+    .where(
+      and(
+        inArray(episodeChoices.fromEpisodeId, branchIds),
+        eq(episodes.status, "ready"),
+      ),
+    );
+
+  const counts = new Map<string, number>();
+  for (const e of edges) {
+    counts.set(e.fromEpisodeId, (counts.get(e.fromEpisodeId) ?? 0) + 1);
+  }
+  for (const e of edges) {
+    if (counts.get(e.fromEpisodeId) !== 1) continue;
+    map.set(e.fromEpisodeId, {
+      episodeId: e.episodeId,
+      episodeNumber: e.episodeNumber,
+      episodeTitle: e.episodeTitle,
+      durationSeconds: e.durationSeconds,
+    });
+  }
+  return map;
 }
 
 // Resume rail for the home page. Signed-in users get their watch_progress;
@@ -123,6 +216,7 @@ export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
         durationSeconds: episodes.durationSeconds,
         completed: watchProgress.completed,
         updatedAt: watchProgress.updatedAt,
+        branchOfEpisodeId: episodes.branchOfEpisodeId,
       })
       .from(watchProgress)
       .innerJoin(episodes, eq(episodes.id, watchProgress.episodeId))
@@ -138,7 +232,7 @@ export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
       )
       .orderBy(desc(watchProgress.updatedAt))
       .limit(CANDIDATE_LIMIT);
-    return collapse(rows);
+    return collapse(rows, await loadContinuations(rows));
   }
 
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
@@ -162,6 +256,7 @@ export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
       // trial_sessions has no updated_at; started_at is the closest proxy
       // for "most recent session" ordering.
       updatedAt: trialSessions.startedAt,
+      branchOfEpisodeId: episodes.branchOfEpisodeId,
     })
     .from(trialSessions)
     .innerJoin(episodes, eq(episodes.id, trialSessions.lastEpisodeId))
@@ -177,5 +272,5 @@ export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
     )
     .orderBy(desc(trialSessions.startedAt))
     .limit(CANDIDATE_LIMIT);
-  return collapse(rows);
+  return collapse(rows, await loadContinuations(rows));
 }

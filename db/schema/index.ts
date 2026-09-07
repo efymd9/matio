@@ -4,6 +4,7 @@ export * from "./stripe_events";
 export * from "./shows";
 export * from "./seasons";
 export * from "./episodes";
+export * from "./episode_choices";
 export * from "./trial_sessions";
 export * from "./watch_progress";
 export * from "./show_reminders";

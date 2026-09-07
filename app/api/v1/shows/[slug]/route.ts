@@ -3,7 +3,12 @@ import type { NextRequest } from "next/server";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import type { EpisodeSummary, ShowDetail } from "@/lib/api/types";
-import { absoluteMediaUrl, apiError, apiOk } from "@/lib/api/v1";
+import {
+  absoluteMediaUrl,
+  apiError,
+  apiOk,
+  linearShowsOnly,
+} from "@/lib/api/v1";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 
 // GET /api/v1/shows/:slug — one published show plus its ready episodes.
@@ -39,6 +44,9 @@ export async function GET(
         eq(shows.slug, slug),
         eq(shows.status, "published"),
         isNull(shows.deletedAt),
+        // A show with branching content 404s here exactly as it is absent
+        // from /v1/catalog (#143) — same WHERE, same answer.
+        linearShowsOnly(),
       ),
     )
     .limit(1);
