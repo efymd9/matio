@@ -99,9 +99,9 @@ export default defineConfig({
       //   локальный замер завышает против CI на ~0.5–0.7 п.п. — окончательные
       //   числа выставляются по логу CI).
       thresholds: {
-        lines: 32.0,
-        functions: 26.4,
-        branches: 26.5,
+        lines: 32.1,
+        functions: 26.5,
+        branches: 26.8,
         statements: 31.7,
       },
     },
