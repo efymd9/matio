@@ -523,6 +523,10 @@ describe("Player — Mux Data consent on the live element", () => {
 import { capturePostHog } from "@/lib/posthog-events";
 import { onPixelReady } from "@/lib/meta-pixel-events";
 
+// The overlays load through next/dynamic — under a full parallel run the
+// lazy import can take longer than Testing Library's 1s default.
+const LONG = { timeout: 5_000 };
+
 function clock(video: HTMLVideoElement, duration: number) {
   let currentTime = 0;
   let ended = false;
@@ -600,7 +604,7 @@ describe("Player — branching video (#144)", () => {
       // tagged, the countdown reads the video clock, and the non-default
       // preloader mounts at preload=metadata.
       c.seek(592);
-      const group = await screen.findByRole("group", { name: en.forkOverlay.label });
+      const group = await screen.findByRole("group", { name: en.forkOverlay.label }, LONG);
       expect(group.textContent).toContain("Kiss him or hug him?");
       const kiss = screen.getByRole("button", { name: /kiss him/i });
       const hug = screen.getByRole("button", { name: /hug him/i });
@@ -670,7 +674,7 @@ describe("Player — branching video (#144)", () => {
     c.seek(560);
     await waitFor(() => expect(tokenFetches()).toHaveLength(3));
     c.seek(595);
-    await screen.findByRole("group", { name: en.forkOverlay.label });
+    await screen.findByRole("group", { name: en.forkOverlay.label }, LONG);
     expect(screen.getByText(en.forkOverlay.autoIn(5))).toBeTruthy();
 
     await c.end();
@@ -693,7 +697,7 @@ describe("Player — branching video (#144)", () => {
     await waitFor(() => expect(probe.inits).toHaveLength(1));
     const c = clock(video, 600);
     c.seek(593);
-    const kiss = await screen.findByRole("button", { name: /kiss him/i });
+    const kiss = await screen.findByRole("button", { name: /kiss him/i }, LONG);
     await act(async () => {
       kiss.click();
     });
@@ -702,7 +706,7 @@ describe("Player — branching video (#144)", () => {
       expect(screen.queryByRole("group", { name: en.forkOverlay.label })).toBeNull(),
     );
     c.seek(594);
-    const again = await screen.findByRole("button", { name: /kiss him/i });
+    const again = await screen.findByRole("button", { name: /kiss him/i }, LONG);
     expect(again.getAttribute("aria-pressed")).toBe("true");
   });
 
@@ -744,7 +748,7 @@ describe("Player — branching video (#144)", () => {
     // Nothing follows an ending — no prefetch at all.
     expect(tokenFetches()).toEqual(["b-931"]);
     await c.end();
-    await screen.findByText(en.seriesEndOverlay.kicker);
+    await screen.findByText(en.seriesEndOverlay.kicker, {}, LONG);
     expect(probe.inits).toHaveLength(1);
     expect(capturePostHog).not.toHaveBeenCalledWith("episode_auto_advanced", expect.anything());
     // Meta Lead is "finished the FIRST episode" — a branch is position 0.
@@ -757,7 +761,7 @@ describe("Player — branching video (#144)", () => {
     await waitFor(() => expect(probe.inits).toHaveLength(1));
     const c = clock(video, 600);
     await c.end();
-    await screen.findByText(en.seriesEndOverlay.kicker);
+    await screen.findByText(en.seriesEndOverlay.kicker, {}, LONG);
     expect(probe.inits).toHaveLength(1);
   });
 
@@ -776,7 +780,7 @@ describe("Player — branching video (#144)", () => {
     await act(async () => {
       screen.getByRole("button", { name: en.player.episodesBtn }).click();
     });
-    const dialog = await screen.findByRole("dialog", { name: en.episodesOverlay.title });
+    const dialog = await screen.findByRole("dialog", { name: en.episodesOverlay.title }, LONG);
     expect(dialog.textContent).toContain(en.episodesOverlay.count(3));
     expect(dialog.textContent).not.toContain("902");
     expect(dialog.textContent).not.toContain("hugs him");
