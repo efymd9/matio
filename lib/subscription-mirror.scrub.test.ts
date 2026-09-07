@@ -61,6 +61,9 @@ vi.mock("@/lib/guest-checkout", () => ({
   isGuestSubscription: (sub: { metadata?: Record<string, string> }) =>
     (sub.metadata ?? {}).guest === "1",
   claimGuestCheckout: h.claimGuest,
+  // #179 added the tombstone probe on the guest branch; none of these cases
+  // reach it, but the module shape must match main so the import resolves.
+  isErasedCustomer: async () => false,
 }));
 
 import { mirrorSubscription } from "./subscription-mirror";

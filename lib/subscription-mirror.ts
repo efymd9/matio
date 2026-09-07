@@ -420,7 +420,10 @@ export async function mirrorSubscription(sub: Stripe.Subscription) {
 // deletes a metadata key set to "", and deleting an absent key is a no-op. The
 // predicate is "keys present", not "consent present", so a genuine renewal
 // months later costs no Stripe call. Ids only in the log — the metadata IS the
-// data being erased.
+// data being erased. Cost: the update itself raises one extra
+// customer.subscription.updated per purchase — that echo reaches this mirror
+// with the keys already gone, so the predicate stops it before any Stripe call
+// (no loop, one redundant upsert).
 async function scrubCapiIdentity(sub: Stripe.Subscription): Promise<void> {
   if (!metadataHasCapiIdentity(sub.metadata)) return;
   try {
