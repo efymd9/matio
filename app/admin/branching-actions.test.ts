@@ -11,7 +11,12 @@ vi.mock("server-only", () => ({}));
 const h = vi.hoisted(() => ({
   selects: [] as unknown[][],
   where: [] as unknown[],
-  writes: [] as Array<{ op: string; table: unknown; values?: unknown }>,
+  writes: [] as Array<{
+    op: string;
+    table: unknown;
+    values?: unknown;
+    where?: unknown;
+  }>,
   txFails: false,
   revalidated: [] as string[],
 }));
@@ -30,45 +35,48 @@ vi.mock("next/navigation", () => ({ redirect: () => undefined }));
 
 function writer(op: string) {
   return (table: unknown) => {
-    const record = (values?: unknown) => {
-      h.writes.push({ op, table, values });
+    const record = (values?: unknown, where?: unknown) => {
+      h.writes.push({ op, table, values, where });
     };
     return {
       set: (values: unknown) => ({
-        where: async () => record(values),
+        where: async (where: unknown) => record(values, where),
       }),
-      where: async () => record(),
+      where: async (where: unknown) => record(undefined, where),
       values: async (values: unknown) => record(values),
     };
   };
 }
 
-vi.mock("@/db", () => ({
-  db: {
-    select: () => {
-      const result = h.selects.shift() ?? [];
-      const chain = {
-        from: () => chain,
-        innerJoin: () => chain,
-        where: (clause: unknown) => {
-          h.where.push(clause);
-          return chain;
-        },
-        orderBy: () => chain,
-        limit: async () => result,
-        then: (
-          resolve: (v: unknown) => unknown,
-          reject: (e: unknown) => unknown,
-        ) => Promise.resolve(result).then(resolve, reject),
-      };
+function select() {
+  const result = h.selects.shift() ?? [];
+  const chain = {
+    from: () => chain,
+    innerJoin: () => chain,
+    where: (clause: unknown) => {
+      h.where.push(clause);
       return chain;
     },
+    orderBy: () => chain,
+    limit: async () => result,
+    then: (
+      resolve: (v: unknown) => unknown,
+      reject: (e: unknown) => unknown,
+    ) => Promise.resolve(result).then(resolve, reject),
+  };
+  return chain;
+}
+
+vi.mock("@/db", () => ({
+  db: {
+    select,
     update: writer("update"),
     delete: writer("delete"),
     insert: writer("insert"),
     transaction: async (fn: (tx: unknown) => Promise<void>) => {
       if (h.txFails) throw new Error("connection reset");
       return fn({
+        select,
         update: writer("update"),
         delete: writer("delete"),
         insert: writer("insert"),
@@ -85,9 +93,10 @@ vi.mock("drizzle-orm", () => ({
   sql: Object.assign(() => undefined, { raw: () => undefined }),
 }));
 
-import { episodeChoices, episodes } from "@/db/schema";
+import { episodeChoices, episodes, seasons } from "@/db/schema";
 import {
   deleteEpisodeChoice,
+  deleteSeason,
   updateShow,
   upsertEpisodeChoices,
 } from "./actions";
@@ -310,6 +319,37 @@ describe("deleteEpisodeChoice", () => {
   });
 });
 
+describe("deleteSeason", () => {
+  it("drops the choices pointing INTO the season before the cascade, in one transaction", async () => {
+    // episode_choices.to_episode_id is RESTRICT and Postgres checks it per
+    // cascaded row: a branch physically before its parent, or a fork whose
+    // parent lives in another season, made the bare DELETE fail with 23503
+    // and the admin got the masked generic error (the 2026-07-16 class).
+    await deleteSeason(SEASON, SHOW);
+
+    expect(h.writes.map((w) => [w.op, w.table])).toEqual([
+      ["delete", episodeChoices],
+      ["delete", seasons],
+    ]);
+    // Incoming edges: to_episode_id IN (episodes of THIS season of THIS
+    // show) — the subquery is scoped so a forged post cannot strip another
+    // show's forks.
+    const edges = h.writes[0].where as { inArray: [unknown, unknown] };
+    expect(edges.inArray[0]).toBe(episodeChoices.toEpisodeId);
+    expect(h.where[0]).toContainEqual({ eq: [seasons.id, SEASON] });
+    expect(h.where[0]).toContainEqual({ eq: [seasons.showId, SHOW] });
+    expect(h.writes[1].where).toContainEqual({ eq: [seasons.id, SEASON] });
+    expect(h.writes[1].where).toContainEqual({ eq: [seasons.showId, SHOW] });
+    expect(h.revalidated).toEqual([`/admin/shows/${SHOW}`]);
+  });
+
+  it("leaves the season in place when the transaction fails", async () => {
+    h.txFails = true;
+    await expect(deleteSeason(SEASON, SHOW)).rejects.toThrow();
+    expect(h.writes).toEqual([]);
+  });
+});
+
 describe("updateShow — publish guard", () => {
   const SHOW_FORM = { title: "Oath", slug: "the-scarlet-oath", status: "published" };
   const NODES = [
@@ -341,12 +381,34 @@ describe("updateShow — publish guard", () => {
     }
   });
 
-  it("lets a sound graph publish", async () => {
+  it("lets a sound graph publish — and stamps released_at on listed episodes only", async () => {
     // Guard queries, then updateShow's own prev-row snapshot.
     h.selects = [NODES, EDGES, [{ posterImageUrl: null, heroImageUrl: null, status: "draft" }]];
     const result = await updateShow(SHOW, { status: "idle" }, form(SHOW_FORM));
     expect(result).toEqual({ status: "ok" });
-    expect(h.writes.map((w) => w.op)).toContain("update");
+
+    // The draft → published edge stamps release dates; a branch is not a
+    // release (no pulse marker, no release-retention row), so the stamp's
+    // WHERE leaves branches out.
+    const stamp = h.writes.find(
+      (w) =>
+        w.op === "update" &&
+        w.table === episodes &&
+        typeof (w.values as { releasedAt?: unknown })?.releasedAt !== "undefined",
+    );
+    expect(stamp).toBeDefined();
+    expect(stamp!.where).toContainEqual({ isNull: episodes.branchOfEpisodeId });
+    expect(stamp!.where).toContainEqual({ eq: [episodes.status, "ready"] });
+  });
+
+  it("stamps nothing on a routine edit of an already-published show", async () => {
+    h.selects = [NODES, EDGES, [{ posterImageUrl: null, heroImageUrl: null, status: "published" }]];
+    await updateShow(SHOW, { status: "idle" }, form(SHOW_FORM));
+    expect(
+      h.writes.some(
+        (w) => typeof (w.values as { releasedAt?: unknown })?.releasedAt !== "undefined",
+      ),
+    ).toBe(false);
   });
 
   it("does not consult the graph when saving a draft", async () => {

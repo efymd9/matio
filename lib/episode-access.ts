@@ -42,7 +42,9 @@ export async function getOrderedReadyEpisodeIds(
 // A show is tier-gated iff at least one READY episode is open below the
 // subscriber tier. Gated shows use per-episode walls; shows where every
 // ready episode is subscriber-only keep the legacy 60-second preview.
-// One indexed probe — limit 1, not a count.
+// One indexed probe — limit 1, not a count. Branches are excluded for the
+// same reason as above: a listed all-subscriber show must not flip to the
+// per-episode walls because a hidden branch happens to carry a lower tier.
 export async function showHasTierGating(showId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: episodes.id })
@@ -53,6 +55,7 @@ export async function showHasTierGating(showId: string): Promise<boolean> {
         eq(seasons.showId, showId),
         eq(episodes.status, "ready"),
         ne(episodes.access, "subscriber"),
+        isNull(episodes.branchOfEpisodeId),
       ),
     )
     .limit(1);

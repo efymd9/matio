@@ -74,12 +74,15 @@ describe("getOrderedReadyEpisodeIds", () => {
 });
 
 describe("showHasTierGating", () => {
-  it("is true iff a ready episode sits below the subscriber tier", async () => {
+  it("is true iff a ready LISTED episode sits below the subscriber tier", async () => {
     h.rows = [{ id: "ep-1" }];
     expect(await showHasTierGating("show-1")).toBe(true);
     const [clause] = h.where as unknown[][];
     expect(clause).toContainEqual({ ne: [episodes.access, "subscriber"] });
     expect(clause).toContainEqual({ eq: [episodes.status, "ready"] });
+    // A hidden branch with a free/member tier must not flip an
+    // all-subscriber show into the per-episode walls (#143).
+    expect(clause).toContainEqual({ isNull: episodes.branchOfEpisodeId });
 
     h.rows = [];
     expect(await showHasTierGating("show-1")).toBe(false);

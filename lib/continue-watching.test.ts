@@ -278,11 +278,16 @@ describe("getContinueWatching — branching video", () => {
     expect(item.episodeId).toBe("ep-3");
   });
 
-  it("keeps a branch in progress on the tile as itself", async () => {
-    h.rows = [branchRow({ completed: false, positionSeconds: 100 })];
+  it("gives a branch in progress no tile until the player can resume one (#144)", async () => {
+    // Its ?ep= deep link falls back to episode 1 today — a tile promising
+    // "resume 901" that lands elsewhere is worse than none. No fall-through
+    // to an older row of the show either (same rule as a finished row).
+    h.rows = [
+      branchRow({ completed: false, positionSeconds: 100 }),
+      row({ episodeId: "ep-2", positionSeconds: 300 }),
+    ];
     h.choiceRows = [continuation()];
-    const [item] = await getContinueWatching();
-    expect(item).toMatchObject({ episodeId: "b-901", positionSeconds: 100 });
+    expect(await getContinueWatching()).toEqual([]);
   });
 
   it("drops a finished branch that is an ending (no choices)", async () => {

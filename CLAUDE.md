@@ -913,15 +913,26 @@ infra/
   VIEWER copy → es/en on the rows (not ru/en, not `dictionaries.ts`).
   **Branches are hidden from every public list**: the show page + its JSON-LD
   `numberOfEpisodes`, `getOrderedReadyEpisodeIds` (funnel positions, the
-  app's positional gate — a branch id resolves to position 0), the home
-  hero's "first episode" + episode count, and the watch page's Player
-  `episodes` prop (PR 1 filters them out entirely — that prop feeds both the
-  overlay and `episodes[idx + 1]`; PR 2 threads them through as
-  playable-but-unlisted). `lib/continue-watching.ts` leads a FINISHED branch
-  on to its single silent continuation (one extra query, only when a branch
-  row is present) instead of dropping the show from the rail. The mobile
-  `/api/v1` excludes a branch-bearing show WHOLESALE (`linearShowsOnly()` in
-  `lib/api/v1.ts`, WHERE-only in `catalog` + `shows/[slug]`; DTOs untouched).
+  app's positional gate — a branch id resolves to position 0) and
+  `showHasTierGating` (a hidden free/member branch must not flip an
+  all-subscriber show to per-episode walls), the home hero's "first
+  episode" + episode count, the reminder-email picker + `sendShowReminders`
+  (a branch answers `episode_invalid` — its `?ep=` deep link is dead), and
+  the watch page's Player `episodes` prop (PR 1 filters them out entirely —
+  that prop feeds both the overlay and `episodes[idx + 1]`; PR 2 threads
+  them through as playable-but-unlisted). A branch is **not a release**:
+  both `released_at` stamps (publish action + Mux ready webhook) skip it, so
+  no pulse marker / release-retention row appears for it.
+  `lib/continue-watching.ts` leads a FINISHED branch on to its single silent
+  continuation (one extra query, only when a branch row is present) instead
+  of dropping the show from the rail, and gives an UNFINISHED branch no tile
+  until #144 can resume one. The mobile `/api/v1` excludes a branch-bearing
+  show WHOLESALE (`linearShowsOnly()` in `lib/api/v1.ts`, WHERE-only in
+  `catalog` + `shows/[slug]`; DTOs untouched). **`deleteSeason` deletes the
+  choices pointing INTO the season first, in the same transaction** — the
+  RESTRICT FK is checked per cascaded row, so a branch placed before its
+  parent or a cross-season fork otherwise fails the cascade with 23503 and
+  the masked generic error.
   **Admin**: the episode page's "Branching" panel (`components/admin/
   fork-panel.tsx` → `upsertEpisodeChoices` / `deleteEpisodeChoice`, typed
   `AdminFormState` codes rendered inline — never throws for what an owner can

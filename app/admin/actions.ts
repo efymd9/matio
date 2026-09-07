@@ -250,6 +250,10 @@ export async function updateShow(
           and(
             isNull(episodes.releasedAt),
             eq(episodes.status, "ready"),
+            // A branch is not a release (#143): stamping it would put a
+            // marker on the analytics pulse chart and a row in release
+            // retention for something no viewer can reach by position.
+            isNull(episodes.branchOfEpisodeId),
             inArray(
               episodes.seasonId,
               db
@@ -351,12 +355,31 @@ export async function createSeason(showId: string, formData: FormData) {
 
 export async function deleteSeason(id: string, showId: string) {
   await requireAdmin();
-  // Scope the delete to (season_id, show_id) so a crafted form post
-  // with mismatched ids can't reach across shows. The form sends both
-  // ids; the relationship is enforced here.
-  await db
-    .delete(seasons)
-    .where(and(eq(seasons.id, id), eq(seasons.showId, showId)));
+  await db.transaction(async (tx) => {
+    // Branching (#143): episode_choices.to_episode_id is ON DELETE RESTRICT,
+    // and Postgres checks it per cascaded ROW, not per statement — so the
+    // season cascade fails with 23503 (→ the masked generic error page)
+    // whenever a choice still points at one of its episodes: a branch that
+    // sits physically before its parent in the season, or a fork whose
+    // parent lives in another season. Drop the incoming edges first, in
+    // the same transaction; outgoing ones cascade with their episode.
+    // Scoped to (season_id, show_id) like the delete below, so a crafted
+    // post cannot strip another show's forks either.
+    const seasonEpisodes = tx
+      .select({ id: episodes.id })
+      .from(episodes)
+      .innerJoin(seasons, eq(episodes.seasonId, seasons.id))
+      .where(and(eq(seasons.id, id), eq(seasons.showId, showId)));
+    await tx
+      .delete(episodeChoices)
+      .where(inArray(episodeChoices.toEpisodeId, seasonEpisodes));
+    // Scope the delete to (season_id, show_id) so a crafted form post
+    // with mismatched ids can't reach across shows. The form sends both
+    // ids; the relationship is enforced here.
+    await tx
+      .delete(seasons)
+      .where(and(eq(seasons.id, id), eq(seasons.showId, showId)));
+  });
   revalidatePath(`/admin/shows/${showId}`);
 }
 

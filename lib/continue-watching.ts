@@ -83,12 +83,14 @@ type Continuation = {
 // still unknown, the show gets no tile — falling through to an older row
 // would resurface a stale episode/position.
 //
-// One exception (#143): a finished branch whose single choice leads on
-// becomes a tile for THAT episode at 0:00. A linear episode leaves the
-// rail when finished because auto-advance writes the next row within
-// seconds; a branch's silent hop is the same moment, but until PR 2 ships
-// the player nothing writes it — and even then a viewer who stops exactly
-// at the seam would lose the show from the rail.
+// Branches (#143) are handled in two halves. A FINISHED branch whose single
+// choice leads on becomes a tile for THAT episode at 0:00 — a linear episode
+// leaves the rail when finished because auto-advance writes the next row
+// within seconds; a branch's silent hop is the same moment, but a viewer who
+// stops exactly at the seam would otherwise lose the show from the rail. An
+// UNFINISHED branch yields no tile at all until the player can play one
+// (#144): today its ?ep= deep link falls back to episode 1, and a tile that
+// promises "resume 901" and lands elsewhere is worse than no tile.
 function collapse(
   rows: CandidateRow[],
   continuations: Map<string, Continuation>,
@@ -108,6 +110,8 @@ function collapse(
       ? continuations.get(row.episodeId)
       : undefined;
     if (finished && !next) continue;
+    // Until #144 a branch cannot be resumed (see above) — no tile.
+    if (!finished && row.branchOfEpisodeId) continue;
     const show = {
       slug: row.slug,
       title: row.title,
