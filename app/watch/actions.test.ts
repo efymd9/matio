@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
   save: vi.fn(),
   saveSegments: vi.fn(),
   select: vi.fn(),
+  update: vi.fn(() => ({ set: () => ({ where: async () => undefined }) })),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -22,7 +23,12 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => (h.cookie ? { value: h.cookie } : undefined) }),
   headers: async () => new Headers(),
 }));
-vi.mock("@/db", () => ({ db: { select: h.select } }));
+vi.mock("@/db", () => ({
+  db: {
+    select: h.select,
+    update: (table: unknown) => h.update(table),
+  },
+}));
 vi.mock("@/db/schema", () => ({
   episodes: {},
   seasons: {},
@@ -79,6 +85,7 @@ beforeEach(() => {
   h.save.mockReset().mockResolvedValue("saved");
   h.saveSegments.mockReset().mockResolvedValue({ outcome: "saved", accepted: 1 });
   h.select.mockReset();
+  h.update = vi.fn(() => ({ set: () => ({ where: async () => undefined }) }));
   vi.stubEnv("PAYMENTS_ENABLED", "");
   vi.stubEnv("REQUIRE_SIGNUP", "");
 });
@@ -187,4 +194,53 @@ describe("saveTrialPosition still shares the position clamp", () => {
     await expect(saveTrialPosition(EPISODE, -1)).resolves.toBeUndefined();
     expect(h.select).not.toHaveBeenCalled();
   });
+});
+
+// db.select(...).from(episodes).innerJoin(...).innerJoin(...).where(...).limit(1)
+function episodeRow(rows: unknown[]) {
+  const chain = {
+    from: () => chain,
+    innerJoin: () => chain,
+    where: () => chain,
+    limit: async () => rows,
+  };
+  return chain;
+}
+
+// The anonymous resume/depth write under the signup gate (#198): the same
+// tier rule the token route mints from decides whether it may write at all.
+describe("saveTrialPosition — the episode's tier decides for an anonymous save", () => {
+  beforeEach(() => {
+    h.cookie = "trial-token";
+    vi.stubEnv("REQUIRE_SIGNUP", "1");
+  });
+
+  it("writes for a free episode — the one an anonymous viewer could play", async () => {
+    h.select.mockReturnValueOnce(
+      episodeRow([{ showId: "show-1", access: "free" }]),
+    );
+    const ordered = vi.mocked(
+      (await import("@/lib/episode-access")).getOrderedReadyEpisodeIds,
+    );
+    ordered.mockResolvedValueOnce([EPISODE]);
+    const update = vi.fn(() => ({ set: () => ({ where: async () => undefined }) }));
+    h.update = update;
+
+    await expect(saveTrialPosition(EPISODE, 30)).resolves.toBeUndefined();
+
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([["member"], ["subscriber"]])(
+    "writes nothing for a %s episode — it was walled for this viewer",
+    async (access) => {
+      h.select.mockReturnValueOnce(episodeRow([{ showId: "show-1", access }]));
+      const update = vi.fn();
+      h.update = update;
+
+      await expect(saveTrialPosition(EPISODE, 30)).resolves.toBeUndefined();
+
+      expect(update).not.toHaveBeenCalled();
+    },
+  );
 });

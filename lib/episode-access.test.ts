@@ -52,6 +52,7 @@ import {
   getOrderedReadyEpisodeIds,
   isFreeToWatch,
   resolveEffectiveTier,
+  seriesIsFreeToWatch,
   resolveRequestTier,
   showHasTierGating,
 } from "./episode-access";
@@ -215,5 +216,29 @@ describe("isFreeToWatch — what schema.org may claim", () => {
     expect(
       isFreeToWatch("subscriber", { paymentsOn: false, signupGate: false }),
     ).toBe(true);
+  });
+});
+
+describe("seriesIsFreeToWatch — the claim about the whole series", () => {
+  const GATE = { paymentsOn: false, signupGate: true };
+
+  it("is false when only the first episode is free — the shape every show in production has", () => {
+    expect(seriesIsFreeToWatch(["free", "member", "subscriber"], GATE)).toBe(
+      false,
+    );
+  });
+
+  it("is true when every ready episode really plays with no account", () => {
+    expect(seriesIsFreeToWatch(["free", "free"], GATE)).toBe(true);
+    expect(
+      seriesIsFreeToWatch(["member", "subscriber"], {
+        paymentsOn: false,
+        signupGate: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("is false for a series with nothing ready — there is no free video to claim", () => {
+    expect(seriesIsFreeToWatch([], GATE)).toBe(false);
   });
 });

@@ -69,6 +69,18 @@ export function isFreeToWatch(
   return resolveEffectiveTier(access, opts) === "free";
 }
 
+// The series-level claim: schema.org's TVSeries.isAccessibleForFree is about
+// the whole thing, so it may only be true when EVERY ready episode plays
+// with no account. A series with a free first episode and a walled tail is
+// not "free" — its episodes carry their own flags for that.
+export function seriesIsFreeToWatch(
+  readyAccess: EpisodeTier[],
+  opts: { paymentsOn: boolean; signupGate: boolean },
+): boolean {
+  if (readyAccess.length === 0) return false;
+  return readyAccess.every((access) => isFreeToWatch(access, opts));
+}
+
 // Ordered ready-episode ids for a show; position = array index + 1. The
 // caller is responsible for show-level checks (published, not deleted) —
 // every current caller has already verified them.
