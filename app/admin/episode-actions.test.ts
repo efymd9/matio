@@ -234,6 +234,30 @@ describe("updateEpisode — same contract on the edit form", () => {
     });
   });
 
+  it("answers episode_number_invalid on the edit form too", async () => {
+    const state = await updateEpisode(
+      EPISODE,
+      SEASON,
+      SHOW,
+      IDLE,
+      form({ ...VALID_EDIT, number: "0" }),
+    );
+
+    expect(state).toEqual({ status: "error", code: "episode_number_invalid" });
+    expect(h.writes).toEqual([]);
+  });
+
+  it("re-throws a database failure that is not a duplicate number", async () => {
+    h.selects.push([{ id: EPISODE }]);
+    h.updateFails = Object.assign(new Error("connection reset"), {
+      cause: Object.assign(new Error("57P01"), { code: "57P01" }),
+    });
+
+    await expect(
+      updateEpisode(EPISODE, SEASON, SHOW, IDLE, form(VALID_EDIT)),
+    ).rejects.toThrow("connection reset");
+  });
+
   it("answers episode_number_taken when renumbering onto a taken slot", async () => {
     h.selects.push([{ id: EPISODE }]);
     h.updateFails = uniqueViolation();

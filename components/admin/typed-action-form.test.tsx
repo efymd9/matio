@@ -14,6 +14,7 @@ vi.mock("@/lib/i18n/admin-client", async () => {
 });
 
 import { TypedActionForm } from "./typed-action-form";
+import { FormSubmitButton } from "./form-submit-button";
 import { ru } from "@/lib/i18n/admin-dictionaries";
 import type { AdminFormState } from "@/app/admin/actions";
 
@@ -125,5 +126,34 @@ describe("TypedActionForm", () => {
       release({ status: "ok" });
     });
     expect(field).not.toBeDisabled();
+  });
+});
+
+describe("FormSubmitButton inside a hand-dispatched form", () => {
+  it("shows the pending label while the action runs — useFormStatus cannot see this dispatch", async () => {
+    let release: (state: AdminFormState) => void = () => {};
+    const action = () =>
+      new Promise<AdminFormState>((resolve) => {
+        release = resolve;
+      });
+    render(
+      <TypedActionForm action={action}>
+        <FormSubmitButton>save</FormSubmitButton>
+      </TypedActionForm>,
+    );
+    const button = screen.getByRole("button");
+    expect(button).toHaveTextContent("save");
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    expect(button).toHaveTextContent(ru.formSubmit.savingDefault);
+    expect(button).toBeDisabled();
+
+    await act(async () => {
+      release({ status: "ok" });
+    });
+    expect(button).toHaveTextContent("save");
   });
 });
