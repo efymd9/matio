@@ -12,6 +12,34 @@ import { episodes, seasons } from "@/db/schema";
 
 export type EpisodeTier = "free" | "member" | "subscriber";
 
+// The ONE rule for "what tier does this episode behave as, right now" —
+// called by the watch page (what the player locks client-side), the token
+// route (what it mints or 403s) and the watch actions (what an anonymous
+// save may write). Three seams that must never drift: the free pivot cost
+// us exactly that lesson when only the token route was neutralised.
+//
+// - Paid mode: the admin's tier, verbatim. free plays for anyone, member
+//   asks for an account, subscriber asks for money.
+// - Free mode WITH the signup gate (REQUIRE_SIGNUP=1): the admin's tier
+//   decides again, with one substitution — `subscriber` behaves as
+//   `member`, because with payments off the paywall's CTA leads to
+//   /subscribe, which redirects home. A wall that sells nothing is worse
+//   than a wall that asks for the account we can actually create. Flip
+//   PAYMENTS_ENABLED=1 and the paid branch above turns it into a real
+//   paywall with no code change.
+// - Free mode without the gate: everything is free, as the pivot intends.
+//
+// Signed-in viewers under the gate render in mode="member", where the
+// member tier is unlocked — so they keep playing everything for free.
+export function resolveEffectiveTier(
+  access: EpisodeTier,
+  { paymentsOn, signupGate }: { paymentsOn: boolean; signupGate: boolean },
+): EpisodeTier {
+  if (paymentsOn) return access;
+  if (!signupGate) return "free";
+  return access === "free" ? "free" : "member";
+}
+
 // Ordered ready-episode ids for a show; position = array index + 1. The
 // caller is responsible for show-level checks (published, not deleted) —
 // every current caller has already verified them.

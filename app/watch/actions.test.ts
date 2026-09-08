@@ -42,10 +42,16 @@ vi.mock("drizzle-orm", () => ({
 vi.mock("@/lib/visitor", () => ({ stampVisitorWallSeen: vi.fn() }));
 vi.mock("@/lib/i18n/server", () => ({ getLocale: async () => "en" }));
 vi.mock("@/lib/subscription-access", () => ({ hasActiveSubscription: vi.fn() }));
-vi.mock("@/lib/episode-access", () => ({
-  getOrderedReadyEpisodeIds: vi.fn(),
-  showHasTierGating: vi.fn(),
-}));
+vi.mock("@/lib/episode-access", async (importOriginal) => {
+  // resolveEffectiveTier is pure and IS the subject of the gate cases —
+  // stubbing it would test the stub.
+  const actual = await importOriginal<typeof import("@/lib/episode-access")>();
+  return {
+    resolveEffectiveTier: actual.resolveEffectiveTier,
+    getOrderedReadyEpisodeIds: vi.fn(),
+    showHasTierGating: vi.fn(),
+  };
+});
 vi.mock("@/lib/trial", () => ({
   TRIAL_COOKIE: "trial_session",
   TRIAL_DURATION_SECONDS: 60,
@@ -65,6 +71,18 @@ vi.mock("@/lib/watch-segments-write", () => ({
 import { saveTrialPosition, saveWatchProgress, saveWatchSegments } from "./actions";
 
 const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+
+// db.select({...}).from(episodes).where(...).limit(1) — the shape the
+// gate's tier lookup uses.
+function selectRows(rows: unknown[]) {
+  const chain = {
+    from: () => chain,
+    innerJoin: () => chain,
+    where: () => chain,
+    limit: async () => rows,
+  };
+  return chain;
+}
 
 beforeEach(() => {
   h.userId = null;
@@ -127,10 +145,40 @@ describe("saveWatchSegments (web server action)", () => {
     );
   });
 
-  it("drops an anonymous flush under the signup gate — anonymous playback does not exist there", async () => {
+  it("flushes an anonymous viewer under the signup gate for a FREE episode (#198)", async () => {
     vi.stubEnv("REQUIRE_SIGNUP", "1");
     h.cookie = "trial-token";
+    h.select.mockReturnValueOnce(selectRows([{ access: "free" }]));
+
     await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
+
+    expect(h.saveSegments).toHaveBeenCalledWith(
+      { kind: "anonymous", sessionToken: "trial-token", maxPosition: null },
+      EPISODE,
+      [3],
+    );
+  });
+
+  it.each([["member"], ["subscriber"]])(
+    "drops an anonymous flush under the gate for a %s episode — it was never playable",
+    async (access) => {
+      vi.stubEnv("REQUIRE_SIGNUP", "1");
+      h.cookie = "trial-token";
+      h.select.mockReturnValueOnce(selectRows([{ access }]));
+
+      await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
+
+      expect(h.saveSegments).not.toHaveBeenCalled();
+    },
+  );
+
+  it("drops an anonymous flush for an episode that no longer exists", async () => {
+    vi.stubEnv("REQUIRE_SIGNUP", "1");
+    h.cookie = "trial-token";
+    h.select.mockReturnValueOnce(selectRows([]));
+
+    await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
+
     expect(h.saveSegments).not.toHaveBeenCalled();
   });
 

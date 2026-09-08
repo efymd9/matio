@@ -22,6 +22,7 @@ import { saveWatchSegmentsFor } from "@/lib/watch-segments-write";
 import {
   getOrderedReadyEpisodeIds,
   showHasTierGating,
+  resolveEffectiveTier,
 } from "@/lib/episode-access";
 import {
   TRIAL_COOKIE,
@@ -57,6 +58,24 @@ export async function saveWatchProgress(
 // shared with the app's POST /api/v1/watch-segments. This action decides
 // only WHO may flush from the web and keeps its historical silent-return
 // contract: the outcome is deliberately dropped, invalid input never throws.
+// Is this episode playable with no account at all? Only the free tier is,
+// and only while payments are off — the one read the anonymous segment
+// flush needs before it may write (#198).
+async function isAnonymouslyPlayableEpisode(episodeId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ access: episodes.access })
+    .from(episodes)
+    .where(eq(episodes.id, episodeId))
+    .limit(1);
+  if (!row) return false;
+  return (
+    resolveEffectiveTier(row.access, {
+      paymentsOn: paymentsEnabled(),
+      signupGate: signupRequired(),
+    }) === "free"
+  );
+}
+
 export async function saveWatchSegments(episodeId: string, buckets: number[]) {
   const { userId } = await auth();
   if (userId) {
@@ -64,12 +83,18 @@ export async function saveWatchSegments(episodeId: string, buckets: number[]) {
     return;
   }
   // Anonymous flushes are only legitimate where anonymous playback exists:
-  // open free mode (no signup gate). Signup-gate era → signed-in only;
-  // paid-mode anonymous previews are deliberately excluded (a 60s-capped
-  // preview cohort would paint a fake everyone-leaves-at-60s cliff onto
-  // the episode's retention curve). Open free mode has no positional gate
-  // on the web, hence maxPosition: null.
-  if (paymentsEnabled() || signupRequired()) return;
+  // open free mode, and — since #198 — a free-tier episode under the signup
+  // gate. Paid-mode anonymous previews stay deliberately excluded (a
+  // 60s-capped preview cohort would paint a fake everyone-leaves-at-60s
+  // cliff onto the episode's retention curve). Neither free-mode shape has
+  // a positional gate on the web, hence maxPosition: null.
+  if (paymentsEnabled()) return;
+  if (signupRequired() && !(await isAnonymouslyPlayableEpisode(episodeId))) {
+    // Anything above the free tier is walled for this viewer, so a flush
+    // for it is forged or stale — it must not paint retention counters on
+    // an episode nobody could have watched.
+    return;
+  }
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   if (!sessionToken) return;
   await saveWatchSegmentsFor(
@@ -133,14 +158,13 @@ export async function saveTrialPosition(
   // Free pivot: with payments off every episode is anonymously playable as
   // the free tier, so every save takes the full-tracking branch (no 60s
   // cap, no member/tier-gating rejects) — mirrors the token route.
-  // Signup gate: anonymous playback doesn't exist, so an anonymous save is
-  // by definition forged/stale — coerce to member (reject, no write),
-  // mirroring the token route's coercion.
-  const access = paymentsEnabled()
-    ? row.access
-    : signupRequired()
-      ? "member"
-      : "free";
+  // Signup gate: only a free episode is anonymously playable, so only it
+  // may write; a save for anything above it is forged or stale and is
+  // rejected — the same resolveEffectiveTier the token route mints from.
+  const access = resolveEffectiveTier(row.access, {
+    paymentsOn: paymentsEnabled(),
+    signupGate: signupRequired(),
+  });
   if (access === "free") {
     const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
     const position = orderedIds.indexOf(episodeId) + 1;

@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { actors, episodes, seasons, showActors } from "@/db/schema";
+import { resolveEffectiveTier } from "@/lib/episode-access";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
@@ -201,11 +202,15 @@ export default async function ShowDetailPage({
     genre: show.genre,
     numberOfSeasons: showSeasons.length,
     numberOfEpisodes: readyEpisodes.length,
+    // Honest to what an anonymous visitor actually gets: Google treats a
+    // registration wall like a paywall, so this may only say "free" for
+    // episodes that really play with no account (#198).
     isAccessibleForFree:
       readyEpisodes.length > 0 &&
-      (paymentsOn
-        ? readyEpisodes.every((e) => e.access === "free")
-        : !signupGate),
+      readyEpisodes.every(
+        (e) =>
+          resolveEffectiveTier(e.access, { paymentsOn, signupGate }) === "free",
+      ),
     actors: cast.map((m) => ({
       name: m.name,
       url: canonicalUrl(`/actors/${m.slug}`),
@@ -220,9 +225,9 @@ export default async function ShowDetailPage({
           name: e.title,
           description: e.description,
           durationSeconds: e.durationSeconds,
-          isAccessibleForFree: paymentsOn
-            ? e.access === "free"
-            : !signupGate,
+          isAccessibleForFree:
+            resolveEffectiveTier(e.access, { paymentsOn, signupGate }) ===
+            "free",
         })),
     })),
   });

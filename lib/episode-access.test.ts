@@ -48,7 +48,12 @@ vi.mock("drizzle-orm", () => ({
 }));
 
 import { episodes, seasons } from "@/db/schema";
-import { getOrderedReadyEpisodeIds, showHasTierGating } from "./episode-access";
+import {
+  getOrderedReadyEpisodeIds,
+  resolveEffectiveTier,
+  showHasTierGating,
+} from "./episode-access";
+import type { EpisodeTier } from "./episode-access";
 
 beforeEach(() => {
   h.rows = [];
@@ -86,5 +91,58 @@ describe("showHasTierGating", () => {
 
     h.rows = [];
     expect(await showHasTierGating("show-1")).toBe(false);
+  });
+});
+
+// The rule the whole access surface reads from (#198): the admin's tier
+// decides in paid mode and under the signup gate; the open free pivot
+// flattens everything. Table-driven because the three consumers (watch
+// page, token route, watch actions) must never disagree — the free pivot's
+// lesson was exactly one of them drifting.
+describe("resolveEffectiveTier", () => {
+  const TIERS: EpisodeTier[] = ["free", "member", "subscriber"];
+
+  it("hands back the admin's tier verbatim in paid mode", () => {
+    for (const tier of TIERS) {
+      expect(
+        resolveEffectiveTier(tier, { paymentsOn: true, signupGate: false }),
+        tier,
+      ).toBe(tier);
+      // The gate is a deliberate no-op once payments own the gating.
+      expect(
+        resolveEffectiveTier(tier, { paymentsOn: true, signupGate: true }),
+        tier,
+      ).toBe(tier);
+    }
+  });
+
+  it("flattens every tier to free in the open free pivot", () => {
+    for (const tier of TIERS) {
+      expect(
+        resolveEffectiveTier(tier, { paymentsOn: false, signupGate: false }),
+        tier,
+      ).toBe("free");
+    }
+  });
+
+  it("keeps a free episode free under the signup gate — no account needed", () => {
+    expect(
+      resolveEffectiveTier("free", { paymentsOn: false, signupGate: true }),
+    ).toBe("free");
+  });
+
+  it("walls member behind the account under the signup gate", () => {
+    expect(
+      resolveEffectiveTier("member", { paymentsOn: false, signupGate: true }),
+    ).toBe("member");
+  });
+
+  it("asks a subscriber episode for an account, not for money, while payments are off", () => {
+    // A paywall would send the viewer to /subscribe, which redirects home
+    // in free mode. Flipping PAYMENTS_ENABLED=1 turns this into the real
+    // paywall through the paid branch above, with no code change.
+    expect(
+      resolveEffectiveTier("subscriber", { paymentsOn: false, signupGate: true }),
+    ).toBe("member");
   });
 });
