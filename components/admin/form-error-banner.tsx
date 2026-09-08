@@ -13,6 +13,10 @@ const ERROR_KEY: Record<AdminFormErrorCode, keyof AdminDict["formErrors"]> = {
   slug_required: "slugRequired",
   slug_invalid: "slugInvalid",
   slug_taken: "slugTaken",
+  // Эпизоды (#193): номер занят/некорректен, маркеры интро.
+  episode_number_invalid: "episodeNumberInvalid",
+  episode_number_taken: "episodeNumberTaken",
+  intro_markers_invalid: "introMarkersInvalid",
   unknown: "unknown",
   // Branching video (#143) — fork panel + publish guard.
   fork_window_out_of_range: "forkWindowOutOfRange",

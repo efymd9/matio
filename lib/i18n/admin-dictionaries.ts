@@ -822,6 +822,11 @@ export const ru = {
     slugInvalid:
       "Slug — только строчные латинские буквы, цифры и дефисы.",
     slugTaken: "Такой slug уже занят — выберите другой.",
+    episodeNumberInvalid: "Номер эпизода — целое число от 1.",
+    episodeNumberTaken:
+      "Этот номер в сезоне уже занят — выберите другой.",
+    introMarkersInvalid:
+      "Маркеры интро: целые секунды, конец позже начала.",
     unknown: "Не удалось сохранить. Попробуйте ещё раз.",
     notSaved: "Не сохранено",
     // Ветвление (#143): панель на странице эпизода + publish-guard сериала.
@@ -1770,6 +1775,11 @@ export const en: AdminDict = {
     slugRequired: "Slug is required.",
     slugInvalid: "Slug must be lowercase letters, numbers, and hyphens.",
     slugTaken: "That slug is already taken — pick another.",
+    episodeNumberInvalid: "Episode number must be a whole number from 1.",
+    episodeNumberTaken:
+      "That number is already used in this season — pick another.",
+    introMarkersInvalid:
+      "Intro markers must be whole seconds, with the end after the start.",
     unknown: "Couldn’t save. Try again.",
     notSaved: "Not saved",
     forkWindowOutOfRange:
