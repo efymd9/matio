@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AccessFormSelect } from "@/components/admin/access-select";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { deleteEpisode, updateEpisode } from "@/app/admin/actions";
+import { TypedActionForm } from "@/components/admin/typed-action-form";
 import { getAdminDict } from "@/lib/i18n/admin-server";
 
 function formatDuration(seconds: number | null): string {
@@ -218,7 +219,7 @@ export default async function EditEpisodePage({
 
       {/* Details */}
       <Panel kicker={t.episode.detailsKicker} title={t.episode.episodeInfo}>
-        <form
+        <TypedActionForm
           action={updateEpisode.bind(null, episode.id, season.id, show.id)}
           className="space-y-5"
         >
@@ -290,7 +291,7 @@ export default async function EditEpisodePage({
               {t.episode.saveChanges}
             </FormSubmitButton>
           </div>
-        </form>
+        </TypedActionForm>
       </Panel>
 
       {/* Branching — branch-of parent + fork editor (#143) */}

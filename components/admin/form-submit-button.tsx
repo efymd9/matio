@@ -3,9 +3,11 @@
 import { useFormStatus } from "react-dom";
 import { Icon } from "@/components/site/icon";
 import { useAdminT } from "@/lib/i18n/admin-client";
+import { useTypedActionPending } from "@/components/admin/typed-action-form";
 
 // Reusable submit button for admin server-action forms. Reads the
-// wrapping <form>'s pending state via useFormStatus and swaps to a
+// wrapping form's pending state (useFormStatus for a <form action>,
+// TypedActionForm's context for a hand-dispatched one) and swaps to a
 // spinner + label while the action runs. Lives in its own client
 // component so the pages embedding it can stay server components.
 export function FormSubmitButton({
@@ -17,7 +19,13 @@ export function FormSubmitButton({
   pendingLabel?: string;
   icon?: "check" | "plus";
 }) {
-  const { pending } = useFormStatus();
+  // Two kinds of form use this button. A <form action={serverAction}>
+  // reports through useFormStatus; TypedActionForm dispatches by hand, and
+  // useFormStatus cannot see that (there is no form action), so it reports
+  // through its own context. Exactly one of them is ever true.
+  const { pending: nativePending } = useFormStatus();
+  const dispatchedPending = useTypedActionPending();
+  const pending = nativePending || dispatchedPending;
   const t = useAdminT();
   return (
     <button
