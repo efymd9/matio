@@ -107,10 +107,10 @@ export default defineConfig({
       //   свежего main (#162 влит), то же правило «max(main, локальный −
       //   0.7)»).
       thresholds: {
-        lines: 37.2,
-        functions: 30.9,
-        branches: 31.9,
-        statements: 36.8,
+        lines: 37.3,
+        functions: 31.3,
+        branches: 32.2,
+        statements: 37.0,
       },
     },
 
