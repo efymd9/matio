@@ -184,11 +184,12 @@ export default async function ShowDetailPage({
   // isAccessibleForFree on the CreativeWork entities — no VideoObject (Google
   // requires that on a page where the user can watch, and the player lives on
   // the robots-disallowed /watch). Only ready episodes are advertised.
-  // "Honestly" includes the payments kill-switch: with payments off every
-  // episode actually plays free, so the declaration must say so. The signup
-  // gate flips it back to false — Google's paywalled-content guidance
-  // treats registration walls like paywalls, and claiming "free" for
-  // account-gated video reads as cloaking.
+  // "Honestly" includes the payments kill-switch and the signup gate: the
+  // claim is computed per episode from what an anonymous visitor actually
+  // gets (isFreeToWatch, #198), because Google's paywalled-content guidance
+  // treats registration walls like paywalls and claiming "free" for
+  // account-gated video reads as cloaking. Payments off with no gate: all
+  // free. Under the gate: only the free tier.
   const paymentsOn = paymentsEnabled();
   const signupGate = signupRequired();
   const readyEpisodes = allEpisodes.filter((e) => e.status === "ready");

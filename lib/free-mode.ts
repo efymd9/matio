@@ -21,11 +21,15 @@ export function paymentsEnabled(): boolean {
 }
 
 // Signup gate for the 2026-07 "free with an account" pivot: with
-// REQUIRE_SIGNUP=1 (and payments still off), anonymous visitors get zero
-// playback — the watch page presents every episode as the `member` tier, so
-// the player renders the SignupWall (prop-driven, no token fetch) and
-// /api/playback-token 403s `signup_required` as belt-and-braces. Signed-in
-// users keep playing everything for free. Unset = the open free mode above.
+// REQUIRE_SIGNUP=1 (and payments still off), the admin's per-episode tier
+// decides for anonymous visitors (resolveEffectiveTier in
+// lib/episode-access.ts, #198) — a `free` episode plays with no account,
+// anything above it reads locked, so the player renders the SignupWall
+// (prop-driven, no token fetch) and /api/playback-token 403s
+// `signup_required` as belt-and-braces. `subscriber` asks for an account
+// too, not for money: with payments off a paywall CTA leads to /subscribe,
+// which redirects home. Signed-in users keep playing everything for free.
+// Unset = the open free mode above, where every tier plays for everyone.
 //
 // Deliberately scoped to free mode: with PAYMENTS_ENABLED=1 the per-episode
 // tier system owns all gating and this flag is a no-op, so re-enabling

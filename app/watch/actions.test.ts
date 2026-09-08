@@ -72,17 +72,6 @@ import { saveTrialPosition, saveWatchProgress, saveWatchSegments } from "./actio
 
 const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
-// db.select({...}).from(episodes).where(...).limit(1) — the shape the
-// gate's tier lookup uses.
-function selectRows(rows: unknown[]) {
-  const chain = {
-    from: () => chain,
-    innerJoin: () => chain,
-    where: () => chain,
-    limit: async () => rows,
-  };
-  return chain;
-}
 
 beforeEach(() => {
   h.userId = null;
@@ -139,47 +128,36 @@ describe("saveWatchSegments (web server action)", () => {
     h.cookie = "trial-token";
     await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
     expect(h.saveSegments).toHaveBeenCalledWith(
-      { kind: "anonymous", sessionToken: "trial-token", maxPosition: null },
+      {
+        kind: "anonymous",
+        sessionToken: "trial-token",
+        maxPosition: null,
+        freeTierOnly: false,
+      },
       EPISODE,
       [3],
     );
   });
 
-  it("flushes an anonymous viewer under the signup gate for a FREE episode (#198)", async () => {
+  it("asks the write to accept only a free episode under the signup gate (#198)", async () => {
     vi.stubEnv("REQUIRE_SIGNUP", "1");
     h.cookie = "trial-token";
-    h.select.mockReturnValueOnce(selectRows([{ access: "free" }]));
 
     await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
 
+    // The tier itself is checked inside the write, on the episode row it
+    // already reads — the action only states which rule applies, so the two
+    // surfaces cannot disagree about what "playable" means.
     expect(h.saveSegments).toHaveBeenCalledWith(
-      { kind: "anonymous", sessionToken: "trial-token", maxPosition: null },
+      {
+        kind: "anonymous",
+        sessionToken: "trial-token",
+        maxPosition: null,
+        freeTierOnly: true,
+      },
       EPISODE,
       [3],
     );
-  });
-
-  it.each([["member"], ["subscriber"]])(
-    "drops an anonymous flush under the gate for a %s episode — it was never playable",
-    async (access) => {
-      vi.stubEnv("REQUIRE_SIGNUP", "1");
-      h.cookie = "trial-token";
-      h.select.mockReturnValueOnce(selectRows([{ access }]));
-
-      await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
-
-      expect(h.saveSegments).not.toHaveBeenCalled();
-    },
-  );
-
-  it("drops an anonymous flush for an episode that no longer exists", async () => {
-    vi.stubEnv("REQUIRE_SIGNUP", "1");
-    h.cookie = "trial-token";
-    h.select.mockReturnValueOnce(selectRows([]));
-
-    await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
-
-    expect(h.saveSegments).not.toHaveBeenCalled();
   });
 
   it("keeps paid-mode anonymous previews off the retention curve", async () => {

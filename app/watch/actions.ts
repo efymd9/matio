@@ -58,24 +58,6 @@ export async function saveWatchProgress(
 // shared with the app's POST /api/v1/watch-segments. This action decides
 // only WHO may flush from the web and keeps its historical silent-return
 // contract: the outcome is deliberately dropped, invalid input never throws.
-// Is this episode playable with no account at all? Only the free tier is,
-// and only while payments are off — the one read the anonymous segment
-// flush needs before it may write (#198).
-async function isAnonymouslyPlayableEpisode(episodeId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ access: episodes.access })
-    .from(episodes)
-    .where(eq(episodes.id, episodeId))
-    .limit(1);
-  if (!row) return false;
-  return (
-    resolveEffectiveTier(row.access, {
-      paymentsOn: paymentsEnabled(),
-      signupGate: signupRequired(),
-    }) === "free"
-  );
-}
-
 export async function saveWatchSegments(episodeId: string, buckets: number[]) {
   const { userId } = await auth();
   if (userId) {
@@ -89,16 +71,17 @@ export async function saveWatchSegments(episodeId: string, buckets: number[]) {
   // cliff onto the episode's retention curve). Neither free-mode shape has
   // a positional gate on the web, hence maxPosition: null.
   if (paymentsEnabled()) return;
-  if (signupRequired() && !(await isAnonymouslyPlayableEpisode(episodeId))) {
-    // Anything above the free tier is walled for this viewer, so a flush
-    // for it is forged or stale — it must not paint retention counters on
-    // an episode nobody could have watched.
-    return;
-  }
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   if (!sessionToken) return;
   await saveWatchSegmentsFor(
-    { kind: "anonymous", sessionToken, maxPosition: null },
+    {
+      kind: "anonymous",
+      sessionToken,
+      maxPosition: null,
+      // Under the gate only a free episode was anonymously playable; the
+      // write refuses the rest on the row it already reads (#198).
+      freeTierOnly: signupRequired(),
+    },
     episodeId,
     buckets,
   );
