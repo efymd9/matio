@@ -8,7 +8,7 @@ import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { readAttributionCookiesFromRequest } from "@/lib/attribution";
 import {
-  resolveEffectiveTier,
+  resolveRequestTier,
   showHasTierGating,
 } from "@/lib/episode-access";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
@@ -131,12 +131,11 @@ export async function GET(req: NextRequest) {
   // Signed-in viewers under the gate take the member path (they play
   // everything for free); anonymous ones get the episode's own effective
   // tier, so a free episode still mints and anything above it 403s.
-  const paymentsOn = paymentsEnabled();
-  const signupGate = signupRequired();
-  const access =
-    !paymentsOn && userId
-      ? "member"
-      : resolveEffectiveTier(row.access, { paymentsOn, signupGate });
+  const access = resolveRequestTier(row.access, {
+    paymentsOn: paymentsEnabled(),
+    signupGate: signupRequired(),
+    signedIn: Boolean(userId),
+  });
 
   if (access === "free") {
     // Funnel tracking row (kind='episodes') — minted on the first free

@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { actors, episodes, seasons, showActors } from "@/db/schema";
-import { resolveEffectiveTier } from "@/lib/episode-access";
+import { isFreeToWatch } from "@/lib/episode-access";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
@@ -207,9 +207,8 @@ export default async function ShowDetailPage({
     // episodes that really play with no account (#198).
     isAccessibleForFree:
       readyEpisodes.length > 0 &&
-      readyEpisodes.every(
-        (e) =>
-          resolveEffectiveTier(e.access, { paymentsOn, signupGate }) === "free",
+      readyEpisodes.every((e) =>
+        isFreeToWatch(e.access, { paymentsOn, signupGate }),
       ),
     actors: cast.map((m) => ({
       name: m.name,
@@ -225,9 +224,10 @@ export default async function ShowDetailPage({
           name: e.title,
           description: e.description,
           durationSeconds: e.durationSeconds,
-          isAccessibleForFree:
-            resolveEffectiveTier(e.access, { paymentsOn, signupGate }) ===
-            "free",
+          isAccessibleForFree: isFreeToWatch(e.access, {
+            paymentsOn,
+            signupGate,
+          }),
         })),
     })),
   });

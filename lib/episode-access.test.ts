@@ -50,7 +50,9 @@ vi.mock("drizzle-orm", () => ({
 import { episodes, seasons } from "@/db/schema";
 import {
   getOrderedReadyEpisodeIds,
+  isFreeToWatch,
   resolveEffectiveTier,
+  resolveRequestTier,
   showHasTierGating,
 } from "./episode-access";
 import type { EpisodeTier } from "./episode-access";
@@ -144,5 +146,74 @@ describe("resolveEffectiveTier", () => {
     expect(
       resolveEffectiveTier("subscriber", { paymentsOn: false, signupGate: true }),
     ).toBe("member");
+  });
+});
+
+// What the token route mints for one request. The dangerous mistakes are
+// asymmetric: minting for an anonymous member request hands out walled
+// content, refusing a signed-in one locks a viewer out of what they were
+// promised. Both directions are pinned here.
+describe("resolveRequestTier", () => {
+  const GATE = { paymentsOn: false, signupGate: true };
+  const OPEN = { paymentsOn: false, signupGate: false };
+  const PAID = { paymentsOn: true, signupGate: false };
+
+  it("mints a free episode for an anonymous viewer under the gate (#198)", () => {
+    expect(resolveRequestTier("free", { ...GATE, signedIn: false })).toBe("free");
+  });
+
+  it.each([["member"], ["subscriber"]] as const)(
+    "refuses %s for an anonymous viewer under the gate",
+    (access) => {
+      // "member" is what the route turns into 403 signup_required.
+      expect(resolveRequestTier(access, { ...GATE, signedIn: false })).toBe(
+        "member",
+      );
+    },
+  );
+
+  it.each([["free"], ["member"], ["subscriber"]] as const)(
+    "lets a signed-in viewer play %s while payments are off",
+    (access) => {
+      expect(resolveRequestTier(access, { ...GATE, signedIn: true })).toBe(
+        "member",
+      );
+      expect(resolveRequestTier(access, { ...OPEN, signedIn: true })).toBe(
+        "member",
+      );
+    },
+  );
+
+  it("hands anonymous viewers the free path in the open pivot", () => {
+    expect(resolveRequestTier("subscriber", { ...OPEN, signedIn: false })).toBe(
+      "free",
+    );
+  });
+
+  it("gives payments back their say — a session buys nothing by itself", () => {
+    // With payments on, a signed-in non-subscriber must still meet the
+    // subscriber tier; the route checks the subscription separately.
+    expect(resolveRequestTier("subscriber", { ...PAID, signedIn: true })).toBe(
+      "subscriber",
+    );
+    expect(resolveRequestTier("free", { ...PAID, signedIn: false })).toBe("free");
+  });
+});
+
+describe("isFreeToWatch — what schema.org may claim", () => {
+  it("is true only when nothing at all is asked of the viewer", () => {
+    expect(isFreeToWatch("free", { paymentsOn: false, signupGate: true })).toBe(
+      true,
+    );
+    expect(
+      isFreeToWatch("member", { paymentsOn: false, signupGate: true }),
+    ).toBe(false);
+    expect(
+      isFreeToWatch("subscriber", { paymentsOn: true, signupGate: false }),
+    ).toBe(false);
+    // The open pivot really is free for everyone.
+    expect(
+      isFreeToWatch("subscriber", { paymentsOn: false, signupGate: false }),
+    ).toBe(true);
   });
 });

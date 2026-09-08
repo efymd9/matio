@@ -40,6 +40,35 @@ export function resolveEffectiveTier(
   return access === "free" ? "free" : "member";
 }
 
+// The same rule from the token route's point of view, where one more fact
+// is known: whether the request carries a session. With payments off a
+// signed-in viewer plays everything (the "free with an account" pivot), so
+// the request mints on the member path regardless of the episode's tier.
+// Anonymous requests fall through to the episode rule above — a free
+// episode still mints, anything above it 403s `signup_required`.
+export function resolveRequestTier(
+  access: EpisodeTier,
+  {
+    paymentsOn,
+    signupGate,
+    signedIn,
+  }: { paymentsOn: boolean; signupGate: boolean; signedIn: boolean },
+): EpisodeTier {
+  if (!paymentsOn && signedIn) return "member";
+  return resolveEffectiveTier(access, { paymentsOn, signupGate });
+}
+
+// Does an episode of this tier play with no account at all? The honest
+// answer for schema.org `isAccessibleForFree` — Google reads a registration
+// wall as a paywall, so this may only be true when nothing is asked of the
+// viewer.
+export function isFreeToWatch(
+  access: EpisodeTier,
+  opts: { paymentsOn: boolean; signupGate: boolean },
+): boolean {
+  return resolveEffectiveTier(access, opts) === "free";
+}
+
 // Ordered ready-episode ids for a show; position = array index + 1. The
 // caller is responsible for show-level checks (published, not deleted) —
 // every current caller has already verified them.
