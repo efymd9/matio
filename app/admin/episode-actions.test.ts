@@ -206,6 +206,32 @@ describe("updateEpisode — same contract on the edit form", () => {
 
     expect(state).toEqual({ status: "ok" });
     expect(h.writes[0]?.op).toBe("update");
+    // Both surfaces the edit can change: the episode page and the season
+    // list that prints its number and title.
+    expect(h.revalidated).toEqual([
+      `/admin/shows/${SHOW}/seasons/${SEASON}/episodes/${EPISODE}`,
+      `/admin/shows/${SHOW}/seasons/${SEASON}`,
+    ]);
+  });
+
+  it("drops a half-filled intro pair to null on both columns", async () => {
+    h.selects.push([{ id: EPISODE }]);
+
+    // The skip-intro chip needs both markers; a lone start is not a
+    // partial setting, it is no setting.
+    const state = await updateEpisode(
+      EPISODE,
+      SEASON,
+      SHOW,
+      IDLE,
+      form({ ...VALID_EDIT, introStartSeconds: "5" }),
+    );
+
+    expect(state).toEqual({ status: "ok" });
+    expect(h.writes[0]?.values).toMatchObject({
+      introStartSeconds: null,
+      introEndSeconds: null,
+    });
   });
 
   it("answers episode_number_taken when renumbering onto a taken slot", async () => {

@@ -58,12 +58,16 @@ describe("TypedActionForm", () => {
     expect(field.value).toBe("1");
   });
 
-  it("passes the form fields to the action", async () => {
-    const action = vi.fn(
-      async (_prev: AdminFormState, fd: FormData): Promise<AdminFormState> => ({
-        status: "ok",
-      }),
-    );
+  it("hands the action the form fields and the previous state", async () => {
+    const seen: Array<{ prev: AdminFormState; number: FormDataEntryValue | null }> =
+      [];
+    const action = async (
+      prev: AdminFormState,
+      fd: FormData,
+    ): Promise<AdminFormState> => {
+      seen.push({ prev, number: fd.get("number") });
+      return { status: "ok" };
+    };
     const { field, submit } = renderForm(action);
     fireEvent.change(field, { target: { value: "7" } });
 
@@ -71,9 +75,7 @@ describe("TypedActionForm", () => {
       submit();
     });
 
-    expect(action).toHaveBeenCalledTimes(1);
-    const sent = action.mock.calls[0]?.[1] as FormData;
-    expect(sent.get("number")).toBe("7");
+    expect(seen).toEqual([{ prev: { status: "idle" }, number: "7" }]);
   });
 
   it("clears the fields after a successful create, and shows no error", async () => {

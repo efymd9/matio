@@ -1,6 +1,13 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useRef } from "react";
+import {
+  createContext,
+  startTransition,
+  useActionState,
+  useContext,
+  useEffect,
+  useRef,
+} from "react";
 import type { ReactNode } from "react";
 import { FormErrorBanner } from "@/components/admin/form-error-banner";
 import type { AdminFormState } from "@/app/admin/actions";
@@ -17,6 +24,21 @@ import type { AdminFormState } from "@/app/admin/actions";
 // through useActionState inside our own transition schedules no reset —
 // the same pattern (and the same reason) as components/admin/show-form.
 // Native constraint validation still runs before submit fires.
+//
+// The caller's layout classes go on the FIELDSET, not the form: Tailwind
+// compiles space-y-* to a direct-child selector, and wrapping the fields
+// in anything would otherwise make them grandchildren and collapse every
+// gap. min-w-0 undoes the fieldset's own min-inline-size:min-content, which
+// would keep the grid rows inside from shrinking.
+const PendingContext = createContext(false);
+
+/** Pending state of the enclosing TypedActionForm. False everywhere else,
+ *  so a button can read it next to useFormStatus without caring which kind
+ *  of form it sits in. */
+export function useTypedActionPending(): boolean {
+  return useContext(PendingContext);
+}
+
 export function TypedActionForm({
   action,
   className,
@@ -45,19 +67,25 @@ export function TypedActionForm({
       ref={formRef}
       onSubmit={(e) => {
         e.preventDefault();
+        // Read the fields BEFORE the fieldset goes disabled — a disabled
+        // control contributes nothing to FormData.
         const formData = new FormData(e.currentTarget);
         startTransition(() => formAction(formData));
       }}
-      className={className}
       aria-busy={pending}
     >
-      <FormErrorBanner state={state} />
-      {/* display:contents keeps the layout while disabling every control
-          in flight — a second submit would otherwise race the first and
-          come back as "number taken" for a row it just inserted. */}
-      <fieldset disabled={pending} className="contents">
-        {children}
-      </fieldset>
+      <PendingContext.Provider value={pending}>
+        {/* disabled while in flight: a second submit would otherwise race
+            the first and come back as "number taken" for the row it just
+            inserted. */}
+        <fieldset
+          disabled={pending}
+          className={className ? `min-w-0 ${className}` : "min-w-0"}
+        >
+          <FormErrorBanner state={state} />
+          {children}
+        </fieldset>
+      </PendingContext.Provider>
     </form>
   );
 }
