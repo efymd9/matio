@@ -12,6 +12,75 @@ import { episodes, seasons } from "@/db/schema";
 
 export type EpisodeTier = "free" | "member" | "subscriber";
 
+// The ONE rule for "what tier does this episode behave as, right now" —
+// called by the watch page (what the player locks client-side), the token
+// route (what it mints or 403s) and the watch actions (what an anonymous
+// save may write). Three seams that must never drift: the free pivot cost
+// us exactly that lesson when only the token route was neutralised.
+//
+// - Paid mode: the admin's tier, verbatim. free plays for anyone, member
+//   asks for an account, subscriber asks for money.
+// - Free mode WITH the signup gate (REQUIRE_SIGNUP=1): the admin's tier
+//   decides again, with one substitution — `subscriber` behaves as
+//   `member`, because with payments off the paywall's CTA leads to
+//   /subscribe, which redirects home. A wall that sells nothing is worse
+//   than a wall that asks for the account we can actually create. Flip
+//   PAYMENTS_ENABLED=1 and the paid branch above turns it into a real
+//   paywall with no code change.
+// - Free mode without the gate: everything is free, as the pivot intends.
+//
+// Signed-in viewers under the gate render in mode="member", where the
+// member tier is unlocked — so they keep playing everything for free.
+export function resolveEffectiveTier(
+  access: EpisodeTier,
+  { paymentsOn, signupGate }: { paymentsOn: boolean; signupGate: boolean },
+): EpisodeTier {
+  if (paymentsOn) return access;
+  if (!signupGate) return "free";
+  return access === "free" ? "free" : "member";
+}
+
+// The same rule from the token route's point of view, where one more fact
+// is known: whether the request carries a session. With payments off a
+// signed-in viewer plays everything (the "free with an account" pivot), so
+// the request mints on the member path regardless of the episode's tier.
+// Anonymous requests fall through to the episode rule above — a free
+// episode still mints, anything above it 403s `signup_required`.
+export function resolveRequestTier(
+  access: EpisodeTier,
+  {
+    paymentsOn,
+    signupGate,
+    signedIn,
+  }: { paymentsOn: boolean; signupGate: boolean; signedIn: boolean },
+): EpisodeTier {
+  if (!paymentsOn && signedIn) return "member";
+  return resolveEffectiveTier(access, { paymentsOn, signupGate });
+}
+
+// Does an episode of this tier play with no account at all? The honest
+// answer for schema.org `isAccessibleForFree` — Google reads a registration
+// wall as a paywall, so this may only be true when nothing is asked of the
+// viewer.
+export function isFreeToWatch(
+  access: EpisodeTier,
+  opts: { paymentsOn: boolean; signupGate: boolean },
+): boolean {
+  return resolveEffectiveTier(access, opts) === "free";
+}
+
+// The series-level claim: schema.org's TVSeries.isAccessibleForFree is about
+// the whole thing, so it may only be true when EVERY ready episode plays
+// with no account. A series with a free first episode and a walled tail is
+// not "free" — its episodes carry their own flags for that.
+export function seriesIsFreeToWatch(
+  readyAccess: EpisodeTier[],
+  opts: { paymentsOn: boolean; signupGate: boolean },
+): boolean {
+  if (readyAccess.length === 0) return false;
+  return readyAccess.every((access) => isFreeToWatch(access, opts));
+}
+
 // Ordered ready-episode ids for a show; position = array index + 1. The
 // caller is responsible for show-level checks (published, not deleted) —
 // every current caller has already verified them.

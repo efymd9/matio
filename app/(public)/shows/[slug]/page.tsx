@@ -5,6 +5,10 @@ import { notFound } from "next/navigation";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { actors, episodes, seasons, showActors } from "@/db/schema";
+import {
+  isFreeToWatch,
+  seriesIsFreeToWatch,
+} from "@/lib/episode-access";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
@@ -183,11 +187,12 @@ export default async function ShowDetailPage({
   // isAccessibleForFree on the CreativeWork entities — no VideoObject (Google
   // requires that on a page where the user can watch, and the player lives on
   // the robots-disallowed /watch). Only ready episodes are advertised.
-  // "Honestly" includes the payments kill-switch: with payments off every
-  // episode actually plays free, so the declaration must say so. The signup
-  // gate flips it back to false — Google's paywalled-content guidance
-  // treats registration walls like paywalls, and claiming "free" for
-  // account-gated video reads as cloaking.
+  // "Honestly" includes the payments kill-switch and the signup gate: the
+  // claim is computed per episode from what an anonymous visitor actually
+  // gets (isFreeToWatch, #198), because Google's paywalled-content guidance
+  // treats registration walls like paywalls and claiming "free" for
+  // account-gated video reads as cloaking. Payments off with no gate: all
+  // free. Under the gate: only the free tier.
   const paymentsOn = paymentsEnabled();
   const signupGate = signupRequired();
   const readyEpisodes = allEpisodes.filter((e) => e.status === "ready");
@@ -201,11 +206,13 @@ export default async function ShowDetailPage({
     genre: show.genre,
     numberOfSeasons: showSeasons.length,
     numberOfEpisodes: readyEpisodes.length,
-    isAccessibleForFree:
-      readyEpisodes.length > 0 &&
-      (paymentsOn
-        ? readyEpisodes.every((e) => e.access === "free")
-        : !signupGate),
+    // Honest to what an anonymous visitor actually gets: Google treats a
+    // registration wall like a paywall, so this may only say "free" for
+    // episodes that really play with no account (#198).
+    isAccessibleForFree: seriesIsFreeToWatch(
+      readyEpisodes.map((e) => e.access),
+      { paymentsOn, signupGate },
+    ),
     actors: cast.map((m) => ({
       name: m.name,
       url: canonicalUrl(`/actors/${m.slug}`),
@@ -220,9 +227,10 @@ export default async function ShowDetailPage({
           name: e.title,
           description: e.description,
           durationSeconds: e.durationSeconds,
-          isAccessibleForFree: paymentsOn
-            ? e.access === "free"
-            : !signupGate,
+          isAccessibleForFree: isFreeToWatch(e.access, {
+            paymentsOn,
+            signupGate,
+          }),
         })),
     })),
   });

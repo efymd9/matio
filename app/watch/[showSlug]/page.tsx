@@ -29,6 +29,7 @@ import {
   applyUserAttribution,
   readAttributionCookies,
 } from "@/lib/attribution";
+import { resolveEffectiveTier } from "@/lib/episode-access";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
@@ -199,12 +200,13 @@ export default async function WatchPage({
   // route) is load-bearing. The legacy 60s-trial branch and the
   // expired-trial redirect below become unreachable.
   //
-  // Signup gate (REQUIRE_SIGNUP=1, free mode only): anonymous visitors get
-  // the episodes presented as the MEMBER tier instead — every episode reads
-  // locked in mode="free", so the player renders the SignupWall full-surface
-  // with zero token fetches (the same prop-driven path a member-tier deep
-  // link takes in paid mode). Signed-in viewers are in mode="member" where
-  // the member tier is unlocked, so they play everything unchanged.
+  // Signup gate (REQUIRE_SIGNUP=1, free mode only): the admin's per-episode
+  // tier decides (resolveEffectiveTier) — a free episode plays for anyone,
+  // anything above it reads locked in mode="free" and the player renders the
+  // SignupWall full-surface with zero token fetches (the same prop-driven
+  // path a member-tier deep link takes in paid mode). Signed-in viewers are
+  // in mode="member" where the member tier is unlocked, so they play
+  // everything unchanged.
   const paymentsOn = paymentsEnabled();
   const signupGate = signupRequired();
   // Listed episodes only — the twin of showHasTierGating's
@@ -242,11 +244,7 @@ export default async function WatchPage({
         introStartSeconds: e.introStartSeconds,
         introEndSeconds: e.introEndSeconds,
         thumbnailUrl,
-        tier: paymentsOn
-          ? e.access
-          : signupGate
-            ? ("member" as const)
-            : ("free" as const),
+        tier: resolveEffectiveTier(e.access, { paymentsOn, signupGate }),
         branchOfEpisodeId: e.branchOfEpisodeId,
         forkPrompt: inLocale(locale, e.forkPromptEs, e.forkPromptEn),
         forkWindowSeconds: e.forkWindowSeconds,
@@ -440,9 +438,10 @@ export default async function WatchPage({
         <Player
           mode="free"
           orientation={show.orientation}
-          // Gate sessions render the SignupWall before any playback — skip
-          // the muted-autoplay capability probe they could never use.
-          autoplay={signupGate ? false : autoplay}
+          // A gated start renders the SignupWall before any playback — skip
+          // the muted-autoplay capability probe it could never use. A free
+          // first episode under the same gate autoplays like any other.
+          autoplay={freeInitial.tier === "free" ? autoplay : false}
           showId={show.id}
           showSlug={show.slug}
           showTitle={show.title}
