@@ -26,7 +26,7 @@ vi.mock("next/headers", () => ({
 vi.mock("@/db", () => ({
   db: {
     select: h.select,
-    update: (table: unknown) => h.update(table),
+    update: () => h.update(),
   },
 }));
 vi.mock("@/db/schema", () => ({
