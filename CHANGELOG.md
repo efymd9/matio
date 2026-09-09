@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.1](https://github.com/efymd9/matio/compare/matio-v0.9.0...matio-v0.9.1) (2026-09-09)
+
+
+### Bug fixes
+
+* **checkout:** адрес возврата после оплаты — платформенные источники вместо localhost ([#203](https://github.com/efymd9/matio/issues/203)) ([d03802b](https://github.com/efymd9/matio/commit/d03802bad8365ac0f30b20fdeb7a224ca37f51a8)), closes [#202](https://github.com/efymd9/matio/issues/202)
+* **staging:** открыть пути вебхуков в замке стенда — Stripe получал 401 ([#201](https://github.com/efymd9/matio/issues/201)) ([cda20db](https://github.com/efymd9/matio/commit/cda20db3acefcb9dc9972629c516925b06a56068)), closes [#200](https://github.com/efymd9/matio/issues/200)
+* **watch:** тир эпизода решает и под гейтом регистрации — free играет без аккаунта ([#199](https://github.com/efymd9/matio/issues/199)) ([121c0ca](https://github.com/efymd9/matio/commit/121c0caba5356623fa3b1378bc192a06d44a0d13))
+
+
+### Documentation
+
+* **registry:** прод мигрирован — 0024 и 0025 применены перед релизом v0.9.0 ([#196](https://github.com/efymd9/matio/issues/196)) ([7bc34db](https://github.com/efymd9/matio/commit/7bc34db2bf1b4222635bf8df8167013313096a67)), closes [#188](https://github.com/efymd9/matio/issues/188)
+
 ## [0.9.0](https://github.com/efymd9/matio/compare/matio-v0.8.0...matio-v0.9.0) (2026-09-08)
 
 
