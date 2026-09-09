@@ -223,6 +223,7 @@ export function Player({
   userEmail,
   autoplay = true,
   payFirst = false,
+  walletPublishableKey = null,
   freeMode = false,
   signupGate = false,
   orientation = "horizontal",
@@ -243,6 +244,11 @@ export function Player({
   // PAY_FIRST_CHECKOUT flag (server-read on the watch page): the paywall's
   // signed-out CTA goes straight to guest Stripe Checkout.
   payFirst?: boolean;
+  // Stripe publishable key, RUNTIME-read on the watch page (never a
+  // build-inlined NEXT_PUBLIC read — see lib/checkout-session.ts) and threaded
+  // down so the paywall can mount the in-place wallet button (#210). Null =
+  // no key configured, and the paywall simply keeps its card CTA.
+  walletPublishableKey?: string | null;
   // Payments kill-switch (server-read, !paymentsEnabled()): the series-end
   // paywall/signup-wall are mounted CLIENT-SIDE at `ended` with no server
   // 403 involved, so the flag must reach this component to route those
@@ -385,6 +391,7 @@ export function Player({
       onFirstPlay={onFirstPlay}
       userEmail={userEmail}
       payFirst={payFirst}
+      walletPublishableKey={walletPublishableKey}
       freeMode={freeMode}
       signupGate={signupGate}
       orientation={orientation}
@@ -410,6 +417,7 @@ function EpisodePlayback({
   onFirstPlay,
   userEmail,
   payFirst,
+  walletPublishableKey,
   freeMode,
   signupGate,
   orientation,
@@ -431,6 +439,7 @@ function EpisodePlayback({
   onFirstPlay: () => void;
   userEmail?: string | null;
   payFirst?: boolean;
+  walletPublishableKey?: string | null;
   freeMode?: boolean;
   signupGate?: boolean;
   orientation: ShowOrientation;
@@ -1380,6 +1389,7 @@ function EpisodePlayback({
         episodeLabel={episodeLabel}
         variant={mode === "free" || mode === "member" ? "tier" : "trial"}
         payFirst={payFirst}
+        walletPublishableKey={walletPublishableKey}
       />
     );
   }

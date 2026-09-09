@@ -69,7 +69,13 @@ export type FunnelEvent =
   //     'other_session' | 'ticket_mint_failed')
   | "welcome_signin_succeeded"
   | "welcome_signin_failed"
-  | "welcome_fallback_shown";
+  | "welcome_fallback_shown"
+  // Paywall in-place wallet button (#210): the buyer authorised Apple Pay /
+  // Google Pay in the sheet. Fired at confirm — the moment of intent — so the
+  // saved conversion funnel keeps its meaning even though the underlying
+  // Checkout Session was created a step earlier (when the consent box was
+  // ticked). Properties are ids only.
+  | "wallet_checkout_confirmed";
 
 // Minimal surface we use. The provider assigns the real posthog-js instance
 // (which is structurally compatible) to window.posthog after init.

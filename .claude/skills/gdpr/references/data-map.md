@@ -87,8 +87,29 @@
 | Куда | Когда | Что именно (поля) | Гейт |
 |---|---|---|---|
 | **Clerk** | регистрация/вход; `claimGuestCheckout` | всё, что вводит пользователь в Clerk UI; сервер: `users.createUser({emailAddress:[email], skipPasswordRequirement:true})`, `signInTokens.createSignInToken` (id) | договор |
-| **Stripe** | `createAuthCheckoutSession` / `createGuestCheckoutSession` | `customers.create({email, metadata:{userId}})`; Checkout Session `locale`, `client_reference_id` (claim token); `subscription_data.metadata`: `userId`, `attr_first_*`/`attr_last_*` (UTM), `capi_consent`, `capi_ip` (сырой IP), `capi_ua`, `capi_fbp`, `capi_fbc` — **только до `Purchase`**: сразу после события `mirrorSubscription` стирает четыре сигнала (`subscriptions.update`, пустая строка = удаление ключа; best-effort, следующий вебхук с теми же ключами повторяет; `capi_consent` остаётся — флаг, не данные), `ph_consent`, `guest`, `claim_token`, `trial_token`; billing address и карта — вводятся у Stripe | договор; `capi_*` и `ph_*` — только при маркетинговом согласии; подписки до #165 и те, чьи события ушли в ранний выход зеркала (нет локального юзера / неизвестная цена), чистит `pnpm stripe:scrub-capi` (явный `STRIPE_SECRET_KEY`, dry-run по умолчанию) |
+| **Stripe** | `createAuthCheckoutSession` / `createGuestCheckoutSession` | `customers.create({email, metadata:{userId}})`; Checkout Session `locale`, `client_reference_id` (claim token); `subscription_data.metadata`: `userId`, `attr_first_*`/`attr_last_*` (UTM), `capi_consent`, `capi_ip` (сырой IP), `capi_ua`, `capi_fbp`, `capi_fbc` — **только до `Purchase`**: сразу после события `mirrorSubscription` стирает четыре сигнала (`subscriptions.update`, пустая строка = удаление ключа; best-effort, следующий вебхук с теми же ключами повторяет; `capi_consent` остаётся — флаг, не данные), `ph_consent`, `guest`, `claim_token`, `trial_token`, **`tos_accepted_at` + `tos_version`** (только кошелёк на paywall, #210 — см. ниже); billing address и карта — вводятся у Stripe | договор; `capi_*` и `ph_*` — только при маркетинговом согласии; подписки до #165 и те, чьи события ушли в ранний выход зеркала (нет локального юзера / неизвестная цена), чистит `pnpm stripe:scrub-capi` (явный `STRIPE_SECRET_KEY`, dry-run по умолчанию) |
 | **Stripe** | `createAuthCheckoutSession` / `createGuestCheckoutSession` | `customers.create({email, metadata:{userId}})`; Checkout Session `locale`, `client_reference_id` (claim token); `subscription_data.metadata`: `userId`, `attr_first_*`/`attr_last_*` (UTM), `capi_consent`, **`capi_ip` (сырой IP)**, **`capi_ua`**, `capi_fbp`, `capi_fbc`, `ph_consent`, `guest`, `claim_token`, `trial_token`; billing address и карта — вводятся у Stripe | договор; `capi_*` и `ph_*` — только при маркетинговом согласии; `capi_ip/ua` не чистятся после использования (#165) |
+
+**Отказ от 14-дневного права на поверхности кошелька (#210).** Apple Pay /
+Google Pay прямо на paywall создают Checkout Session с `ui_mode: 'elements'`,
+а Stripe на этом ui_mode не рендерит согласие: `custom_text` отбивается
+(`400 … not supported with ui_mode: elements`, проверено на живом API), а
+единственный рендерер `consent_collection` — `TermsElement` — закрыт бетой.
+Поэтому чекбокс показываем мы сами (`components/watch/wallet-express-checkout.tsx`,
+текст — существующий ключ `subscribe.withdrawalWaiver` на языке зрителя), а факт
+принятия едет в `subscription_data.metadata` двумя строковыми ключами:
+`tos_accepted_at` (ISO 8601) и `tos_version` (дата редакции `/terms`).
+**Новой колонки и нового хранилища не заводится** — минимизация: запись
+живёт ровно там же, где Checkout сегодня хранит своё `consent`, у уже
+задействованного процессора, и привязана к подписке, которая и так там есть.
+В отличие от `capi_*` эти два ключа **не** стираются после `Purchase`: они и
+есть доказательство согласия на немедленное предоставление и обязаны пережить
+событие, которое их породило. Стирание — по общему каскаду аккаунта; отдельного
+пути не требуется, потому что отдельного хранилища нет. Новых процессоров
+не появилось: Apple и Google выступают кошельками внутри уже существующего
+платёжного потока Stripe, реквизиты у нас не оседают, и в браузер не
+загружается ничего, чего не грузит сегодняшний `/checkout`.
+
 | **Stripe** (стирание) | вебхук Clerk `user.deleted` | `subscriptions.update(<sub id>, {cancel_at_period_end: true})` — только id подписки, ничего о пользователе; Customer не удаляется (`customers.del` — решение владельца, `docs/registry.md`) | ст. 17 — исполнение запроса |
 | **Meta CAPI** (`lib/meta-capi.ts`) | вебхук Stripe, переход в access-granting | `Purchase`: `em` = SHA-256(email), `external_id` = SHA-256(Clerk id), `fbp`, `fbc`, `client_ip_address` (сырой), `client_user_agent`, `event_id` = sub id, `value`/`currency`, `content_ids` | `capi_consent` из метаданных |
 | **Meta Pixel** (браузер) | по странице | `PageView`, `ViewContent`, `Lead`, `InitiateCheckout`, `CompleteRegistration` + `_fbp`/`_fbc`, IP/UA запроса — самим пикселем | `cookie_consent.marketing` |

@@ -1,11 +1,15 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
-import { createAuthCheckoutSession } from "@/app/subscribe/actions";
+import {
+  createAuthCheckoutSession,
+  createAuthWalletCheckoutSession,
+} from "@/app/subscribe/actions";
 import { createGuestCheckoutSession } from "@/app/subscribe/guest-actions";
 import type {
   CheckoutSessionResult,
   CheckoutTargetInput,
+  WalletCheckoutResult,
 } from "@/lib/checkout-session";
 import { paymentsEnabled } from "@/lib/free-mode";
 
@@ -30,4 +34,24 @@ export async function createCheckoutSession(
   const { userId } = await auth();
   if (userId) return createAuthCheckoutSession(input);
   return createGuestCheckoutSession(input);
+}
+
+// Single entry point the paywall's wallet button calls (issue #210). Same
+// server-side auth resolution as createCheckoutSession above — the client never
+// declares who it is — but v1 answers `unavailable` for anonymous visitors
+// instead of dispatching to the guest builder: a wallet purchase by a
+// signed-out buyer additionally mints a Clerk account and a sign-in ticket from
+// the wallet's email, which is the account-takeover-sensitive path the
+// 2026-06-16 webview incident hardened. It gets its own PR and its own bench
+// rehearsal. `unavailable` is not an error — the paywall simply keeps the card
+// CTA it has today.
+export async function createWalletCheckoutSession(
+  input: CheckoutTargetInput,
+  waiverAccepted: boolean,
+): Promise<WalletCheckoutResult> {
+  if (!paymentsEnabled()) return { kind: "redirect", to: "/" };
+
+  const { userId } = await auth();
+  if (!userId) return { kind: "unavailable" };
+  return createAuthWalletCheckoutSession(input, waiverAccepted);
 }

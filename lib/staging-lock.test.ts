@@ -51,6 +51,25 @@ describe("isStagingLockOpenPath", () => {
     expect(isStagingLockOpenPath(`${path}/`)).toBe(true);
   });
 
+  it("leaves the whole /.well-known tree open — RFC 8615 URIs are machine-fetched and public", () => {
+    // Apple re-fetches the merchant-domain association when it re-verifies a
+    // registered payment-method domain; a 401 there reads as "Apple Pay
+    // stopped working" with no error anywhere (#210).
+    expect(
+      isStagingLockOpenPath(
+        "/.well-known/apple-developer-merchantid-domain-association",
+      ),
+    ).toBe(true);
+    expect(isStagingLockOpenPath("/.well-known/anything/nested")).toBe(true);
+  });
+
+  it("does not open a path that merely mentions well-known", () => {
+    // Prefix, not substring: the open set is the namespace at the root only.
+    expect(isStagingLockOpenPath("/.well-known")).toBe(false);
+    expect(isStagingLockOpenPath("/admin/.well-known/x")).toBe(false);
+    expect(isStagingLockOpenPath("/well-known/x")).toBe(false);
+  });
+
   it("does not open the webhook tree beyond those three paths", () => {
     expect(isStagingLockOpenPath("/api/webhooks")).toBe(false);
     expect(isStagingLockOpenPath("/api/webhooks/stripe/extra")).toBe(false);
