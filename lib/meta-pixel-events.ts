@@ -55,7 +55,7 @@ export type StandardEvent =
 // amount for the server-side Purchase event is read from Stripe; this is only
 // the hint attached to the browser ViewContent / InitiateCheckout events on
 // the single $38/mo plan.
-export const MEMBERSHIP_VALUE = 38;
+export const MEMBERSHIP_VALUE = 25;
 export const MEMBERSHIP_CURRENCY = "USD";
 
 export function trackPixel(

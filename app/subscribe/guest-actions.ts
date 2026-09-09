@@ -19,11 +19,6 @@ import {
   embeddedCheckoutEnabled,
 } from "@/lib/checkout-session";
 import { buildWatchPath, resolveCheckoutTarget } from "@/lib/checkout-target";
-import {
-  checkoutLineItems,
-  TRIAL_FEE_VALUE,
-  TRIAL_SUBSCRIPTION_DATA,
-} from "@/lib/checkout-trial";
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { isInAppBrowser } from "@/lib/in-app-browser";
@@ -32,8 +27,12 @@ import {
   GUEST_METADATA_KEYS,
 } from "@/lib/guest-checkout";
 import { getDict } from "@/lib/i18n/server";
+import { buildCheckoutSessionParams } from "@/lib/checkout-session-params";
 import { sendCapiEvents } from "@/lib/meta-capi";
-import { MEMBERSHIP_CURRENCY } from "@/lib/meta-pixel-events";
+import {
+  MEMBERSHIP_CURRENCY,
+  MEMBERSHIP_VALUE,
+} from "@/lib/meta-pixel-events";
 import {
   captureServerEvent,
   toPosthogConsentMetadata,
@@ -160,12 +159,6 @@ export async function createGuestCheckoutSession(
   if (!priceId) {
     throw new Error("Stripe price for monthly not configured");
   }
-  // $1/3-day intro trial is mandatory once live — fail loud rather than
-  // silently charge $38 today against the "$1 for 3 days" copy.
-  const trialFeePriceId = process.env.STRIPE_PRICE_TRIAL_FEE;
-  if (!trialFeePriceId) {
-    throw new Error("Stripe trial fee price not configured");
-  }
   const stripe = getStripe();
   // Refuses on a deployment with no usable origin instead of charging the
   // card and returning the buyer to localhost (#202).
@@ -262,30 +255,14 @@ export async function createGuestCheckoutSession(
 
   const session = await stripe.checkout.sessions.create(
     {
-      mode: "subscription",
-      // Deliberately NO `customer` (none exists yet — Stripe creates one
-      // from the email typed on the checkout form) and NO `customer_update`
-      // (Stripe rejects it without an existing customer; the collected
-      // billing address lands on the new customer automatically).
-      client_reference_id: claimToken,
-      line_items: checkoutLineItems(priceId, trialFeePriceId),
-      ...urlParams,
-      subscription_data: {
-        // $1 today, 3-day trial, then $38/mo (see lib/checkout-trial.ts).
-        ...TRIAL_SUBSCRIPTION_DATA,
-        metadata: sessionMetadata,
-      },
-      // Stripe Tax + EU withdrawal waiver: identical to the signed-in flow
-      // (see app/subscribe/actions.ts for the rationale on each).
-      automatic_tax: { enabled: true },
-      billing_address_collection: "required",
-      consent_collection: { terms_of_service: "required" },
-      custom_text: {
-        terms_of_service_acceptance: {
-          message: t.subscribe.withdrawalWaiver,
-        },
-      },
-      locale,
+      ...buildCheckoutSessionParams({
+        priceId,
+        urlParams,
+        subscriptionMetadata: sessionMetadata,
+        locale,
+        withdrawalWaiver: t.subscribe.withdrawalWaiver,
+        clientReferenceId: claimToken,
+      }),
     },
     { idempotencyKey },
   );
@@ -317,7 +294,7 @@ export async function createGuestCheckoutSession(
             clientUserAgent: capiIdentity?.ua,
           },
           customData: {
-            value: TRIAL_FEE_VALUE,
+            value: MEMBERSHIP_VALUE,
             currency: MEMBERSHIP_CURRENCY,
             content_type: "product",
             content_ids: ["matio-membership"],
@@ -333,7 +310,7 @@ export async function createGuestCheckoutSession(
             distinctId: phDistinctId,
             event: "checkout_started",
             properties: {
-              value: TRIAL_FEE_VALUE,
+              value: MEMBERSHIP_VALUE,
               currency: MEMBERSHIP_CURRENCY,
               flow: "pay_first",
               ...(attribution.first.source
