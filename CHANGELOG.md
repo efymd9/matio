@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/efymd9/matio/compare/matio-v0.9.1...matio-v0.9.2) (2026-09-09)
+
+
+### Bug fixes
+
+* **watch:** убрать кнопку блокировки управления из плеера ([#205](https://github.com/efymd9/matio/issues/205)) ([587c8c6](https://github.com/efymd9/matio/commit/587c8c68e6928a0c908ee05de8219524025ae5c2)), closes [#204](https://github.com/efymd9/matio/issues/204)
+
 ## [0.9.1](https://github.com/efymd9/matio/compare/matio-v0.9.0...matio-v0.9.1) (2026-09-09)
 
 
