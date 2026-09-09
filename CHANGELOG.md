@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/efymd9/matio/compare/matio-v0.9.2...matio-v0.10.0) (2026-09-09)
+
+
+### Features
+
+* **payments:** цена 25 $/мес со списанием сразу — вводный доллар и пробный период убраны ([#208](https://github.com/efymd9/matio/issues/208)) ([d3480b8](https://github.com/efymd9/matio/commit/d3480b8a7c69ada1eb5f0b1f5a13b2fba4030c0a)), closes [#207](https://github.com/efymd9/matio/issues/207)
+
 ## [0.9.2](https://github.com/efymd9/matio/compare/matio-v0.9.1...matio-v0.9.2) (2026-09-09)
 
 
