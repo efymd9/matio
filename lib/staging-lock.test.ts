@@ -39,6 +39,24 @@ describe("isStagingLockOpenPath", () => {
     expect(isStagingLockOpenPath("/api/cron/other")).toBe(false);
   });
 
+  it.each([
+    ["/api/webhooks/stripe"],
+    ["/api/webhooks/clerk"],
+    ["/api/webhooks/mux"],
+  ])("leaves %s open — a vendor cannot send Basic Auth, it signs instead", (path) => {
+    // Locked, the bench answered 401 to Stripe and no purchase could be
+    // rehearsed (#200). Each route still verifies its own signature, so the
+    // open path costs no protection.
+    expect(isStagingLockOpenPath(path)).toBe(true);
+    expect(isStagingLockOpenPath(`${path}/`)).toBe(true);
+  });
+
+  it("does not open the webhook tree beyond those three paths", () => {
+    expect(isStagingLockOpenPath("/api/webhooks")).toBe(false);
+    expect(isStagingLockOpenPath("/api/webhooks/stripe/extra")).toBe(false);
+    expect(isStagingLockOpenPath("/api/webhooks/other")).toBe(false);
+  });
+
   it("locks everything else, including the rest of the API", () => {
     // /api/t writes the visitor ledger: an open beacon would fill the bench's
     // tables with drive-by traffic.

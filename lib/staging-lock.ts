@@ -36,7 +36,21 @@ export const NOINDEX_VALUE = "noindex, nofollow";
 // is open for the same reason: Vercel Cron calls it with its own
 // `Authorization: Bearer <CRON_SECRET>` (a Basic challenge would just 401 the
 // platform every night), and the route refuses anything but that bearer.
-const OPEN_PATHS = new Set(["/api/healthz", "/api/cron/retention"]);
+// Paths the lock deliberately leaves open. Every one of them is a MACHINE
+// caller that cannot send a browser's Basic Auth header and authenticates
+// itself some other way: the uptime probe (nothing to protect), the
+// platform cron (Bearer CRON_SECRET), and the three vendor webhooks, each
+// of which verifies its own signature before touching anything (Stripe
+// signature, Svix for Clerk, Mux signature). Leaving the webhooks locked
+// meant the bench answered 401 to Stripe and no purchase could ever be
+// rehearsed — found while preparing #153.
+const OPEN_PATHS = new Set([
+  "/api/healthz",
+  "/api/cron/retention",
+  "/api/webhooks/stripe",
+  "/api/webhooks/clerk",
+  "/api/webhooks/mux",
+]);
 
 export type StagingLockVerdict = "allow" | "challenge";
 
