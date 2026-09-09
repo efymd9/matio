@@ -266,3 +266,48 @@ describe("WalletExpressCheckout — confirming a payment", () => {
     expect(nav.push).not.toHaveBeenCalled();
   });
 });
+
+describe("WalletExpressCheckout — degrading without a scene", () => {
+  it("disappears when the Checkout session itself fails to load", async () => {
+    render(<WalletExpressCheckout {...PROPS} />);
+    fireEvent.click(screen.getByRole("checkbox"));
+    await waitFor(() => expect(screen.getByTestId("ece")).toBeTruthy());
+
+    // Reported from an effect, never from render — updating the parent while
+    // this component renders is something React rejects outright.
+    stripeMock.checkoutState = { type: "error" };
+    act(() => {
+      stripeMock.handlers.onLoadError({});
+    });
+
+    await waitFor(() => expect(screen.queryByTestId("ece")).toBeNull());
+  });
+
+  it("disappears when the element reports a load error", async () => {
+    render(<WalletExpressCheckout {...PROPS} />);
+    fireEvent.click(screen.getByRole("checkbox"));
+    await waitFor(() => expect(screen.getByTestId("ece")).toBeTruthy());
+
+    act(() => {
+      stripeMock.handlers.onLoadError({ error: { message: "boom" } });
+    });
+
+    await waitFor(() => expect(screen.queryByTestId("ece")).toBeNull());
+  });
+
+  it("does not treat a cancel that arrives AFTER a confirm as a change of mind", async () => {
+    render(<WalletExpressCheckout {...PROPS} />);
+    fireEvent.click(screen.getByRole("checkbox"));
+    await waitFor(() => expect(screen.getByTestId("ece")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("ece"));
+    await waitFor(() => expect(nav.push).toHaveBeenCalled());
+
+    // Stripe documents this ordering for a wallet that resolves inline. The
+    // payment already went through; nothing may be re-armed behind it.
+    act(() => {
+      stripeMock.handlers.onCancel({});
+    });
+
+    expect(nav.push).toHaveBeenCalledTimes(1);
+  });
+});

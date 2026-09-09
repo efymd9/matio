@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CheckoutElementsProvider,
@@ -85,6 +85,10 @@ export function WalletExpressCheckout(props: Props) {
     }
   }, [showSlug, episodeId, resumeSeconds, publishableKey]);
 
+  // Stable identity: WalletButton reports failure from an effect keyed on this
+  // callback, and a fresh closure every render would re-run it in a loop.
+  const markUnavailable = useCallback(() => setAvailable(false), []);
+
   const onAccept = (next: boolean) => {
     setAccepted(next);
     if (next) void start();
@@ -120,7 +124,7 @@ export function WalletExpressCheckout(props: Props) {
               returnUrl={returnUrl}
               sessionId={sessionId}
               showSlug={showSlug}
-              onUnavailable={() => setAvailable(false)}
+              onUnavailable={markUnavailable}
             />
           </CheckoutElementsProvider>
         </div>
@@ -190,11 +194,15 @@ function WalletButton({
     router.push(returnUrl);
   };
 
-  if (checkout.type === "error") {
-    // The session failed to load — say nothing and let the card CTA stand.
-    onUnavailable();
-    return null;
-  }
+  // The session failed to load — say nothing and let the card CTA stand.
+  // Reported from an effect, not from render: calling the parent's setter
+  // while this component renders updates another component mid-render, which
+  // React rejects outright.
+  const failed = checkout.type === "error";
+  useEffect(() => {
+    if (failed) onUnavailable();
+  }, [failed, onUnavailable]);
+  if (failed) return null;
 
   return (
     <>
