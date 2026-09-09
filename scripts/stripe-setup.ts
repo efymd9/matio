@@ -14,19 +14,13 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 const CURRENCY = "usd";
 
-// Recurring $38/mo membership — unchanged.
+// The one and only plan: $25/mo, charged at checkout (#207). The former
+// $1 / 3-day intro fee is gone — there is no trial and no second line item.
 const PRODUCT_NAME = "Matio Membership";
 const PLAN = "monthly";
-const UNIT_AMOUNT = 3800; // $38.00 USD
+const UNIT_AMOUNT = 2500; // $25.00 USD
 const INTERVAL = "month" as const;
 
-// One-time $1 intro trial fee (2026-06-11). Charged at checkout; the
-// membership above runs a 3-day Stripe trial and starts billing $38 on day 3.
-// Separate product so the Checkout/invoice line reads as a 3-day trial, and a
-// separate plan-metadata marker so it never collides with the monthly price.
-const TRIAL_FEE_PRODUCT_NAME = "Matio — 3-day trial";
-const TRIAL_FEE_PLAN = "trial_fee";
-const TRIAL_FEE_UNIT_AMOUNT = 100; // $1.00 USD, one-time
 
 async function ensureProduct(name: string, plan: string) {
   const list = await stripe.products.list({ limit: 100 });
@@ -88,8 +82,8 @@ async function ensurePrice(opts: {
     product: productId,
     unit_amount: unitAmount,
     currency: CURRENCY,
-    // Match the live $38/mo price's tax treatment so VAT/sales tax stacks on
-    // top of the trial fee too once a Stripe Tax registration is added.
+    // Match the live membership price's tax treatment so VAT/sales tax stacks on
+    // top of the membership price once a Stripe Tax registration is added.
     tax_behavior: "exclusive",
     ...(interval ? { recurring: { interval } } : {}),
     metadata: { plan },
@@ -109,21 +103,12 @@ async function main() {
     interval: INTERVAL,
   });
 
-  const trialProduct = await ensureProduct(TRIAL_FEE_PRODUCT_NAME, TRIAL_FEE_PLAN);
-  const trialPrice = await ensurePrice({
-    productId: trialProduct.id,
-    plan: TRIAL_FEE_PLAN,
-    unitAmount: TRIAL_FEE_UNIT_AMOUNT,
-  });
 
   console.log("\nAdd these to .env.local (replace any existing values):\n");
   console.log(`STRIPE_PRICE_MONTHLY=${price.id}`);
-  console.log(`STRIPE_PRICE_TRIAL_FEE=${trialPrice.id}`);
   console.log("\nThen push to Vercel (then redeploy to pick them up):");
   console.log("  vercel env rm STRIPE_PRICE_MONTHLY production --yes");
   console.log(`  echo -n "${price.id}" | vercel env add STRIPE_PRICE_MONTHLY production`);
-  console.log("  vercel env rm STRIPE_PRICE_TRIAL_FEE production --yes");
-  console.log(`  echo -n "${trialPrice.id}" | vercel env add STRIPE_PRICE_TRIAL_FEE production`);
 }
 
 main().catch((err) => {

@@ -23,17 +23,16 @@ import {
   readCapiIdentity,
   toCapiMetadata,
 } from "@/lib/capi-identity";
-import {
-  checkoutLineItems,
-  TRIAL_FEE_VALUE,
-  TRIAL_SUBSCRIPTION_DATA,
-} from "@/lib/checkout-trial";
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { isInAppBrowser } from "@/lib/in-app-browser";
 import { getDict } from "@/lib/i18n/server";
+import { buildCheckoutSessionParams } from "@/lib/checkout-session-params";
 import { sendCapiEvents } from "@/lib/meta-capi";
-import { MEMBERSHIP_CURRENCY } from "@/lib/meta-pixel-events";
+import {
+  MEMBERSHIP_CURRENCY,
+  MEMBERSHIP_VALUE,
+} from "@/lib/meta-pixel-events";
 import {
   captureServerEvent,
   toPosthogConsentMetadata,
@@ -86,12 +85,6 @@ export async function createAuthCheckoutSession(
   const priceId = process.env.STRIPE_PRICE_MONTHLY;
   if (!priceId) {
     throw new Error("Stripe price for monthly not configured");
-  }
-  // $1/3-day intro trial is mandatory once live — fail loud rather than
-  // silently charge $38 today against the "$1 for 3 days" copy.
-  const trialFeePriceId = process.env.STRIPE_PRICE_TRIAL_FEE;
-  if (!trialFeePriceId) {
-    throw new Error("Stripe trial fee price not configured");
   }
 
   const stripe = getStripe();
@@ -241,35 +234,14 @@ export async function createAuthCheckoutSession(
 
   const session = await stripe.checkout.sessions.create(
     {
-      mode: "subscription",
-      customer: customerId,
-      line_items: checkoutLineItems(priceId, trialFeePriceId),
-      ...urlParams,
-      subscription_data: {
-        // $1 today, 3-day trial, then $38/mo (see lib/checkout-trial.ts).
-        ...TRIAL_SUBSCRIPTION_DATA,
-        metadata: subscriptionMetadata,
-      },
-      // Stripe Tax — collect billing address, compute VAT/sales tax, and
-      // persist the address back to the Customer so renewals invoice
-      // correctly. Without this, EU/UK customers were billed at the flat
-      // price with zero VAT, leaving the company on the hook.
-      automatic_tax: { enabled: true },
-      customer_update: { address: "auto", name: "auto" },
-      billing_address_collection: "required",
-      // EU 14-day right-of-withdrawal waiver (Terms §6). The required
-      // ToS checkbox links to the URL set in the Stripe account's Public
-      // Details (https://matio.tv/terms); custom_text replaces Stripe's
-      // default acceptance line with the digital-content waiver so the
-      // customer expressly consents to immediate supply. Stripe records
-      // the acceptance on the session. Both work in embedded mode.
-      consent_collection: { terms_of_service: "required" },
-      custom_text: {
-        terms_of_service_acceptance: {
-          message: t.subscribe.withdrawalWaiver,
-        },
-      },
-      locale,
+      ...buildCheckoutSessionParams({
+        priceId,
+        urlParams,
+        subscriptionMetadata: subscriptionMetadata,
+        locale,
+        withdrawalWaiver: t.subscribe.withdrawalWaiver,
+        customerId,
+      }),
     },
     { idempotencyKey },
   );
@@ -300,7 +272,7 @@ export async function createAuthCheckoutSession(
             clientUserAgent: capiIdentity?.ua,
           },
           customData: {
-            value: TRIAL_FEE_VALUE,
+            value: MEMBERSHIP_VALUE,
             currency: MEMBERSHIP_CURRENCY,
             content_type: "product",
             content_ids: ["matio-membership"],
@@ -313,7 +285,7 @@ export async function createAuthCheckoutSession(
         distinctId: userId,
         event: "checkout_started",
         properties: {
-          value: TRIAL_FEE_VALUE,
+          value: MEMBERSHIP_VALUE,
           currency: MEMBERSHIP_CURRENCY,
           // First-touch UTM so the conversion funnel can break down by campaign
           // (already normalized + source-aliased by attribution.ts).

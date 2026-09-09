@@ -116,7 +116,7 @@ export default defineConfig({
       //   включая отказ в развёрнутом окружении).
       thresholds: {
         lines: 38.7,
-        functions: 31.8,
+        functions: 31.9,
         branches: 33.2,
         statements: 38.3,
       },
