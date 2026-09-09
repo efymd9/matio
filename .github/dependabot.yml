@@ -36,8 +36,6 @@ updates:
       # TS 7 API / TS 7.1 стабилизировал API.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "eslint"
-        update-types: ["version-update:semver-major"]
       - dependency-name: "@mux/mux-node"
         update-types: ["version-update:semver-major"]
 
