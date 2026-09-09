@@ -384,6 +384,11 @@ export default async function WatchPage({
       // signup_completed) historically fired on /subscribe; this flow
       // returns users here instead. Same deduped component + same
       // localStorage flag → no double-fires for users who saw /subscribe.
+      // Same runtime read as the other branches (see the note there). THIS is
+      // the branch the wallet button exists for: a signed-in non-subscriber
+      // whose member tier ran out is looking at the subscription paywall.
+      const walletKey = walletCheckoutEnabled() ? getPublishableKey() : null;
+
       const { first: firstTouch } = await readAttributionCookies();
       const signupUtm: Record<string, string> = {};
       if (firstTouch.source) signupUtm.utm_source = firstTouch.source;
@@ -405,6 +410,7 @@ export default async function WatchPage({
             initialEpisodeId={initial.id}
             resumeSeconds={queryResume ?? resumeFromProgress}
             userEmail={userEmail}
+            walletPublishableKey={walletKey}
             freeMode={!paymentsOn}
           />
         </WatchShell>

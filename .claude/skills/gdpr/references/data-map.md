@@ -90,6 +90,19 @@
 | **Stripe** | `createAuthCheckoutSession` / `createGuestCheckoutSession` | `customers.create({email, metadata:{userId}})`; Checkout Session `locale`, `client_reference_id` (claim token); `subscription_data.metadata`: `userId`, `attr_first_*`/`attr_last_*` (UTM), `capi_consent`, `capi_ip` (сырой IP), `capi_ua`, `capi_fbp`, `capi_fbc` — **только до `Purchase`**: сразу после события `mirrorSubscription` стирает четыре сигнала (`subscriptions.update`, пустая строка = удаление ключа; best-effort, следующий вебхук с теми же ключами повторяет; `capi_consent` остаётся — флаг, не данные), `ph_consent`, `guest`, `claim_token`, `trial_token`, **`tos_accepted_at` + `tos_version`** (только кошелёк на paywall, #210 — см. ниже); billing address и карта — вводятся у Stripe | договор; `capi_*` и `ph_*` — только при маркетинговом согласии; подписки до #165 и те, чьи события ушли в ранний выход зеркала (нет локального юзера / неизвестная цена), чистит `pnpm stripe:scrub-capi` (явный `STRIPE_SECRET_KEY`, dry-run по умолчанию) |
 | **Stripe** | `createAuthCheckoutSession` / `createGuestCheckoutSession` | `customers.create({email, metadata:{userId}})`; Checkout Session `locale`, `client_reference_id` (claim token); `subscription_data.metadata`: `userId`, `attr_first_*`/`attr_last_*` (UTM), `capi_consent`, **`capi_ip` (сырой IP)**, **`capi_ua`**, `capi_fbp`, `capi_fbc`, `ph_consent`, `guest`, `claim_token`, `trial_token`; billing address и карта — вводятся у Stripe | договор; `capi_*` и `ph_*` — только при маркетинговом согласии; `capi_ip/ua` не чистятся после использования (#165) |
 
+| **Stripe** (стирание) | вебхук Clerk `user.deleted` | `subscriptions.update(<sub id>, {cancel_at_period_end: true})` — только id подписки, ничего о пользователе; Customer не удаляется (`customers.del` — решение владельца, `docs/registry.md`) | ст. 17 — исполнение запроса |
+| **Meta CAPI** (`lib/meta-capi.ts`) | вебхук Stripe, переход в access-granting | `Purchase`: `em` = SHA-256(email), `external_id` = SHA-256(Clerk id), `fbp`, `fbc`, `client_ip_address` (сырой), `client_user_agent`, `event_id` = sub id, `value`/`currency`, `content_ids` | `capi_consent` из метаданных |
+| **Meta Pixel** (браузер) | по странице | `PageView`, `ViewContent`, `Lead`, `InitiateCheckout`, `CompleteRegistration` + `_fbp`/`_fbc`, IP/UA запроса — самим пикселем | `cookie_consent.marketing` |
+| **PostHog** (браузер) | по странице | `$pageview`, `show_viewed`, `trial_play_started`, `signup_wall_shown`, `signup_completed`, `checkout_started`, … со свойствами `show_slug`, `episode_number`, `mode`, `auth`, `gate`; супер-свойства `locale`, `locale_source`; `identify(userId, {email})` после входа; session replay с маской всех input/text; UTM нормализуются в `before_send` | `cookie_consent.marketing` |
+| **PostHog** (сервер, `lib/posthog-server.ts`) | вебхук Stripe | `subscribe_succeeded`: `distinctId` = Clerk id, `value`, `currency`, `plan`, `utm_*` first-touch | `ph_consent` из метаданных |
+| **Google GA4** | по странице | `page_view` + события `trackGA` (без user_id/email в коде), Consent Mode v2 | `cookie_consent.marketing` |
+| **OpenAI oaiq** | по странице; регистрация; возврат с оплаты | `page_viewed{type:contents}`; `registration_completed{type:customer_action}` или `subscription_created{plan_id, amount, currency}`; `options.event_id` = `signup:<Clerk id>` / Stripe sub id; cookie `__oppref` — самим SDK | `cookie_consent.marketing` |
+| **Resend** | кнопка «Episode reminders» в админке | `to` = `show_reminders.email`, `subject`/`html`/`text` (название шоу, сезон/эпизод, логлайн, жанр, длительность, подписанный thumbnail-URL Mux с TTL 90 дней), `List-Unsubscribe` (HMAC адреса), `replyTo` contact@, idempotency-key = хеш id строк | явный запрос пользователя в форме |
+| **Mux** | воспроизведение | JWT `aud: v` (playback id, exp ≤ 1 ч) — без PII; thumbnail JWT `aud: t`; Mux Data beacons (`player_name`, `video_series`) — только при согласии; Mux Data API — чтение агрегатов | договор; Data — согласие |
+| **Sentry** | ошибка | событие после `scrubSentryEvent`: `user.id` только, URL без query/credentials, заголовки по allowlist, email-подобные строки → `[redacted-email]` | всегда (DSN задан) |
+| **Vercel** | каждый запрос | edge видит IP (нами не сохраняется), cookies, UA; runtime-логи — id/статусы | инфраструктура |
+| **GitHub Actions** | ночной бэкап; ежемесячная проба | полный дамп (см. §1) | инфраструктура |
+
 **Отказ от 14-дневного права на поверхности кошелька (#210).** Apple Pay /
 Google Pay прямо на paywall создают Checkout Session с `ui_mode: 'elements'`,
 а Stripe на этом ui_mode не рендерит согласие: `custom_text` отбивается
@@ -110,18 +123,6 @@ Google Pay прямо на paywall создают Checkout Session с `ui_mode: 
 платёжного потока Stripe, реквизиты у нас не оседают, и в браузер не
 загружается ничего, чего не грузит сегодняшний `/checkout`.
 
-| **Stripe** (стирание) | вебхук Clerk `user.deleted` | `subscriptions.update(<sub id>, {cancel_at_period_end: true})` — только id подписки, ничего о пользователе; Customer не удаляется (`customers.del` — решение владельца, `docs/registry.md`) | ст. 17 — исполнение запроса |
-| **Meta CAPI** (`lib/meta-capi.ts`) | вебхук Stripe, переход в access-granting | `Purchase`: `em` = SHA-256(email), `external_id` = SHA-256(Clerk id), `fbp`, `fbc`, `client_ip_address` (сырой), `client_user_agent`, `event_id` = sub id, `value`/`currency`, `content_ids` | `capi_consent` из метаданных |
-| **Meta Pixel** (браузер) | по странице | `PageView`, `ViewContent`, `Lead`, `InitiateCheckout`, `CompleteRegistration` + `_fbp`/`_fbc`, IP/UA запроса — самим пикселем | `cookie_consent.marketing` |
-| **PostHog** (браузер) | по странице | `$pageview`, `show_viewed`, `trial_play_started`, `signup_wall_shown`, `signup_completed`, `checkout_started`, … со свойствами `show_slug`, `episode_number`, `mode`, `auth`, `gate`; супер-свойства `locale`, `locale_source`; `identify(userId, {email})` после входа; session replay с маской всех input/text; UTM нормализуются в `before_send` | `cookie_consent.marketing` |
-| **PostHog** (сервер, `lib/posthog-server.ts`) | вебхук Stripe | `subscribe_succeeded`: `distinctId` = Clerk id, `value`, `currency`, `plan`, `utm_*` first-touch | `ph_consent` из метаданных |
-| **Google GA4** | по странице | `page_view` + события `trackGA` (без user_id/email в коде), Consent Mode v2 | `cookie_consent.marketing` |
-| **OpenAI oaiq** | по странице; регистрация; возврат с оплаты | `page_viewed{type:contents}`; `registration_completed{type:customer_action}` или `subscription_created{plan_id, amount, currency}`; `options.event_id` = `signup:<Clerk id>` / Stripe sub id; cookie `__oppref` — самим SDK | `cookie_consent.marketing` |
-| **Resend** | кнопка «Episode reminders» в админке | `to` = `show_reminders.email`, `subject`/`html`/`text` (название шоу, сезон/эпизод, логлайн, жанр, длительность, подписанный thumbnail-URL Mux с TTL 90 дней), `List-Unsubscribe` (HMAC адреса), `replyTo` contact@, idempotency-key = хеш id строк | явный запрос пользователя в форме |
-| **Mux** | воспроизведение | JWT `aud: v` (playback id, exp ≤ 1 ч) — без PII; thumbnail JWT `aud: t`; Mux Data beacons (`player_name`, `video_series`) — только при согласии; Mux Data API — чтение агрегатов | договор; Data — согласие |
-| **Sentry** | ошибка | событие после `scrubSentryEvent`: `user.id` только, URL без query/credentials, заголовки по allowlist, email-подобные строки → `[redacted-email]` | всегда (DSN задан) |
-| **Vercel** | каждый запрос | edge видит IP (нами не сохраняется), cookies, UA; runtime-логи — id/статусы | инфраструктура |
-| **GitHub Actions** | ночной бэкап; ежемесячная проба | полный дамп (см. §1) | инфраструктура |
 
 ## 4. Устройство пользователя — cookies и хранилища
 

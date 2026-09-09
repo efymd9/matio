@@ -493,12 +493,27 @@ export async function createAuthWalletCheckoutSession(
   // The acceptance record travels the metadata channel with everything else, so
   // the webhook sees it on the subscription. Not a new DB column on purpose —
   // see lib/wallet-checkout.ts.
+  //
+  // The acceptance is stamped from the START OF THE IDEMPOTENCY HOUR, not from
+  // `new Date()`. A millisecond-precision timestamp here would be fatal to the
+  // double-charge guard below: it rides in the metadata that the variant digest
+  // hashes, so every call would mint a different key, Stripe's replay would
+  // never trigger, and two tabs would create two live sessions — the exact
+  // parallel-tap double-charge the key exists to collapse. Hashing the metadata
+  // WITHOUT the timestamp does not work either: the create params would then
+  // differ under an identical key, which Stripe rejects outright with
+  // `idempotency_error`.
+  //
+  // Hour granularity is the honest trade and costs nothing evidentially: what
+  // the waiver has to prove is that the buyer asked for immediate supply BEFORE
+  // supply began, and the subscription's own creation timestamp — precise, and
+  // necessarily later — supplies the other half.
+  const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
   const walletMetadata = {
     ...subscriptionMetadata,
-    ...toWaiverMetadata(new Date()),
+    ...toWaiverMetadata(new Date(hourBucket * 60 * 60 * 1000)),
   };
 
-  const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
   const variant = crypto
     .createHash("sha256")
     .update(

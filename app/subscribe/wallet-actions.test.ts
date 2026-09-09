@@ -330,6 +330,56 @@ describe("createAuthWalletCheckoutSession — the session it builds", () => {
     expect(key).toMatch(/^checkout:user_1:\d+:[0-9a-f]{16}$/);
   });
 
+  // The two tabs are SECONDS apart, not microseconds. Without the clock being
+  // moved between the calls both assertions below pass even against the bug
+  // they exist to catch — two `new Date()` reads inside the same millisecond
+  // produce the same string. Mid-hour start so advancing cannot cross a bucket
+  // boundary and make the suite flaky.
+  async function twoTabsFiveSecondsApart() {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-09T10:30:00.000Z"));
+    await createAuthWalletCheckoutSession(INPUT, true);
+    vi.setSystemTime(new Date("2026-09-09T10:30:05.000Z"));
+    await createAuthWalletCheckoutSession(INPUT, true);
+    vi.useRealTimers();
+  }
+
+  it("produces the SAME idempotency key for the same intent — the double-charge guard", async () => {
+    // The key only protects anything if it is stable. An earlier revision
+    // stamped the waiver acceptance with `new Date()` and hashed it into the
+    // variant digest, so every call minted a fresh key: two tabs would create
+    // two live sessions and a buyer who confirmed in both paid twice.
+    await twoTabsFiveSecondsApart();
+
+    const [a, b] = h.sessions.map(
+      (s) => (s.opts as { idempotencyKey: string }).idempotencyKey,
+    );
+    expect(a).toBe(b);
+  });
+
+  it("sends byte-identical create params on that repeat, or Stripe 400s the replay", async () => {
+    // The other half of the same guard: a stable key with drifting params is
+    // `idempotency_error`, which dead-ends checkout until the hour rolls.
+    await twoTabsFiveSecondsApart();
+
+    expect(JSON.stringify(h.sessions[0].params)).toBe(
+      JSON.stringify(h.sessions[1].params),
+    );
+  });
+
+  it("still records a real, parseable acceptance instant", async () => {
+    // Hour-bucketed, not fabricated: it must remain a timestamp that precedes
+    // the subscription it justifies.
+    await createAuthWalletCheckoutSession(INPUT, true);
+
+    const meta = (
+      h.sessions[0].params.subscription_data as { metadata: Record<string, string> }
+    ).metadata;
+    const at = new Date(meta.tos_accepted_at).getTime();
+    expect(Number.isNaN(at)).toBe(false);
+    expect(at).toBeLessThanOrEqual(Date.now());
+  });
+
   it("fires NO checkout-intent events at creation — the wall is not intent", async () => {
     await createAuthWalletCheckoutSession(INPUT, true);
 
