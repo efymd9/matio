@@ -5,6 +5,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
 import { db } from "@/db";
 import { subscriptions, users } from "@/db/schema";
+import { checkoutOrigin } from "@/lib/checkout-origin";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import {
   type CheckoutSessionResult,
@@ -120,7 +121,9 @@ export async function createAuthCheckoutSession(
     return { kind: "redirect", to: "/" };
   }
 
-  const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  // Refuses on a deployment with no usable origin instead of charging the
+  // card and returning the buyer to localhost (#202).
+  const origin = checkoutOrigin();
 
   // If the user came from a watch flow, carry show+resume through so we
   // can drop them back into playback after checkout. Validation lives in
