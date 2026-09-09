@@ -447,7 +447,8 @@ describe("Player — Mux Data consent on the live element", () => {
       expect(video.mux?.deleted).toBe(false);
       // The right chrome is on screen — any player edit is checked in both.
       if (orientation === "vertical") {
-        expect(screen.getByLabelText(en.player.lockAria)).toBeTruthy();
+        // The vertical chrome has no playback-rate control; its presence is
+        // what tells the two chromes apart here.
         expect(document.querySelector('[data-chrome="rate"]')).toBeNull();
       } else {
         expect(document.querySelector('[data-chrome="rate"]')).toBeTruthy();

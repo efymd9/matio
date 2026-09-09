@@ -274,7 +274,6 @@ export function Player({
     seconds: resumeSeconds ?? null,
   }));
   const [overlay, setOverlay] = useState<OverlayKind>("none");
-  const [locked, setLocked] = useState(false);
   // trial_play_started (PostHog) fires once per show-preview session, not per
   // episode — the ref lives in the outer shell so swapping episodes mid-trial
   // doesn't re-fire it. No-op without marketing consent (PostHog isn't loaded).
@@ -378,8 +377,6 @@ export function Player({
       showTitle={showTitle}
       resumeSeconds={resumeForThisLoad}
       autoplay={autoplay}
-      locked={locked}
-      onLockChange={setLocked}
       overlay={overlay}
       onOverlayChange={setOverlay}
       onSwap={swap}
@@ -405,8 +402,6 @@ function EpisodePlayback({
   showTitle,
   resumeSeconds,
   autoplay,
-  locked,
-  onLockChange,
   overlay,
   onOverlayChange,
   onSwap,
@@ -428,8 +423,6 @@ function EpisodePlayback({
   showTitle?: string;
   resumeSeconds: number | null;
   autoplay: boolean;
-  locked: boolean;
-  onLockChange: (locked: boolean) => void;
   overlay: OverlayKind;
   onOverlayChange: (overlay: OverlayKind) => void;
   onSwap: (episodeId: string) => void;
@@ -1893,14 +1886,11 @@ function EpisodePlayback({
           episodesCount={listed.length}
           hasNext={!!next}
           hasCaptions={hasCaptions}
-          locked={locked}
           showSkipIntro={showSkipIntro}
           showUnmutePill={showUnmutePill}
           needsTap={needsTap}
           chipVisible={chipEpisodeId === current.id}
           onOpenEpisodes={() => onOverlayChange("episodes")}
-          onLock={() => onLockChange(true)}
-          onUnlock={() => onLockChange(false)}
           onUnmute={() => {
             const el = videoRef.current;
             if (el) el.muted = false;
@@ -1925,7 +1915,7 @@ function EpisodePlayback({
         <>
       {/* Top scrim + bar */}
       <div
-        className={`pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/75 to-transparent px-5 pb-16 pt-5 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8 sm:pt-[22px] ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
+        className={`pointer-events-none absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/75 to-transparent px-5 pb-16 pt-5 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:px-8 sm:pt-[22px]`}
       >
         <div className="pointer-events-auto flex items-center gap-4">
           <Link
@@ -1987,7 +1977,7 @@ function EpisodePlayback({
 
       {/* Center cluster */}
       <div
-        className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
+        className={`pointer-events-none absolute inset-0 z-10 flex items-center justify-center transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0`}
       >
         {/* prev-episode · gold play/pause · next-episode. The seek clusters
             the design removed are replaced by episode transport — the
@@ -2036,7 +2026,7 @@ function EpisodePlayback({
 
       {/* Skip-intro chip — only renders when in the intro window and the
           chrome isn't locked. */}
-      {showSkipIntro && !locked && current.introEndSeconds != null ? (
+      {showSkipIntro && current.introEndSeconds != null ? (
         <button
           type="button"
           onClick={() => {
@@ -2052,7 +2042,7 @@ function EpisodePlayback({
       ) : null}
 
       {/* "Tap for sound" pill — autoplay landed in the muted fallback. */}
-      {showUnmutePill && !locked ? (
+      {showUnmutePill ? (
         <button
           type="button"
           onClick={(e) => {
@@ -2082,7 +2072,7 @@ function EpisodePlayback({
           playback-core leaves the element paused with no signal, so this
           is our own affordance. The tap doubles as the gesture that
           blesses the element for unmuted auto-advance later. */}
-      {needsTap && !locked ? (
+      {needsTap ? (
         <button
           type="button"
           onClick={(e) => {
@@ -2105,7 +2095,7 @@ function EpisodePlayback({
 
       {/* Transient "Up next" chip right after an auto-advance, so the
           instant cut doesn't disorient. */}
-      {chipEpisodeId === current.id && !locked ? (
+      {chipEpisodeId === current.id ? (
         <div className="pointer-events-none absolute left-1/2 top-5 z-20 max-w-[80%] -translate-x-1/2 truncate rounded-full border border-rust/30 bg-black/60 px-4 py-2 text-xs font-semibold text-cream backdrop-blur-xl">
           {t.player.upNextBtn} · {t.home.epShort(currentNumber)} — {current.title}
         </div>
@@ -2133,7 +2123,7 @@ function EpisodePlayback({
         <>
       {/* Mini Matio branding */}
       <div
-        className={`pointer-events-none absolute bottom-[92px] left-5 z-10 opacity-50 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:left-8 ${locked ? "!opacity-0" : ""}`}
+        className={`pointer-events-none absolute bottom-[92px] left-5 z-10 opacity-50 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 sm:left-8`}
       >
         <MatioLogo size={11} />
       </div>
@@ -2142,7 +2132,7 @@ function EpisodePlayback({
           home-indicator safe-area; floors keep the original 1.25rem/2rem
           cushion on devices with no inset. */}
       <div
-        className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 to-transparent pt-4 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 pl-[max(env(safe-area-inset-left),1.25rem)] pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pl-[max(env(safe-area-inset-left),2rem)] sm:pr-[max(env(safe-area-inset-right),2rem)] ${locked ? "!opacity-0 !pointer-events-none" : ""}`}
+        className={`absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/85 to-transparent pt-4 transition-opacity duration-300 group-[[media-ui-inactive]]/player:opacity-0 pl-[max(env(safe-area-inset-left),1.25rem)] pr-[max(env(safe-area-inset-right),1.25rem)] pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pl-[max(env(safe-area-inset-left),2rem)] sm:pr-[max(env(safe-area-inset-right),2rem)]`}
       >
         {/* Gold scrubber — knob/track/fill themed via mediaVars. */}
         <MediaTimeRange className="!block !h-3 !w-full !bg-transparent" />
@@ -2197,14 +2187,6 @@ function EpisodePlayback({
                 <Icon name="fullscreen" size={20} />
               </span>
             </MediaFullscreenButton>
-            <button
-              type="button"
-              aria-label={t.player.lockAria}
-              onClick={() => onLockChange(true)}
-              className="-m-2 p-2 text-cream transition-opacity hover:opacity-80"
-            >
-              <Icon name="lock" size={18} />
-            </button>
           </div>
         </div>
       </div>
@@ -2223,18 +2205,6 @@ function EpisodePlayback({
         style={{ minWidth: "180px" }}
       />
 
-      {/* Unlock pill — only thing interactive when chrome is locked. */}
-      {locked ? (
-        <button
-          type="button"
-          onClick={() => onLockChange(false)}
-          className="absolute left-1/2 top-1/2 z-20 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-rust/60 bg-burgundy/50 px-4 py-2.5 text-sm font-semibold text-cream backdrop-blur-xl transition-colors hover:bg-burgundy/70"
-          aria-label={t.player.unlockAria}
-        >
-          <Icon name="lock" size={16} />
-          {t.player.tapToUnlock}
-        </button>
-      ) : null}
         </>
       )}
 
