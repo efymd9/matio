@@ -6,6 +6,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
 import { db } from "@/db";
 import { subscriptions, trialSessions } from "@/db/schema";
+import { checkoutOrigin } from "@/lib/checkout-origin";
 import { readAttributionCookies, toStripeMetadata } from "@/lib/attribution";
 import {
   type CapiIdentity,
@@ -166,7 +167,9 @@ export async function createGuestCheckoutSession(
     throw new Error("Stripe trial fee price not configured");
   }
   const stripe = getStripe();
-  const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  // Refuses on a deployment with no usable origin instead of charging the
+  // card and returning the buyer to localhost (#202).
+  const origin = checkoutOrigin();
 
   // After payment, Stripe sends the top frame to /welcome, which verifies the
   // session + the claim cookie and signs the buyer in. Used as return_url in
