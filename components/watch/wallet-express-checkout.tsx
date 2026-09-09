@@ -110,7 +110,7 @@ export function WalletExpressCheckout(props: Props) {
         </p>
       ) : null}
 
-      {accepted && clientSecret && returnUrl && sessionId ? (
+      {accepted && available !== false && clientSecret && returnUrl && sessionId ? (
         <div className="mx-auto mt-3 max-w-md">
           <CheckoutElementsProvider
             stripe={getStripeBrowser(publishableKey)}
