@@ -22,7 +22,9 @@ export async function POST(req: NextRequest) {
   try {
     evt = await verifyWebhook(req);
   } catch (err) {
-    console.error("Clerk webhook signature verification failed:", err);
+    console.error("Clerk webhook signature verification failed:", {
+      error: describeError(err),
+    });
     return new Response("Bad signature", { status: 400 });
   }
 

@@ -22,9 +22,12 @@ export function walletCheckoutEnabled(): boolean {
 // Service + the §5-6 withdrawal waiver in one box, #214). Bumped by hand when
 // /terms or the checkbox wording changes, so a stored acceptance can be traced
 // to what was on screen. Date-stamped because /terms is dated, not numbered:
-// 2026-08-16 is its last content change (the move to DEEP ORDINARY LTD); the
-// page's visible "Last updated" was corrected to that edition in #214.
-export const TOS_VERSION = "2026-08-16";
+// 2026-09-09 is its last content change — §5, the price clause, rewritten for
+// $25/mo charged today (#208); the page's visible "Last updated" matches it
+// (#214). Check `git log -- 'app/(public)/terms'` before bumping: an earlier
+// revision of this constant trusted a header comment and named the wrong
+// edition.
+export const TOS_VERSION = "2026-09-09";
 
 // Metadata key carrying the acceptance. It rides the SAME channel as
 // attribution and the CAPI identity — subscription_data.metadata — which is the

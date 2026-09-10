@@ -287,7 +287,7 @@ describe("createAuthWalletCheckoutSession — the session it builds", () => {
     const meta = (
       h.sessions[0].params.subscription_data as { metadata: Record<string, string> }
     ).metadata;
-    expect(meta.tos_version).toBe("2026-08-16");
+    expect(meta.tos_version).toBe("2026-09-09");
     // A time here either breaks the idempotency key or, rounded, back-dates the
     // acceptance (#214). Stripe's session `created` is the exact moment.
     expect(meta).not.toHaveProperty("tos_accepted_at");

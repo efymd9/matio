@@ -17,10 +17,11 @@ import { en } from "@/lib/i18n/dictionaries";
 // wallet at all. A golden that reached out to Stripe would be
 // non-deterministic and would also be a picture of Apple's button, not ours.
 
-// The consent copy comes straight from the product dictionary (#214), so the
-// board can never show wording the paywall does not: one required box that is
-// BOTH the Terms acceptance and the 14-day withdrawal waiver, plus a Privacy
-// Policy notice beneath it that is not part of the "I agree".
+// A–C take the consent copy straight from the product dictionary (#214), so
+// they cannot show wording the paywall does not: one required box that is BOTH
+// the Terms acceptance and the 14-day withdrawal waiver, plus a Privacy Policy
+// notice beneath it that is not part of the "I agree". D is a deliberately
+// terser ALTERNATIVE and its wording is not the product's.
 const CONSENT = en.subscribe.walletConsent;
 const legalLink = "font-bold text-gold underline underline-offset-2";
 
@@ -85,8 +86,14 @@ export function WallFrame({
 /** Inert stand-in for the Stripe-rendered wallet button. Deliberately NOT an
  *  Apple Pay look-alike (Apple's guidelines forbid a self-made button) — it is
  *  a labelled grey slot at the real element height so the layout measures
- *  correctly. */
-function WalletSlot({ height = 48, label = "Apple Pay / Google Pay" }) {
+ *  correctly. It marks where the button WILL appear: in the product nothing
+ *  renders there until the box is ticked, so the sheet grows by this much at
+ *  that moment — the caption says so, rather than the picture implying a
+ *  button is live before consent. */
+function WalletSlot({
+  height = 48,
+  label = "Apple Pay / Google Pay · appears once you agree",
+}) {
   return (
     <div
       className="flex w-full items-center justify-center rounded-lg border border-dashed border-cream/25 bg-cream/10 text-[11px] font-semibold tracking-wide text-cream/50"
@@ -189,7 +196,7 @@ export function WalletSlotSplit() {
     <Sheet>
       <Heading />
       <div className="mt-4 grid grid-cols-2 gap-2.5">
-        <WalletSlot label="Apple Pay" />
+        <WalletSlot label="Apple Pay · after you agree" />
         <button
           type="button"
           className="inline-flex h-12 items-center justify-center rounded-lg bg-gold-cta px-4 text-xs font-extrabold text-gold-deep shadow-cta"

@@ -1,5 +1,5 @@
 // DRAFT pending legal-counsel review. Trading party + contact details
-// filled 2026-05-27; entity updated 2026-08-16 — visible "Last updated" corrected to that edition in #214 (DEEP ORDINARY LTD, England
+// filled 2026-05-27; entity updated 2026-08-16; §5 price rewritten 2026-09-09 (#208) — visible "Last updated" set to that edition in #214 (DEEP ORDINARY LTD, England
 // & Wales). The Stripe Checkout consent_collection.terms_of_service flow
 // (digital-content waiver, §6) is wired in app/subscribe/actions.ts.
 import type { Metadata } from "next";
@@ -18,8 +18,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED_ES = "16 de agosto de 2026";
-const LAST_UPDATED_EN = "August 16, 2026";
+const LAST_UPDATED_ES = "9 de septiembre de 2026";
+const LAST_UPDATED_EN = "September 9, 2026";
 
 export default async function TermsPage() {
   const { locale, t } = await getDict();
