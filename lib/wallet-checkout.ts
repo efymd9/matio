@@ -22,10 +22,8 @@ export function walletCheckoutEnabled(): boolean {
 // Service + the §5-6 withdrawal waiver in one box, #214). Bumped by hand when
 // /terms or the checkbox wording changes, so a stored acceptance can be traced
 // to what was on screen. Date-stamped because /terms is dated, not numbered:
-// 2026-08-16 is its last CONTENT change (the entity update noted in the page's
-// header). NB the page's visible "Last updated" still reads May 27, 2026 — a
-// stale date on the page itself, raised with the owner, not a reason to
-// misstate the edition here.
+// 2026-08-16 is its last content change (the move to DEEP ORDINARY LTD); the
+// page's visible "Last updated" was corrected to that edition in #214.
 export const TOS_VERSION = "2026-08-16";
 
 // Metadata key carrying the acceptance. It rides the SAME channel as

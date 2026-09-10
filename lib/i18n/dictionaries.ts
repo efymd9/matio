@@ -279,8 +279,8 @@ export const es = {
       "Solicito que matio comience la reproducción de inmediato y reconozco que pierdo mi derecho de desistimiento de 14 días una vez que comience la reproducción.",
     // The paywall wallet's one required checkbox (#214): Terms acceptance AND
     // the withdrawal waiver. Split around the links so the component renders
-    // /terms and /privacy as anchors. Legal copy: drafted in #214 for the
-    // owner's approval; counsel review pending together with /terms.
+    // /terms and /privacy as anchors. Legal copy: approved by the owner
+    // 2026-09-10 (#214); counsel review pending together with /terms.
     walletConsent: {
       beforeTerms: "Acepto los ",
       terms: "Términos del servicio",
@@ -770,8 +770,8 @@ export const en: Dict = {
       "I request that matio begin streaming immediately and I acknowledge that I lose my 14-day right of withdrawal once playback starts.",
     // The paywall wallet's one required checkbox (#214): Terms acceptance AND
     // the withdrawal waiver. Split around the links so the component renders
-    // /terms and /privacy as anchors. Legal copy: drafted in #214 for the
-    // owner's approval; counsel review pending together with /terms.
+    // /terms and /privacy as anchors. Legal copy: approved by the owner
+    // 2026-09-10 (#214); counsel review pending together with /terms.
     walletConsent: {
       beforeTerms: "I agree to the ",
       terms: "Terms of Service",
