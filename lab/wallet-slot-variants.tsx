@@ -36,9 +36,16 @@ function ConsentText() {
   );
 }
 
-function PrivacyNotice() {
+// `center` is for variant D, whose consent line is centred: an indented,
+// left-aligned notice there sits visibly off the line above it. The default is
+// unchanged, so A–C render exactly as before.
+function PrivacyNotice({ center = false }: { center?: boolean }) {
   return (
-    <p className="mt-1.5 pl-6.5 text-left text-[10px] font-medium text-cream/45">
+    <p
+      className={`mt-1.5 text-[10px] font-medium text-cream/45 ${
+        center ? "text-center" : "pl-6.5 text-left"
+      }`}
+    >
       {CONSENT.privacyBefore}
       <a href="/privacy" className={legalLink}>
         {CONSENT.privacy}
@@ -222,7 +229,7 @@ export function WalletSlotTerse() {
           , start now, waive the 14-day withdrawal right
         </span>
       </label>
-      <PrivacyNotice />
+      <PrivacyNotice center />
       <div className="mt-3">
         <button type="button" className={cardCta}>
           {CTA}
