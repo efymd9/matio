@@ -89,4 +89,50 @@ describe("buildCheckoutSessionParams", () => {
     // Not on the session: the mirror reads subscription metadata only.
     expect(p.metadata).toBeUndefined();
   });
+
+  // The paywall's in-place wallet button (#210) sells the same membership on a
+  // different Stripe surface. These two assertions are the whole reason the
+  // surface is a parameter of this builder and not a second builder: what is
+  // sold, and on what terms, must be provably identical.
+  describe("the 'elements' (wallet) surface", () => {
+    const wallet = { ...base, customerId: "cus_1", surface: "elements" as const };
+
+    it("differs from the Stripe-rendered form ONLY in the consent pair", () => {
+      const embedded = buildCheckoutSessionParams({
+        ...base,
+        customerId: "cus_1",
+      });
+      const elements = buildCheckoutSessionParams(wallet);
+
+      // Everything that decides what is sold and on what terms.
+      expect(elements.line_items).toEqual(embedded.line_items);
+      expect(elements.mode).toBe(embedded.mode);
+      expect(elements.automatic_tax).toEqual(embedded.automatic_tax);
+      expect(elements.billing_address_collection).toBe(
+        embedded.billing_address_collection,
+      );
+      expect(elements.customer).toBe(embedded.customer);
+      expect(elements.customer_update).toEqual(embedded.customer_update);
+      expect(elements.locale).toBe(embedded.locale);
+      expect(elements.subscription_data).toEqual(embedded.subscription_data);
+
+      // …and the only permitted difference. `custom_text` is hard-rejected by
+      // Stripe under ui_mode 'elements' and `consent_collection` has no
+      // renderer there, so both move into our own paywall UI — see the note in
+      // checkout-session-params.ts. Anything else drifting is a bug.
+      const diff = Object.keys({ ...embedded, ...elements }).filter((k) => {
+        const a = JSON.stringify(embedded[k as keyof typeof embedded]);
+        const b = JSON.stringify(elements[k as keyof typeof elements]);
+        return a !== b;
+      });
+      expect(diff.sort()).toEqual(["consent_collection", "custom_text"]);
+    });
+
+    it("still charges today — no trial sneaks in on the wallet path either", () => {
+      const p = buildCheckoutSessionParams(wallet);
+
+      expect(JSON.stringify(p)).not.toContain("trial");
+      expect(p.line_items).toEqual([{ price: "price_monthly", quantity: 1 }]);
+    });
+  });
 });

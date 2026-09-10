@@ -25,6 +25,28 @@ export type CheckoutSessionResult =
   | { kind: "hosted"; url: string }
   | { kind: "redirect"; to: string };
 
+// What the paywall's wallet button gets back (issue #210). Distinct from
+// `embedded` because the client does something different with it: it mounts a
+// bare ExpressCheckoutElement rather than Stripe's whole form, and it needs the
+// return URL up front — `{CHECKOUT_SESSION_ID}` is a server-side Checkout
+// template token and has no substituting party in a client `confirm()`, so the
+// server bakes the real session id in at creation. That is no weaker: the id is
+// re-read at Stripe and bound to this user's customer by
+// lib/checkout-return-verify.ts regardless of where it came from.
+//
+// `kind: 'unavailable'` is the honest answer when the wallet surface is off,
+// the buyer is in a webview, or the flag is unset — the paywall then shows only
+// its existing card CTA. It is NOT an error state.
+export type WalletCheckoutResult =
+  | {
+      kind: "wallet";
+      clientSecret: string;
+      sessionId: string;
+      returnUrl: string;
+    }
+  | { kind: "unavailable" }
+  | { kind: "redirect"; to: string };
+
 // Embedded Checkout needs a publishable key on the client (loadStripe). When
 // it's unset we create a HOSTED session and redirect — identical to the
 // pre-embedded behavior — so a deploy that hasn't received the key yet keeps

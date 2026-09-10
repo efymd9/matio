@@ -30,6 +30,8 @@ import {
   readAttributionCookies,
 } from "@/lib/attribution";
 import { resolveEffectiveTier } from "@/lib/episode-access";
+import { getPublishableKey } from "@/lib/checkout-session";
+import { walletCheckoutEnabled } from "@/lib/wallet-checkout";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
@@ -382,6 +384,11 @@ export default async function WatchPage({
       // signup_completed) historically fired on /subscribe; this flow
       // returns users here instead. Same deduped component + same
       // localStorage flag → no double-fires for users who saw /subscribe.
+      // Same runtime read as the other branches (see the note there). THIS is
+      // the branch the wallet button exists for: a signed-in non-subscriber
+      // whose member tier ran out is looking at the subscription paywall.
+      const walletKey = walletCheckoutEnabled() ? getPublishableKey() : null;
+
       const { first: firstTouch } = await readAttributionCookies();
       const signupUtm: Record<string, string> = {};
       if (firstTouch.source) signupUtm.utm_source = firstTouch.source;
@@ -403,6 +410,7 @@ export default async function WatchPage({
             initialEpisodeId={initial.id}
             resumeSeconds={queryResume ?? resumeFromProgress}
             userEmail={userEmail}
+            walletPublishableKey={walletKey}
             freeMode={!paymentsOn}
           />
         </WatchShell>
@@ -414,6 +422,12 @@ export default async function WatchPage({
     // position. payFirst routes the wall's signed-out CTA straight to
     // guest Stripe Checkout (PAY_FIRST_CHECKOUT flag).
     const payFirst = process.env.PAY_FIRST_CHECKOUT === "1";
+    // Runtime read (getPublishableKey), never an inlined `process.env
+    // .NEXT_PUBLIC_…`: the key can be added to an already-built deployment and
+    // Vercel reuses Next's inlined client chunks across an env-only change.
+    // Null unless the wallet flag is on too, so the paywall mounts nothing —
+    // and pulls no Stripe.js — while the vertical is dark. (#210)
+    const walletKey = walletCheckoutEnabled() ? getPublishableKey() : null;
     const freeSessionToken =
       (await cookies()).get(TRIAL_COOKIE)?.value ?? null;
     const freeSession = freeSessionToken
@@ -450,6 +464,7 @@ export default async function WatchPage({
           resumeSeconds={queryResume ?? freeResume}
           userEmail={userEmail}
           payFirst={payFirst}
+          walletPublishableKey={walletKey}
           freeMode={!paymentsOn}
           signupGate={signupGate}
         />
@@ -481,6 +496,8 @@ export default async function WatchPage({
   // /subscribe would bounce an anonymous visitor off Clerk sign-up instead,
   // re-erecting exactly the wall the flag removes.
   const payFirst = process.env.PAY_FIRST_CHECKOUT === "1";
+  // See the note on the tier-gated branch: runtime read, gated on the flag.
+  const walletKey = walletCheckoutEnabled() ? getPublishableKey() : null;
   if (trial && !isTrialActive(trial) && !payFirst) {
     const sp = new URLSearchParams({ show: show.slug });
     // lastPositionSeconds is only meaningful for the user's first trial of
@@ -507,6 +524,7 @@ export default async function WatchPage({
         resumeSeconds={queryResume ?? (trial?.lastPositionSeconds || null)}
         userEmail={userEmail}
         payFirst={payFirst}
+        walletPublishableKey={walletKey}
       />
     </WatchShell>
   );

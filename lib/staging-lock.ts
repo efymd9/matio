@@ -52,10 +52,25 @@ const OPEN_PATHS = new Set([
   "/api/webhooks/mux",
 ]);
 
+// Well-known URIs (RFC 8615) are machine-fetched by third parties that can
+// never send a browser's Basic credential, and every one of them is public by
+// definition — that is the entire point of the namespace. Left open as a
+// PREFIX so a future one does not have to be discovered the hard way.
+//
+// The concrete motivation is payment-wallet verification (#210): Stripe's
+// modern payment-method-domain registration needs no hosted file, but Apple's
+// own re-verification of a registered domain still re-fetches
+// /.well-known/apple-developer-merchantid-domain-association. A 401 there
+// surfaces as "Apple Pay just stopped working" with no error anywhere, which
+// is the most expensive kind of failure to diagnose. Nothing under this prefix
+// is generated from user data.
+const OPEN_PREFIXES = ["/.well-known/"];
+
 export type StagingLockVerdict = "allow" | "challenge";
 
 /** True for the handful of paths the lock deliberately leaves open. */
 export function isStagingLockOpenPath(pathname: string): boolean {
+  if (OPEN_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;
   // A trailing slash is the same resource; nothing else is normalised, because
   // the pathname arrives already decoded and normalised from `req.nextUrl`.
   const normalized =

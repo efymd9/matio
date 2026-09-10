@@ -19,6 +19,21 @@ export function buildCheckoutReturnUrl(
   return `${origin}/?welcome=1&cs=${CHECKOUT_SESSION_PLACEHOLDER}`;
 }
 
+// Substitutes the placeholder ourselves, for the one surface where Stripe
+// cannot: the paywall's wallet button confirms in the browser with
+// `redirect: 'if_required'`, so on an inline success there is no Stripe
+// redirect to do the substitution. The server knows the real session id the
+// moment it creates the session, so it bakes it in and hands the finished URL
+// to the client (issue #210).
+//
+// This is not a weaker handle than Stripe's own substitution: whoever supplies
+// the id, lib/checkout-return-verify.ts re-reads the session AT STRIPE and
+// requires it to be complete, paid, and owned by this user's customer. A
+// forged or foreign id yields nothing.
+export function withCheckoutSessionId(url: string, sessionId: string): string {
+  return url.split(CHECKOUT_SESSION_PLACEHOLDER).join(sessionId);
+}
+
 // A Checkout Session id as it arrives back in the URL: shape-validated, never
 // trusted for anything but keying a beacon (it grants no data by itself).
 export function parseCheckoutSessionParam(value: unknown): string | null {

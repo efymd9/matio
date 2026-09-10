@@ -14,6 +14,15 @@ import type { Locale } from "@/lib/i18n/dictionaries";
 // or a second line item appearing here would mean somebody is being charged
 // something other than what the page promises.
 
+// Which Stripe surface renders the session.
+//   'embedded' — today's /checkout page (ui_mode 'embedded_page' or the hosted
+//                fallback): Stripe renders the whole form, including the ToS
+//                checkbox carrying our withdrawal waiver.
+//   'elements'  — the wallet button on the paywall (ui_mode 'elements'): we
+//                render the surface, so the two consent params below move to
+//                our own UI. See the consent note on the builder.
+export type CheckoutSurface = "embedded" | "elements";
+
 export type CheckoutSessionInput = {
   /** The recurring membership price (STRIPE_PRICE_MONTHLY). */
   priceId: string;
@@ -29,6 +38,8 @@ export type CheckoutSessionInput = {
   customerId?: string;
   /** Guest flow only: binds the session to the buyer's claim cookie. */
   clientReferenceId?: string;
+  /** Which surface renders it. Defaults to today's Stripe-rendered form. */
+  surface?: CheckoutSurface;
 };
 
 export function buildCheckoutSessionParams({
@@ -39,7 +50,37 @@ export function buildCheckoutSessionParams({
   withdrawalWaiver,
   customerId,
   clientReferenceId,
+  surface = "embedded",
 }: CheckoutSessionInput): Stripe.Checkout.SessionCreateParams {
+  // The ToS consent pair is the ONLY thing that differs between surfaces, and
+  // it differs because Stripe will not render it under `ui_mode: 'elements'`:
+  //
+  //   * `custom_text` is hard-rejected there — verified against the live API on
+  //     the pinned 2026-04-22.dahlia: "The following parameters are not
+  //     supported with `ui_mode: elements`: custom_text". So the localized
+  //     waiver wording below simply cannot be sent.
+  //   * `consent_collection` IS accepted, but its only renderer is Stripe's
+  //     `TermsElement`, which the installed SDK marks "Requires beta access"
+  //     and types with zero options — it could not carry our wording even with
+  //     access, and a required-but-unrendered consent risks an unconfirmable
+  //     session.
+  //
+  // So on the wallet surface WE collect the waiver, in the buyer's language,
+  // before the wallet sheet can open, and record the acceptance in
+  // subscription metadata (see lib/wallet-checkout.ts). Dropping these two
+  // params is therefore not a loosening — the consent moves, it does not
+  // disappear. Everything that decides WHAT IS SOLD stays identical, which is
+  // what checkout-session-params.test.ts pins.
+  const consentParams =
+    surface === "elements"
+      ? {}
+      : {
+          consent_collection: { terms_of_service: "required" as const },
+          custom_text: {
+            terms_of_service_acceptance: { message: withdrawalWaiver },
+          },
+        };
+
   return {
     mode: "subscription",
     // One line item, quantity one: the membership, charged today.
@@ -62,11 +103,9 @@ export function buildCheckoutSessionParams({
     // checkbox links to the URL in the Stripe account's public details, and
     // custom_text replaces Stripe's default line with the digital-content
     // waiver, so the buyer expressly consents to immediate supply. Stripe
-    // records the acceptance on the session. Works in embedded mode too.
-    consent_collection: { terms_of_service: "required" },
-    custom_text: {
-      terms_of_service_acceptance: { message: withdrawalWaiver },
-    },
+    // records the acceptance on the session. Works in embedded mode too — and
+    // moves into our own UI on the 'elements' surface, see above.
+    ...consentParams,
     locale,
   } as Stripe.Checkout.SessionCreateParams;
 }
