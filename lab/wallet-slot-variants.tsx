@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { TONE_GRADIENT, WALL_SCRIM } from "@/lib/design";
+import { en } from "@/lib/i18n/dictionaries";
 
 // Lab-first board for the paywall's in-place wallet slot (#210). The product
 // ships variant A (the arrangement inside components/watch/paywall.tsx +
@@ -16,8 +17,36 @@ import { TONE_GRADIENT, WALL_SCRIM } from "@/lib/design";
 // wallet at all. A golden that reached out to Stripe would be
 // non-deterministic and would also be a picture of Apple's button, not ours.
 
-const WAIVER =
-  "I ask for immediate access and accept that I lose my 14-day right to cancel once streaming begins.";
+// The consent copy comes straight from the product dictionary (#214), so the
+// board can never show wording the paywall does not: one required box that is
+// BOTH the Terms acceptance and the 14-day withdrawal waiver, plus a Privacy
+// Policy notice beneath it that is not part of the "I agree".
+const CONSENT = en.subscribe.walletConsent;
+const legalLink = "font-bold text-gold underline underline-offset-2";
+
+function ConsentText() {
+  return (
+    <>
+      {CONSENT.beforeTerms}
+      <a href="/terms" className={legalLink}>
+        {CONSENT.terms}
+      </a>
+      {CONSENT.afterTerms}
+    </>
+  );
+}
+
+function PrivacyNotice() {
+  return (
+    <p className="mt-1.5 pl-6.5 text-left text-[10px] font-medium text-cream/45">
+      {CONSENT.privacyBefore}
+      <a href="/privacy" className={legalLink}>
+        {CONSENT.privacy}
+      </a>
+      {CONSENT.privacyAfter}
+    </p>
+  );
+}
 const CTA = "Continue · Subscribe";
 const BENEFITS = "Every episode · Full catalogue · Cancel anytime";
 
@@ -108,9 +137,10 @@ export function WalletSlotStacked() {
       <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-left">
         <input type="checkbox" readOnly className="mt-0.5 size-4 shrink-0 accent-gold" />
         <span className="text-[11px] leading-snug font-medium text-cream/60">
-          {WAIVER}
+          <ConsentText />
         </span>
       </label>
+      <PrivacyNotice />
       <div className="mt-3">
         <WalletSlot />
       </div>
@@ -133,9 +163,10 @@ export function WalletSlotFirst() {
       <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-left">
         <input type="checkbox" readOnly className="mt-0.5 size-4 shrink-0 accent-gold" />
         <span className="text-[11px] leading-snug font-medium text-cream/60">
-          {WAIVER}
+          <ConsentText />
         </span>
       </label>
+      <PrivacyNotice />
       <p className="mt-3 text-[11px] text-cream/55">
         Rather use a card? <span className={cardLink}>Pay with card</span>
       </p>
@@ -162,9 +193,10 @@ export function WalletSlotSplit() {
       <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-left">
         <input type="checkbox" readOnly className="mt-0.5 size-4 shrink-0 accent-gold" />
         <span className="text-[11px] leading-snug font-medium text-cream/60">
-          {WAIVER}
+          <ConsentText />
         </span>
       </label>
+      <PrivacyNotice />
     </Sheet>
   );
 }
@@ -183,9 +215,14 @@ export function WalletSlotTerse() {
       <label className="mt-2.5 flex cursor-pointer items-center justify-center gap-2">
         <input type="checkbox" readOnly className="size-3.5 shrink-0 accent-gold" />
         <span className="text-[10px] font-medium text-cream/50">
-          Start now, waive the 14-day cancellation
+          Agree to the{" "}
+          <a href="/terms" className={legalLink}>
+            Terms
+          </a>
+          , start now, waive the 14-day withdrawal right
         </span>
       </label>
+      <PrivacyNotice />
       <div className="mt-3">
         <button type="button" className={cardCta}>
           {CTA}

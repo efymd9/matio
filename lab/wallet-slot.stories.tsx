@@ -59,7 +59,7 @@ const VARIANTS: {
     key: "D",
     name: "Terse consent",
     summary:
-      "Wallet on top, the waiver reduced to one line with an inline tick — still an explicit, unticked opt-in.",
+      "Wallet on top, the consent (Terms + waiver) reduced to one line with an inline tick — still an explicit, unticked opt-in.",
     render: () => <WalletSlotTerse />,
   },
   {

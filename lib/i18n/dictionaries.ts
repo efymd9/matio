@@ -277,6 +277,19 @@ export const es = {
     continueSubscribe: "Continuar · Suscribirse",
     withdrawalWaiver:
       "Solicito que matio comience la reproducción de inmediato y reconozco que pierdo mi derecho de desistimiento de 14 días una vez que comience la reproducción.",
+    // The paywall wallet's one required checkbox (#214): Terms acceptance AND
+    // the withdrawal waiver. Split around the links so the component renders
+    // /terms and /privacy as anchors. Legal copy: drafted in #214 for the
+    // owner's approval; counsel review pending together with /terms.
+    walletConsent: {
+      beforeTerms: "Acepto los ",
+      terms: "Términos del servicio",
+      afterTerms:
+        " y solicito que matio comience la reproducción de inmediato. Entiendo que pierdo mi derecho de desistimiento de 14 días una vez que comience la reproducción.",
+      privacyBefore: "Consulta nuestra ",
+      privacy: "Política de privacidad",
+      privacyAfter: ".",
+    },
     alreadyMemberKicker: "Ya eres miembro",
     youreSubscribed: "Estás suscrito.",
     yourPlanIs: (plan: string, status: string) =>
@@ -755,6 +768,19 @@ export const en: Dict = {
     continueSubscribe: "Continue · Subscribe",
     withdrawalWaiver:
       "I request that matio begin streaming immediately and I acknowledge that I lose my 14-day right of withdrawal once playback starts.",
+    // The paywall wallet's one required checkbox (#214): Terms acceptance AND
+    // the withdrawal waiver. Split around the links so the component renders
+    // /terms and /privacy as anchors. Legal copy: drafted in #214 for the
+    // owner's approval; counsel review pending together with /terms.
+    walletConsent: {
+      beforeTerms: "I agree to the ",
+      terms: "Terms of Service",
+      afterTerms:
+        " and ask matio to start streaming now. I understand I lose my 14-day right of withdrawal once playback starts.",
+      privacyBefore: "See our ",
+      privacy: "Privacy Policy",
+      privacyAfter: ".",
+    },
     alreadyMemberKicker: "Already a member",
     youreSubscribed: "You're subscribed.",
     yourPlanIs: (plan: string, status: string) =>

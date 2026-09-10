@@ -104,6 +104,51 @@ vi.mock("@/lib/mux-token", () => ({
   muxThumbnailUrl: () => "https://image.mux.com/dummy/thumbnail.jpg",
 }));
 
+// The paywall wallet's confirm-time reporting (#214): the CAPI identity
+// capture, the Meta call and PostHog are the vendor steps that can fail with a
+// message quoting what was sent. Partial mocks — everything else in these
+// modules (the #165 scrub keys the mirror case relies on) stays real.
+// The spies DELEGATE to the real functions by default: every other case in
+// this file (the Stripe mirror, the #165 scrub) must keep running the real
+// Meta/PostHog code it always exercised. Only the wallet cases override them,
+// one call at a time.
+const walletAudit = vi.hoisted(() => {
+  const real: Record<string, (...args: unknown[]) => unknown> = {};
+  return {
+    real,
+    capiRead: vi.fn((...args: unknown[]) => real.readCapiIdentity(...args)),
+    capiSend: vi.fn((...args: unknown[]) => real.sendCapiEvents(...args)),
+    posthogCapture: vi.fn((...args: unknown[]) =>
+      real.captureServerEvent(...args),
+    ),
+    consent: "",
+  };
+});
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "user-agent": "Mozilla/5.0 Safari" }),
+  cookies: async () => ({
+    get: (name: string) =>
+      name === "cookie_consent" && walletAudit.consent
+        ? { value: walletAudit.consent }
+        : undefined,
+  }),
+}));
+vi.mock("@/lib/capi-identity", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capi-identity")>();
+  walletAudit.real.readCapiIdentity = actual.readCapiIdentity as (...args: unknown[]) => unknown;
+  return { ...actual, readCapiIdentity: walletAudit.capiRead };
+});
+vi.mock("@/lib/meta-capi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/meta-capi")>();
+  walletAudit.real.sendCapiEvents = actual.sendCapiEvents as (...args: unknown[]) => unknown;
+  return { ...actual, sendCapiEvents: walletAudit.capiSend };
+});
+vi.mock("@/lib/posthog-server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/posthog-server")>();
+  walletAudit.real.captureServerEvent = actual.captureServerEvent as (...args: unknown[]) => unknown;
+  return { ...actual, captureServerEvent: walletAudit.posthogCapture };
+});
+
 import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as retentionCron } from "@/app/api/cron/retention/route";
 import { GET as readyz } from "@/app/api/readyz/route";
@@ -112,6 +157,8 @@ import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
 import { assembleUserExport, summarizeExport } from "@/lib/user-export";
+import { reportWalletCheckoutStarted } from "@/app/subscribe/actions";
+import { CONSENT_VERSION, serializeConsent } from "@/lib/cookie-consent";
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -862,5 +909,70 @@ describe("log audit · subject-access export summary (scripts/export-user-data.t
     }
     // What it DOES keep: the error's name and status, enough to know what to retry.
     expect(notes).toContain("StripeInvalidRequestError/404");
+  });
+});
+
+describe("log audit · wallet checkout-intent reporting (#214)", () => {
+  // The paywall wallet reports InitiateCheckout / checkout_started when the
+  // buyer confirms. Every vendor step on that path can fail with a message that
+  // quotes what was sent, and the users row it reads holds the address. Only
+  // step names, error classes, codes and statuses may come out.
+  const quoted = (name: string) =>
+    Object.assign(new Error(`rejected ${MARKER_NAME} <${MARKER_EMAIL}>`), {
+      name,
+      code: "marker_code",
+      statusCode: 400,
+    });
+
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("WALLET_EXPRESS_CHECKOUT", "1");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://matio.tv");
+    walletAudit.consent = serializeConsent({
+      necessary: true,
+      marketing: true,
+      ts: 0,
+      v: CONSENT_VERSION,
+    });
+    const chain = {
+      from: () => chain,
+      where: () => chain,
+      limit: async () => [{ email: MARKER_EMAIL }],
+    };
+    select.mockImplementation(() => chain);
+  });
+
+  it("logs failed vendor calls by step and class — never the buyer's address", async () => {
+    walletAudit.capiRead.mockRejectedValueOnce(quoted("CapiIdentityError"));
+    walletAudit.capiSend.mockRejectedValueOnce(quoted("FetchError"));
+    walletAudit.posthogCapture.mockRejectedValueOnce(quoted("PostHogError"));
+    const logged = captureConsole();
+
+    await reportWalletCheckoutStarted("cs_test_marker");
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    // What it DOES log: which step failed, and the vendor's class and code.
+    expect(logged()).toContain("walletCheckout: CAPI identity capture failed");
+    expect(logged()).toContain("startCheckout: CAPI InitiateCheckout threw");
+    expect(logged()).toContain("startCheckout: PostHog checkout_started threw");
+    expect(logged()).toContain("marker_code");
+  });
+
+  it("logs a failure that escapes the vendor calls by class, not by message", async () => {
+    // A synchronous throw skips the per-call catches and reaches the outer one.
+    walletAudit.posthogCapture.mockImplementationOnce(() => {
+      throw quoted("PostHogError");
+    });
+    const logged = captureConsole();
+
+    await reportWalletCheckoutStarted("cs_test_marker");
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain("walletCheckout: checkout-intent reporting threw");
+    expect(logged()).toContain("PostHogError");
   });
 });

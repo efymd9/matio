@@ -9,6 +9,7 @@ import {
   subscriptions,
   users,
 } from "@/db/schema";
+import { describeError } from "@/lib/observability";
 import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 
@@ -148,7 +149,7 @@ async function eraseDeletedUser(userId: string | undefined) {
       // "Stripe is down".
       console.error(
         "Clerk user.deleted: could NOT schedule the live Stripe subscription's cancellation — cancel it at Stripe by hand",
-        { ...ids, error: describeStripeError(err) },
+        { ...ids, error: describeError(err) },
       );
     }
     Sentry.captureMessage(
@@ -226,14 +227,3 @@ const STRIPE_CANCEL_TIMEOUT_MS = 5_000;
 // handler finds no user — so after the last attempt the loud error log above
 // is the only recovery path.
 const STRIPE_CANCEL_RETRIES = 2;
-
-// The loggable shape of a failed Stripe call: class, Stripe error code and
-// HTTP status — never the message, which quotes what was sent.
-function describeStripeError(err: unknown) {
-  const e = err as { name?: unknown; code?: unknown; statusCode?: unknown };
-  return {
-    name: typeof e?.name === "string" ? e.name : "unknown",
-    code: typeof e?.code === "string" ? e.code : undefined,
-    statusCode: typeof e?.statusCode === "number" ? e.statusCode : undefined,
-  };
-}

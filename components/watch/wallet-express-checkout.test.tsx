@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -250,6 +251,9 @@ describe("WalletExpressCheckout — confirming a payment", () => {
       expect(stripeMock.confirm).toHaveBeenCalledWith({
         expressCheckoutConfirmEvent: { expressPaymentType: "apple_pay" },
         returnUrl: "https://matio.tv/watch/x?cs=cs_test_123",
+        // Explicit: the in-place router.push path depends on it, not on
+        // whatever Stripe's default happens to be.
+        redirect: "if_required",
       }),
     );
   });
@@ -309,5 +313,57 @@ describe("WalletExpressCheckout — degrading without a scene", () => {
     });
 
     expect(nav.push).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("WalletExpressCheckout — what the buyer agrees to (#214)", () => {
+  it("asks for Terms acceptance, linked to /terms, in the same box as the waiver", () => {
+    render(<WalletExpressCheckout {...PROPS} />);
+
+    const label = screen.getByRole("checkbox").closest("label") as HTMLElement;
+    const terms = within(label).getByRole("link", { name: /terms of service/i });
+    expect(terms.getAttribute("href")).toBe("/terms");
+    // Both halves live in the one required box: agreeing to the Terms AND
+    // waiving the 14-day withdrawal right once playback starts.
+    expect(label.textContent).toMatch(/I agree to the Terms of Service/);
+    expect(label.textContent).toMatch(/14-day right of withdrawal/);
+  });
+
+  it("links the Privacy Policy as a notice, outside the thing being agreed to", () => {
+    render(<WalletExpressCheckout {...PROPS} />);
+
+    const label = screen.getByRole("checkbox").closest("label") as HTMLElement;
+    const privacy = screen.getByRole("link", { name: /privacy policy/i });
+    expect(privacy.getAttribute("href")).toBe("/privacy");
+    // The legal basis for a paid membership is the contract; folding the
+    // policy into "I agree" is the anti-pattern this layout avoids.
+    expect(label.contains(privacy)).toBe(false);
+  });
+
+  it("opens both legal pages in a new tab — following them in place would unmount the paywall", () => {
+    render(<WalletExpressCheckout {...PROPS} />);
+
+    for (const name of [/terms of service/i, /privacy policy/i]) {
+      const link = screen.getByRole("link", { name });
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toContain("noopener");
+    }
+  });
+
+  it("sends the checkbox's own state to the server", async () => {
+    // Pins the wiring, not a guarantee: the value is still this client's word,
+    // and the server can only refuse a client that says the box is unticked.
+    render(<WalletExpressCheckout {...PROPS} />);
+    const box = screen.getByRole("checkbox") as HTMLInputElement;
+    fireEvent.click(box);
+
+    await waitFor(() =>
+      expect(actions.createWalletCheckoutSession).toHaveBeenCalled(),
+    );
+    const sent = (
+      actions.createWalletCheckoutSession.mock.calls[0] as unknown[]
+    )[1];
+    expect(sent).toBe(box.checked);
+    expect(sent).toBe(true);
   });
 });
