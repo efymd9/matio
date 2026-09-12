@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.11.0](https://github.com/efymd9/matio/compare/matio-v0.10.0...matio-v0.11.0) (2026-09-12)
+
+
+### Features
+
+* **checkout:** Apple Pay / Google Pay кнопкой прямо на paywall ([#211](https://github.com/efymd9/matio/issues/211)) ([d851db7](https://github.com/efymd9/matio/commit/d851db7aeb1f0ff2175ff76e5b88ce7fb89b99b2)), closes [#210](https://github.com/efymd9/matio/issues/210)
+
+
+### Bug fixes
+
+* **checkout:** кошелёк на paywall — принятие Условий, честная запись согласия, аудит логов ([#216](https://github.com/efymd9/matio/issues/216)) ([f390a8c](https://github.com/efymd9/matio/commit/f390a8c2b1de1d943875f5034004f7059368ca4c))
+
 ## [0.10.0](https://github.com/efymd9/matio/compare/matio-v0.9.2...matio-v0.10.0) (2026-09-09)
 
 
