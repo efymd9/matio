@@ -281,14 +281,16 @@ describe("createAuthWalletCheckoutSession — the session it builds", () => {
     expect(params.consent_collection).toBeUndefined();
   });
 
-  it("records the waiver acceptance on the subscription metadata", async () => {
+  it("records WHICH terms were accepted — and no acceptance time", async () => {
     await createAuthWalletCheckoutSession(INPUT, true);
 
     const meta = (
       h.sessions[0].params.subscription_data as { metadata: Record<string, string> }
     ).metadata;
-    expect(meta.tos_version).toBe("2026-08-16");
-    expect(() => new Date(meta.tos_accepted_at).toISOString()).not.toThrow();
+    expect(meta.tos_version).toBe("2026-09-09");
+    // A time here either breaks the idempotency key or, rounded, back-dates the
+    // acceptance (#214). Stripe's session `created` is the exact moment.
+    expect(meta).not.toHaveProperty("tos_accepted_at");
   });
 
   it("carries the whole metadata channel the cookie-less webhook depends on", async () => {
@@ -367,17 +369,17 @@ describe("createAuthWalletCheckoutSession — the session it builds", () => {
     );
   });
 
-  it("still records a real, parseable acceptance instant", async () => {
-    // Hour-bucketed, not fabricated: it must remain a timestamp that precedes
-    // the subscription it justifies.
+  it("puts no clock reading anywhere in the metadata", async () => {
+    // Guards the regression directly: any ISO timestamp in the metadata rides
+    // into the idempotency digest — or, rounded, misstates when consent happened.
     await createAuthWalletCheckoutSession(INPUT, true);
 
     const meta = (
       h.sessions[0].params.subscription_data as { metadata: Record<string, string> }
     ).metadata;
-    const at = new Date(meta.tos_accepted_at).getTime();
-    expect(Number.isNaN(at)).toBe(false);
-    expect(at).toBeLessThanOrEqual(Date.now());
+    for (const value of Object.values(meta)) {
+      expect(value).not.toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:/);
+    }
   });
 
   it("fires NO checkout-intent events at creation — the wall is not intent", async () => {
@@ -400,7 +402,7 @@ describe("createAuthWalletCheckoutSession — the session it builds", () => {
     ).metadata;
     expect(meta.capi_consent).toBeUndefined();
     expect(meta.ph_consent).toBeUndefined();
-    expect(meta.tos_accepted_at).toBeTruthy();
+    expect(meta.tos_version).toBeTruthy();
   });
 });
 

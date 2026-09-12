@@ -55,7 +55,21 @@ vi.mock("@sentry/nextjs", () => ({ captureMessage: sentryMessage }));
 // The erasure handler's one outbound call (cancel the live subscription at
 // Stripe) is a spy so its failure text can be seeded with a marker.
 vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({ subscriptions: { update: stripeUpdate } }),
+  getStripe: () => ({
+    subscriptions: { update: stripeUpdate, list: async () => ({ data: [] }) },
+    // The checkout session builder's calls (#214): inert, so the audit case
+    // reaches the CAPI identity capture it exists to watch.
+    customers: { create: async () => ({ id: "cus_dummy" }) },
+    checkout: {
+      sessions: {
+        create: async () => ({
+          id: "cs_test_dummy",
+          client_secret: "cs_secret_dummy",
+          url: "https://checkout.stripe.com/dummy",
+        }),
+      },
+    },
+  }),
 }));
 // The Stripe mirror's guest branch: the tombstone answer is the switch under
 // audit; the claim itself must never be reached from a tombstoned customer.
@@ -84,6 +98,13 @@ vi.mock("@clerk/nextjs/server", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/admin", () => ({
   requireAdmin: async () => ({ id: "admin_1" }),
+  // The checkout builder's signed-in user — the address it carries is exactly
+  // what the audit case must keep out of the log.
+  getOrSyncCurrentUser: async () => ({
+    id: "user_1",
+    email: MARKER_EMAIL,
+    stripeCustomerId: "cus_dummy",
+  }),
 }));
 vi.mock("@/lib/resend", () => ({
   resendConfigured: () => true,
@@ -104,6 +125,62 @@ vi.mock("@/lib/mux-token", () => ({
   muxThumbnailUrl: () => "https://image.mux.com/dummy/thumbnail.jpg",
 }));
 
+// The paywall wallet's confirm-time reporting (#214): the CAPI identity
+// capture, the Meta call and PostHog are the vendor steps that can fail with a
+// message quoting what was sent. Partial mocks — everything else in these
+// modules (the #165 scrub keys the mirror case relies on) stays real.
+// The spies DELEGATE to the real functions by default: every other case in
+// this file (the Stripe mirror, the #165 scrub) must keep running the real
+// Meta/PostHog code it always exercised. Only the wallet cases override them,
+// one call at a time.
+const walletAudit = vi.hoisted(() => {
+  const real: Record<string, (...args: unknown[]) => unknown> = {};
+  return {
+    real,
+    capiRead: vi.fn((...args: unknown[]) => real.readCapiIdentity(...args)),
+    capiSend: vi.fn((...args: unknown[]) => real.sendCapiEvents(...args)),
+    posthogCapture: vi.fn((...args: unknown[]) =>
+      real.captureServerEvent(...args),
+    ),
+    consent: "",
+  };
+});
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "user-agent": "Mozilla/5.0 Safari" }),
+  cookies: async () => ({
+    get: (name: string) =>
+      name === "cookie_consent" && walletAudit.consent
+        ? { value: walletAudit.consent }
+        : undefined,
+  }),
+}));
+vi.mock("@/lib/capi-identity", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capi-identity")>();
+  walletAudit.real.readCapiIdentity = actual.readCapiIdentity as (...args: unknown[]) => unknown;
+  return { ...actual, readCapiIdentity: walletAudit.capiRead };
+});
+vi.mock("@/lib/meta-capi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/meta-capi")>();
+  walletAudit.real.sendCapiEvents = actual.sendCapiEvents as (...args: unknown[]) => unknown;
+  return { ...actual, sendCapiEvents: walletAudit.capiSend };
+});
+vi.mock("@/lib/posthog-server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/posthog-server")>();
+  walletAudit.real.captureServerEvent = actual.captureServerEvent as (...args: unknown[]) => unknown;
+  return { ...actual, captureServerEvent: walletAudit.posthogCapture };
+});
+
+// No watch-flow target for the builder case: the audit is about the log line,
+// not about resolving a show from the database.
+vi.mock("@/lib/checkout-target", () => ({
+  resolveCheckoutTarget: async () => ({
+    showSlug: null,
+    episodeId: null,
+    resume: null,
+  }),
+  buildWatchPath: () => null,
+}));
+
 import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as retentionCron } from "@/app/api/cron/retention/route";
 import { GET as readyz } from "@/app/api/readyz/route";
@@ -112,6 +189,11 @@ import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
 import { assembleUserExport, summarizeExport } from "@/lib/user-export";
+import {
+  createAuthCheckoutSession,
+  reportWalletCheckoutStarted,
+} from "@/app/subscribe/actions";
+import { CONSENT_VERSION, serializeConsent } from "@/lib/cookie-consent";
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -862,5 +944,129 @@ describe("log audit · subject-access export summary (scripts/export-user-data.t
     }
     // What it DOES keep: the error's name and status, enough to know what to retry.
     expect(notes).toContain("StripeInvalidRequestError/404");
+  });
+});
+
+describe("log audit · wallet checkout-intent reporting (#214)", () => {
+  // The paywall wallet reports InitiateCheckout / checkout_started when the
+  // buyer confirms. Every vendor step on that path can fail with a message that
+  // quotes what was sent, and the users row it reads holds the address. Only
+  // step names, error classes, codes and statuses may come out.
+  const quoted = (name: string) =>
+    Object.assign(new Error(`rejected ${MARKER_NAME} <${MARKER_EMAIL}>`), {
+      name,
+      code: "marker_code",
+      statusCode: 400,
+    });
+
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("WALLET_EXPRESS_CHECKOUT", "1");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://matio.tv");
+    walletAudit.consent = serializeConsent({
+      necessary: true,
+      marketing: true,
+      ts: 0,
+      v: CONSENT_VERSION,
+    });
+    const chain = {
+      from: () => chain,
+      where: () => chain,
+      limit: async () => [{ email: MARKER_EMAIL }],
+    };
+    select.mockImplementation(() => chain);
+  });
+
+  it("logs failed vendor calls by step and class — never the buyer's address", async () => {
+    walletAudit.capiRead.mockRejectedValueOnce(quoted("CapiIdentityError"));
+    walletAudit.capiSend.mockRejectedValueOnce(quoted("FetchError"));
+    walletAudit.posthogCapture.mockRejectedValueOnce(quoted("PostHogError"));
+    const logged = captureConsole();
+
+    await reportWalletCheckoutStarted("cs_test_marker");
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    // What it DOES log: which step failed, and the vendor's class and code.
+    expect(logged()).toContain("walletCheckout: CAPI identity capture failed");
+    expect(logged()).toContain("startCheckout: CAPI InitiateCheckout threw");
+    expect(logged()).toContain("startCheckout: PostHog checkout_started threw");
+    expect(logged()).toContain("marker_code");
+  });
+
+  it("logs a failure that escapes the vendor calls by class, not by message", async () => {
+    // A synchronous throw skips the per-call catches and reaches the outer one.
+    walletAudit.posthogCapture.mockImplementationOnce(() => {
+      throw quoted("PostHogError");
+    });
+    const logged = captureConsole();
+
+    await reportWalletCheckoutStarted("cs_test_marker");
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain("walletCheckout: checkout-intent reporting threw");
+    expect(logged()).toContain("PostHogError");
+  });
+});
+
+describe("log audit · checkout session builder (prepareAuthCheckout, #214)", () => {
+  // The one checkout log line the wallet cases above cannot reach: the CAPI
+  // identity capture inside the builder that /checkout and the wallet share.
+  // The signed-in user it works with carries the address.
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://matio.tv");
+    vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "pk_test_dummy");
+    vi.stubEnv("STRIPE_PRICE_MONTHLY", "price_dummy");
+    walletAudit.consent = serializeConsent({
+      necessary: true,
+      marketing: true,
+      ts: 0,
+      v: CONSENT_VERSION,
+    });
+    // No existing access-granting row, so the builder proceeds past layer 1.
+    const chain = { from: () => chain, where: () => chain, limit: async () => [] };
+    select.mockImplementation(() => chain);
+  });
+
+  it("logs a failed CAPI identity capture by class — never the buyer's address", async () => {
+    walletAudit.capiRead.mockRejectedValueOnce(
+      Object.assign(new Error(`rejected ${MARKER_NAME} <${MARKER_EMAIL}>`), {
+        name: "CapiIdentityError",
+        code: "marker_code",
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await createAuthCheckoutSession({ show: null, ep: null, resume: null });
+
+    expect(res.kind).toBe("embedded");
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain("startCheckout: CAPI identity capture failed");
+    expect(logged()).toContain("marker_code");
+  });
+});
+
+describe("log audit · Clerk webhook signature failure", () => {
+  it("rejects a bad signature without echoing the verifier's error text", async () => {
+    clerkVerify.mockRejectedValue(
+      Object.assign(new Error(`signature mismatch for ${MARKER_EMAIL}`), {
+        name: "WebhookVerificationError",
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(
+      new Request("https://matio.tv/api/webhooks/clerk", { method: "POST" }) as never,
+    );
+
+    expect(res.status).toBe(400);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).toContain("WebhookVerificationError");
   });
 });

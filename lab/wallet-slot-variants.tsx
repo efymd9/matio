@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { TONE_GRADIENT, WALL_SCRIM } from "@/lib/design";
+import { en } from "@/lib/i18n/dictionaries";
 
 // Lab-first board for the paywall's in-place wallet slot (#210). The product
 // ships variant A (the arrangement inside components/watch/paywall.tsx +
@@ -16,8 +17,44 @@ import { TONE_GRADIENT, WALL_SCRIM } from "@/lib/design";
 // wallet at all. A golden that reached out to Stripe would be
 // non-deterministic and would also be a picture of Apple's button, not ours.
 
-const WAIVER =
-  "I ask for immediate access and accept that I lose my 14-day right to cancel once streaming begins.";
+// A–C take the consent copy straight from the product dictionary (#214), so
+// they cannot show wording the paywall does not: one required box that is BOTH
+// the Terms acceptance and the 14-day withdrawal waiver, plus a Privacy Policy
+// notice beneath it that is not part of the "I agree". D is a deliberately
+// terser ALTERNATIVE and its wording is not the product's.
+const CONSENT = en.subscribe.walletConsent;
+const legalLink = "font-bold text-gold underline underline-offset-2";
+
+function ConsentText() {
+  return (
+    <>
+      {CONSENT.beforeTerms}
+      <a href="/terms" className={legalLink}>
+        {CONSENT.terms}
+      </a>
+      {CONSENT.afterTerms}
+    </>
+  );
+}
+
+// `center` is for variant D, whose consent line is centred: an indented,
+// left-aligned notice there sits visibly off the line above it. The default is
+// unchanged, so A–C render exactly as before.
+function PrivacyNotice({ center = false }: { center?: boolean }) {
+  return (
+    <p
+      className={`mt-1.5 text-[10px] font-medium text-cream/45 ${
+        center ? "text-center" : "pl-6.5 text-left"
+      }`}
+    >
+      {CONSENT.privacyBefore}
+      <a href="/privacy" className={legalLink}>
+        {CONSENT.privacy}
+      </a>
+      {CONSENT.privacyAfter}
+    </p>
+  );
+}
 const CTA = "Continue · Subscribe";
 const BENEFITS = "Every episode · Full catalogue · Cancel anytime";
 
@@ -49,8 +86,14 @@ export function WallFrame({
 /** Inert stand-in for the Stripe-rendered wallet button. Deliberately NOT an
  *  Apple Pay look-alike (Apple's guidelines forbid a self-made button) — it is
  *  a labelled grey slot at the real element height so the layout measures
- *  correctly. */
-function WalletSlot({ height = 48, label = "Apple Pay / Google Pay" }) {
+ *  correctly. It marks where the button WILL appear: in the product nothing
+ *  renders there until the box is ticked, so the sheet grows by this much at
+ *  that moment — the caption says so, rather than the picture implying a
+ *  button is live before consent. */
+function WalletSlot({
+  height = 48,
+  label = "Apple Pay / Google Pay · appears once you agree",
+}) {
   return (
     <div
       className="flex w-full items-center justify-center rounded-lg border border-dashed border-cream/25 bg-cream/10 text-[11px] font-semibold tracking-wide text-cream/50"
@@ -108,9 +151,10 @@ export function WalletSlotStacked() {
       <label className="mt-4 flex cursor-pointer items-start gap-2.5 text-left">
         <input type="checkbox" readOnly className="mt-0.5 size-4 shrink-0 accent-gold" />
         <span className="text-[11px] leading-snug font-medium text-cream/60">
-          {WAIVER}
+          <ConsentText />
         </span>
       </label>
+      <PrivacyNotice />
       <div className="mt-3">
         <WalletSlot />
       </div>
@@ -133,9 +177,10 @@ export function WalletSlotFirst() {
       <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-left">
         <input type="checkbox" readOnly className="mt-0.5 size-4 shrink-0 accent-gold" />
         <span className="text-[11px] leading-snug font-medium text-cream/60">
-          {WAIVER}
+          <ConsentText />
         </span>
       </label>
+      <PrivacyNotice />
       <p className="mt-3 text-[11px] text-cream/55">
         Rather use a card? <span className={cardLink}>Pay with card</span>
       </p>
@@ -151,7 +196,7 @@ export function WalletSlotSplit() {
     <Sheet>
       <Heading />
       <div className="mt-4 grid grid-cols-2 gap-2.5">
-        <WalletSlot label="Apple Pay" />
+        <WalletSlot label="Apple Pay · after you agree" />
         <button
           type="button"
           className="inline-flex h-12 items-center justify-center rounded-lg bg-gold-cta px-4 text-xs font-extrabold text-gold-deep shadow-cta"
@@ -162,9 +207,10 @@ export function WalletSlotSplit() {
       <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-left">
         <input type="checkbox" readOnly className="mt-0.5 size-4 shrink-0 accent-gold" />
         <span className="text-[11px] leading-snug font-medium text-cream/60">
-          {WAIVER}
+          <ConsentText />
         </span>
       </label>
+      <PrivacyNotice />
     </Sheet>
   );
 }
@@ -183,9 +229,14 @@ export function WalletSlotTerse() {
       <label className="mt-2.5 flex cursor-pointer items-center justify-center gap-2">
         <input type="checkbox" readOnly className="size-3.5 shrink-0 accent-gold" />
         <span className="text-[10px] font-medium text-cream/50">
-          Start now, waive the 14-day cancellation
+          Agree to the{" "}
+          <a href="/terms" className={legalLink}>
+            Terms
+          </a>
+          , start now, waive the 14-day withdrawal right
         </span>
       </label>
+      <PrivacyNotice center />
       <div className="mt-3">
         <button type="button" className={cardCta}>
           {CTA}

@@ -2,10 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   resolveWalletGate,
-  TOS_ACCEPTED_AT_KEY,
   TOS_VERSION,
   TOS_VERSION_KEY,
-  toWaiverMetadata,
+  toConsentMetadata,
   walletCheckoutEnabled,
 } from "./wallet-checkout";
 
@@ -35,31 +34,28 @@ describe("walletCheckoutEnabled", () => {
   });
 });
 
-describe("toWaiverMetadata", () => {
-  it("records WHEN the buyer accepted and WHICH wording they saw", () => {
-    // Stripe cannot render the waiver on the wallet surface, so this record is
-    // the only evidence that the buyer consented to immediate supply. Both
-    // halves matter: a timestamp with no version cannot be tied to the text
-    // that was on screen.
-    const at = new Date("2026-09-09T10:11:12.000Z");
-
-    expect(toWaiverMetadata(at)).toEqual({
-      [TOS_ACCEPTED_AT_KEY]: "2026-09-09T10:11:12.000Z",
-      [TOS_VERSION_KEY]: TOS_VERSION,
-    });
+describe("toConsentMetadata", () => {
+  it("records WHICH terms were accepted — and no time", () => {
+    // Absent on purpose: a clock read in session metadata either breaks the
+    // idempotency key (unique per call) or, rounded to keep the key stable,
+    // back-dates the acceptance (#214). Stripe's session `created` is exact.
+    expect(toConsentMetadata()).toEqual({ [TOS_VERSION_KEY]: TOS_VERSION });
   });
 
-  it("is pure — the clock is the caller's, never read in here", () => {
-    const at = new Date("2020-01-01T00:00:00.000Z");
+  it("is identical on every call, so the idempotency key stays stable", () => {
+    expect(toConsentMetadata()).toEqual(toConsentMetadata());
+  });
 
-    expect(toWaiverMetadata(at)).toEqual(toWaiverMetadata(at));
-    expect(toWaiverMetadata(at)[TOS_ACCEPTED_AT_KEY]).toBe(at.toISOString());
+  it("carries nothing shaped like a clock reading", () => {
+    for (const value of Object.values(toConsentMetadata())) {
+      expect(value).not.toMatch(/T\d{2}:\d{2}/);
+    }
   });
 
   it("emits only string values — Stripe metadata rejects anything else", () => {
-    const meta = toWaiverMetadata(new Date(0));
-
-    expect(Object.values(meta).every((v) => typeof v === "string")).toBe(true);
+    expect(
+      Object.values(toConsentMetadata()).every((v) => typeof v === "string"),
+    ).toBe(true);
   });
 });
 
@@ -71,7 +67,7 @@ describe("resolveWalletGate", () => {
     hasPublishableKey: true,
     inAppBrowser: false,
     signedIn: true,
-    waiverAccepted: true,
+    consentAccepted: true,
   };
 
   it("permits the wallet only when every condition holds", () => {
@@ -84,7 +80,7 @@ describe("resolveWalletGate", () => {
     ["no publishable key", { hasPublishableKey: false }, "no_publishable_key"],
     ["FB/IG webview", { inAppBrowser: true }, "in_app_browser"],
     ["signed out", { signedIn: false }, "anonymous"],
-    ["waiver unticked", { waiverAccepted: false }, "waiver_not_accepted"],
+    ["consent unticked", { consentAccepted: false }, "consent_not_accepted"],
   ])("refuses when %s", (_label, override, expected) => {
     expect(resolveWalletGate({ ...OPEN, ...override })).toBe(expected);
   });
@@ -100,7 +96,7 @@ describe("resolveWalletGate", () => {
         hasPublishableKey: false,
         inAppBrowser: true,
         signedIn: false,
-        waiverAccepted: false,
+        consentAccepted: false,
       }),
     ).toBe("payments_off");
   });
@@ -111,7 +107,7 @@ describe("resolveWalletGate", () => {
     expect(resolveWalletGate({ ...OPEN, signedIn: false })).not.toBe("ok");
   });
 
-  it("never returns ok without the waiver — Stripe cannot collect it here", () => {
-    expect(resolveWalletGate({ ...OPEN, waiverAccepted: false })).not.toBe("ok");
+  it("never returns ok without consent — Stripe cannot collect it here", () => {
+    expect(resolveWalletGate({ ...OPEN, consentAccepted: false })).not.toBe("ok");
   });
 });

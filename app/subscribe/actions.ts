@@ -15,7 +15,7 @@ import {
 } from "@/lib/checkout-session";
 import {
   resolveWalletGate,
-  toWaiverMetadata,
+  toConsentMetadata,
   walletCheckoutEnabled,
 } from "@/lib/wallet-checkout";
 import { auth } from "@clerk/nextjs/server";
@@ -37,6 +37,7 @@ import {
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { isInAppBrowser } from "@/lib/in-app-browser";
+import { describeError } from "@/lib/observability";
 import { getDict } from "@/lib/i18n/server";
 import { buildCheckoutSessionParams } from "@/lib/checkout-session-params";
 import { sendCapiEvents } from "@/lib/meta-capi";
@@ -187,7 +188,7 @@ async function prepareAuthCheckout(
       capiIdentity = await readCapiIdentity();
       capiMetadata = toCapiMetadata(capiIdentity);
     } catch (err) {
-      console.warn("startCheckout: CAPI identity capture failed", { err });
+      console.warn("startCheckout: CAPI identity capture failed", { error: describeError(err) });
     }
   }
 
@@ -272,7 +273,7 @@ async function fireCheckoutIntent({
         },
       },
     ]).catch((err) => {
-      console.warn("startCheckout: CAPI InitiateCheckout threw", { err });
+      console.warn("startCheckout: CAPI InitiateCheckout threw", { error: describeError(err) });
     }),
     captureServerEvent({
       distinctId: userId,
@@ -293,7 +294,7 @@ async function fireCheckoutIntent({
           : {}),
       },
     }).catch((err) => {
-      console.warn("startCheckout: PostHog checkout_started threw", { err });
+      console.warn("startCheckout: PostHog checkout_started threw", { error: describeError(err) });
     }),
   ]);
 }
@@ -449,7 +450,7 @@ export async function createAuthCheckoutSession(
 // incident hardened, and it earns its own PR and its own rehearsal.
 export async function createAuthWalletCheckoutSession(
   input: CheckoutTargetInput,
-  waiverAccepted: boolean,
+  consentAccepted: boolean,
 ): Promise<WalletCheckoutResult> {
   // One table decides whether this surface may exist at all
   // (lib/wallet-checkout.ts). Evaluated FIRST and in full, before any Stripe
@@ -463,7 +464,7 @@ export async function createAuthWalletCheckoutSession(
     hasPublishableKey: embeddedCheckoutEnabled(),
     inAppBrowser: isInAppBrowser((await headers()).get("user-agent")),
     signedIn: Boolean(authUserId),
-    waiverAccepted,
+    consentAccepted,
   });
   if (verdict === "payments_off") return { kind: "redirect", to: "/" };
   if (verdict !== "ok") return { kind: "unavailable" };
@@ -490,28 +491,17 @@ export async function createAuthWalletCheckoutSession(
   // where the existing cs= verification + inline idempotent mirror run.
   const successUrl = buildCheckoutReturnUrl(origin, buildWatchPath(target));
 
-  // The acceptance record travels the metadata channel with everything else, so
+  // The consent record travels the metadata channel with everything else, so
   // the webhook sees it on the subscription. Not a new DB column on purpose —
-  // see lib/wallet-checkout.ts.
-  //
-  // The acceptance is stamped from the START OF THE IDEMPOTENCY HOUR, not from
-  // `new Date()`. A millisecond-precision timestamp here would be fatal to the
-  // double-charge guard below: it rides in the metadata that the variant digest
-  // hashes, so every call would mint a different key, Stripe's replay would
-  // never trigger, and two tabs would create two live sessions — the exact
-  // parallel-tap double-charge the key exists to collapse. Hashing the metadata
-  // WITHOUT the timestamp does not work either: the create params would then
-  // differ under an identical key, which Stripe rejects outright with
-  // `idempotency_error`.
-  //
-  // Hour granularity is the honest trade and costs nothing evidentially: what
-  // the waiver has to prove is that the buyer asked for immediate supply BEFORE
-  // supply began, and the subscription's own creation timestamp — precise, and
-  // necessarily later — supplies the other half.
+  // see lib/wallet-checkout.ts. It carries WHICH terms were accepted and no
+  // time at all: a clock read here lands in the idempotency digest below (a
+  // key unique per call = the parallel-tab double charge), and rounding it to
+  // keep the key stable back-dates the acceptance (#214). The exact moment is
+  // the session's own `created`, which cannot precede the tick that caused it.
   const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
   const walletMetadata = {
     ...subscriptionMetadata,
-    ...toWaiverMetadata(new Date(hourBucket * 60 * 60 * 1000)),
+    ...toConsentMetadata(),
   };
 
   const variant = crypto
@@ -596,7 +586,7 @@ export async function reportWalletCheckoutStarted(
   try {
     capiIdentity = await readCapiIdentity();
   } catch (err) {
-    console.warn("walletCheckout: CAPI identity capture failed", { err });
+    console.warn("walletCheckout: CAPI identity capture failed", { error: describeError(err) });
   }
 
   try {
@@ -609,6 +599,6 @@ export async function reportWalletCheckoutStarted(
       attribution: await readAttributionCookies(),
     });
   } catch (err) {
-    console.warn("walletCheckout: checkout-intent reporting threw", { err });
+    console.warn("walletCheckout: checkout-intent reporting threw", { error: describeError(err) });
   }
 }

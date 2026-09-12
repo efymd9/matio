@@ -25,8 +25,8 @@ import { getStripeBrowser } from "@/lib/stripe-browser";
 // lib/checkout-session-params.ts).
 //
 // WHY THE CONSENT CHECKBOX COMES FIRST. A Checkout Session must already exist
-// before the Element can mount, and the waiver acceptance has to be on that
-// session's metadata — so the box cannot be collected after the fact. Gating
+// before the Element can mount, and the consent record (Terms + the withdrawal
+// waiver) has to be on that session's metadata — so the box cannot be collected after the fact. Gating
 // the session on it turns out to be the right thing twice over: a pre-ticked
 // consent box is invalid under EU law anyway, and ticking it is a genuine
 // INTENT signal, so we are not minting a Stripe session on every wall
@@ -42,6 +42,12 @@ type Props = {
 
 export function WalletExpressCheckout(props: Props) {
   const t = useT();
+  // One box, two halves (#214): Terms acceptance AND the withdrawal waiver.
+  // Both legal pages open in a new tab — following a link in place would
+  // unmount the paywall and lose the buyer's spot in the player.
+  const consent = t.subscribe.walletConsent;
+  const legalLink =
+    "font-bold text-gold underline underline-offset-2 hover:text-gold-hi";
   const [accepted, setAccepted] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [returnUrl, setReturnUrl] = useState<string | null>(null);
@@ -54,7 +60,10 @@ export function WalletExpressCheckout(props: Props) {
 
   const { showSlug, episodeId, resumeSeconds, publishableKey } = props;
 
-  const start = useCallback(async () => {
+  // What reaches the server is this client's word that the box is ticked — a
+  // crafted request can say the same, and no checkbox proves a human ticked it.
+  // The server refuses a client that says it is NOT ticked; that is all it can do.
+  const start = useCallback(async (consentAccepted: boolean) => {
     if (startedRef.current) return;
     startedRef.current = true;
     const input: CheckoutTargetInput = {
@@ -63,7 +72,7 @@ export function WalletExpressCheckout(props: Props) {
       resume: resumeSeconds ? String(resumeSeconds) : null,
     };
     try {
-      const res = await createWalletCheckoutSession(input, true);
+      const res = await createWalletCheckoutSession(input, consentAccepted);
       if (res.kind !== "wallet") {
         setAvailable(false);
         return;
@@ -91,7 +100,7 @@ export function WalletExpressCheckout(props: Props) {
 
   const onAccept = (next: boolean) => {
     setAccepted(next);
-    if (next) void start();
+    if (next) void start(next);
   };
 
   return (
@@ -104,9 +113,33 @@ export function WalletExpressCheckout(props: Props) {
           className="mt-0.5 size-4 shrink-0 accent-gold"
         />
         <span className="text-[11px] leading-snug font-medium text-cream/60">
-          {t.subscribe.withdrawalWaiver}
+          {consent.beforeTerms}
+          <a
+            href="/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={legalLink}
+          >
+            {consent.terms}
+          </a>
+          {consent.afterTerms}
         </span>
       </label>
+      {/* A notice, not a term: the legal basis for a paid membership is the
+          contract, so the Privacy Policy is linked for information and never
+          folded into the "I agree" above. Indented to sit under the label. */}
+      <p className="mx-auto mt-1.5 max-w-md pl-6.5 text-left text-[10px] font-medium text-cream/45">
+        {consent.privacyBefore}
+        <a
+          href="/privacy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={legalLink}
+        >
+          {consent.privacy}
+        </a>
+        {consent.privacyAfter}
+      </p>
 
       {accepted && available === null ? (
         <p className="mt-3 text-[11px] font-medium text-cream/45">
@@ -175,6 +208,10 @@ function WalletButton({
     const result = await checkout.checkout.confirm({
       expressCheckoutConfirmEvent: event,
       returnUrl,
+      // Explicit, not Stripe's default: `if_required` resolves an unchallenged
+      // wallet payment in place, which is what the router.push below is for. A
+      // 3DS step-up still redirects to returnUrl — the same destination.
+      redirect: "if_required",
     });
 
     if (result.type === "error") {

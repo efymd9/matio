@@ -47,11 +47,11 @@ export async function createCheckoutSession(
 // CTA it has today.
 export async function createWalletCheckoutSession(
   input: CheckoutTargetInput,
-  waiverAccepted: boolean,
+  consentAccepted: boolean,
 ): Promise<WalletCheckoutResult> {
   if (!paymentsEnabled()) return { kind: "redirect", to: "/" };
 
   const { userId } = await auth();
   if (!userId) return { kind: "unavailable" };
-  return createAuthWalletCheckoutSession(input, waiverAccepted);
+  return createAuthWalletCheckoutSession(input, consentAccepted);
 }

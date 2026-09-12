@@ -65,11 +65,12 @@ export function buildCheckoutSessionParams({
   //     access, and a required-but-unrendered consent risks an unconfirmable
   //     session.
   //
-  // So on the wallet surface WE collect the waiver, in the buyer's language,
-  // before the wallet sheet can open, and record the acceptance in
-  // subscription metadata (see lib/wallet-checkout.ts). Dropping these two
-  // params is therefore not a loosening — the consent moves, it does not
-  // disappear. Everything that decides WHAT IS SOLD stays identical, which is
+  // So on the wallet surface WE collect it — one required checkbox that is
+  // BOTH the Terms acceptance and the withdrawal waiver, in the buyer's
+  // language, before the wallet sheet can open — and record which terms were
+  // accepted in subscription metadata (see lib/wallet-checkout.ts, #214).
+  // Dropping these two params is therefore not a loosening — the consent
+  // moves, it does not disappear. Everything that decides WHAT IS SOLD stays identical, which is
   // what checkout-session-params.test.ts pins.
   const consentParams =
     surface === "elements"

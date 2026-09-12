@@ -17,9 +17,9 @@ vi.mock("@/app/subscribe/actions", () => ({
   createAuthCheckoutSession: async () => ({ kind: "embedded" as const, clientSecret: "x" }),
   createAuthWalletCheckoutSession: async (
     input: unknown,
-    waiverAccepted: boolean,
+    consentAccepted: boolean,
   ) => {
-    h.authCalls.push({ input, waiverAccepted });
+    h.authCalls.push({ input, consentAccepted });
     return {
       kind: "wallet" as const,
       clientSecret: "cs_secret",
@@ -66,18 +66,18 @@ describe("createWalletCheckoutSession", () => {
     expect(h.authCalls).toHaveLength(0);
   });
 
-  it("dispatches a signed-in buyer to the wallet builder, waiver flag intact", async () => {
+  it("dispatches a signed-in buyer to the wallet builder, consent flag intact", async () => {
     const res = await createWalletCheckoutSession(INPUT, true);
 
     expect(res).toMatchObject({ kind: "wallet", sessionId: "cs_test_1" });
-    expect(h.authCalls).toEqual([{ input: INPUT, waiverAccepted: true }]);
+    expect(h.authCalls).toEqual([{ input: INPUT, consentAccepted: true }]);
   });
 
-  it("forwards a FALSE waiver rather than quietly upgrading it", async () => {
+  it("forwards a FALSE consent rather than quietly upgrading it", async () => {
     // The server-side builder is what refuses; the dispatcher must not paper
     // over an unticked box on the way through.
     await createWalletCheckoutSession(INPUT, false);
 
-    expect(h.authCalls).toEqual([{ input: INPUT, waiverAccepted: false }]);
+    expect(h.authCalls).toEqual([{ input: INPUT, consentAccepted: false }]);
   });
 });
