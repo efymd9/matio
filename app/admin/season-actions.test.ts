@@ -165,12 +165,12 @@ describe("createSeason — typed errors, never a masked throw", () => {
   });
 });
 
-describe("deleteEpisode — the choice-target refusal is a code, a real delete redirects", () => {
+describe("deleteEpisode — the choice-target refusal is a code; where a real delete ends is the page's call", () => {
   it("refuses an episode some choice leads to: no DELETE, no redirect, the code for the row", async () => {
     h.selects.push([{ id: EPISODE }]); // the (episode, season, show) chain
     h.selects.push([{ id: "choice-1" }]); // …and an edge pointing at it
 
-    const state = await deleteEpisode(EPISODE, SEASON, SHOW);
+    const state = await deleteEpisode(EPISODE, SEASON, SHOW, "stay");
 
     expect(state).toEqual({
       status: "error",
@@ -181,13 +181,31 @@ describe("deleteEpisode — the choice-target refusal is a code, a real delete r
     expect(h.revalidated).toEqual([]);
   });
 
-  it("deletes an ordinary episode and redirects to the season list", async () => {
+  it("from the season page: deletes, refreshes the list in place and does NOT redirect", async () => {
     h.selects.push([{ id: EPISODE }]);
     h.selects.push([]); // nobody's choice leads here
 
+    // A redirect here would remount the page and wipe the add-episode form
+    // next to the row (review of #221) — revalidatePath is the whole refresh.
+    const state = await deleteEpisode(EPISODE, SEASON, SHOW, "stay");
+
+    expect(state).toEqual({ status: "ok" });
+    expect(h.writes).toEqual([
+      { op: "delete", where: { eq: [episodes.id, EPISODE] } },
+    ]);
+    expect(h.revalidated).toEqual([SEASON_PATH]);
+    expect(h.redirected).toEqual([]);
+  });
+
+  it("from the episode page: deletes and redirects to the season list", async () => {
+    h.selects.push([{ id: EPISODE }]);
+    h.selects.push([]);
+
     // The redirect surfaces as the NEXT_REDIRECT throw next/navigation
     // makes — that is the success path, not a failure.
-    await expect(deleteEpisode(EPISODE, SEASON, SHOW)).rejects.toMatchObject({
+    await expect(
+      deleteEpisode(EPISODE, SEASON, SHOW, "season"),
+    ).rejects.toMatchObject({
       digest: expect.stringContaining("NEXT_REDIRECT"),
     });
 
@@ -202,7 +220,7 @@ describe("deleteEpisode — the choice-target refusal is a code, a real delete r
     h.selects.push([]);
 
     await expect(
-      deleteEpisode(EPISODE, SEASON, "other-show"),
+      deleteEpisode(EPISODE, SEASON, "other-show", "season"),
     ).rejects.toThrow("Episode not in this season/show");
     expect(h.writes).toEqual([]);
     expect(h.redirected).toEqual([]);

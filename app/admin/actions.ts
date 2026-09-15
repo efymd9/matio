@@ -617,14 +617,20 @@ export async function updateEpisodeAccess(
 // Typed for the one refusal an admin can reach: an episode some choice
 // leads to (episode_choices.to_episode_id is ON DELETE RESTRICT, #143). The
 // episode page hides the button for such rows; the season page's row has no
-// edge data, so its form gets the same rule as a code (#195). Success ends in
-// a redirect to the season list — the episode page would otherwise re-render
-// a row that no longer exists. Bound with the three ids, it ignores the
-// (prev, formData) pair TypedActionForm appends.
+// edge data, so its form gets the same rule as a code (#195). `after` says
+// where a real delete ends: the episode page LEAVES for the season list (its
+// own row is gone — it would re-render into notFound), the season page STAYS
+// on revalidatePath alone — a redirect from a server action is a push plus a
+// remount of the subtree (Next 16 RedirectBoundary), which would wipe what
+// the admin typed into the neighbouring "add episode" form and stack a spare
+// history entry on the same URL. The flag is bound by the page, never a
+// path from the post; both pages bind all four, so the (prev, formData) pair
+// TypedActionForm appends lands past them and is ignored.
 export async function deleteEpisode(
   id: string,
   seasonId: string,
   showId: string,
+  after: "stay" | "season",
 ): Promise<AdminFormState> {
   await requireAdmin();
   // Verify the full (episode, season, show) chain before deleting.
@@ -651,7 +657,10 @@ export async function deleteEpisode(
   }
   await db.delete(episodes).where(eq(episodes.id, id));
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
-  redirect(`/admin/shows/${showId}/seasons/${seasonId}`);
+  if (after === "season") {
+    redirect(`/admin/shows/${showId}/seasons/${seasonId}`);
+  }
+  return { status: "ok" };
 }
 
 // ---------- branching video (#143) ----------

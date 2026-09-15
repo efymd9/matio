@@ -172,9 +172,18 @@ export default async function SeasonPage({
                     </Link>
                     {/* The row knows nothing about choice edges; a target
                         of someone's fork answers with a code shown right
-                        here instead of the masked generic page (#195). */}
+                        here instead of the masked generic page (#195).
+                        "stay": the list refreshes in place — a redirect
+                        would remount the page and wipe the add-episode
+                        form below. */}
                     <TypedActionForm
-                      action={deleteEpisode.bind(null, episode.id, season.id, show.id)}
+                      action={deleteEpisode.bind(
+                        null,
+                        episode.id,
+                        season.id,
+                        show.id,
+                        "stay",
+                      )}
                       className="flex max-w-sm items-center gap-2"
                     >
                       <ConfirmDeleteButton

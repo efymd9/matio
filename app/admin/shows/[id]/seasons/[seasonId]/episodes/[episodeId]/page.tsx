@@ -313,7 +313,16 @@ export default async function EditEpisodePage({
           <p className="text-sm text-cream/60">{t.fork.deleteBlockedByChoices}</p>
         ) : (
           <TypedActionForm
-            action={deleteEpisode.bind(null, episode.id, season.id, show.id)}
+            // "season": this page's own row is gone after the delete, so the
+            // action leaves for the season list instead of re-rendering
+            // into notFound.
+            action={deleteEpisode.bind(
+              null,
+              episode.id,
+              season.id,
+              show.id,
+              "season",
+            )}
           >
             <ConfirmDeleteButton
               message={t.episode.deleteConfirm(episode.number, episode.title)}

@@ -1029,8 +1029,11 @@ infra/
   choice target answers the typed `episode_is_choice_target` (#195) — one
   `isChoiceTarget` read in `lib/branching-db.ts`, shared by the episode page
   (which hides the button and says why) and the season page's delete form
-  (which has no edge data); the RESTRICT FK stays as the safety net, and a
-  real delete ends in a redirect to the season list. The throw registry at
+  (which has no edge data); the RESTRICT FK stays as the safety net. Where a
+  real delete ends is bound by the page (`after: "stay" | "season"`): the
+  episode page redirects to the season list (its row is gone), the season
+  page stays on `revalidatePath` — a server-action redirect remounts the
+  subtree and would wipe the neighbouring add-episode form. The throw registry at
   the top of `app/admin/actions.ts` lists every `throw` that deliberately
   remains — forged-post guards only.
   **Player (#144, `components/watch/player.tsx`)**: the watch page delivers
