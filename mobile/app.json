@@ -12,7 +12,10 @@
     "ios": {
       "bundleIdentifier": "tv.matio.app",
       "icon": "./assets/expo.icon",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "tv.matio.app",

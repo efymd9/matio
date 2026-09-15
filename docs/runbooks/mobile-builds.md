@@ -22,8 +22,10 @@
 
 ```
 cd mobile
-npx eas-cli build --platform ios --profile production --auto-submit
+npx eas-cli@latest build --platform ios --profile production --auto-submit
 ```
+
+(`@latest` обязателен: глобальный `eas-cli` на машине владельца — 19.x, а `eas.json` требует ≥ 24.) Запускать в обычном терминале, НЕ через `! …` основной сессии — там нет TTY, и EAS не может спросить логин Apple («Credentials are not set up. Run this command again in interactive mode»). После первого раза сертификат живёт на сервере EAS, и следующие сборки идут с `--non-interactive` откуда угодно.
 
 Что спросит и что отвечать: логин Apple ID (пароль + код 2FA — вводит только
 владелец), «Register bundle identifier tv.matio.app?» → yes, «Generate a new
@@ -35,7 +37,7 @@ Apple Distribution Certificate / Provisioning Profile?» → yes (EAS храни
 
 ## Следующие сборки
 
-- Код в `main` → `cd mobile && npx eas-cli build -p ios --profile production --auto-submit`.
+- Код в `main` → `cd mobile && npx eas-cli@latest build -p ios --profile production --auto-submit --non-interactive`.
   Не запускать одновременно с тяжёлой сборкой веба на этой машине (сборка идёт
   в облаке EAS, но `prebuild` и загрузка проекта — локально).
 - `ios/` и `android/` в репо не коммитятся (CNG): EAS делает `expo prebuild`
@@ -45,6 +47,8 @@ Apple Distribution Certificate / Provisioning Profile?» → yes (EAS храни
   аккаунт компании (или осознанно с продавцом-физлицом).
 
 ## Грабли
+
+- `ios.infoPlist.ITSAppUsesNonExemptEncryption: false` стоит в `app.json` нарочно: без него App Store Connect требует ручной ответ про экспорт шифрования перед КАЖДЫМ тестом сборки (приложение использует только HTTPS — исключение по правилам Apple).
 
 - Первая сборка требует живой сессии Apple ID; агенту её не отдавать —
   пароль и 2FA вводит владелец через `! …` в основной сессии.
