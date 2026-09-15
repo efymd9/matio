@@ -209,7 +209,14 @@ Clerk его уже не покажет, а скрипт и реестр клю�
    аккаунт можно воскресить: `users.stripe_customer_id` **плюс** каждый
    `cus_…`, который Stripe сам находит по адресу аккаунта —
    `customers.search({ query: "email:'<адрес>'" })`, одна страница (≤100),
-   5 с, без ретраев, best-effort (#223). Зачем искать: гостевой checkout
+   5 с, без ретраев, best-effort (#223) — **только если у аккаунта есть
+   платёжный след** (`stripe_customer_id` или хоть одна строка
+   `subscriptions`; иначе `search=skipped_no_stripe_footprint` — адрес
+   аккаунта эпохи free/gate в Stripe не уходит) и **только клиенты с точно
+   этим адресом** (у Stripe `:` по строковому полю — «все слова по порядку»,
+   `a@b.com` вернул бы и `a@b.com.mx`; такие и клиенты без адреса
+   пропускаются и в логе только считаются — ложный тумбстоун навечно лишил
+   бы чужого покупателя аккаунта). Зачем искать: гостевой checkout
    создаёт Customer из адреса, набранного на форме, а более поздняя покупка
    из-под аккаунта перезаписывает `users.stripe_customer_id` новым id — про
    старого помнит только Stripe, а его поздний вебхук (`guest = "1"` в
@@ -251,16 +258,17 @@ customer / тумбстоун / живая подписка, **сколько к
 (заодно видно, читает ли ключ персон вообще) — и ничего не пишет. Вендорские
 переменные опциональны: без `STRIPE_SECRET_KEY` живая подписка не отменится
 (скрипт скажет `cancel by hand`) и клиенты по адресу не ищутся
-(`search=skipped_unconfigured` — тумбстоунится только id из строки), без
-ключа PostHog — `posthog: skipped_unconfigured`. В stdout — только id,
-счётчики и статусы:
+(`search=skipped_unconfigured` — тумбстоунится только id из строки); у
+аккаунта без платёжного следа — `search=skipped_no_stripe_footprint`
+(искать нечего и незачем); без ключа PostHog —
+`posthog: skipped_unconfigured`. В stdout — только id, счётчики и статусы:
 
 ```
 DRY RUN — erase user_…
 subject: user_…
-would delete: users=1 show_reminders=1 subscriptions=0 watch_progress=12 watch_days=5
+would delete: users=1 show_reminders=1 subscriptions=1 watch_progress=12 watch_days=5
 would de-identify (user_id → NULL): trial_sessions=2 visitors=1 marketing_links=0
-stripe: customer=none live_subscription=no search=ok customers=1 (ids cus_…)
+stripe: customer=yes live_subscription=no search=ok customers=2 (ids cus_…, cus_…) skipped=1 (other or no address)
 posthog: found persons=1
 nothing changed (dry run — re-run with --apply)
 ```

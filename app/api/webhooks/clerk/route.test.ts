@@ -383,7 +383,12 @@ describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)"
     // while the row still has one.
     h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
     h.stripeSearch.mockResolvedValue({
-      data: [{ id: "cus_older" }, { id: "cus_dummy" }],
+      data: [
+        { id: "cus_older", email: EMAIL },
+        { id: "cus_dummy", email: EMAIL },
+        // `:` on a string field also matches a superstring — not ours.
+        { id: "cus_stranger", email: `${EMAIL}.mx` },
+      ],
       has_more: false,
     });
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
@@ -410,8 +415,30 @@ describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)"
     expect(info.mock.calls.at(-1)?.[1]).toMatchObject({
       stripeSearch: "ok",
       stripeCustomersTombstoned: ["cus_dummy", "cus_older"],
+      stripeCustomersSkipped: 1,
     });
     expect(h.sentryMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not ask Stripe about an account that never had a Stripe footprint — no customer id, no subscriptions row (#223)", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: null };
+    h.liveSub = undefined;
+
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    expect(res.status).toBe(200);
+    expect(h.stripeSearch).not.toHaveBeenCalled();
+    expect(h.inserts).toEqual([]);
+    expect(h.writes).toEqual(["delete show_reminders", "delete users"]);
+    // The footprint probe: any subscriptions row by user_id, after the
+    // live-subscription probe.
+    const probes = h.selects
+      .filter((s) => s.table === "subscriptions")
+      .map((s) => render(s.where).sql);
+    expect(probes).toEqual([
+      '("subscriptions"."user_id" = $1 and "subscriptions"."status" in ($2, $3, $4) and "subscriptions"."current_period_end" > $5)',
+      '"subscriptions"."user_id" = $1',
+    ]);
   });
 
   it("writes the tombstone with or without a live subscription", async () => {

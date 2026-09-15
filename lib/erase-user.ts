@@ -81,7 +81,10 @@ export type EraseStripeLike = {
     search: (
       params: { query: string; limit: number },
       options: { timeout: number; maxNetworkRetries: number },
-    ) => Promise<{ data: { id: string }[]; has_more: boolean }>;
+    ) => Promise<{
+      data: { id: string; email?: string | null }[];
+      has_more: boolean;
+    }>;
   };
 };
 
@@ -146,24 +149,44 @@ export const STRIPE_CANCEL_RETRIES = 2;
 // address: the Search API (`GET /v1/customers/search`), one page, the same
 // request ceiling as the cancellation, no retries, never throws — the
 // erasure never waits for Stripe. Search is eventually consistent (Stripe:
-// under a minute after a
-// write), which for an erasure is noise — a customer minted in the last
-// minute before the account was deleted has no subscription to fire a
-// webhook from yet. The exact match on `email` is case-insensitive at
-// Stripe, so the address goes as stored. One page IS the whole answer: an
+// under a minute after a write), which for an erasure is noise — a
+// customer minted in the last minute before the account was deleted has
+// no subscription to fire a webhook from yet. The address goes as stored
+// (Stripe matches case-insensitively). One page IS the whole answer: an
 // address with more than STRIPE_SEARCH_LIMIT customers does not happen
 // (one guest checkout mints one customer), so `has_more` is a warning by
 // id, not a second request.
+//
+// Two guards, because a tombstone is forever and a wrong one costs a
+// stranger their account (isErasedCustomer → the mirror warns-and-returns,
+// /welcome sends the buyer home: "paid, no account"):
+//   · `:` on a STRING field is not equality at Stripe — the docs' own
+//     example: `name:"one two three"` matches "one two three four"
+//     (docs.stripe.com/search#search-query-language), so `email:'a@b.com'`
+//     can return a@b.com.mx. Every customer the page returns is therefore
+//     compared to the address itself, lowercased on both sides; one with
+//     another address, or none, is skipped and only COUNTED by id.
+//   · The search runs only for an account with a Stripe footprint — a
+//     customer id on the row, or any subscriptions row. A free/gate-era
+//     account that never checked out has never given Stripe its address,
+//     and the erasure must not be the first time it does: the search goes
+//     only where the address already is (`skipped_no_stripe_footprint`).
 export const STRIPE_SEARCH_LIMIT = 100;
 
-export type StripeSearchStatus = "ok" | "skipped_unconfigured" | "failed";
+export type StripeSearchStatus =
+  | "ok"
+  | "skipped_no_stripe_footprint"
+  | "skipped_unconfigured"
+  | "failed";
 
 export type StripeCustomerSearch = {
   status: StripeSearchStatus;
-  /** Customer ids Stripe holds for the address — ids only, never the address. */
+  /** Customer ids Stripe holds for EXACTLY this address — ids only, never the address. */
   customerIds: string[];
   /** A second page exists: only the first STRIPE_SEARCH_LIMIT ids are here. */
   hasMore: boolean;
+  /** Customers the page returned that are NOT the address (a superstring, or none) — a count, nothing else. */
+  skipped: number;
   /** For a failed search: class and code only — Stripe quotes the query, i.e. the address. */
   error?: ReturnType<typeof describeError>;
 };
@@ -190,7 +213,7 @@ async function searchStripeCustomers(
   try {
     stripe = getStripe();
   } catch {
-    return { status: "skipped_unconfigured", customerIds: [], hasMore: false };
+    return skippedSearch("skipped_unconfigured");
   }
   try {
     const page = await stripe.customers.search(
@@ -203,21 +226,39 @@ async function searchStripeCustomers(
         { userId },
       );
     }
+    // The exact-address check (see the module comment): a superstring
+    // match or an address-less customer is somebody else's record.
+    const wanted = email.toLowerCase();
+    const matches = page.data.filter(
+      (customer) => customer.email?.toLowerCase() === wanted,
+    );
     return {
       status: "ok",
-      customerIds: page.data.map((customer) => customer.id),
+      customerIds: matches.map((customer) => customer.id),
       hasMore: page.has_more,
+      skipped: page.data.length - matches.length,
     };
   } catch (err) {
     // Never the message: Stripe echoes the query, and the query is the
     // address. Name, code and HTTP status tell an outage from a bad key.
-    return {
-      status: "failed",
-      customerIds: [],
-      hasMore: false,
-      error: describeError(err),
-    };
+    return { ...skippedSearch("failed"), error: describeError(err) };
   }
+}
+
+function skippedSearch(
+  status: Exclude<StripeSearchStatus, "ok">,
+): StripeCustomerSearch {
+  return { status, customerIds: [], hasMore: false, skipped: 0 };
+}
+
+/** Any subscriptions row at all — live or long cancelled — for the account. */
+async function hasAnySubscription(db: EraseDb, userId: string) {
+  const [row] = await db
+    .select({ id: subscriptions.id })
+    .from(subscriptions)
+    .where(eq(subscriptions.userId, userId))
+    .limit(1);
+  return row !== undefined;
 }
 
 // The erasure's reporting for a failed search: the address is about to leave
@@ -356,12 +397,17 @@ export async function eraseUser(
   // the id the row holds, because the address must leave `users` either
   // way. One write-if-absent INSERT for all of them, so a redelivery is a
   // no-op; a failure here throws (500 → Clerk retries) — unlike the Stripe
-  // calls, this row is what makes the erasure stick.
-  const search = await searchStripeCustomersAndReport(
-    userId,
-    user.email,
-    deps.getStripe,
-  );
+  // calls, this row is what makes the erasure stick. The search goes only
+  // where the address already is (the footprint rule in the module
+  // comment): a customer id on the row, the live subscription found
+  // above, or — one cheap read — any subscriptions row at all.
+  const hasStripeFootprint =
+    user.stripeCustomerId !== null ||
+    liveSub !== undefined ||
+    (await hasAnySubscription(db, userId));
+  const search = hasStripeFootprint
+    ? await searchStripeCustomersAndReport(userId, user.email, deps.getStripe)
+    : skippedSearch("skipped_no_stripe_footprint");
   const stripeCustomersTombstoned = [
     ...new Set([
       ...(user.stripeCustomerId ? [user.stripeCustomerId] : []),
@@ -406,6 +452,7 @@ export async function eraseUser(
     cancelRequested,
     stripeSearch: search.status,
     stripeCustomersTombstoned,
+    stripeCustomersSkipped: search.skipped,
     posthog: posthog.status,
     posthogPersons: posthog.personIds.length,
   });
@@ -563,8 +610,12 @@ export async function previewErasure(
     stripeCustomer: Boolean(user?.stripeCustomerId),
     tombstoned,
     liveSubscription: live > 0,
+    // The same footprint rule as the erasure, from the counts above: a
+    // customer id on the row, or any subscriptions row.
     stripeSearch: user
-      ? await searchStripeCustomers(userId, user.email, deps.getStripe)
+      ? user.stripeCustomerId || subs > 0
+        ? await searchStripeCustomers(userId, user.email, deps.getStripe)
+        : skippedSearch("skipped_no_stripe_footprint")
       : null,
     posthog: await lookupPosthogPersons(deps.posthog, userId),
   };
@@ -580,7 +631,7 @@ function customersSummary(ids: string[]): string {
 
 function searchSummary(s: StripeCustomerSearch): string {
   if (s.status === "ok") {
-    return `search=ok ${customersSummary(s.customerIds)}${s.hasMore ? ` has_more=yes (first ${STRIPE_SEARCH_LIMIT} only)` : ""}`;
+    return `search=ok ${customersSummary(s.customerIds)}${s.skipped > 0 ? ` skipped=${s.skipped} (other or no address)` : ""}${s.hasMore ? ` has_more=yes (first ${STRIPE_SEARCH_LIMIT} only)` : ""}`;
   }
   return `search=${s.status}${s.error ? ` error=${s.error.name}` : ""}`;
 }

@@ -41,6 +41,8 @@ const h = {
     | { email: string; stripeCustomerId: string | null }
     | undefined,
   liveSub: undefined as { stripeSubscriptionId: string } | undefined,
+  // Any subscriptions row at all (the Stripe-footprint probe, #223).
+  anySub: false,
   counts: {} as Record<string, number>,
   selects: [] as { table: string; where: unknown; fields: unknown }[],
   deletes: [] as { table: string; where: unknown }[],
@@ -66,7 +68,13 @@ function makeDb(): EraseDb {
           return Object.assign(counted, {
             limit: async () => {
               if (name === "users") return h.userRow ? [h.userRow] : [];
-              if (name === "subscriptions") return h.liveSub ? [h.liveSub] : [];
+              if (name === "subscriptions") {
+                // The live probe selects stripeSubscriptionId; the footprint
+                // probe (#223) selects id — answered separately.
+                const f = fields as { stripeSubscriptionId?: unknown };
+                if (f?.stripeSubscriptionId) return h.liveSub ? [h.liveSub] : [];
+                return h.anySub ? [{ id: "sub_old" }] : [];
+              }
               throw new Error(`unexpected select from ${name}`);
             },
           });
@@ -126,6 +134,7 @@ function posthogDeletes() {
 beforeEach(() => {
   h.userRow = { email: EMAIL, stripeCustomerId: null };
   h.liveSub = undefined;
+  h.anySub = false;
   h.counts = {};
   h.selects.length = 0;
   h.deletes.length = 0;
@@ -263,7 +272,10 @@ describe("eraseUser · the customers behind the address (#223)", () => {
   it("(а) tombstones the row's customer AND every customer Stripe finds for the address — one insert, before the deletes", async () => {
     h.userRow = { email: EMAIL, stripeCustomerId: "cus_B" };
     stripeSearch.mockResolvedValue({
-      data: [{ id: "cus_A" }, { id: "cus_B" }],
+      data: [
+        { id: "cus_A", email: "someone@example.invalid" },
+        { id: "cus_B", email: EMAIL },
+      ],
       has_more: false,
     });
 
@@ -295,20 +307,89 @@ describe("eraseUser · the customers behind the address (#223)", () => {
     expect(sentryMessage).not.toHaveBeenCalled();
   });
 
-  it("tombstones a customer Stripe finds even when the users row holds none", async () => {
+  it("a subscriptions row is a Stripe footprint too: no customer id on the row, the search still runs and what it finds is tombstoned", async () => {
     h.userRow = { email: EMAIL, stripeCustomerId: null };
-    stripeSearch.mockResolvedValue({ data: [{ id: "cus_A" }], has_more: false });
+    h.anySub = true;
+    stripeSearch.mockResolvedValue({
+      data: [{ id: "cus_A", email: EMAIL }],
+      has_more: false,
+    });
 
     const result = await eraseUser(USER_ID, deps());
 
+    // The footprint probe: any row by user_id, after the live probe.
+    const probes = h.selects
+      .filter((s) => s.table === "subscriptions")
+      .map((s) => render(s.where).sql);
+    expect(probes).toEqual([
+      '("subscriptions"."user_id" = $1 and "subscriptions"."status" in ($2, $3, $4) and "subscriptions"."current_period_end" > $5)',
+      '"subscriptions"."user_id" = $1',
+    ]);
+    expect(stripeSearch).toHaveBeenCalledTimes(1);
     expect(h.writes[0]).toBe("insert erased_customers");
     expect(h.inserts).toEqual([
       { table: "erased_customers", values: [{ stripeCustomerId: "cus_A" }] },
     ]);
     expect(result).toMatchObject({
       stripeCustomer: false,
+      stripeSearch: "ok",
       stripeCustomersTombstoned: ["cus_A"],
     });
+  });
+
+  it("an account with neither a customer id nor a subscriptions row is never searched — the address has never been at Stripe", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: null };
+    h.anySub = false;
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await eraseUser(USER_ID, deps());
+
+    expect(stripeSearch).not.toHaveBeenCalled();
+    expect(h.writes).toEqual(["delete show_reminders", "delete users"]);
+    expect(result).toMatchObject({
+      status: "erased",
+      stripeSearch: "skipped_no_stripe_footprint",
+      stripeCustomersTombstoned: [],
+    });
+    expect(error).not.toHaveBeenCalled();
+    expect(sentryMessage).not.toHaveBeenCalled();
+    expect(stepsLeftByHand(result)).toEqual([]);
+  });
+
+  it("tombstones only the customers whose address IS the account's — a superstring match or an address-less customer is skipped and counted, never named", async () => {
+    // `:` on a Stripe string field matches "all the words in order", so
+    // email:'a@b.com' also returns a@b.com.mx — somebody else's record.
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_B" };
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    stripeSearch.mockResolvedValue({
+      data: [
+        { id: "cus_other", email: "someone@example.invalid.mx" },
+        { id: "cus_noemail" },
+        { id: "cus_nullemail", email: null },
+        { id: "cus_exact", email: "SOMEONE@example.invalid" },
+      ],
+      has_more: false,
+    });
+
+    const result = await eraseUser(USER_ID, deps());
+
+    expect(h.inserts).toEqual([
+      {
+        table: "erased_customers",
+        values: [{ stripeCustomerId: "cus_B" }, { stripeCustomerId: "cus_exact" }],
+      },
+    ]);
+    expect(result).toMatchObject({
+      stripeSearch: "ok",
+      stripeCustomersTombstoned: ["cus_B", "cus_exact"],
+    });
+    const summary = info.mock.calls.at(-1)?.[1];
+    expect(summary).toMatchObject({
+      stripeCustomersTombstoned: ["cus_B", "cus_exact"],
+      stripeCustomersSkipped: 3,
+    });
+    expect(JSON.stringify(summary)).not.toContain("example.invalid");
+    expect(sentryMessage).not.toHaveBeenCalled();
   });
 
   it("(б) a failed search (timeout, outage) is `failed`: the erasure completes with the row's id, shouted by id — log AND Sentry, never the address", async () => {
@@ -382,7 +463,7 @@ describe("eraseUser · the customers behind the address (#223)", () => {
   });
 
   it("(г) the address is escaped for the Stripe Search Query Language — the backslash first, then the quote", async () => {
-    h.userRow = { email: "o'brien\\x@example.invalid", stripeCustomerId: null };
+    h.userRow = { email: "o'brien\\x@example.invalid", stripeCustomerId: "cus_B" };
 
     await eraseUser(USER_ID, deps());
 
@@ -396,16 +477,19 @@ describe("eraseUser · the customers behind the address (#223)", () => {
   });
 
   it("(д) a second page (has_more) is a warning by id, not a second request — the first page is tombstoned", async () => {
-    h.userRow = { email: EMAIL, stripeCustomerId: null };
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_B" };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    stripeSearch.mockResolvedValue({ data: [{ id: "cus_A" }], has_more: true });
+    stripeSearch.mockResolvedValue({
+      data: [{ id: "cus_A", email: EMAIL }],
+      has_more: true,
+    });
 
     const result = await eraseUser(USER_ID, deps());
 
     expect(stripeSearch).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({
       stripeSearch: "ok",
-      stripeCustomersTombstoned: ["cus_A"],
+      stripeCustomersTombstoned: ["cus_B", "cus_A"],
     });
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain(
@@ -539,7 +623,10 @@ describe("previewErasure (the dry run)", () => {
     };
     fetchMock.mockResolvedValueOnce(json(200, { results: [{ id: 42 }] }));
     stripeSearch.mockResolvedValue({
-      data: [{ id: "cus_dummy" }, { id: "cus_older" }],
+      data: [
+        { id: "cus_dummy", email: EMAIL },
+        { id: "cus_older", email: "someone@example.invalid" },
+      ],
       has_more: false,
     });
 
@@ -568,6 +655,7 @@ describe("previewErasure (the dry run)", () => {
         status: "ok",
         customerIds: ["cus_dummy", "cus_older"],
         hasMore: false,
+        skipped: 0,
       },
       posthog: { status: "found", personIds: ["42"] },
     });
@@ -659,16 +747,45 @@ describe("previewErasure (the dry run)", () => {
       status: "failed",
       customerIds: [],
       hasMore: false,
+      skipped: 0,
       error: { name: "StripeAPIError", code: undefined, statusCode: 503 },
     });
     expect(skipped.stripeSearch).toEqual({
       status: "skipped_unconfigured",
       customerIds: [],
       hasMore: false,
+      skipped: 0,
     });
     expect(h.writes).toEqual([]);
     expect(error).not.toHaveBeenCalled();
     expect(sentryMessage).not.toHaveBeenCalled();
+  });
+
+  it("applies the footprint rule from its own counts: no customer id and no subscriptions row → no search; a subscriptions row alone → search", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: null };
+    h.counts = { subscriptions: 0 };
+
+    const none = await previewErasure(USER_ID, {
+      db: makeDb(),
+      getStripe: stripe,
+      posthog: null,
+    });
+    expect(none.stripeSearch).toEqual({
+      status: "skipped_no_stripe_footprint",
+      customerIds: [],
+      hasMore: false,
+      skipped: 0,
+    });
+    expect(stripeSearch).not.toHaveBeenCalled();
+
+    h.counts = { subscriptions: 1 };
+    const some = await previewErasure(USER_ID, {
+      db: makeDb(),
+      getStripe: stripe,
+      posthog: null,
+    });
+    expect(some.stripeSearch?.status).toBe("ok");
+    expect(stripeSearch).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -684,6 +801,7 @@ describe("the script's stdout", () => {
       status: "ok",
       customerIds: ["cus_dummy", "cus_older"],
       hasMore: false,
+      skipped: 0,
     },
     posthog: { status: "skipped_forbidden", personIds: [], httpStatus: 403 },
   };
@@ -721,23 +839,46 @@ describe("the script's stdout", () => {
       summarizeErasePreview(USER_ID, { ...preview, liveSubscription: false, stripeSearch: search })
         .split("\n")[3];
     expect(stripeLine(null)).toBe("stripe: customer=yes live_subscription=no");
-    expect(stripeLine({ status: "ok", customerIds: [], hasMore: false })).toBe(
-      "stripe: customer=yes live_subscription=no search=ok customers=0",
-    );
-    expect(stripeLine({ status: "ok", customerIds: ["cus_a"], hasMore: true })).toBe(
+    expect(
+      stripeLine({ status: "ok", customerIds: [], hasMore: false, skipped: 0 }),
+    ).toBe("stripe: customer=yes live_subscription=no search=ok customers=0");
+    expect(
+      stripeLine({ status: "ok", customerIds: ["cus_a"], hasMore: true, skipped: 0 }),
+    ).toBe(
       "stripe: customer=yes live_subscription=no search=ok customers=1 (ids cus_a) has_more=yes (first 100 only)",
+    );
+    expect(
+      stripeLine({ status: "ok", customerIds: ["cus_a"], hasMore: false, skipped: 2 }),
+    ).toBe(
+      "stripe: customer=yes live_subscription=no search=ok customers=1 (ids cus_a) skipped=2 (other or no address)",
     );
     expect(
       stripeLine({
         status: "failed",
         customerIds: [],
         hasMore: false,
+        skipped: 0,
         error: { name: "TimeoutError" },
       }),
     ).toBe("stripe: customer=yes live_subscription=no search=failed error=TimeoutError");
     expect(
-      stripeLine({ status: "skipped_unconfigured", customerIds: [], hasMore: false }),
+      stripeLine({
+        status: "skipped_unconfigured",
+        customerIds: [],
+        hasMore: false,
+        skipped: 0,
+      }),
     ).toBe("stripe: customer=yes live_subscription=no search=skipped_unconfigured");
+    expect(
+      stripeLine({
+        status: "skipped_no_stripe_footprint",
+        customerIds: [],
+        hasMore: false,
+        skipped: 0,
+      }),
+    ).toBe(
+      "stripe: customer=yes live_subscription=no search=skipped_no_stripe_footprint",
+    );
     expect(
       summarizeErasePreview(USER_ID, {
         ...preview,
