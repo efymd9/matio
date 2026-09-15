@@ -48,6 +48,8 @@ Apple Distribution Certificate / Provisioning Profile?» → yes (EAS храни
 
 ## Грабли
 
+- **Лок мобильного обязан быть согласован для ЛЮБОГО npm, не только для локального.** Сборка 15.09 (build 2) упала в `Install dependencies`: `npm ci` на билдере EAS сказал «Missing: typescript@5.9.3 from lock file» — `typescript ~7` в `mobile/package.json` не удовлетворял peer `^5` у `@solana/codecs-*` (транзитивно из `@clerk/clerk-js`), и npm билдера хотел вложенную 5.9.3, которой в локе нет; локальный npm 11 это прощает. TypeScript мобильного держим на `~5.9` (штатный для Expo SDK 57). Проверка перед сборкой и при любом Dependabot-PR в `mobile/`: `cd mobile && npm ci && npm ls typescript` — ноль строк `invalid`.
+
 - `ios.infoPlist.ITSAppUsesNonExemptEncryption: false` стоит в `app.json` нарочно: без него App Store Connect требует ручной ответ про экспорт шифрования перед КАЖДЫМ тестом сборки (приложение использует только HTTPS — исключение по правилам Apple).
 
 - Первая сборка требует живой сессии Apple ID; агенту её не отдавать —
