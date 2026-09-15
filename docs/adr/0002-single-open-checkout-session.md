@@ -207,10 +207,15 @@ dead when it comes back into view, exactly like a signed-in buyer's.
   gets no `visibilitychange`, so the `/checkout` probe also runs on `window`
   `focus`, and the wallet learns at confirm; either way the recovery is one
   click on the retry card, never a second charge. Removing the key also
-  removed the only brake on session creation for a signed-in buyer: reloads
-  of `/checkout` and repeated ticks of the wallet box each mint a session
-  (+ list + expire) and a fresh `InitiateCheckout` / `checkout_started` —
-  Stripe churn and funnel inflation, not money (issue #227).
+  removed the only brake on session creation for a signed-in buyer — closed
+  by #227: `prepareAuthCheckout` runs the guest flow's hourly counter
+  (`lib/checkout-rate-limit.ts:checkoutRateLimited`, same table, key
+  `user:` + HMAC of the userId) after the auth guard and before any Stripe
+  call, `AUTH_CHECKOUT_RATELIMIT_PER_HOUR` = 10 by default; over it,
+  `/checkout` throws `CheckoutRateLimitedError` (the client's existing retry
+  card) and the wallet answers `unavailable`. Fail-open on a DB error, like
+  the guest brake — the limiter protects Stripe quotas and the funnel, not
+  money, so it must never block a real buyer.
 - Revisit if: Stripe's `list` stops being read-your-writes consistent; the
   guest flow gains a customer before payment (then it joins the list-based
   sweep and the table can go); Stripe's list learns to filter by

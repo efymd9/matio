@@ -52,6 +52,19 @@ export type WalletCheckoutResult =
   | { kind: "unavailable" }
   | { kind: "redirect"; to: string };
 
+// Thrown by createAuthCheckoutSession when the account is over its hourly
+// session-creation budget (#227, lib/checkout-rate-limit.ts). A throw, not a
+// `redirect` result, on purpose: /checkout's client already turns a rejected
+// action into its retry card (`checkout.errorBody` + `retry`), which is the
+// honest answer — "try again later", not "go home". The message carries no
+// data (Next masks it behind a digest in production anyway).
+export class CheckoutRateLimitedError extends Error {
+  constructor() {
+    super("checkout rate limited");
+    this.name = "CheckoutRateLimitedError";
+  }
+}
+
 // Embedded Checkout needs a publishable key on the client (loadStripe). When
 // it's unset we create a HOSTED session and redirect — identical to the
 // pre-embedded behavior — so a deploy that hasn't received the key yet keeps

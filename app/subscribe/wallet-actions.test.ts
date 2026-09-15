@@ -38,6 +38,10 @@ const h = vi.hoisted(() => ({
   capiThrows: false,
   capiEvents: [] as unknown[],
   posthogEvents: [] as unknown[],
+  // The per-account brake's table (#227): (key, hour window) → count, an
+  // in-memory twin of the limiter's one upsert, so the REAL limiter runs.
+  rateLimitCounts: new Map<string, number>(),
+  rateLimitDbDown: false,
 }));
 
 function select() {
@@ -61,6 +65,23 @@ vi.mock("@/db", () => ({
         return { where: async () => undefined };
       },
     }),
+    // The limiter's upsert (lib/checkout-rate-limit.ts): returns the count
+    // after the increment; a "down" database throws like the driver would.
+    insert: () => ({
+      values: (row: { ipHash: string; windowStart: Date }) => ({
+        onConflictDoUpdate: () => ({
+          returning: async () => {
+            if (h.rateLimitDbDown) throw new Error("connect ECONNREFUSED");
+            const key = `${row.ipHash}|${row.windowStart.toISOString()}`;
+            const next = (h.rateLimitCounts.get(key) ?? 0) + 1;
+            h.rateLimitCounts.set(key, next);
+            return [{ count: next }];
+          },
+        }),
+      }),
+    }),
+    // The limiter's sampled prune — inert here.
+    delete: () => ({ where: async () => undefined }),
   },
 }));
 
@@ -140,6 +161,8 @@ vi.mock("@/lib/posthog-server", () => ({
   toPosthogConsentMetadata: () => ({ ph_consent: "1" }),
 }));
 
+import { AUTH_CHECKOUT_RATELIMIT_PER_HOUR } from "@/lib/checkout-rate-limit";
+import { CheckoutRateLimitedError } from "@/lib/checkout-session";
 import { CONSENT_VERSION, serializeConsent } from "@/lib/cookie-consent";
 
 import {
@@ -176,6 +199,8 @@ beforeEach(() => {
   h.capiThrows = false;
   h.capiEvents = [];
   h.posthogEvents = [];
+  h.rateLimitCounts = new Map();
+  h.rateLimitDbDown = false;
   vi.stubEnv("PAYMENTS_ENABLED", "1");
   vi.stubEnv("WALLET_EXPRESS_CHECKOUT", "1");
   vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "pk_test_x");
@@ -564,6 +589,135 @@ describe("#217 — one open session per buyer", () => {
     expect(first.kind === "wallet" && first.sessionId).toBe("cs_test_1");
     expect(third.kind === "wallet" && third.sessionId).toBe("cs_test_3");
     expect(openSessionIds()).toEqual(["cs_test_3"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #227 — a per-account brake on session creation.
+// ---------------------------------------------------------------------------
+// Since #217 the create carries no idempotency key, so every call of either
+// builder is a real Stripe create + list + N expire and, with consent, a fresh
+// InitiateCheckout / checkout_started. The brake is the guest flow's hourly
+// counter keyed by the account instead of the IP, checked after the auth
+// guard and before anything talks to Stripe. The limiter here is the REAL one
+// (lib/checkout-rate-limit.ts) over the db fake's in-memory counter.
+describe("#227 — per-account brake on session creation", () => {
+  const LIMIT = AUTH_CHECKOUT_RATELIMIT_PER_HOUR;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-15T10:30:00.000Z"));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("(а) the 11th /checkout of one account inside the hour creates NO session and throws CheckoutRateLimitedError", async () => {
+    for (let i = 0; i < LIMIT; i++) {
+      expect((await createAuthCheckoutSession(INPUT)).kind).toBe("embedded");
+    }
+    expect(st.sessions).toHaveLength(LIMIT);
+
+    await expect(createAuthCheckoutSession(INPUT)).rejects.toBeInstanceOf(
+      CheckoutRateLimitedError,
+    );
+
+    // Stripe was not touched by the refused call: no create, no sweep.
+    expect(st.sessions).toHaveLength(LIMIT);
+    expect(st.listCalls).toBe(LIMIT);
+    expect(st.customersCreated).toBe(0);
+    // And no eleventh InitiateCheckout / checkout_started — the funnel
+    // inflation is half the point.
+    expect(h.capiEvents).toHaveLength(LIMIT);
+    expect(h.posthogEvents).toHaveLength(LIMIT);
+    expect(console.warn).toHaveBeenCalledWith("startCheckout: rate limited", {
+      userId: "user_1",
+    });
+  });
+
+  it("(б) the wallet over the budget answers `unavailable` — the slot just does not render — and Stripe is not touched", async () => {
+    for (let i = 0; i < LIMIT; i++) {
+      expect((await createAuthWalletCheckoutSession(INPUT, true)).kind).toBe("wallet");
+    }
+
+    expect(await createAuthWalletCheckoutSession(INPUT, true)).toEqual({
+      kind: "unavailable",
+    });
+
+    expect(st.sessions).toHaveLength(LIMIT);
+    expect(st.listCalls).toBe(LIMIT);
+  });
+
+  it("the budget is one per ACCOUNT, shared by both surfaces", async () => {
+    // Five reloads of /checkout and five ticks of the wallet box are ten
+    // sessions of one buyer, whichever surface minted them.
+    for (let i = 0; i < LIMIT / 2; i++) await createAuthCheckoutSession(INPUT);
+    for (let i = 0; i < LIMIT / 2; i++) {
+      await createAuthWalletCheckoutSession(INPUT, true);
+    }
+
+    expect(await createAuthWalletCheckoutSession(INPUT, true)).toEqual({
+      kind: "unavailable",
+    });
+    await expect(createAuthCheckoutSession(INPUT)).rejects.toBeInstanceOf(
+      CheckoutRateLimitedError,
+    );
+    expect(st.sessions).toHaveLength(LIMIT);
+  });
+
+  it("(в) fails OPEN — a database blip never blocks a buyer", async () => {
+    h.rateLimitDbDown = true;
+
+    const res = await createAuthCheckoutSession(INPUT);
+    const wallet = await createAuthWalletCheckoutSession(INPUT, true);
+
+    expect(res.kind).toBe("embedded");
+    expect(wallet.kind).toBe("wallet");
+    expect(st.sessions).toHaveLength(2);
+    expect(console.warn).toHaveBeenCalledWith(
+      "checkoutRateLimited: DB error — failing open",
+      expect.anything(),
+    );
+  });
+
+  it("(г) accounts have independent budgets", async () => {
+    for (let i = 0; i < LIMIT; i++) await createAuthCheckoutSession(INPUT);
+    await expect(createAuthCheckoutSession(INPUT)).rejects.toBeInstanceOf(
+      CheckoutRateLimitedError,
+    );
+
+    h.authUserId = "user_2";
+    h.userCustomerId = "cus_other";
+    expect((await createAuthCheckoutSession(INPUT)).kind).toBe("embedded");
+
+    h.authUserId = "user_1";
+    h.userCustomerId = "cus_existing";
+    await expect(createAuthCheckoutSession(INPUT)).rejects.toBeInstanceOf(
+      CheckoutRateLimitedError,
+    );
+  });
+
+  it("the table sees a hash of the account, never the Clerk id", async () => {
+    await createAuthCheckoutSession(INPUT);
+
+    const keys = [...h.rateLimitCounts.keys()];
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toMatch(/^user:[0-9a-f]{64}\|2026-09-15T10:00:00\.000Z$/);
+    expect(keys[0]).not.toContain("user_1");
+  });
+
+  it("the budget rolls over with the clock hour", async () => {
+    for (let i = 0; i < LIMIT; i++) await createAuthCheckoutSession(INPUT);
+    await expect(createAuthCheckoutSession(INPUT)).rejects.toBeInstanceOf(
+      CheckoutRateLimitedError,
+    );
+
+    vi.setSystemTime(new Date("2026-09-15T11:00:00.000Z"));
+
+    expect((await createAuthCheckoutSession(INPUT)).kind).toBe("embedded");
   });
 });
 

@@ -23,7 +23,8 @@ PR: данные не размножаются бесконтрольно, ст�
 
 Что уже есть в кодовой базе по теме (не изобретать заново): HMAC-хеш IP
 вместо сырого (`lib/trial.ts:hashClientIp`, тот же приём в
-`show_reminders.ip_hash`, `guest_checkout_attempts`, и HMAC значения cookie
+`show_reminders.ip_hash`, `guest_checkout_attempts` — там же с #227 HMAC
+Clerk id вместо самого id для лимита авторизованного чекаута — и HMAC значения cookie
 вместо самого значения — `guest_checkout_sessions.claim_token_hash`,
 `lib/guest-checkout-sessions.ts`); стирание CAPI-снимка
 (сырой IP/UA, `_fbp`/`_fbc`) из метаданных Stripe сразу после `Purchase`
@@ -172,7 +173,8 @@ PR: данные не размножаются бесконтрольно, ст�
   `marketing_links.created_by` (админ).
 - **Не привязано к `users` вовсе** (псевдонимное): `trial_sessions` без
   `user_id` (session_token, ip_hash), `visitors` без `user_id`,
-  `guest_checkout_attempts` (ip_hash, самопрунинг 2 ч),
+  `guest_checkout_attempts` (HMAC IP гостя или `user:` + HMAC Clerk id —
+  #227; самопрунинг 2 ч),
   `guest_checkout_sessions` (HMAC cookie `checkout_claim` + id сессии
   Stripe, самопрунинг 24 ч — #224), `stripe_events` (id событий).
 - **Кеши**: `roleCache` (5 с, process-local) истекает сам; Data Cache —

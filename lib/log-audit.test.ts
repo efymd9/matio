@@ -113,9 +113,13 @@ vi.mock("@clerk/nextjs/webhooks", () => ({ verifyWebhook: clerkVerify }));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: walletAudit.authUserId }),
 }));
-// The guest action's per-IP brake is not the thing under audit; inert.
+// The guest action's per-IP brake is not the thing under audit; inert. The
+// signed-in builders' per-account brake (#227) is a spy: one case flips it to
+// watch the line the refusal logs.
 vi.mock("@/lib/checkout-rate-limit", () => ({
   guestCheckoutRateLimited: async () => false,
+  checkoutRateLimited: walletAudit.rateLimited,
+  AUTH_CHECKOUT_RATELIMIT_PER_HOUR: 10,
 }));
 
 // The reminder dispatch path pulls in auth, Next's cache and the Resend SDK —
@@ -169,6 +173,8 @@ const walletAudit = vi.hoisted(() => {
       real.captureServerEvent(...args),
     ),
     consent: "",
+    // The per-account checkout brake (#227) — allows unless a case says so.
+    rateLimited: vi.fn(async () => false),
     // Who Clerk says is calling (every case but the guest ones: a user).
     authUserId: "user_1" as string | null,
     // The guest buyer's checkout_claim cookie (#224 cases) — a value the
@@ -234,6 +240,7 @@ import {
   reportWalletCheckoutStarted,
 } from "@/app/subscribe/actions";
 import { createGuestCheckoutSession } from "@/app/subscribe/guest-actions";
+import { CheckoutRateLimitedError } from "@/lib/checkout-session";
 import { CONSENT_VERSION, serializeConsent } from "@/lib/cookie-consent";
 
 /** Render a console argument the way a log aggregator would see it. */
@@ -1249,6 +1256,27 @@ describe("log audit · checkout session builder (prepareAuthCheckout, #214)", ()
     }
     expect(logged()).toContain("startCheckout: CAPI identity capture failed");
     expect(logged()).toContain("marker_code");
+  });
+
+  it("logs a refused (rate-limited) checkout by user id only — never the buyer's address (#227)", async () => {
+    walletAudit.rateLimited.mockResolvedValueOnce(true);
+    const logged = captureConsole();
+
+    const err = await createAuthCheckoutSession({
+      show: null,
+      ep: null,
+      resume: null,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(CheckoutRateLimitedError);
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+      // The error travels to the client (masked by a digest in production)
+      // and to Sentry by name; it carries no data either way.
+      expect(render(err)).not.toContain(marker);
+    }
+    expect(logged()).toContain("startCheckout: rate limited");
+    expect(logged()).toContain("user_1");
   });
 });
 
