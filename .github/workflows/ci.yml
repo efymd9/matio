@@ -63,6 +63,14 @@ jobs:
       # Ставим только chromium: остальные движки удвоили бы время без пользы —
       # matio ловит кроссбраузерные различия не голденами, а правилами из
       # docs/gotchas.md (Safari < 15.4 и т.д.).
+      # #212: `--with-deps` runs apt-get against every source on the runner,
+      # including Google's chrome-stable repo that ubuntu-latest ships with —
+      # and that repo has published a Release/Packages.gz mismatch before
+      # (2026-09-09, "Hash Sum mismatch", every PR red for hours). We install
+      # Playwright's own Chromium, not Google Chrome, so that source is pure
+      # liability: drop it before apt runs.
+      - name: Убрать apt-репозиторий Google Chrome (#212)
+        run: sudo rm -f /etc/apt/sources.list.d/google-chrome*.list /etc/apt/sources.list.d/google.list
       - name: Браузер для UI Lab
         run: pnpm exec playwright install chromium --with-deps
 
