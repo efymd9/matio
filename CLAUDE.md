@@ -1026,7 +1026,13 @@ infra/
   (prompt with <2 options) / `publish_branch_not_ready` /
   `publish_choice_target_not_branch` / `publish_branch_cycle` — on EVERY
   published save, not only the draft→published edge. `deleteEpisode` on a
-  choice target is refused by the FK; the page hides the button and says why.
+  choice target answers the typed `episode_is_choice_target` (#195) — one
+  `isChoiceTarget` read in `lib/branching-db.ts`, shared by the episode page
+  (which hides the button and says why) and the season page's delete form
+  (which has no edge data); the RESTRICT FK stays as the safety net, and a
+  real delete ends in a redirect to the season list. The throw registry at
+  the top of `app/admin/actions.ts` lists every `throw` that deliberately
+  remains — forged-post guards only.
   **Player (#144, `components/watch/player.tsx`)**: the watch page delivers
   ALL ready episodes (branches included — the `isNull(branch_of_episode_id)`
   filter is gone) plus each one's `episode_choices` as a `PlayerEpisode` DTO

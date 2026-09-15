@@ -170,8 +170,12 @@ export default async function SeasonPage({
                     >
                       {t.season.edit}
                     </Link>
-                    <form
+                    {/* The row knows nothing about choice edges; a target
+                        of someone's fork answers with a code shown right
+                        here instead of the masked generic page (#195). */}
+                    <TypedActionForm
                       action={deleteEpisode.bind(null, episode.id, season.id, show.id)}
+                      className="flex max-w-sm items-center gap-2"
                     >
                       <ConfirmDeleteButton
                         message={t.season.deleteEpisodeConfirm(
@@ -181,7 +185,7 @@ export default async function SeasonPage({
                       >
                         {t.season.delete}
                       </ConfirmDeleteButton>
-                    </form>
+                    </TypedActionForm>
                   </div>
                 </div>
               );
