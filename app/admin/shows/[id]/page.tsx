@@ -14,6 +14,7 @@ import { Icon } from "@/components/site/icon";
 import { ConfirmDeleteButton } from "@/components/admin/confirm-delete-button";
 import { RemindersPanel } from "@/components/admin/reminders-panel";
 import { ShowForm } from "@/components/admin/show-form";
+import { TypedActionForm } from "@/components/admin/typed-action-form";
 import { Input } from "@/components/ui/input";
 import { resendConfigured } from "@/lib/resend";
 import { getAdminDict } from "@/lib/i18n/admin-server";
@@ -254,33 +255,38 @@ export default async function EditShowPage({
           )}
         </div>
 
-        <form
+        {/* A taken season number comes back as a code rendered above the
+            row (#195); the fields stay here on the server as children. */}
+        <TypedActionForm
           action={createSeason.bind(null, show.id)}
-          className="mt-4 flex gap-2 border-t border-white/[0.06] pt-4"
+          className="mt-4 space-y-2 border-t border-white/[0.06] pt-4"
+          resetOnSuccess
         >
-          <Input
-            name="number"
-            type="number"
-            min={1}
-            placeholder={t.showEdit.seasonNumberPlaceholder}
-            required
-            className="w-16 text-center"
-            aria-label={t.showEdit.seasonNumberAria}
-          />
-          <Input
-            name="title"
-            placeholder={t.showEdit.seasonTitlePlaceholder}
-            className="flex-1"
-            aria-label={t.showEdit.seasonTitleAria}
-          />
-          <button
-            type="submit"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-white px-4 text-sm font-bold text-black transition-colors hover:bg-white/90"
-          >
-            <Icon name="plus" size={14} color="#0f0a07" />
-            {t.showEdit.add}
-          </button>
-        </form>
+          <div className="flex gap-2">
+            <Input
+              name="number"
+              type="number"
+              min={1}
+              placeholder={t.showEdit.seasonNumberPlaceholder}
+              required
+              className="w-16 text-center"
+              aria-label={t.showEdit.seasonNumberAria}
+            />
+            <Input
+              name="title"
+              placeholder={t.showEdit.seasonTitlePlaceholder}
+              className="flex-1"
+              aria-label={t.showEdit.seasonTitleAria}
+            />
+            <button
+              type="submit"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-white px-4 text-sm font-bold text-black transition-colors hover:bg-white/90"
+            >
+              <Icon name="plus" size={14} color="#0f0a07" />
+              {t.showEdit.add}
+            </button>
+          </div>
+        </TypedActionForm>
       </Panel>
 
       {/* Virtual actors (cast) */}
