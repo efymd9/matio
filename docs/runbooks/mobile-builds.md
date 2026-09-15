@@ -37,7 +37,18 @@ Apple Distribution Certificate / Provisioning Profile?» → yes (EAS храни
 
 ## Следующие сборки
 
-- Код в `main` → `cd mobile && npx eas-cli@latest build -p ios --profile production --auto-submit --non-interactive`.
+Одна команда из основной сессии (сертификат и `ascAppId` уже есть):
+
+```
+cd mobile && npm ci && EAS_BUILD_NO_EXPO_GO_WARNING=true npx eas-cli@latest build -p ios --profile production --auto-submit --non-interactive
+```
+
+Если `--auto-submit` не запланировался (сборка ушла, submit отказал) — после `FINISHED`:
+`npx eas-cli@latest submit -p ios --id <buildId> --profile production --non-interactive`.
+Статус сборки: `npx eas-cli@latest build:view <buildId> --json`; лог из `logFiles` отдаётся в brotli — `curl -s <url> | brotli -dc`.
+
+История: 15.09.2026 — сборки 1–2 упали (TTY; лок/TypeScript), сборка 3 (0.1.0 (3), `cc0ade74`) ушла в TestFlight.
+
   Не запускать одновременно с тяжёлой сборкой веба на этой машине (сборка идёт
   в облаке EAS, но `prebuild` и загрузка проекта — локально).
 - `ios/` и `android/` в репо не коммитятся (CNG): EAS делает `expo prebuild`
