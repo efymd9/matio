@@ -6,7 +6,10 @@ import {
   EmbeddedCheckout,
   EmbeddedCheckoutProvider,
 } from "@stripe/react-stripe-js";
-import { createCheckoutSession } from "@/app/checkout/actions";
+import {
+  checkoutSessionState,
+  createCheckoutSession,
+} from "@/app/checkout/actions";
 import { useT } from "@/lib/i18n/client";
 import { getStripeBrowser } from "@/lib/stripe-browser";
 
@@ -20,6 +23,15 @@ import { getStripeBrowser } from "@/lib/stripe-browser";
 // After payment Stripe redirects the top frame to the session's return_url
 // (/welcome for guests, the watch path for signed-in buyers), so the existing
 // claim + webhook-mirror machinery is untouched.
+//
+// Since #217 a signed-in buyer holds at most ONE open Checkout Session: every
+// newer checkout (a second /checkout tab, the paywall's wallet button) expires
+// the others. This form can therefore be dead by the time its tab is looked at
+// again, and Stripe's embedded iframe gives no signal for that — so on every
+// return to the tab the client asks the server whether its session is still
+// open and, if not, swaps the dead iframe for the retry prompt. The retry is a
+// reload, i.e. a fresh session, which in turn closes the newer one elsewhere:
+// the tab the buyer is looking at is the live one.
 export function CheckoutClient({
   show,
   ep,
@@ -36,14 +48,20 @@ export function CheckoutClient({
   const t = useT();
   const router = useRouter();
   const [clientSecret, setClientSecret] = useState<string | null>(null);
-  const [errored, setErrored] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  // `load` — the session could not be created or Stripe.js did not come up;
+  // `expired` — the session was open when mounted and is not any more (a newer
+  // checkout of this buyer closed it, #217). Both end in the same retry card,
+  // with different words.
+  const [failure, setFailure] = useState<"load" | "expired" | null>(null);
   // Create the session exactly once. The ref survives StrictMode's
   // mount→cleanup→mount in dev (same instance), so the action isn't called
-  // twice; Stripe's hour-bucketed idempotency key is the backstop. No
-  // active/cleanup flag on purpose — a per-pass flag from the discarded first
-  // StrictMode mount would suppress the second pass's state update and hang the
-  // spinner. React 19 no-ops setState on an unmounted component, so a late
-  // resolve after a real unmount is harmless.
+  // twice — and since #217 a second call would not be a harmless replay: it
+  // would create a second session and expire the first. No active/cleanup flag
+  // on purpose — a per-pass flag from the discarded first StrictMode mount
+  // would suppress the second pass's state update and hang the spinner. React
+  // 19 no-ops setState on an unmounted component, so a late resolve after a
+  // real unmount is harmless.
   const startedRef = useRef(false);
 
   useEffect(() => {
@@ -66,20 +84,46 @@ export function CheckoutClient({
           // blank card. Surface the retry UI instead.
           const stripe = await getStripeBrowser(publishableKey);
           if (!stripe) {
-            setErrored(true);
+            setFailure("load");
             return;
           }
+          setSessionId(res.sessionId);
           setClientSecret(res.clientSecret);
         }
       })
-      .catch(() => setErrored(true));
+      .catch(() => setFailure("load"));
   }, [show, ep, resume, router, publishableKey]);
 
-  if (errored) {
+  // The refocus probe (#217). Only while a session is mounted, only when the
+  // tab becomes visible, one probe in flight at a time. A probe that fails
+  // answers "open" on the server side, so nothing here can tear down a working
+  // form by accident; only a definite "closed" does.
+  useEffect(() => {
+    if (!sessionId || failure) return;
+    let probing = false;
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible" || probing) return;
+      probing = true;
+      checkoutSessionState(sessionId)
+        .then((state) => {
+          if (state === "closed") setFailure("expired");
+        })
+        .catch(() => {})
+        .finally(() => {
+          probing = false;
+        });
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [sessionId, failure]);
+
+  if (failure) {
     return (
       <div className="mt-10 rounded-2xl border border-white/10 bg-white/[0.04] p-8 text-center">
         <p className="text-sm font-medium text-white/75">
-          {t.checkout.errorBody}
+          {failure === "expired"
+            ? t.checkout.expiredBody
+            : t.checkout.errorBody}
         </p>
         <button
           type="button"

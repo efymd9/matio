@@ -6,12 +6,14 @@ import {
   createAuthWalletCheckoutSession,
 } from "@/app/subscribe/actions";
 import { createGuestCheckoutSession } from "@/app/subscribe/guest-actions";
+import { parseCheckoutSessionParam } from "@/lib/checkout-return";
 import type {
   CheckoutSessionResult,
   CheckoutTargetInput,
   WalletCheckoutResult,
 } from "@/lib/checkout-session";
 import { paymentsEnabled } from "@/lib/free-mode";
+import { getStripe } from "@/lib/stripe";
 
 // Single entry point the in-site /checkout client calls to create a Checkout
 // Session. It resolves the auth state SERVER-SIDE (never trusts the client) and
@@ -54,4 +56,32 @@ export async function createWalletCheckoutSession(
   const { userId } = await auth();
   if (!userId) return { kind: "unavailable" };
   return createAuthWalletCheckoutSession(input, consentAccepted);
+}
+
+// The /checkout client's refocus probe (#217). Every new checkout expires the
+// buyer's OTHER open sessions, so a form left open in a second tab can be dead
+// by the time the buyer comes back to it — and Stripe's embedded iframe gives
+// us no signal for that. When the tab becomes visible again the client asks
+// whether its session is still open; `closed` replaces the dead iframe with the
+// retry prompt, and the retry creates a fresh session (which, in turn, closes
+// the newer one elsewhere — the tab the buyer is looking at is the live one).
+//
+// Read-only, and it answers a status word and nothing else. Every uncertainty
+// — a transient Stripe failure, an id that is not shaped like a session id,
+// payments switched off — answers `open`, so a failed probe never tears down a
+// form that works; the buyer's own submit still tells the truth. The id is the
+// same public-ish token Stripe puts in the return URL; learning whether one is
+// still open grants nothing.
+export async function checkoutSessionState(
+  sessionId: string,
+): Promise<"open" | "closed"> {
+  if (!paymentsEnabled()) return "open";
+  const id = parseCheckoutSessionParam(sessionId);
+  if (!id) return "open";
+  try {
+    const session = await getStripe().checkout.sessions.retrieve(id);
+    return session.status === "open" ? "open" : "closed";
+  } catch {
+    return "open";
+  }
 }

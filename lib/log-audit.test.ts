@@ -30,6 +30,8 @@ const {
   batchSend,
   clerkVerify,
   stripeUpdate,
+  stripeSessionList,
+  stripeSessionExpire,
   erasedCustomer,
   sentryMessage,
 } = vi.hoisted(() => ({
@@ -41,6 +43,8 @@ const {
   batchSend: vi.fn(),
   clerkVerify: vi.fn(),
   stripeUpdate: vi.fn(),
+  stripeSessionList: vi.fn(),
+  stripeSessionExpire: vi.fn(),
   erasedCustomer: vi.fn(),
   sentryMessage: vi.fn(),
 }));
@@ -58,7 +62,9 @@ vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     subscriptions: { update: stripeUpdate, list: async () => ({ data: [] }) },
     // The checkout session builder's calls (#214): inert, so the audit case
-    // reaches the CAPI identity capture it exists to watch.
+    // reaches the CAPI identity capture it exists to watch. The one-open-
+    // session sweep that follows every create (#217) is spied, so its failure
+    // text can be seeded with a marker.
     customers: { create: async () => ({ id: "cus_dummy" }) },
     checkout: {
       sessions: {
@@ -67,6 +73,9 @@ vi.mock("@/lib/stripe", () => ({
           client_secret: "cs_secret_dummy",
           url: "https://checkout.stripe.com/dummy",
         }),
+        list: stripeSessionList,
+        expire: stripeSessionExpire,
+        retrieve: async (id: string) => ({ id, status: "open" }),
       },
     },
   }),
@@ -232,6 +241,8 @@ beforeEach(() => {
   batchSend.mockReset();
   clerkVerify.mockReset();
   stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
+  stripeSessionList.mockReset().mockResolvedValue({ data: [] });
+  stripeSessionExpire.mockReset().mockResolvedValue({ id: "cs_test_dummy" });
   erasedCustomer.mockReset().mockResolvedValue(false);
   sentryMessage.mockReset();
 });
@@ -1048,6 +1059,51 @@ describe("log audit · checkout session builder (prepareAuthCheckout, #214)", ()
       expect(logged()).not.toContain(marker);
     }
     expect(logged()).toContain("startCheckout: CAPI identity capture failed");
+    expect(logged()).toContain("marker_code");
+  });
+});
+
+describe("log audit · one-open-session sweep after a checkout create (#217)", () => {
+  // Every create is followed by list + expire of the buyer's other open
+  // sessions; when that cannot be completed the new session is closed and the
+  // failure logged. Stripe's error text can quote what was sent — the
+  // customer's e-mail among it — so only ids and the error class may come out.
+  const quoted = (name: string) =>
+    Object.assign(new Error(`rejected ${MARKER_NAME} <${MARKER_EMAIL}>`), {
+      name,
+      code: "marker_code",
+      statusCode: 400,
+    });
+
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://matio.tv");
+    vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "pk_test_dummy");
+    vi.stubEnv("STRIPE_PRICE_MONTHLY", "price_dummy");
+    walletAudit.consent = "";
+    const chain = { from: () => chain, where: () => chain, limit: async () => [] };
+    select.mockImplementation(() => chain);
+  });
+
+  it("logs a failed sweep — and a failed close of the new session — by ids and class, never the buyer's address", async () => {
+    stripeSessionList.mockRejectedValueOnce(quoted("StripeConnectionError"));
+    stripeSessionExpire.mockRejectedValueOnce(quoted("StripeAPIError"));
+    const logged = captureConsole();
+
+    await expect(
+      createAuthCheckoutSession({ show: null, ep: null, resume: null }),
+    ).rejects.toThrow();
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain(
+      "startCheckout: could not expire the customer's other open sessions",
+    );
+    expect(logged()).toContain("startCheckout: closing the new session failed too");
+    expect(logged()).toContain("cs_test_dummy");
+    expect(logged()).toContain("StripeConnectionError");
+    expect(logged()).toContain("StripeAPIError");
     expect(logged()).toContain("marker_code");
   });
 });

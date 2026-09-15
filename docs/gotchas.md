@@ -258,21 +258,23 @@ const ref = invoice.parent?.subscription_details?.subscription;
 const subId = typeof ref === "string" ? ref : ref?.id;
 ```
 
-### Idempotency key on Checkout creation
+### Idempotency key on Checkout creation — guest flow only since #217
 
-`stripe.checkout.sessions.create()` accepts a second-arg `{ idempotencyKey }`. Reusing the same key returns the same Session — important when a user might double-click Subscribe or open Checkout in two tabs:
+`stripe.checkout.sessions.create()` accepts a second-arg `{ idempotencyKey }`. Reusing the same key returns the same Session. The GUEST flow still uses one (it has no Stripe customer before payment, so nothing to sweep by):
 
 ```ts
 const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
 await stripe.checkout.sessions.create(
-  { mode: "subscription", customer, line_items, success_url, cancel_url, ... },
-  { idempotencyKey: `checkout:${userId}:${plan}:${hourBucket}` },
+  { mode: "subscription", line_items, client_reference_id, success_url, ... },
+  { idempotencyKey: `checkout:guest:${claimToken}:${hourBucket}:${variantDigest}` },
 );
 ```
 
-Without it, two parallel submissions both pass the DB and Stripe-list dedupe checks in `startCheckout` (neither is atomic with `sessions.create`) and we end up with two completed subscriptions for the same user.
+**Same key + different params = 400 `idempotency_error`, not a replay.** Stripe only replays byte-identical requests. If anything in the payload drifts between two calls inside the key's window — a new `resume` playhead in the success URL, a rotated mobile IP in `capi_ip` metadata, fresh attribution, a locale switch — the second call hard-fails and that user can't start ANY checkout until the bucket rolls. Hence the **digest of the variable request parts** in the key (`sha256(params).slice(0,16)`): true double-submits still collide while changed-intent retries get a fresh session. See `app/subscribe/guest-actions.ts`.
 
-**But: same key + different params = 400 `idempotency_error`, not a replay.** Stripe only replays byte-identical requests. If anything in the payload drifts between two calls inside the key's window — a new `resume` playhead in the success URL, a rotated mobile IP in `capi_ip` metadata, fresh attribution, a locale switch — the second call hard-fails and that user can't start ANY checkout until the bucket rolls. The guest flow learned this the hard way: its key folds a **digest of the variable request parts** into the key (`checkout:guest:<token>:<hour>:<sha256(params).slice(0,16)>`) so true double-submits still collide while changed-intent retries get a fresh session. See `app/subscribe/guest-actions.ts`.
+**And the flip side, which is why the SIGNED-IN flow has no key at all (#217).** A key that changes whenever the params drift is not a "one session per buyer" guarantee — every drift (a consent banner accepted between two tabs, a playhead ten seconds further along, the wallet surface next to /checkout) is a second key and a second live, billable session. The signed-in builders now enforce the invariant directly: create WITHOUT a key, then `checkout.sessions.list({ customer, status: "open" })` and `expire` every session but the new one (`createSoleOpenSession`, `app/subscribe/actions.ts`). Do not add the key back "for safety": **Stripe replays the CACHED first response for a key — `status: "open"` included — even after the sweep of a newer session has expired that session**, so a retry inside the hour would be handed a dead session with no way to tell from the response, until the bucket rolls. Also: `expire` on a session that is not open is a 400 — the sweep re-`retrieve`s on failure and only propagates when the session is still open.
+
+`customers.create` DOES take a deterministic key, `customer:<userId>`: two parallel first checkouts otherwise mint two customers, and `users.stripe_customer_id` (last writer wins) ends up naming one while the other holds the session — the webhook finds no user, the `cs=` return refuses the mismatch, and the buyer has paid for nothing.
 
 ### Cancel: `cancel_at_period_end` vs `cancel_at`
 

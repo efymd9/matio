@@ -336,7 +336,11 @@ export async function createGuestCheckoutSession(
     if (!session.client_secret) {
       throw new Error("Stripe did not return an embedded client secret");
     }
-    return { kind: "embedded", clientSecret: session.client_secret };
+    return {
+      kind: "embedded",
+      clientSecret: session.client_secret,
+      sessionId: session.id,
+    };
   }
   if (!session.url) throw new Error("Stripe did not return a session URL");
   return { kind: "hosted", url: session.url };

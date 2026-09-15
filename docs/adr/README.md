@@ -38,3 +38,4 @@ what has to be revisited if a stated assumption stops holding.
 ## Records
 
 - [0001. Branching video: a branch is an episode row, the graph is `episode_choices`](./0001-branching-video-graph.md) — Accepted, 2026-09-06
+- [0002. One open Checkout Session per buyer: an expire-sweep after every create, no idempotency key on the signed-in flow](./0002-single-open-checkout-session.md) — Accepted, 2026-09-15

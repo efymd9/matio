@@ -141,11 +141,19 @@ export default defineConfig({
       //   разошёлся с CI на 0.74 п.п. — больше запаса 0.7 из правила
       //   «локальный − 0.7», и первая версия пола (41.4) легла ровно на
       //   число CI, без запаса на дрейф).
+      // → 42.1/34.1/35.6/41.6 (#217: stateful-фейк Stripe в
+      //   app/subscribe/wallet-actions.test.ts исполняет sweep-ветки
+      //   createSoleOpenSession, новый app/checkout/checkout-client.test.tsx
+      //   впервые покрывает клиент /checkout, проба checkoutSessionState и
+      //   кейс аудита логов. Локально 42.80/34.89/36.33/42.31 поверх f390a8c2;
+      //   полы по правилу «max(main, локальный − 0.7)». Осторожно: в #214
+      //   локальный разошёлся с CI на 0.74 — если CI прочитает ниже пола,
+      //   финальные числа ставятся по логу CI, как в истории выше).
       thresholds: {
-        lines: 41.3,
-        functions: 33.6,
-        branches: 35.3,
-        statements: 40.8,
+        lines: 42.1,
+        functions: 34.1,
+        branches: 35.6,
+        statements: 41.6,
       },
     },
 

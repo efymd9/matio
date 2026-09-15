@@ -33,16 +33,61 @@ vi.mock("@/app/subscribe/guest-actions", () => ({
   createGuestCheckoutSession: async () => ({ kind: "redirect" as const, to: "/" }),
 }));
 
-import { createWalletCheckoutSession } from "./actions";
+// The refocus probe's one Stripe call (#217).
+const stripe = vi.hoisted(() => ({
+  retrieve: vi.fn(async (id: string) => ({ id, status: "open" })),
+}));
+vi.mock("@/lib/stripe", () => ({
+  getStripe: () => ({ checkout: { sessions: { retrieve: stripe.retrieve } } }),
+}));
+
+import { checkoutSessionState, createWalletCheckoutSession } from "./actions";
 
 const INPUT = { show: "the-scarlet-oath", ep: "ep-3", resume: null };
 
 beforeEach(() => {
   h.authUserId = "user_1";
   h.authCalls = [];
+  stripe.retrieve.mockReset().mockImplementation(async (id: string) => ({
+    id,
+    status: "open",
+  }));
   vi.stubEnv("PAYMENTS_ENABLED", "1");
 });
 afterEach(() => vi.unstubAllEnvs());
+
+describe("checkoutSessionState — the /checkout tab's refocus probe (#217)", () => {
+  it("answers closed for a session that is no longer open", async () => {
+    stripe.retrieve.mockResolvedValue({ id: "cs_test_1", status: "expired" });
+
+    expect(await checkoutSessionState("cs_test_1")).toBe("closed");
+    expect(stripe.retrieve).toHaveBeenCalledWith("cs_test_1");
+  });
+
+  it("answers open for a live session", async () => {
+    expect(await checkoutSessionState("cs_test_1")).toBe("open");
+  });
+
+  it("answers open — leaving the form alone — when Stripe cannot be reached", async () => {
+    // A failed probe must never tear down a form that works; the buyer's own
+    // submit still tells the truth.
+    stripe.retrieve.mockRejectedValue(new Error("stripe down"));
+
+    expect(await checkoutSessionState("cs_test_1")).toBe("open");
+  });
+
+  it("refuses an id that is not shaped like a session id, without asking Stripe", async () => {
+    expect(await checkoutSessionState("<script>")).toBe("open");
+    expect(stripe.retrieve).not.toHaveBeenCalled();
+  });
+
+  it("answers open while payments are off, without asking Stripe", async () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "");
+
+    expect(await checkoutSessionState("cs_test_1")).toBe("open");
+    expect(stripe.retrieve).not.toHaveBeenCalled();
+  });
+});
 
 describe("createWalletCheckoutSession", () => {
   it("redirects home while payments are off, without resolving auth", async () => {
