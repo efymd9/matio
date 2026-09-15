@@ -1,13 +1,42 @@
 // For more info, see https://github.com/storybookjs/eslint-plugin-storybook#configuration-flat-config-format
 import storybook from "eslint-plugin-storybook";
 
+import { fixupPluginRules } from "@eslint/compat";
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
+// ESLint 10 removed the deprecated rule-context members (context.getFilename(),
+// getSourceCode(), parserOptions, …) and three plugins that eslint-config-next
+// composes still call them — their peer ranges stop at ESLint 9 and none has
+// an ESLint-10 release: eslint-plugin-react 7.37.5 (2025-04; upstream #3977
+// open), eslint-plugin-jsx-a11y 6.10.2 (2024-10; #1075 open),
+// eslint-plugin-import 2.32.0 (2025-06). Without this, `react/display-name`
+// crashes on the first file (`contextOrFilename.getFilename is not a
+// function`). @eslint/compat's fixup puts exactly those members back on the
+// rule context; the rule set and its levels are untouched (#157, part 2).
+// Drop the shim once eslint-config-next depends on ESLint-10-native versions
+// of the three — tracked in docs/registry.md.
+const LEGACY_PLUGINS = new Set(["react", "jsx-a11y", "import"]);
+
+function fixupLegacyPlugins(configs) {
+  return configs.map((config) =>
+    config.plugins
+      ? {
+          ...config,
+          plugins: Object.fromEntries(
+            Object.entries(config.plugins).map(([name, plugin]) => [
+              name,
+              LEGACY_PLUGINS.has(name) ? fixupPluginRules(plugin) : plugin,
+            ]),
+          ),
+        }
+      : config,
+  );
+}
+
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
+  ...fixupLegacyPlugins([...nextVitals, ...nextTs]),
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
