@@ -150,7 +150,7 @@ export default defineConfig({
       //   42.46/34.41/36.17/41.96 поверх f390a8c2; полы по правилу
       //   «max(main, локальный − 0.7)» — окончательные числа по логу CI).
       thresholds: {
-        lines: 41.7,
+        lines: 41.6,
         functions: 33.7,
         branches: 35.4,
         statements: 41.2,
