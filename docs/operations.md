@@ -34,6 +34,7 @@ Poster/hero drag-and-drop needs `BLOB_READ_WRITE_TOKEN` (injected by the connect
 | `pnpm promote-to-admin <email>` | `UPDATE users SET role='admin' WHERE email=…` |
 | `pnpm stripe:setup` | Idempotently create/find the two Stripe products+prices; prints `STRIPE_PRICE_*` env lines |
 | `DATABASE_URL=… pnpm export-user-data <userId> [--out <file>]` | GDPR art. 15/20 subject-access export for one Clerk id: the 8 person-keyed tables + Clerk / Stripe / PostHog (best-effort, each only when its key is passed: `CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `POSTHOG_PERSONAL_API_KEY` + `POSTHOG_PROJECT_ID`). Reads NO `.env.local` — every variable explicit; no `DATABASE_URL` → exit 2. Writes one JSON file (mode 0600), prints counts only. Full procedure: [runbooks/gdpr-requests.md](./runbooks/gdpr-requests.md) |
+| `DATABASE_URL=… pnpm erase-user <userId> [--apply]` | GDPR art. 17 erasure for one Clerk id, by hand — the same `eraseUser` the Clerk `user.deleted` webhook runs (`lib/erase-user.ts`), for a webhook that never arrived or after a restore from backup. **Dry run by default**: row counts to delete / de-identify, Stripe customer + tombstone + live subscription + every Stripe customer found for the address (`customers.search`, ids — the tombstone's scope, #223), PostHog persons found — writes nothing; `--apply` erases (idempotent). Reads NO `.env.local`; no `DATABASE_URL` → exit 2; `STRIPE_SECRET_KEY`, `POSTHOG_PERSONAL_API_KEY` + `POSTHOG_PROJECT_ID` optional (a missing one is skipped and said so); exit 3 = a vendor step left for the operator. Stdout = ids, counts, statuses. Procedure: [runbooks/gdpr-requests.md §4](./runbooks/gdpr-requests.md) |
 
 ## DB migrations
 
@@ -210,6 +211,11 @@ vercel env pull .env.vercel.production
    psql $DATABASE_URL -c "select count(*) from erased_customers where stripe_customer_id = '<cus_…>';"
    ```
    Reads `1`. A later Stripe webhook for that customer logs `customer belongs to an erased account — guest checkout NOT re-claimed` and creates nothing.
+4. The PostHog person behind the Clerk id goes with its events (#180) when `POSTHOG_PERSONAL_API_KEY` + `POSTHOG_PROJECT_ID` are set on the deployment: the erasure's info line reads `posthog: 'deleted'` (or `'not_found'` for an account that never sent an event). `skipped_forbidden` (the key lacks `person:write`) or `failed` → an `erase user: PostHog person NOT erased` error line plus a Sentry message by id → delete the person by hand (runbook §4) or, once the key can, re-run the erasure:
+   ```bash
+   DATABASE_URL=… POSTHOG_PERSONAL_API_KEY=… POSTHOG_PROJECT_ID=190233 pnpm erase-user <clerk id> --apply
+   ```
+   Idempotent: nothing local changes on a second pass, only the PostHog step is repeated. The same command — dry-run first, without `--apply`, to read the counts — is the path when the webhook never arrived at all.
 
 ### Show → upload → publish
 

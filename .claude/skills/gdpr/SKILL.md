@@ -23,7 +23,10 @@ PR: данные не размножаются бесконтрольно, ст�
 
 Что уже есть в кодовой базе по теме (не изобретать заново): HMAC-хеш IP
 вместо сырого (`lib/trial.ts:hashClientIp`, тот же приём в
-`show_reminders.ip_hash`, `guest_checkout_attempts`); стирание CAPI-снимка
+`show_reminders.ip_hash`, `guest_checkout_attempts` — там же с #227 HMAC
+Clerk id вместо самого id для лимита авторизованного чекаута — и HMAC значения cookie
+вместо самого значения — `guest_checkout_sessions.claim_token_hash`,
+`lib/guest-checkout-sessions.ts`); стирание CAPI-снимка
 (сырой IP/UA, `_fbp`/`_fbc`) из метаданных Stripe сразу после `Purchase`
 (`lib/subscription-mirror.ts`, #165); скрабберы Sentry
 (`lib/observability.ts`) и лог-аудит (`lib/log-audit.test.ts`); гейт
@@ -139,16 +142,21 @@ PR: данные не размножаются бесконтрольно, ст�
 
 ## Канон стирания (ст. 17) — как это устроено по факту
 
-Факт на 06.09.2026 (полная таблица — `references/data-map.md`):
+Факт на 15.09.2026 (полная таблица — `references/data-map.md`):
 
 - **Триггер** — удаление аккаунта в Clerk (UserProfile → «Delete account»,
   дашборд, или наш ручной запрос). Вебхук `user.deleted`
-  (`app/api/webhooks/clerk/route.ts`, с #161) — единственная механика:
-  `DELETE FROM users WHERE id = <clerk id>` → каскады FK + явное удаление
-  `show_reminders` по адресу аккаунта. Идемпотентно: повтор для уже стёртого
-  — 200 без записи. Ручной GDPR-запрос исполняется удалением в Clerk тем же
-  путём, не отдельным SQL. Ops-условие: прод-эндпойнт в дашборде Clerk должен
-  быть подписан на `user.deleted` (пока нет — строка в `docs/registry.md`).
+  (`app/api/webhooks/clerk/route.ts`, с #161) зовёт единственную механику —
+  `lib/erase-user.ts:eraseUser` (с #180 её же руками запускает
+  `pnpm erase-user <clerk id> --apply`: вебхук не дошёл или restore вернул
+  строки; dry-run по умолчанию, `DATABASE_URL` явно, `.env.local` не
+  читается): `DELETE FROM users WHERE id = <clerk id>` → каскады FK + явное
+  удаление `show_reminders` по адресу аккаунта. Идемпотентно: повтор для уже
+  стёртого — 200 без записи. Ручной GDPR-запрос исполняется удалением в
+  Clerk тем же путём, не отдельным SQL — скрипт повторяет эффект, не
+  заменяет триггер (ранбук §4). Ops-условие: прод-эндпойнт в дашборде Clerk
+  должен быть подписан на `user.deleted` (пока нет — строка в
+  `docs/registry.md`).
   Тест `app/api/webhooks/clerk/route.test.ts` пришпиливает полную карту FK на
   `users`: новая таблица со ссылкой на `users` без `onDelete` ломает тест —
   и это правильно, потому что иначе она ломала бы стирание. Таблица БЕЗ FK
@@ -165,8 +173,10 @@ PR: данные не размножаются бесконтрольно, ст�
   `marketing_links.created_by` (админ).
 - **Не привязано к `users` вовсе** (псевдонимное): `trial_sessions` без
   `user_id` (session_token, ip_hash), `visitors` без `user_id`,
-  `guest_checkout_attempts` (ip_hash, самопрунинг 2 ч), `stripe_events`
-  (id событий).
+  `guest_checkout_attempts` (HMAC IP гостя или `user:` + HMAC Clerk id —
+  #227; самопрунинг 2 ч),
+  `guest_checkout_sessions` (HMAC cookie `checkout_claim` + id сессии
+  Stripe, самопрунинг 24 ч — #224), `stripe_events` (id событий).
 - **Кеши**: `roleCache` (5 с, process-local) истекает сам; Data Cache —
   каталог и агрегаты без PII. Чистить нечего.
 - **Файлы/медиа**: у пользователей нет загрузок. Чистить нечего.
@@ -177,23 +187,44 @@ PR: данные не размножаются бесконтрольно, ст�
 - **Процессоры**: Clerk — источник истины. Stripe — обработчик
   `user.deleted` сам ставит живой подписке `cancel_at_period_end: true`
   (best-effort: сбой Stripe стирание не останавливает, но уходит в лог и
-  Sentry по id) и ДО `DELETE FROM users` пишет `stripe_customer_id` в
-  тумбстоун `erased_customers` — без него следующий вебхук Stripe по этому
-  клиенту (`guest = "1"` в метаданных не истекает) воссоздал бы Clerk-
-  пользователя и `users` с адресом через `claimGuestCheckout`;
-  `mirrorSubscription` и `/welcome` спрашивают тумбстоун ПЕРЕД claim.
+  Sentry по id) и ДО `DELETE FROM users` пишет в тумбстоун
+  `erased_customers` `stripe_customer_id` **и все `cus_…`, которые
+  `customers.search` находит по адресу аккаунта** (#223: гостевой checkout
+  создаёт Customer из адреса на форме, поздняя покупка из-под аккаунта
+  перезаписывает id в `users` — старого помнит только Stripe; поиск только
+  при платёжном следе — `stripe_customer_id` или строка `subscriptions`,
+  иначе адрес аккаунта эпохи free/gate впервые ушёл бы в Stripe; из ответа
+  берутся только клиенты с ТОЧНО этим адресом — `:` у Stripe по строковому
+  полю матчит и надстройку `a@b.com.mx`, а ложный тумбстоун навечно лишил
+  бы чужого покупателя аккаунта; одна страница
+  ≤100, 5 с, без ретраев, best-effort; сбой поиска — лог + Sentry по id и
+  ручной путь в ранбуке §4, повторить скриптом нельзя: адрес уходит вместе
+  со строкой, payload Clerk его не несёт) — без тумбстоуна следующий вебхук
+  Stripe по любому из этих клиентов (`guest = "1"` в метаданных не
+  истекает) воссоздал бы Clerk-пользователя и `users` с адресом через
+  `claimGuestCheckout`; `mirrorSubscription` и `/welcome` спрашивают
+  тумбстоун ПЕРЕД claim.
   Stripe Customer (email, billing address) при этом остаётся — `customers.del`
-  = решение владельца (`docs/registry.md`); PostHog person (с `email`)
-  требует отдельного вызова (хвост #164); Resend — логи
+  = решение владельца (`docs/registry.md`). PostHog — тот же `eraseUser`
+  ПОСЛЕ локальных DELETE удаляет person по `distinct_id` = Clerk id вместе с
+  событиями (`lib/posthog-erase.ts`, #180: `GET persons?distinct_id` →
+  `DELETE persons/{id}?delete_events=true&delete_recordings=true` — персона,
+  события И записи сессий (replay в проекте включён), 5 с, без ретраев, никогда не
+  бросает, тело ответа не читается; типизированный статус — `deleted` /
+  `not_found` / `skipped_unconfigured` / `skipped_forbidden` (у personal
+  key нет `person:write`) / `failed`; два последних — лог + Sentry по id и
+  ручной путь в ранбуке §4; шаг идёт и когда строки `users` уже нет — так
+  повтор скрипта добирает PostHog после сбоя). Resend — логи
   истекают через 30 дней сами; Meta/Google/OpenAI держат хешированный email
   и клиентские id событий — per-user удаления у них нет; Sentry — только
   `user.id`, истекает по ретеншену плана.
 - **Бэкапы не вычищаем точечно** — позиция ICO «put beyond use»: live-системы
   чистятся сразу; дампы (age-шифрование, приватный Vercel Blob, Франкфурт)
   уезжают ретеншеном 35 дней (`infra/backup/blob.ts prune`); restore из
-  бэкапа после erasure → повторный прогон erasure — шаг §7 в
-  `docs/runbooks/db-restore.md`, но **реестра заявок, по которому его
-  прогонять, нет** (#164). Neon PITR — 6 часов, короче любого окна.
+  бэкапа после erasure → `pnpm erase-user <id> --apply` по каждой строке
+  реестра заявок (ранбук §6) со статусом `erased` позже даты дампа — шаг §7
+  в `docs/runbooks/db-restore.md` (#180). Neon PITR — 6 часов, короче
+  любого окна.
 - **Устройство пользователя** (cookies, localStorage, SecureStore
   приложения) — вне нашего контроля; `/cookies` объясняет, как удалить.
 
@@ -203,7 +234,11 @@ PR: данные не размножаются бесконтрольно, ст�
   contact@matio.tv, верификация без документов (адрес аккаунта + вход через
   Clerk), 30 дней по ст. 12(3), формат ответа (JSON + письмо с перечнем
   ст. 15(1)), реестр заявок без имён — таблица в самом ранбуке. Раздел
-  «Стирание» там — заглушка со ссылкой на #180.
+  «Стирание» (§4, #180): два пути (пользователь сам в Clerk / оператор в
+  Clerk Dashboard — один вебхук), `pnpm erase-user <id> [--apply]` для
+  недошедшего вебхука и restore, ручной PostHog-fallback при
+  `skipped_forbidden` / `failed`, таблица «что остаётся у процессоров и
+  почему», статус `erased` в реестре — по нему §7 `db-restore.md`.
 - **Скрипт — `pnpm export-user-data <userId> [--out <file>]`**
   (`scripts/export-user-data.ts`, логика и тесты в `lib/user-export.ts` +
   `lib/user-export-db.ts`): восемь таблиц по ключам карты (`users` по `id`;

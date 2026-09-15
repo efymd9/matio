@@ -1,6 +1,6 @@
 "use server";
 
-import crypto from "node:crypto";
+import type Stripe from "stripe";
 import { and, eq, inArray } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
 import { db } from "@/db";
@@ -8,11 +8,18 @@ import { subscriptions, users } from "@/db/schema";
 import { checkoutOrigin } from "@/lib/checkout-origin";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import {
+  AUTH_CHECKOUT_RATELIMIT_PER_HOUR,
+  checkoutRateLimited,
+} from "@/lib/checkout-rate-limit";
+import {
+  CheckoutRateLimitedError,
   type CheckoutSessionResult,
   type CheckoutTargetInput,
   type WalletCheckoutResult,
   embeddedCheckoutEnabled,
+  expireIfOpen,
 } from "@/lib/checkout-session";
+import { hashClientIp } from "@/lib/trial";
 import {
   resolveWalletGate,
   toConsentMetadata,
@@ -89,6 +96,7 @@ async function prepareAuthCheckout(
   input: CheckoutTargetInput,
 ): Promise<
   | { kind: "redirect"; to: string }
+  | { kind: "rate_limited" }
   | ({ kind: "ready" } & PreparedAuthCheckout)
 > {
   // Payments off → nothing may create a Stripe session. First statement on
@@ -103,6 +111,26 @@ async function prepareAuthCheckout(
   const user = await getOrSyncCurrentUser();
   if (!user) return { kind: "redirect", to: "/" };
   const userId = user.id;
+
+  // Per-account brake on session creation (#227) — right after the auth guard
+  // and BEFORE anything that talks to Stripe (customers.create, the create +
+  // sweep in createSoleOpenSession). Since #217 the create carries no
+  // idempotency key, so without this every reload of /checkout and every
+  // re-tick of the wallet box is a real Stripe create + list + N expire and,
+  // with consent, a fresh InitiateCheckout / checkout_started. Counted on
+  // EVERY call, like the guest brake, so a flood that ends in errors is braked
+  // too. The bucket is `user:` + HMAC(userId) with the trial limiter's salt —
+  // the table sees a hash, not the Clerk id (lib/checkout-rate-limit.ts).
+  // Fail-open by construction: a DB blip must never block a real buyer.
+  if (
+    await checkoutRateLimited(
+      `user:${hashClientIp(userId)}`,
+      AUTH_CHECKOUT_RATELIMIT_PER_HOUR,
+    )
+  ) {
+    console.warn("startCheckout: rate limited", { userId });
+    return { kind: "rate_limited" };
+  }
 
   // Layer 1: prevent duplicate subscriptions from our DB mirror.
   const [existing] = await db
@@ -126,10 +154,22 @@ async function prepareAuthCheckout(
 
   let customerId = user.stripeCustomerId;
   if (!customerId) {
-    const customer = await stripe.customers.create({
-      email: user.email,
-      metadata: { userId },
-    });
+    // Deterministic idempotency key (#217, scenario 4). Two FIRST checkouts
+    // racing in parallel tabs both land here — each read the users row before
+    // the other wrote it back — and without a key Stripe minted two customers:
+    // the write-back was "last writer wins", so one tab's session sat on a
+    // customer the users row no longer named, the webhook found no user for
+    // it and the cs= return refused the mismatch — money taken, no access.
+    // With `customer:<userId>` Stripe replays the first customer to the second
+    // caller, so both sessions and both write-backs converge on one id; that
+    // is also what makes running this twice safe. (The same key with a changed
+    // e-mail inside Stripe's 24h window is an `idempotency_error`; it takes a
+    // failed write-back AND an address change in the same day, and it heals
+    // itself when the key expires — accepted.)
+    const customer = await stripe.customers.create(
+      { email: user.email, metadata: { userId } },
+      { idempotencyKey: `customer:${userId}` },
+    );
     customerId = customer.id;
     await db
       .update(users)
@@ -299,6 +339,105 @@ async function fireCheckoutIntent({
   ]);
 }
 
+// ---------------------------------------------------------------------------
+// One open Checkout Session per customer — issue #217.
+// ---------------------------------------------------------------------------
+// Two live billable sessions for one buyer is a double charge waiting for a
+// second tap, and the duplicate guards in prepareAuthCheckout only look at
+// SUBSCRIPTIONS, i.e. they fire at creation, not at payment. The hour-bucketed
+// idempotency key that used to stand in for this invariant only held while
+// every create param stayed byte-identical between two calls, and the params
+// are request snapshots: a consent banner accepted between two tabs, a resume
+// playhead ten seconds further along, the wallet surface next to /checkout —
+// each one was a different key, a second live session, a second $25.
+//
+// The invariant is enforced AFTER the create, against everything but the
+// session just created, and it holds regardless of any key:
+//   * create-then-sweep has no residual race: two creates that both list "the
+//     others" AFTER their own create is committed cannot both see an empty
+//     list — whichever list runs last sees the other session and expires it,
+//     so once both calls return at most one session is open (Stripe's list
+//     endpoint reads its primary store; only Search is eventually consistent).
+//     A sweep-then-create would leave the same-instant pair both alive.
+//   * a sweep that cannot be completed closes the session it was protecting
+//     and throws: a client secret is handed out only once every other open
+//     session of the customer is provably gone. Fail closed on the money path.
+//
+// Running it twice is safe by construction: the second run creates a session
+// and expires the first one, so the customer still holds at most one that can
+// take money. The client that lost its session sees the failure at confirm /
+// on refocus and offers a retry (wallet-express-checkout.tsx, checkout-client.tsx).
+//
+// No idempotency key on the create, deliberately. Stripe replays the CACHED
+// response of the first request for a key — including a `status: 'open'` that
+// the sweep of a newer session has since falsified — so a stable key would hand
+// a dead session to every retry for the rest of the hour, with no way to tell
+// from the response. Dedupe of a same-intent double tap is the clients' job
+// (both guard with a startedRef); at worst a burst creates N sessions of which
+// N−1 are expired here. Logged by ids and error class only — never the buyer.
+async function createSoleOpenSession(
+  stripe: Stripe,
+  customerId: string,
+  params: Stripe.Checkout.SessionCreateParams,
+): Promise<Stripe.Checkout.Session> {
+  const session = await stripe.checkout.sessions.create(params);
+  try {
+    await expireOtherOpenSessions(stripe, customerId, session.id);
+  } catch (err) {
+    console.error(
+      "startCheckout: could not expire the customer's other open sessions — closing the new one",
+      { sessionId: session.id, customerId, error: describeError(err) },
+    );
+    await stripe.checkout.sessions.expire(session.id).catch((closeErr) => {
+      console.error("startCheckout: closing the new session failed too", {
+        sessionId: session.id,
+        error: describeError(closeErr),
+      });
+    });
+    throw err;
+  }
+  return session;
+}
+
+// How many list pages the sweep will work through before giving up. Each
+// round expires up to 100 sessions, so this bounds a customer at 1,000 open
+// sessions — a number nothing legitimate produces; past it the sweep fails
+// closed like any other failure, rather than looping on a runaway account.
+const SWEEP_MAX_ROUNDS = 10;
+
+async function expireOtherOpenSessions(
+  stripe: Stripe,
+  customerId: string,
+  keepId: string,
+): Promise<void> {
+  // Only sessions created WITH `customer` are listable this way — the guest
+  // flow's sessions are not; that flow remembers its buyer's previous session
+  // id itself and expires it by id (lib/guest-checkout-sessions.ts, #224).
+  //
+  // Paged by RE-LISTING, not by cursor: every session expired here leaves the
+  // `status: 'open'` result set, so the next unfiltered first page surfaces
+  // what was behind it. A `starting_after` cursor would point at an object
+  // this very loop has just removed from the filtered list — Stripe does not
+  // document what that yields, and the money path is no place to find out.
+  for (let round = 0; round < SWEEP_MAX_ROUNDS; round++) {
+    const page = await stripe.checkout.sessions.list({
+      customer: customerId,
+      status: "open",
+      limit: 100,
+    });
+    for (const other of page.data) {
+      if (other.id === keepId) continue;
+      // Losing the race to whoever closed it first is fine; a session left
+      // OPEN is not, and propagates (expireIfOpen, shared with the guest sweep).
+      await expireIfOpen(stripe, other.id);
+    }
+    if (!page.has_more) return;
+  }
+  throw new Error(
+    `checkout sweep: customer still has more open sessions after ${SWEEP_MAX_ROUNDS} pages`,
+  );
+}
+
 // Signed-in checkout. Returns a CheckoutSessionResult the in-site /checkout
 // page consumes: an embedded client secret (mount the Stripe iframe in-page), a
 // hosted URL (publishable key unset — full-navigate to Stripe, legacy
@@ -310,6 +449,10 @@ export async function createAuthCheckoutSession(
 ): Promise<CheckoutSessionResult> {
   const prepared = await prepareAuthCheckout(input);
   if (prepared.kind === "redirect") return prepared;
+  // Over the per-account budget (#227): the /checkout client turns a rejected
+  // action into its existing retry card — the right words for "later", where
+  // a redirect home would read as "you cannot buy".
+  if (prepared.kind === "rate_limited") throw new CheckoutRateLimitedError();
   const {
     userId,
     email,
@@ -352,53 +495,27 @@ export async function createAuthCheckoutSession(
   // mutually exclusive, spread in per mode. NB: the pinned Stripe API
   // (2026-04-22.dahlia) names the value 'embedded_page', not 'embedded'.
   // In-app browsers (FB/IG webviews) get the HOSTED page — the embedded iframe
-  // + Apple/Google Pay are flaky there (same reason as the guest flow). Folded
-  // into the idempotency variant below so a webview's hosted session can't
-  // collide a same-user embedded one within the hour.
+  // + Apple/Google Pay are flaky there (same reason as the guest flow).
   const inApp = isInAppBrowser((await headers()).get("user-agent"));
   const embedded = embeddedCheckoutEnabled() && !inApp;
   const urlParams = embedded
     ? { ui_mode: "embedded_page" as const, return_url: successUrl }
     : { success_url: successUrl, cancel_url: cancelUrl };
 
-  // Idempotency key dedupes parallel-tab clicks (same intent within the hour →
-  // same Stripe session). The variant digest folds in every create param that
-  // can drift — the success/return URL, the metadata, locale, the embedded
-  // flag, and the SURFACE — so a changed-intent retry within the hour (a
-  // different show/resume, a locale switch, the hosted→embedded transition, or
-  // a buyer who dismissed the paywall's wallet sheet and then walked to
-  // /checkout) gets a NEW key instead of Stripe 400ing `idempotency_error`
-  // ("same key, different parameters"). Mirrors the guest flow's key in
-  // guest-actions.ts.
-  const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
-  const variant = crypto
-    .createHash("sha256")
-    .update(
-      JSON.stringify({
-        successUrl,
-        cancelUrl,
-        subscriptionMetadata,
-        locale,
-        embedded,
-        surface: "embedded",
-      }),
-    )
-    .digest("hex")
-    .slice(0, 16);
-  const idempotencyKey = `checkout:${userId}:${hourBucket}:${variant}`;
-
-  const session = await stripe.checkout.sessions.create(
-    {
-      ...buildCheckoutSessionParams({
-        priceId,
-        urlParams,
-        subscriptionMetadata: subscriptionMetadata,
-        locale,
-        withdrawalWaiver: t.subscribe.withdrawalWaiver,
-        customerId,
-      }),
-    },
-    { idempotencyKey },
+  // No hour-bucketed idempotency key here any more — this create expires the
+  // buyer's other open sessions instead, see createSoleOpenSession (#217).
+  // The guest flow keeps its key (it has no customer to sweep by).
+  const session = await createSoleOpenSession(
+    stripe,
+    customerId,
+    buildCheckoutSessionParams({
+      priceId,
+      urlParams,
+      subscriptionMetadata: subscriptionMetadata,
+      locale,
+      withdrawalWaiver: t.subscribe.withdrawalWaiver,
+      customerId,
+    }),
   );
 
   // Fire the checkout-intent signals SERVER-SIDE, before the redirect to
@@ -407,9 +524,9 @@ export async function createAuthCheckoutSession(
   // in-flight beacons — checkout_started never reached PostHog. Here we await
   // delivery (both clients are 3s-bounded and degrade to a no-op when
   // unconfigured) so the events actually land before we navigate away. Gated on
-  // marketing consent. Meta dedups InitiateCheckout on event_id=session.id if
-  // Stripe idempotency replays the same session. Both are best-effort: a
-  // failure is logged but never blocks the redirect to checkout.
+  // marketing consent. Meta dedups InitiateCheckout on event_id=session.id.
+  // Both are best-effort: a failure is logged but never blocks the redirect to
+  // checkout.
   if (marketingOk) {
     await fireCheckoutIntent({
       sessionId: session.id,
@@ -425,7 +542,13 @@ export async function createAuthCheckoutSession(
     if (!session.client_secret) {
       throw new Error("Stripe did not return an embedded client secret");
     }
-    return { kind: "embedded", clientSecret: session.client_secret };
+    // The id lets the /checkout client ask whether this session is still open
+    // when its tab comes back into view (checkoutSessionState, #217).
+    return {
+      kind: "embedded",
+      clientSecret: session.client_secret,
+      sessionId: session.id,
+    };
   }
   if (!session.url) throw new Error("Stripe did not return a session URL");
   return { kind: "hosted", url: session.url };
@@ -471,8 +594,11 @@ export async function createAuthWalletCheckoutSession(
 
   const prepared = await prepareAuthCheckout(input);
   if (prepared.kind === "redirect") return prepared;
+  // Over the per-account budget (#227): the wallet slot simply does not
+  // render — `unavailable` is the paywall's normal "keep the card CTA" state,
+  // not an error, and the buyer still has /checkout.
+  if (prepared.kind === "rate_limited") return { kind: "unavailable" };
   const {
-    userId,
     email,
     customerId,
     priceId,
@@ -494,30 +620,21 @@ export async function createAuthWalletCheckoutSession(
   // The consent record travels the metadata channel with everything else, so
   // the webhook sees it on the subscription. Not a new DB column on purpose —
   // see lib/wallet-checkout.ts. It carries WHICH terms were accepted and no
-  // time at all: a clock read here lands in the idempotency digest below (a
-  // key unique per call = the parallel-tab double charge), and rounding it to
-  // keep the key stable back-dates the acceptance (#214). The exact moment is
-  // the session's own `created`, which cannot precede the tick that caused it.
-  const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
+  // time at all (#214): the exact moment is the session's own `created`, which
+  // cannot precede the tick that caused it, and a second clock in the record
+  // would be a second, contestable, answer to the same question.
   const walletMetadata = {
     ...subscriptionMetadata,
     ...toConsentMetadata(),
   };
 
-  const variant = crypto
-    .createHash("sha256")
-    .update(
-      JSON.stringify({
-        successUrl,
-        subscriptionMetadata: walletMetadata,
-        locale,
-        surface: "elements",
-      }),
-    )
-    .digest("hex")
-    .slice(0, 16);
-
-  const session = await stripe.checkout.sessions.create(
+  // Same one-open-session rule as /checkout (createSoleOpenSession, #217):
+  // this create expires a /checkout session left open in another tab, and a
+  // later /checkout expires this one — the two surfaces can no longer both be
+  // paid. No idempotency key, for the reason given on the helper.
+  const session = await createSoleOpenSession(
+    stripe,
+    customerId,
     buildCheckoutSessionParams({
       priceId,
       // return_url keeps Stripe's placeholder so REDIRECT-based confirmations
@@ -530,7 +647,6 @@ export async function createAuthWalletCheckoutSession(
       customerId,
       surface: "elements",
     }),
-    { idempotencyKey: `checkout:${userId}:${hourBucket}:${variant}` },
   );
 
   if (!session.client_secret) {

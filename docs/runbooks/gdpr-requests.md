@@ -179,13 +179,164 @@ age -p -o DSR-2026-001.json.age ~/dsr/DSR-2026-001.json   # спросит па�
 
 ## 4. Стирание (ст. 17)
 
-Заполняется в **#180** (стирание у процессоров + скрипт). До него действует
-канон из `.claude/skills/gdpr/SKILL.md` → «Канон стирания»: удалить аккаунт в
-Clerk (Dashboard → Users → Delete) — вебхук `user.deleted` стирает `users`,
-каскады и `show_reminders` по адресу; Stripe / PostHog — руками по той же
-таблице процессоров. Строку в реестр (§6) — так же, как для экспорта: после
-восстановления из бэкапа §7 `db-restore.md` велит повторить стирание по
-этому списку.
+### Приём и верификация
+
+Как для доступа: строка в реестре (§6) в день получения, ответ «получили,
+срок 30 дней», верификация по §2 — запрос с адреса аккаунта + вход на
+matio.tv. Для стирания это важнее, чем для доступа: стёртое не вернуть, а
+восстановление из бэкапа (§7 `db-restore.md`) — инцидент, не сервис.
+Найденный в Clerk `user_…` — **записать сразу**: после удаления аккаунта
+Clerk его уже не покажет, а скрипт и реестр ключуются по нему.
+
+### Два пути — одна механика
+
+Триггер — удаление аккаунта в Clerk; механика — `lib/erase-user.ts:eraseUser`,
+которую запускают вебхук и скрипт с одним и тем же кодом:
+
+| Путь | Когда | Что происходит |
+|---|---|---|
+| **Пользователь сам**: UserProfile → «Delete account» | человек может удалить сам — предложить это первым | Clerk шлёт `user.deleted` → вебхук → всё ниже автоматически |
+| **Оператор**: Clerk Dashboard → Users → карточка → Delete user | верифицированный запрос, человек просит сделать за него | тот же вебхук, то же самое |
+| **`pnpm erase-user <user_…> --apply`** | вебхук не дошёл (Clerk → Webhooks → endpoint → Messages: нет `200` по этому событию) или восстановление из бэкапа вернуло строки (§7 `db-restore.md`) | тот же код руками; идемпотентно — повтор локально ничего не меняет |
+
+Что делает `eraseUser`, по порядку (тесты `app/api/webhooks/clerk/route.test.ts`
+и `lib/erase-user.test.ts` пришпиливают порядок):
+
+1. живая подписка Stripe → `cancel_at_period_end: true` (best-effort: сбой
+   Stripe стирание не останавливает, но уходит в лог и Sentry по id — тогда
+   отменить руками в Stripe Dashboard);
+2. тумбстоун `erased_customers` для **всех** клиентов Stripe, через которых
+   аккаунт можно воскресить: `users.stripe_customer_id` **плюс** каждый
+   `cus_…`, который Stripe сам находит по адресу аккаунта —
+   `customers.search({ query: "email:'<адрес>'" })`, одна страница (≤100),
+   5 с, без ретраев, best-effort (#223) — **только если у аккаунта есть
+   платёжный след** (`stripe_customer_id` или хоть одна строка
+   `subscriptions`; иначе `search=skipped_no_stripe_footprint` — адрес
+   аккаунта эпохи free/gate в Stripe не уходит) и **только клиенты с точно
+   этим адресом** (у Stripe `:` по строковому полю — «все слова по порядку»,
+   `a@b.com` вернул бы и `a@b.com.mx`; такие и клиенты без адреса
+   пропускаются и в логе только считаются — ложный тумбстоун навечно лишил
+   бы чужого покупателя аккаунта). Зачем искать: гостевой checkout
+   создаёт Customer из адреса, набранного на форме, а более поздняя покупка
+   из-под аккаунта перезаписывает `users.stripe_customer_id` новым id — про
+   старого помнит только Stripe, а его поздний вебхук (`guest = "1"` в
+   метаданных подписки не истекает) прошёл бы `isErasedCustomer` и воскресил
+   аккаунт через `claimGuestCheckout`. Поиск идёт ДО `DELETE FROM users` —
+   это последний момент, когда адрес ещё есть (payload Clerk `user.deleted`
+   адреса не несёт). Сбой поиска стирание **не останавливает** (id из строки
+   тумбстоунится всё равно, адрес из `users` уходит), но уходит в лог и
+   Sentry по id — и **этот шаг скрипт повторить не может**: адреса больше
+   нет. Тогда руками, см. «Stripe руками» ниже;
+3. `DELETE FROM show_reminders` по адресу аккаунта и по `user_id`;
+4. `DELETE FROM users` → каскады FK: `subscriptions`, `watch_progress`,
+   `watch_days` удаляются; `trial_sessions`, `visitors`,
+   `marketing_links.created_by` остаются с `user_id = NULL` (псевдонимно);
+5. PostHog: person с `distinct_id` = Clerk id, его события **и записи
+   сессий** (session replay в проекте включён) —
+   `DELETE …/persons/{id}/?delete_events=true&delete_recordings=true`
+   (best-effort, 5 с, без ретраев; сами события и записи PostHog удаляет
+   отложенной задачей, раз в неделю).
+   Этот шаг идёт и когда строки `users` уже нет — так повтор скрипта
+   добирает PostHog после сбоя.
+
+### Скрипт
+
+```bash
+DATABASE_URL='postgres://…' pnpm erase-user user_…            # dry-run: только счётчики
+DATABASE_URL='postgres://…' \
+STRIPE_SECRET_KEY='sk_live_…' \
+POSTHOG_PERSONAL_API_KEY='phx_…' POSTHOG_PROJECT_ID=190233 \
+pnpm erase-user user_… --apply
+```
+
+`.env.local` скрипт не читает (там прод-креды) — каждая переменная явно;
+без `DATABASE_URL` — exit 2, ничего не сделано. Без `--apply` — **dry-run**:
+печатает, сколько строк было бы удалено и деидентифицировано, есть ли Stripe
+customer / тумбстоун / живая подписка, **сколько клиентов Stripe находит по
+адресу и их id** (`search=ok customers=<n> (ids …)` — единственный способ
+увидеть охват тумбстоуна ДО `--apply`), сколько персон PostHog найдено по id
+(заодно видно, читает ли ключ персон вообще) — и ничего не пишет. Вендорские
+переменные опциональны: без `STRIPE_SECRET_KEY` живая подписка не отменится
+(скрипт скажет `cancel by hand`) и клиенты по адресу не ищутся
+(`search=skipped_unconfigured` — тумбстоунится только id из строки); у
+аккаунта без платёжного следа — `search=skipped_no_stripe_footprint`
+(искать нечего и незачем); без ключа PostHog —
+`posthog: skipped_unconfigured`. В stdout — только id, счётчики и статусы:
+
+```
+DRY RUN — erase user_…
+subject: user_…
+would delete: users=1 show_reminders=1 subscriptions=1 watch_progress=12 watch_days=5
+would de-identify (user_id → NULL): trial_sessions=2 visitors=1 marketing_links=0
+stripe: customer=yes live_subscription=no search=ok customers=2 (ids cus_…, cus_…) skipped=1 (other or no address)
+posthog: found persons=1
+nothing changed (dry run — re-run with --apply)
+```
+
+После `--apply` строка `stripe:` говорит, что записано:
+`search=ok tombstoned customers=2 (ids cus_…, cus_…)`.
+
+Коды выхода: `2` — аргументы или нет `DATABASE_URL`; `1` — упала база
+(повторить — стирание сходится); `3` — локально стёрто, но вендорский шаг
+остался на операторе (строки `left for the operator` выше); `0` — всё.
+
+Условие: аккаунт в Clerk уже удалён — скрипт Clerk не трогает. Если аккаунт
+ещё жив, сначала удалить его в Dashboard: вебхук сделает всё сам, скрипт
+тогда не нужен.
+
+### Stripe руками — при `search=failed`
+
+Строка `erase user: Stripe customer search FAILED` в логах Vercel / событие
+Sentry по `userId` с тегом `stripeSearch=failed`, или `search=failed` в
+выводе `--apply`. Локально всё стёрто, id из строки `users` тумбстоунен; не
+найдены только клиенты, о которых знал лишь Stripe. Повторить скриптом
+нельзя — адреса в базе больше нет. Адрес есть в самой заявке (§1): Stripe
+Dashboard → Customers → поиск по адресу → выписать каждый `cus_…` → в Neon
+(SQL editor ветки prod) для каждого:
+
+```sql
+INSERT INTO erased_customers (stripe_customer_id) VALUES ('cus_…')
+ON CONFLICT DO NOTHING;
+```
+
+Проверить: `SELECT stripe_customer_id FROM erased_customers WHERE
+stripe_customer_id IN ('cus_…', …)` показывает все. В реестр (§6) — пометку
+«stripe search by hand».
+
+### PostHog руками — при `skipped_forbidden` или `failed`
+
+`skipped_forbidden` (401/403): у personal key нет scope `person:write`
+(ключ для HogQL-панелей админки создавался с `query:read`). Либо владелец
+добавляет scope (PostHog → Settings → Personal API keys) и
+`pnpm erase-user <id> --apply` повторяется (локально — no-op, PostHog —
+заново), либо руками: https://eu.posthog.com/project/190233/persons → поиск
+по `user_…` → карточка персоны → **Delete person** → галка «Delete all
+events of this person» → подтвердить; затем Session replay → фильтр по этой
+персоне → удалить каждую запись (диалог удаления персоны записи сессий не
+трогает — их стирает только флаг `delete_recordings` API или ручное
+удаление). `failed` (таймаут / 5xx) — повторить
+скрипт позже или так же руками. Сигнал без запроса: строка
+`erase user: PostHog person NOT erased` в логах Vercel и событие в Sentry по
+`userId` — значит, этот шаг нужен.
+
+### Что остаётся у процессоров — и почему
+
+| Процессор | Что остаётся | Основание |
+|---|---|---|
+| Stripe | Customer (email, billing address) и инвойсы; подписка гаснет на конец периода, id **всех** клиентов по адресу — тумбстоун (`customers.search`, #223). `customers.del` — решение владельца (`docs/registry.md`, `needs:owner`) | инвойсы — налоговые записи, ст. 17(3)(b); Customer — до решения владельца, в ответе пользователю так и написать |
+| Resend | логи доставки (адрес, тема) | политика Resend: 30 дней, истекают сами |
+| Бэкапы | зашифрованные дампы до 35 дней | ICO «put beyond use»: live-системы чистятся сразу, дампы истекают; restore → повторное стирание по реестру (§7 `db-restore.md`) |
+| Meta / Google / OpenAI | хешированный email, id событий | per-user удаления нет; согласие отзывается на устройстве (`/cookies`) |
+| Sentry / Vercel | `user.id` в событиях, runtime-логи | ретеншен плана (Sentry 90 дней, Vercel ≤ 1 сутки) |
+| Clerk | ничего — источник истины, аккаунт удалён | — |
+
+### Ответ и реестр
+
+Ответить в 30 дней: что стёрто (аккаунт, история и позиция просмотра,
+напоминания, аналитика), что и почему остаётся (таблица выше), срок жизни
+бэкапов. Реестр (§6): статус `erased`, дата исполнения — по этой строке §7
+`db-restore.md` повторяет стирание после восстановления из дампа старше
+этой даты. Локально ничего не хранить.
 
 ## 5. Сроки — коротко
 

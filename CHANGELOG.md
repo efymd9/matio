@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.11.0](https://github.com/efymd9/matio/compare/matio-v0.10.0...matio-v0.11.0) (2026-09-15)
+
+
+### Features
+
+* **checkout:** Apple Pay / Google Pay кнопкой прямо на paywall ([#211](https://github.com/efymd9/matio/issues/211)) ([d851db7](https://github.com/efymd9/matio/commit/d851db7aeb1f0ff2175ff76e5b88ce7fb89b99b2)), closes [#210](https://github.com/efymd9/matio/issues/210)
+* **privacy:** стирание у процессоров, часть 2 — lib/erase-user.ts, PostHog person, pnpm erase-user, ранбук ст. 17 ([#180](https://github.com/efymd9/matio/issues/180)) ([#226](https://github.com/efymd9/matio/issues/226)) ([75bfe77](https://github.com/efymd9/matio/commit/75bfe7778d5a63c210f8d664c2d223d028a77131))
+
+
+### Bug fixes
+
+* **admin:** остатки throw в админских формах — номер сезона и удаление эпизода со страницы сезона ([#221](https://github.com/efymd9/matio/issues/221)) ([56e8808](https://github.com/efymd9/matio/commit/56e8808401be9e582e9934999d80c0bd236b849d))
+* **checkout:** гостевой pay-first — не более одной открытой сессии на покупателя ([#224](https://github.com/efymd9/matio/issues/224)) ([#231](https://github.com/efymd9/matio/issues/231)) ([f40d779](https://github.com/efymd9/matio/commit/f40d77954f79665426416c23e35d4c735bd6af42))
+* **checkout:** кошелёк на paywall — принятие Условий, честная запись согласия, аудит логов ([#216](https://github.com/efymd9/matio/issues/216)) ([f390a8c](https://github.com/efymd9/matio/commit/f390a8c2b1de1d943875f5034004f7059368ca4c))
+* **checkout:** лимит на частоту создания Checkout Session у авторизованного — 10/ч на аккаунт ([#227](https://github.com/efymd9/matio/issues/227)) ([#232](https://github.com/efymd9/matio/issues/232)) ([6a794a9](https://github.com/efymd9/matio/commit/6a794a9a34f8f5545ba159243cdc8fc320d83f0e))
+* **checkout:** не более одной оплачиваемой сессии на покупателя — sweep открытых сессий вместо часового ключа ([#217](https://github.com/efymd9/matio/issues/217)) ([#225](https://github.com/efymd9/matio/issues/225)) ([3acd2b4](https://github.com/efymd9/matio/commit/3acd2b4f9469eae71b69a5ef66cb22c1be9dcbb0))
+* **privacy:** стирание тумбстоунит всех клиентов Stripe по адресу — customers.search до DELETE FROM users ([#223](https://github.com/efymd9/matio/issues/223)) ([#230](https://github.com/efymd9/matio/issues/230)) ([ba7d3a3](https://github.com/efymd9/matio/commit/ba7d3a39638e6c2ac281a7870ea63d9f3533057d))
+
+
+### Documentation
+
+* «Production context» и /devops — прод в платном режиме с 09.09.2026, не «free pivot» ([#229](https://github.com/efymd9/matio/issues/229)) ([759ea96](https://github.com/efymd9/matio/commit/759ea96f0625d5b8ef5174297d4cd5b7e5b3568a)), closes [#228](https://github.com/efymd9/matio/issues/228)
+
 ## [0.10.0](https://github.com/efymd9/matio/compare/matio-v0.9.2...matio-v0.10.0) (2026-09-09)
 
 

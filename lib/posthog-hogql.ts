@@ -11,8 +11,10 @@
 //
 // The query API lives on the app host (eu.posthog.com), NOT the ingestion
 // host in POSTHOG_HOST (eu.i.posthog.com) — hence the separate env var.
+// Exported because the persons endpoint the account erasure calls
+// (lib/posthog-erase.ts) lives on the same host: one place decides it.
 
-const POSTHOG_API_HOST =
+export const POSTHOG_API_HOST =
   process.env.POSTHOG_API_HOST ?? "https://eu.posthog.com";
 
 export type PosthogQueryConfig = { key: string; projectId: string };

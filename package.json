@@ -1,6 +1,6 @@
 {
   "name": "matio",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "types": ".design-sync/entry.ts",
@@ -24,6 +24,7 @@
     "stripe:setup": "tsx scripts/stripe-setup.ts",
     "stripe:scrub-capi": "tsx scripts/scrub-capi-metadata.ts",
     "export-user-data": "tsx scripts/export-user-data.ts",
+    "erase-user": "tsx scripts/erase-user.ts",
     "test:locale": "vitest run lib/i18n/negotiate.test.ts lib/seo.test.ts",
     "backfill:mux-policy": "tsx scripts/backfill-mux-policy.ts",
     "seed:fake-shows": "tsx scripts/seed-fake-shows.ts",
