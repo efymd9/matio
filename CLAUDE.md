@@ -54,7 +54,10 @@ frame" section is a DRAFT pending a lawyer's review. What is already in force:
   record is the art. 15/20 export (`pnpm export-user-data`, runbook
   `docs/runbooks/gdpr-requests.md`): it goes to a `0600` file on the
   operator's machine, never to stdout — the script prints counts and ids
-  only, and the audit pins that too.
+  only, and the audit pins that too. Its erasure twin (`pnpm erase-user
+  <id> [--apply]`, runbook §4 — dry-run by default, `--apply` runs the
+  webhook's own `eraseUser`) prints ids, counts and statuses only; the
+  audit pins that, and that a PostHog refusal body is never echoed.
 - **Personal data changes run through `/gdpr`.** Any PR that touches personal
   data — a new field / table / cache key holding user data, a new external
   service or SDK that sees it, a change to what emails, pushes, analytics
@@ -634,11 +637,15 @@ app/
                            #   httpOnly cookie only, never the body)
     webhooks/
       clerk/               # user.created → mirrors to users; user.deleted →
-                           #   DELETE FROM users (art. 17: FK cascades +
-                           #   show_reminders by address; idempotent 200);
-                           #   before the DELETE: cancel_at_period_end on a
-                           #   live Stripe sub (best-effort) + the customer
-                           #   id into erased_customers (tombstone — #164)
+                           #   lib/erase-user.ts:eraseUser (art. 17: DELETE
+                           #   FROM users + FK cascades + show_reminders by
+                           #   address; idempotent 200); before the DELETE:
+                           #   cancel_at_period_end on a live Stripe sub
+                           #   (best-effort) + the customer id into
+                           #   erased_customers (tombstone — #164); after
+                           #   it: the PostHog person + events by Clerk id
+                           #   (best-effort, #180). The SAME code as
+                           #   `pnpm erase-user <id> --apply`
       mux/                 # video.asset.{ready,errored} (ready also stamps
                            #   episodes.released_at write-if-null when the
                            #   show is already published)
@@ -773,7 +780,10 @@ lib/
                            #   unsubscribeEmail() (deletes ALL rows for the
                            #   address; salt = MUX_SIGNING_KEY_PRIVATE_KEY,
                            #   same reuse as lib/trial.ts ip hashing)
-  subscription-access.ts   # ACCESS_GRANTING_STATUSES + hasActiveSubscription()
+  subscription-access.ts   # hasActiveSubscription() + the app's import site
+                           #   for ACCESS_GRANTING_STATUSES (re-export)
+  subscription-status.ts   # universal: ACCESS_GRANTING_STATUSES itself —
+                           #   moved out so lib/erase-user.ts loads under tsx
   trial.ts                 # mintTrialSession, link/convert helpers, IP hashing
   tracked-links.ts         # universal (client form preview + server action):
                            #   canonicalizeUtmTriple/TargetPath, buildTrackedUrl
@@ -845,6 +855,27 @@ lib/
                            #   the keys in the data map (show_reminders by
                            #   user_id OR email, visitor_days via the visitors
                            #   found); Drizzle only, db injected
+  erase-user.ts            # universal (no server-only — scripts/erase-user.ts
+                           #   runs it under tsx): eraseUser(userId, {db,
+                           #   getStripe, posthog}) — THE art. 17 erasure the
+                           #   Clerk webhook and the script share (Stripe
+                           #   cancel → tombstone → DELETE reminders → DELETE
+                           #   users → PostHog person, also when the users
+                           #   row was already gone — the retry path);
+                           #   previewErasure (the dry run's counts by the
+                           #   SAME predicates), parseEraseArgs, stdout
+                           #   summaries (ids / counts / statuses only)
+  posthog-erase.ts         # universal: erasePosthogPerson(cfg, distinctId) —
+                           #   GET persons?distinct_id → DELETE each with
+                           #   delete_events=true&delete_recordings=true
+                           #   (person + events + session replays — replay
+                           #   is ON in the project); 5s, no retries, never
+                           #   throws; typed status (deleted / not_found /
+                           #   skipped_unconfigured / skipped_forbidden /
+                           #   failed); never reads a response body
+  posthog-config.ts        # server-only: getPosthogQueryConfig() — the ONE
+                           #   env read of the personal key + project id;
+                           #   re-exported by posthog-query.ts
   i18n/                    # dictionaries.ts + server.ts + client.tsx (optimistic
                            #   LocaleProvider) + actions.ts + shared.ts +
                            #   negotiate.ts (pure Accept-Language/geo locale
@@ -926,6 +957,15 @@ scripts/
                            #   DATABASE_URL required → exit 2, vendors opt-in
                            #   by key; JSON file 0600, stdout = counts only.
                            #   Runbook: docs/runbooks/gdpr-requests.md
+  erase-user.ts            # pnpm erase-user <clerkUserId> [--apply] — art. 17
+                           #   erasure by hand (webhook missed / after a
+                           #   restore): lib/erase-user.ts; DATABASE_URL
+                           #   explicit → exit 2 without it; DRY RUN by
+                           #   default (counts + tombstone + live sub +
+                           #   PostHog persons found, writes nothing);
+                           #   --apply = the webhook's eraseUser; vendors
+                           #   opt-in by key; exit 3 = a step left by hand.
+                           #   Runbook: docs/runbooks/gdpr-requests.md §4
   check-subscription-dupes.ts # pnpm db:check-sub-dupes — pre-flight for 0008
                            #   (locale tests moved to lib/i18n/negotiate.test.ts
                            #    + lib/seo.test.ts — vitest, `pnpm test:locale`)

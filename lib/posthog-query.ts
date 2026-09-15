@@ -1,7 +1,8 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
 import { DIRECT_BUCKET } from "@/lib/admin-analytics";
-import { hogTs, runHogQL, type PosthogQueryConfig } from "@/lib/posthog-hogql";
+import { getPosthogQueryConfig } from "@/lib/posthog-config";
+import { hogTs, runHogQL } from "@/lib/posthog-hogql";
 import { UTM_SOURCE_ALIASES } from "@/lib/utm";
 
 // Server-side PostHog HogQL client. The transport itself (plain fetch +
@@ -22,6 +23,10 @@ import { UTM_SOURCE_ALIASES } from "@/lib/utm";
 
 export { hogTs, runHogQL } from "@/lib/posthog-hogql";
 export type { PosthogQueryConfig } from "@/lib/posthog-hogql";
+// The env read moved to lib/posthog-config.ts (#180: the Clerk webhook's
+// erasure needs the credentials without this module's analytics imports);
+// re-exported so the dashboard code keeps its import site.
+export { getPosthogQueryConfig } from "@/lib/posthog-config";
 
 // The /query endpoint is rate-limited per personal API key — cache
 // aggressively; the panel is a 5-minute-fresh aggregate, not a live feed.
@@ -66,13 +71,6 @@ export type SignupFunnelResult =
   | { status: "ok"; stats: SignupFunnelStats }
   | { status: "not_configured" }
   | { status: "error"; message: string };
-
-export function getPosthogQueryConfig(): PosthogQueryConfig | null {
-  const key = process.env.POSTHOG_PERSONAL_API_KEY;
-  const projectId = process.env.POSTHOG_PROJECT_ID;
-  if (!key || !projectId) return null;
-  return { key, projectId };
-}
 
 // The cache-friendly query window: `from` floors and `to` ceils to 5-minute
 // edges, so the unstable_cache key repeats across renders (range presets

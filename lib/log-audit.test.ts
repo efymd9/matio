@@ -196,6 +196,7 @@ import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
+import { eraseUser, summarizeEraseResult } from "@/lib/erase-user";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
 import { assembleUserExport, summarizeExport } from "@/lib/user-export";
 import {
@@ -249,6 +250,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -503,6 +505,13 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
   // read carries the address. Only ids may come out.
   const USER_ID = "user_marker";
 
+  beforeEach(() => {
+    // PostHog stays off unless a case turns it on — with credentials in the
+    // shell the erasure would otherwise reach the real persons endpoint.
+    vi.stubEnv("POSTHOG_PERSONAL_API_KEY", "");
+    vi.stubEnv("POSTHOG_PROJECT_ID", "");
+  });
+
   function selectChain(rows: unknown[]) {
     const chain = {
       from: () => chain,
@@ -577,6 +586,80 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     expect(logged()).not.toContain(MARKER_EMAIL);
     expect(logged()).toContain("sub_dummy");
     expect(logged()).toContain("resource_missing");
+  });
+
+  // PostHog (#180): the person carries the address as a property, and a
+  // refusal body quotes the request — the request being that person.
+  // Seeded into BOTH answers; only ids and statuses may come out, to the
+  // log and to Sentry alike.
+  function posthogRefusing() {
+    vi.stubEnv("POSTHOG_PERSONAL_API_KEY", "phx_dummy");
+    vi.stubEnv("POSTHOG_PROJECT_ID", "190233");
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            results: [
+              { id: 42, name: MARKER_NAME, properties: { email: MARKER_EMAIL } },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            type: "validation_error",
+            detail: `Person ${MARKER_NAME} <${MARKER_EMAIL}> cannot be deleted`,
+          }),
+          { status: 400 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("does not echo PostHog's person or its error body when the person delete fails", async () => {
+    const fetchMock = posthogRefusing();
+    const req = deletedWithLiveSubscription();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).not.toContain(MARKER_NAME);
+    // What it DOES say: the subject, the person id, the status that decided it.
+    expect(logged()).toContain(USER_ID);
+    expect(logged()).toContain('"personIds":["42"]');
+    expect(logged()).toContain('"httpStatus":400');
+    const sentry = sentryMessage.mock.calls.map(render).join("\n");
+    expect(sentry).not.toContain(MARKER_EMAIL);
+    expect(sentry).not.toContain(MARKER_NAME);
+    expect(sentry).toContain("posthogStatus");
+  });
+
+  it("the script's apply summary (pnpm erase-user --apply) carries counts and statuses only", async () => {
+    posthogRefusing();
+    deletedWithLiveSubscription();
+    const { db } = await import("@/db");
+    const { getStripe } = await import("@/lib/stripe");
+    const logged = captureConsole();
+
+    const result = await eraseUser(USER_ID, {
+      db,
+      getStripe,
+      posthog: { key: "phx_dummy", projectId: "190233" },
+    });
+    const summary = summarizeEraseResult(USER_ID, result);
+
+    expect(summary).not.toContain(MARKER_EMAIL);
+    expect(summary).not.toContain(MARKER_NAME);
+    expect(summary).toContain(`subject: ${USER_ID}`);
+    expect(summary).toContain("posthog: failed persons=1 http=400");
+    expect(logged()).not.toContain(MARKER_EMAIL);
   });
 });
 

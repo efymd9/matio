@@ -147,6 +147,10 @@ beforeEach(() => {
   h.stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
   h.sentryMessage.mockReset();
   vi.stubEnv("CLERK_WEBHOOK_SIGNING_SECRET", SIGNING_SECRET);
+  // PostHog is off unless a case turns it on: with credentials in the
+  // shell the erasure would otherwise reach the real persons endpoint.
+  vi.stubEnv("POSTHOG_PERSONAL_API_KEY", "");
+  vi.stubEnv("POSTHOG_PROJECT_ID", "");
   vi.spyOn(console, "info").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -154,6 +158,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -412,6 +417,81 @@ describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)"
     ]);
   });
 
+});
+
+describe("Clerk webhook · user.deleted × PostHog (#180)", () => {
+  // The processor step is best-effort like the Stripe cancellation: what
+  // PostHog answers never changes the 200, the local DELETEs or the order
+  // they run in — it changes what is said, by id, for the hand path.
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    vi.stubEnv("POSTHOG_PERSONAL_API_KEY", "phx_dummy");
+    vi.stubEnv("POSTHOG_PROJECT_ID", "190233");
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  it("a PostHog failure changes nothing about the 200 or the erasure — it is reported by id", async () => {
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    expect(res.status).toBe(200);
+    expect(h.deletes.map((d) => d.table)).toEqual(["show_reminders", "users"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain(
+      `/api/projects/190233/persons/?distinct_id=${USER_ID}`,
+    );
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0][0]).toContain("PostHog person NOT erased");
+    expect(error.mock.calls[0][1]).toMatchObject({
+      userId: USER_ID,
+      posthog: "failed",
+      error: { name: "TypeError" },
+    });
+    expect(h.sentryMessage).toHaveBeenCalledTimes(1);
+    expect(h.sentryMessage.mock.calls[0][1]).toMatchObject({
+      level: "error",
+      tags: { userId: USER_ID, posthogStatus: "failed" },
+    });
+  });
+
+  it("a person found is deleted with its events, AFTER the local rows are gone", async () => {
+    const order: string[] = [];
+    fetchMock.mockImplementation(async (_url, init) => {
+      order.push(`posthog ${init?.method ?? "GET"}`);
+      return init?.method === "DELETE"
+        ? new Response(null, { status: 204 })
+        : new Response(JSON.stringify({ results: [{ id: 42 }] }), { status: 200 });
+    });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    expect(res.status).toBe(200);
+    expect(order).toEqual(["posthog GET", "posthog DELETE"]);
+    expect(String(fetchMock.mock.calls[1][0])).toContain(
+      "/persons/42/?delete_events=true&delete_recordings=true",
+    );
+    expect(h.writes).toEqual(["delete show_reminders", "delete users"]);
+    expect(info.mock.calls.at(-1)?.[1]).toMatchObject({
+      posthog: "deleted",
+      posthogPersons: 1,
+    });
+    expect(h.sentryMessage).not.toHaveBeenCalled();
+  });
+
+  it("without credentials no request leaves the process", async () => {
+    vi.stubEnv("POSTHOG_PERSONAL_API_KEY", "");
+
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(h.deletes.map((d) => d.table)).toEqual(["show_reminders", "users"]);
+  });
 });
 
 describe("Clerk webhook · user.created (unchanged)", () => {
