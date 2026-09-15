@@ -12,6 +12,7 @@ import {
   type CheckoutTargetInput,
   type WalletCheckoutResult,
   embeddedCheckoutEnabled,
+  expireIfOpen,
 } from "@/lib/checkout-session";
 import {
   resolveWalletGate,
@@ -383,7 +384,8 @@ async function expireOtherOpenSessions(
   keepId: string,
 ): Promise<void> {
   // Only sessions created WITH `customer` are listable this way — the guest
-  // flow's sessions are not, and are out of scope here (registry).
+  // flow's sessions are not; that flow remembers its buyer's previous session
+  // id itself and expires it by id (lib/guest-checkout-sessions.ts, #224).
   //
   // Paged by RE-LISTING, not by cursor: every session expired here leaves the
   // `status: 'open'` result set, so the next unfiltered first page surfaces
@@ -398,15 +400,9 @@ async function expireOtherOpenSessions(
     });
     for (const other of page.data) {
       if (other.id === keepId) continue;
-      try {
-        await stripe.checkout.sessions.expire(other.id);
-      } catch (err) {
-        // Losing the race to whoever closed it first — a parallel sweep, or
-        // the buyer finishing it in the other tab — is exactly the state
-        // wanted. Anything that leaves it OPEN is not, and propagates.
-        const now = await stripe.checkout.sessions.retrieve(other.id);
-        if (now.status === "open") throw err;
-      }
+      // Losing the race to whoever closed it first is fine; a session left
+      // OPEN is not, and propagates (expireIfOpen, shared with the guest sweep).
+      await expireIfOpen(stripe, other.id);
     }
     if (!page.has_more) return;
   }

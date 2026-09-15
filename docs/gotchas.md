@@ -258,21 +258,19 @@ const ref = invoice.parent?.subscription_details?.subscription;
 const subId = typeof ref === "string" ? ref : ref?.id;
 ```
 
-### Idempotency key on Checkout creation — guest flow only since #217
+### No idempotency key on Checkout creation — neither flow, since #217 / #224
 
-`stripe.checkout.sessions.create()` accepts a second-arg `{ idempotencyKey }`. Reusing the same key returns the same Session. The GUEST flow still uses one (it has no Stripe customer before payment, so nothing to sweep by):
+`stripe.checkout.sessions.create()` accepts a second-arg `{ idempotencyKey }`, and both checkout flows used to pass an hour-bucketed one (`checkout:<userId>:<hour>:<digest>`, `checkout:guest:<claimToken>:<hour>:<digest>`). Neither does any more. Two Stripe facts made the key wrong for "one billable session per buyer":
 
-```ts
-const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
-await stripe.checkout.sessions.create(
-  { mode: "subscription", line_items, client_reference_id, success_url, ... },
-  { idempotencyKey: `checkout:guest:${claimToken}:${hourBucket}:${variantDigest}` },
-);
-```
+**Same key + different params = 400 `idempotency_error`, not a replay.** Stripe only replays byte-identical requests, so anything that drifts between two calls — a `resume` playhead in the return URL, a rotated mobile IP in `capi_ip`, fresh `attr_last_*`, a consent banner accepted between two tabs, a locale switch — had to be folded into a digest in the key. Which meant every drift was a **second key, a second live session, a second $25** waiting for a second tap. A key that follows the params is not a guarantee about the buyer.
 
-**Same key + different params = 400 `idempotency_error`, not a replay.** Stripe only replays byte-identical requests. If anything in the payload drifts between two calls inside the key's window — a new `resume` playhead in the success URL, a rotated mobile IP in `capi_ip` metadata, fresh attribution, a locale switch — the second call hard-fails and that user can't start ANY checkout until the bucket rolls. Hence the **digest of the variable request parts** in the key (`sha256(params).slice(0,16)`): true double-submits still collide while changed-intent retries get a fresh session. See `app/subscribe/guest-actions.ts`.
+**And Stripe replays the CACHED first response for a key — `status: "open"` included — even after that session has been expired.** Next to a sweep this is a dead end: a retry inside the hour is handed a session the sweep of a newer one has since killed, with no way to tell from the response, until the bucket rolls.
 
-**And the flip side, which is why the SIGNED-IN flow has no key at all (#217).** A key that changes whenever the params drift is not a "one session per buyer" guarantee — every drift (a consent banner accepted between two tabs, a playhead ten seconds further along, the wallet surface next to /checkout) is a second key and a second live, billable session. The signed-in builders now enforce the invariant directly: create WITHOUT a key, then `checkout.sessions.list({ customer, status: "open" })` and `expire` every session but the new one (`createSoleOpenSession`, `app/subscribe/actions.ts`). Do not add the key back "for safety": **Stripe replays the CACHED first response for a key — `status: "open"` included — even after the sweep of a newer session has expired that session**, so a retry inside the hour would be handed a dead session with no way to tell from the response, until the bucket rolls. Also: `expire` on a session that is not open is a 400 — the sweep re-`retrieve`s on failure and only propagates when the session is still open.
+So the invariant is enforced directly, after every create (ADR 0002):
+- signed-in: `checkout.sessions.list({ customer, status: "open" })` + `expire` every session but the new one (`createSoleOpenSession`, `app/subscribe/actions.ts`, #217);
+- guest (no customer before payment; `list` cannot filter by `client_reference_id`): the new id is upserted under an HMAC of the `checkout_claim` cookie into `guest_checkout_sessions` and the id it REPLACED is expired (`claimSoleGuestSession` in `lib/guest-checkout-sessions.ts`, #224). One statement — `INSERT … ON CONFLICT DO UPDATE … RETURNING old.session_id` (Postgres 18) — because a `(SELECT …)` subquery in RETURNING reads the statement's START snapshot and answers NULL to both of two parallel claims (verified on a local PG18: the blocked second upsert returned NULL from the subquery and the first tab's id from `old.session_id`).
+
+Both sweeps share `expireIfOpen` (`lib/checkout-session.ts`): `expire` on a session that is not open is a 400, so a failed expire is followed by a `retrieve`, and only a session STILL open propagates the failure. Both fail closed — the new session is expired and the error thrown — when the sweep cannot be completed. Do not add a key back "for safety" to either flow; `app/subscribe/wallet-actions.test.ts` and `app/subscribe/guest-actions.test.ts` each carry a guard test against it.
 
 `customers.create` DOES take a deterministic key, `customer:<userId>`: two parallel first checkouts otherwise mint two customers, and `users.stripe_customer_id` (last writer wins) ends up naming one while the other holds the session — the webhook finds no user, the `cs=` return refuses the mismatch, and the buyer has paid for nothing.
 

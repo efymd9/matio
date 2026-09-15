@@ -1,10 +1,11 @@
 import "server-only";
+import type Stripe from "stripe";
 
 // Shared contract between the checkout server actions (app/subscribe/actions.ts
 // signed-in, app/subscribe/guest-actions.ts guest) and the in-site /checkout
 // page that drives them. Lives in its own non-"use server" module because a
-// "use server" file may only export async functions — the type + the env probe
-// below can't live alongside the actions.
+// "use server" file may only export async functions — the type, the env probe
+// and the sweep helper below can't live alongside the actions.
 
 // The watch-flow params threaded through checkout (validated against the DB by
 // resolveCheckoutTarget). Plain object, not FormData — the /checkout client
@@ -80,4 +81,23 @@ export function getPublishableKey(): string | null {
 
 export function embeddedCheckoutEnabled(): boolean {
   return getPublishableKey() !== null;
+}
+
+// The one step both sweeps share (ADR 0002): expire a session the buyer must
+// not be able to pay any more. `expire` is a 400 on a session that is not
+// open, and that is the usual way this loses a race — a parallel sweep or the
+// buyer completing it in the other tab got there first, which is exactly the
+// state wanted. So a failed expire is followed by a `retrieve`, and only a
+// session that is STILL open makes the failure propagate; a retrieve that
+// fails propagates too — the caller fails closed on anything it cannot prove.
+export async function expireIfOpen(
+  stripe: Stripe,
+  sessionId: string,
+): Promise<void> {
+  try {
+    await stripe.checkout.sessions.expire(sessionId);
+  } catch (err) {
+    const now = await stripe.checkout.sessions.retrieve(sessionId);
+    if (now.status === "open") throw err;
+  }
 }

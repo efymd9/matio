@@ -89,6 +89,13 @@ vi.mock("@/lib/guest-checkout", () => ({
   claimGuestCheckout: async () => {
     throw new Error("claim must not run for an erased customer");
   },
+  // The guest checkout builder's constants (#224 cases) — the real values.
+  CHECKOUT_CLAIM_COOKIE: "checkout_claim",
+  GUEST_METADATA_KEYS: {
+    guest: "guest",
+    claimToken: "claim_token",
+    trialToken: "trial_token",
+  },
 }));
 
 // The Clerk webhook's signature check is exercised in its own suite
@@ -97,8 +104,14 @@ vi.mock("@/lib/guest-checkout", () => ({
 vi.mock("@clerk/nextjs/webhooks", () => ({ verifyWebhook: clerkVerify }));
 // The app's progress route resolves the caller through Clerk; a fixed user
 // keeps the audit on the path that actually reaches the database.
+// The guest checkout cases (#224) need an ANONYMOUS caller — a signed-in one
+// is bounced to the auth flow before anything is logged.
 vi.mock("@clerk/nextjs/server", () => ({
-  auth: async () => ({ userId: "user_1" }),
+  auth: async () => ({ userId: walletAudit.authUserId }),
+}));
+// The guest action's per-IP brake is not the thing under audit; inert.
+vi.mock("@/lib/checkout-rate-limit", () => ({
+  guestCheckoutRateLimited: async () => false,
 }));
 
 // The reminder dispatch path pulls in auth, Next's cache and the Resend SDK —
@@ -152,15 +165,28 @@ const walletAudit = vi.hoisted(() => {
       real.captureServerEvent(...args),
     ),
     consent: "",
+    // Who Clerk says is calling (every case but the guest ones: a user).
+    authUserId: "user_1" as string | null,
+    // The guest buyer's checkout_claim cookie (#224 cases) — a value the
+    // audit can look for in the log, because it must never be there.
+    claimCookie: "",
   };
 });
 vi.mock("next/headers", () => ({
   headers: async () => new Headers({ "user-agent": "Mozilla/5.0 Safari" }),
   cookies: async () => ({
-    get: (name: string) =>
-      name === "cookie_consent" && walletAudit.consent
-        ? { value: walletAudit.consent }
-        : undefined,
+    // The guest builder (re)writes the claim cookie; the write is not under
+    // audit.
+    set: () => undefined,
+    get: (name: string) => {
+      if (name === "checkout_claim" && walletAudit.claimCookie) {
+        return { value: walletAudit.claimCookie };
+      }
+      if (name === "cookie_consent" && walletAudit.consent) {
+        return { value: walletAudit.consent };
+      }
+      return undefined;
+    },
   }),
 }));
 vi.mock("@/lib/capi-identity", async (importOriginal) => {
@@ -203,6 +229,7 @@ import {
   createAuthCheckoutSession,
   reportWalletCheckoutStarted,
 } from "@/app/subscribe/actions";
+import { createGuestCheckoutSession } from "@/app/subscribe/guest-actions";
 import { CONSENT_VERSION, serializeConsent } from "@/lib/cookie-consent";
 
 /** Render a console argument the way a log aggregator would see it. */
@@ -246,6 +273,8 @@ beforeEach(() => {
   stripeSessionExpire.mockReset().mockResolvedValue({ id: "cs_test_dummy" });
   erasedCustomer.mockReset().mockResolvedValue(false);
   sentryMessage.mockReset();
+  walletAudit.authUserId = "user_1";
+  walletAudit.claimCookie = "";
 });
 
 afterEach(() => {
@@ -1188,6 +1217,123 @@ describe("log audit · one-open-session sweep after a checkout create (#217)", (
     expect(logged()).toContain("StripeConnectionError");
     expect(logged()).toContain("StripeAPIError");
     expect(logged()).toContain("marker_code");
+  });
+});
+
+describe("log audit · guest checkout sweep (#224)", () => {
+  // The pay-first guest's create is followed by the guest half of the sweep:
+  // the session id is recorded under an HMAC of the claim cookie and the
+  // buyer's PREVIOUS session is expired by id. Three things can fail and log
+  // — the Stripe expire (its error text can quote the request), the DB
+  // upsert (Drizzle's wrapper quotes the statement) and the best-effort
+  // prune — and none of them may carry the claim cookie, its hash, or a
+  // person. Only session ids and error classes come out.
+  const MARKER_CLAIM = "11111111-2222-4333-8444-555555555555";
+  const quoted = (name: string) =>
+    Object.assign(
+      new Error(`rejected ${MARKER_NAME} <${MARKER_EMAIL}> claim ${MARKER_CLAIM}`),
+      { name, code: "marker_code", statusCode: 400 },
+    );
+  const claimAnswers = (previousSessionId: string | null) => ({
+    values: () => ({
+      onConflictDoUpdate: () => ({
+        returning: async () => [{ previousSessionId }],
+      }),
+    }),
+  });
+
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("PAY_FIRST_CHECKOUT", "1");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://matio.tv");
+    vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "pk_test_dummy");
+    vi.stubEnv("STRIPE_PRICE_MONTHLY", "price_dummy");
+    walletAudit.consent = "";
+    walletAudit.authUserId = null;
+    walletAudit.claimCookie = MARKER_CLAIM;
+    // No prune unless a case asks for one.
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+  });
+
+  it("logs a failed expire of the previous session — and a failed close of the new one — by session ids and class, never the claim cookie or the buyer", async () => {
+    insert.mockImplementation(() => claimAnswers("cs_prev_dummy"));
+    stripeSessionExpire
+      .mockRejectedValueOnce(quoted("StripeAPIError"))
+      .mockRejectedValueOnce(quoted("StripeConnectionError"));
+    const logged = captureConsole();
+
+    await expect(
+      createGuestCheckoutSession({ show: null, ep: null, resume: null }),
+    ).rejects.toThrow();
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_CLAIM]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain(
+      "startGuestCheckout: could not expire the buyer's previous open session",
+    );
+    expect(logged()).toContain("startGuestCheckout: closing the new session failed too");
+    expect(logged()).toContain("cs_test_dummy");
+    expect(logged()).toContain("cs_prev_dummy");
+    expect(logged()).toContain("StripeAPIError");
+    expect(logged()).toContain("StripeConnectionError");
+    expect(logged()).toContain("marker_code");
+  });
+
+  it("logs a claim the database refused by class — never the statement or the hash the driver quoted", async () => {
+    insert.mockImplementation(() => ({
+      values: () => ({
+        onConflictDoUpdate: () => ({
+          returning: async () => {
+            throw Object.assign(
+              new Error(
+                `insert into "guest_checkout_sessions" … values ('${MARKER_CLAIM}-hash', …) ${MARKER_DATABASE_URL}`,
+              ),
+              { name: "PostgresError", code: "53300" },
+            );
+          },
+        }),
+      }),
+    }));
+    const logged = captureConsole();
+
+    await expect(
+      createGuestCheckoutSession({ show: null, ep: null, resume: null }),
+    ).rejects.toThrow();
+
+    for (const marker of [MARKER_CLAIM, MARKER_SECRET, MARKER_DATABASE_URL]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).not.toContain("guest_checkout_sessions");
+    expect(logged()).toContain(
+      "startGuestCheckout: could not expire the buyer's previous open session",
+    );
+    expect(logged()).toContain("PostgresError");
+    expect(logged()).toContain("53300");
+  });
+
+  it("logs a failed prune by class only — and the sale goes through", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    insert.mockImplementation(() => claimAnswers(null));
+    del.mockImplementation(() => ({
+      where: async () => {
+        throw Object.assign(
+          new Error(`delete from "guest_checkout_sessions" … ${MARKER_DATABASE_URL}`),
+          { name: "PostgresError", code: "40P01" },
+        );
+      },
+    }));
+    const logged = captureConsole();
+
+    const res = await createGuestCheckoutSession({ show: null, ep: null, resume: null });
+
+    expect(res.kind).toBe("embedded");
+    for (const marker of [MARKER_CLAIM, MARKER_SECRET, MARKER_DATABASE_URL]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).not.toContain("guest_checkout_sessions");
+    expect(logged()).toContain("claimSoleGuestSession: pruning stale rows failed");
+    expect(logged()).toContain("PostgresError");
   });
 });
 

@@ -168,11 +168,20 @@ export default defineConfig({
       //   #217): 43.09/35.12/37.22/42.59 — полы на 0.1 ниже, как в правиле
       //   выше. Локальный замер 43.06/35.03/36.58/42.56 на предыдущем
       //   слиянии для справки; финал только по логу CI).
+      // → 44.4/35.3/38.1/43.8 (#224: гостевой pay-first чекаут впервые под
+      //   тестами — app/subscribe/guest-actions.ts целиком (двадцать кейсов
+      //   на общем stateful-фейке Stripe tools/test/stripe-checkout-fake.ts,
+      //   вынесенном из wallet-actions.test.ts), lib/guest-checkout-sessions.ts
+      //   (один upsert RETURNING old.session_id, пришпилен текстом SQL через
+      //   pg-proxy, самопрунинг), expireIfOpen в lib/checkout-session.ts,
+      //   три кейса лог-аудита. Локальный замер 45.16/36.09/38.88/44.56
+      //   поверх origin/main 3acd2b4f (#225 влит); полы по правилу
+      //   «max(main, локальный − 0.7)» — финал по логу CI).
       thresholds: {
-        lines: 43.0,
-        functions: 35.0,
-        branches: 37.1,
-        statements: 42.5,
+        lines: 44.4,
+        functions: 35.3,
+        branches: 38.1,
+        statements: 43.8,
       },
     },
 

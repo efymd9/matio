@@ -9,6 +9,7 @@ export * from "./trial_sessions";
 export * from "./watch_progress";
 export * from "./show_reminders";
 export * from "./guest_checkout_attempts";
+export * from "./guest_checkout_sessions";
 export * from "./marketing_links";
 export * from "./actors";
 export * from "./visitors";
