@@ -2,18 +2,12 @@ import "server-only";
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { subscriptions } from "@/db/schema";
+import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-status";
 
-// Single source of truth for which subscription statuses grant access.
-// past_due is included so a user whose latest invoice failed isn't
-// immediately locked out of the product they're paying for — Stripe
-// retries the invoice over several days; during that window the user
-// should still be able to watch and to update their card via the
-// Customer Portal (which is where they'll go to fix the situation).
-export const ACCESS_GRANTING_STATUSES = [
-  "active",
-  "trialing",
-  "past_due",
-] as const;
+// The status list itself lives in the universal lib/subscription-status.ts
+// (the erasure core needs it under tsx); this module stays the app's import
+// site for it.
+export { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-status";
 
 // Returns true if the user currently has an access-granting subscription
 // whose current_period_end is still in the future. The period-end check
