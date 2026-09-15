@@ -30,6 +30,7 @@ const {
   batchSend,
   clerkVerify,
   stripeUpdate,
+  stripeSearch,
   stripeSessionList,
   stripeSessionExpire,
   erasedCustomer,
@@ -43,6 +44,7 @@ const {
   batchSend: vi.fn(),
   clerkVerify: vi.fn(),
   stripeUpdate: vi.fn(),
+  stripeSearch: vi.fn(),
   stripeSessionList: vi.fn(),
   stripeSessionExpire: vi.fn(),
   erasedCustomer: vi.fn(),
@@ -56,16 +58,18 @@ vi.mock("server-only", () => ({}));
 // exercised separately above; here the question is what the CALL carries.
 vi.mock("@sentry/nextjs", () => ({ captureMessage: sentryMessage }));
 
-// The erasure handler's one outbound call (cancel the live subscription at
-// Stripe) is a spy so its failure text can be seeded with a marker.
+// The erasure handler's two outbound calls (cancel the live subscription at
+// Stripe; find every customer for the address, #223) are spies so their
+// failure text and their answers can be seeded with a marker.
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     subscriptions: { update: stripeUpdate, list: async () => ({ data: [] }) },
     // The checkout session builder's calls (#214): inert, so the audit case
     // reaches the CAPI identity capture it exists to watch. The one-open-
     // session sweep that follows every create (#217) is spied, so its failure
-    // text can be seeded with a marker.
-    customers: { create: async () => ({ id: "cus_dummy" }) },
+    // text can be seeded with a marker. `search` is the erasure's customer
+    // lookup by address (#223) — a spy for the same reason.
+    customers: { create: async () => ({ id: "cus_dummy" }), search: stripeSearch },
     checkout: {
       sessions: {
         create: async () => ({
@@ -242,6 +246,7 @@ beforeEach(() => {
   batchSend.mockReset();
   clerkVerify.mockReset();
   stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
+  stripeSearch.mockReset().mockResolvedValue({ data: [], has_more: false });
   stripeSessionList.mockReset().mockResolvedValue({ data: [] });
   stripeSessionExpire.mockReset().mockResolvedValue({ id: "cs_test_dummy" });
   erasedCustomer.mockReset().mockResolvedValue(false);
@@ -588,6 +593,56 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     expect(logged()).toContain("resource_missing");
   });
 
+  // The customer search (#223) is the one Stripe call whose REQUEST is the
+  // address (`email:'…'` in the query): a refusal echoes the query, and a
+  // found customer object carries the address and the name.
+  it("does not echo the address when the customer search fails — Stripe quotes the query, and the query is the address", async () => {
+    stripeSearch.mockRejectedValue(
+      Object.assign(
+        new Error(`Invalid search query: email:'${MARKER_EMAIL}'`),
+        { name: "StripeInvalidRequestError", code: "parameter_invalid", statusCode: 400 },
+      ),
+    );
+    const req = deletedWithLiveSubscription();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    expect(stripeSearch).toHaveBeenCalledTimes(1);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    // What it DOES say: the subject, the class, the code — and the hand path.
+    expect(logged()).toContain("Stripe customer search FAILED");
+    expect(logged()).toContain(USER_ID);
+    expect(logged()).toContain("StripeInvalidRequestError");
+    expect(logged()).toContain("parameter_invalid");
+    const sentry = sentryMessage.mock.calls.map(render).join("\n");
+    expect(sentry).not.toContain(MARKER_EMAIL);
+    expect(sentry).toContain('"stripeSearch":"failed"');
+  });
+
+  it("names the customers the search found by id only — the customer objects carry the address and the name", async () => {
+    stripeSearch.mockResolvedValue({
+      data: [
+        { id: "cus_older", email: MARKER_EMAIL, name: MARKER_NAME },
+        { id: "cus_dummy", email: MARKER_EMAIL, name: MARKER_NAME },
+      ],
+      has_more: true,
+    });
+    const req = deletedWithLiveSubscription();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).not.toContain(MARKER_NAME);
+    expect(logged()).toContain('"stripeCustomersTombstoned":["cus_dummy","cus_older"]');
+    // The has_more warning is by id too.
+    expect(logged()).toContain("more than 100 Stripe customers");
+    expect(logged()).toContain(USER_ID);
+  });
+
   // PostHog (#180): the person carries the address as a property, and a
   // refusal body quotes the request — the request being that person.
   // Seeded into BOTH answers; only ids and statuses may come out, to the
@@ -660,6 +715,28 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     expect(summary).toContain(`subject: ${USER_ID}`);
     expect(summary).toContain("posthog: failed persons=1 http=400");
     expect(logged()).not.toContain(MARKER_EMAIL);
+  });
+
+  it("the script's apply summary lists the customers tombstoned by id, never by the address they carry (#223)", async () => {
+    stripeSearch.mockResolvedValue({
+      data: [{ id: "cus_older", email: MARKER_EMAIL, name: MARKER_NAME }],
+      has_more: false,
+    });
+    deletedWithLiveSubscription();
+    const { db } = await import("@/db");
+    const { getStripe } = await import("@/lib/stripe");
+    const logged = captureConsole();
+
+    const result = await eraseUser(USER_ID, { db, getStripe, posthog: null });
+    const summary = summarizeEraseResult(USER_ID, result);
+
+    expect(summary).not.toContain(MARKER_EMAIL);
+    expect(summary).not.toContain(MARKER_NAME);
+    expect(summary).toContain(
+      "search=ok tombstoned customers=2 (ids cus_dummy, cus_older)",
+    );
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).not.toContain(MARKER_NAME);
   });
 });
 
