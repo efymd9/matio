@@ -49,13 +49,12 @@ Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@cle
 | `STRIPE_SECRET_KEY` | Dashboard → Developers → API keys (`sk_test_…` / `sk_live_…`) |
 | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | Dashboard → Developers → API keys (`pk_test_…` / `pk_live_…`). **Must match the secret key's mode.** Powers in-site **Embedded Checkout** on `/checkout` (the `@stripe/stripe-js` loader). NEXT_PUBLIC → inlined at **build** time, so it must be set in Vercel **before** the deploy that wants embedded. **Unset → graceful fallback**: the checkout actions create a hosted session and the `/checkout` page full-navigates to `checkout.stripe.com` exactly as before (no breakage, just not in-site). |
 | `STRIPE_WEBHOOK_SECRET` | Dashboard → Developers → Webhooks → endpoint signing secret (`whsec_…`). **Different per environment.** Local `stripe listen` prints a different one than the dashboard endpoint. |
-| `STRIPE_PRICE_MONTHLY` | Printed by `pnpm stripe:setup`. The recurring $38/mo membership; no annual price anymore. |
-| `STRIPE_PRICE_TRIAL_FEE` | Printed by `pnpm stripe:setup`. The one-time **$1** "3-day trial" fee charged at checkout (2026-06-11). **Required** by both checkout actions — they throw without it (so it must be set before the trial code deploys). |
+| `STRIPE_PRICE_MONTHLY` | Printed by `pnpm stripe:setup`. The recurring **$25/mo** membership, charged at checkout; the only price there is. |
 | `NEXT_PUBLIC_APP_URL` | Origin used in Checkout `return_url` (embedded) / `success_url` + `cancel_url` (hosted). `http://localhost:3000` locally; `https://matio.tv` in prod. |
 
 **One-time setup**:
 1. Drop a `sk_test_…` into `.env.local`.
-2. `pnpm stripe:setup` (scripts/stripe-setup.ts) — idempotently creates (a) the "Matio Membership" product + a $38/mo price tagged `metadata.plan=monthly`, and (b) a "Matio — 3-day trial" product + a one-time **$1** price tagged `metadata.plan=trial_fee` (the intro trial fee). If a stale active price exists for either product at a different amount (e.g. the legacy $9.99) the script archives it and creates a new one before printing the ids — Stripe prices are immutable so the amount can't be patched in place. The intro trial = this $1 one-time price as a Checkout `line_item` + `subscription_data.trial_period_days=3` on the $38/mo price (see `lib/checkout-trial.ts`): $1 collected today, $38 starts on day 3 (status `trialing`→`active`), monthly after.
+2. `pnpm stripe:setup` (scripts/stripe-setup.ts) — idempotently creates the "Matio Membership" product + a **$25/mo** price tagged `metadata.plan=monthly` and prints the id. If a stale active price exists at a different amount (the legacy $38, or the older $9.99) the script archives it and creates a new one — Stripe prices are immutable, so the amount cannot be patched in place. There is no trial product and no second line item: the membership is charged at checkout (#207).
 3. **Customer Portal** — Dashboard → Settings → Billing → Customer portal. Enable "Cancel subscriptions" (mode: at period end). This is what makes the "Manage subscription" button work.
 4. **Local webhook**: `stripe listen --forward-to localhost:3000/api/webhooks/stripe` → it prints a `whsec_…` → paste into `.env.local` `STRIPE_WEBHOOK_SECRET`.
 5. **Prod webhook**: Dashboard → Developers → Webhooks → Add endpoint → `https://matio.tv/api/webhooks/stripe` → subscribe to:
@@ -69,8 +68,7 @@ Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@cle
 
 **Live mode (current)**: production has been on `sk_live_…` since 2026-05-27. Current live artifacts:
 - Product `prod_UatJzLBiTYS8pS` ("Matio Membership")
-- Price `price_1TbhWlCGXbzphNyzoAGW3wXM` — $38/mo USD, `tax_behavior=exclusive`
-- **$1/3-day intro trial product+price — NOT YET CREATED IN LIVE** (trial code shipped 2026-06-11). Run `pnpm stripe:setup` against the live key to create the "Matio — 3-day trial" product + one-time $1 price, fill in the id here, set `STRIPE_PRICE_TRIAL_FEE` in Vercel prod, then redeploy. The checkout actions throw without it, so set the env var **before** the deploy goes live.
+- Price `price_1UDhk3CGXbzphNyzGUObyyrc` — **$25/mo USD**, `tax_behavior=exclusive` (since 2026-09-09; the legacy $38/mo `price_1TbhWl…` and the one-time $1 trial price are archived)
 - Webhook endpoint `we_1Tbdh2CGXbzphNyzsw1zWSZf` → `https://matio.tv/api/webhooks/stripe` (apex, not www — Stripe doesn't follow 307 redirects, so a webhook URL on the www subdomain silently fails since www → apex)
 
 **Stripe Tax**: `tax/settings.status = active`, head office GB. The live price carries `tax_behavior=exclusive` (VAT/GST added on top of $38). `startCheckout` passes `automatic_tax: { enabled: true }` + `customer_update: { address: "auto", name: "auto" }` + `billing_address_collection: "required"` so Checkout collects the billing address, computes tax, and persists the address on the Customer for renewal invoicing. **It collects $0 until a tax registration is added** in Dashboard → Tax → Registrations — the operator (DEEP ORDINARY LTD since 2026-08; Stripe account entity still pending migration) is not yet VAT/OSS-registered, so the verified 2026-05-28 test charge was a flat $38.00 with `tax = null`. The address is captured regardless, so tax switches on automatically once a registration exists; no code change. Flip `tax_behavior` to `inclusive` on the price (one Stripe API call) if you later decide to absorb VAT instead of stacking it on top.
@@ -183,6 +181,10 @@ Can't pass multiple environments in one call. For preview, you also need a git b
 
 **Build settings**: framework auto-detected as Next.js. Routes are dynamic (`ƒ`) by default since they hit DB / cookies.
 
+**Cron** (`crons` in `vercel.json`): one job — `/api/cron/retention` daily at 04:10 UTC (after the 03:40 `db-backup`, so the night's dump still holds what the run deletes for the backup's own 35 days). Vercel calls the path with GET and `Authorization: Bearer <CRON_SECRET>`; the route (`app/api/cron/retention/route.ts`) refuses anything else and refuses EVERYTHING while `CRON_SECRET` is unset — fail closed, nothing deleted, 401s in the cron log. The windows themselves live in `lib/retention.ts` and are copied from `/privacy` §6.
+
+**Env var**: `CRON_SECRET` — generate like `FLAGS_SECRET`; set on **both** projects (prod + staging), because `vercel.json` — and therefore the cron — is shared. Hobby-plan crons run once a day within the scheduled hour; the job is idempotent, so a late or doubled invocation is harmless. Runs are visible in the project's Cron Jobs tab and as the `retention: run complete` log line (counters per table).
+
 ## Vercel Blob (show artwork)
 
 **Used for**: admin-uploaded poster + hero images on shows. Videos stay on Mux; Blob is images only.
@@ -268,7 +270,7 @@ recipe and event list.
 | `NEXT_PUBLIC_POSTHOG_KEY` | Project API key (`phc_…`). **Public** — safe in the browser bundle. Also read server-side by `posthog-node` in `lib/posthog-server.ts`. |
 | `NEXT_PUBLIC_POSTHOG_HOST` | Set to `/ingest` so the client proxies through the Next.js rewrite and bypasses ad blockers. |
 | `POSTHOG_HOST` | `https://eu.i.posthog.com` — the direct EU ingestion endpoint used by the server-side `posthog-node` client (no proxy needed server-side). |
-| `POSTHOG_PERSONAL_API_KEY` | **Personal API key** with the `query:read` scope (PostHog → Settings → Personal API keys) — powers the admin dashboard's "Signup funnel" panel via the query API (`lib/posthog-query.ts`). Secret, server-only. Unset → the panel shows a connect hint. |
+| `POSTHOG_PERSONAL_API_KEY` | **Personal API key** (PostHog → Settings → Personal API keys). Scopes: `query:read` for the admin panels via the query API (`/admin/analytics/sessions`, `lib/posthog-query.ts`) **plus `person:read` + `person:write` for the account erasure** (`lib/posthog-erase.ts`, #180 — the Clerk `user.deleted` webhook deletes the person and its events by Clerk id). Secret, server-only — `lib/posthog-config.ts` is the one env read. Unset → the panels show a connect hint and the erasure reports `skipped_unconfigured`; a key without `person:write` → `skipped_forbidden` (runbook §4 has the manual path). |
 | `POSTHOG_PROJECT_ID` | Numeric project id for the query API path (EU project: `190233`). Distinct from the `phc_…` token. |
 | `POSTHOG_API_HOST` | Optional; defaults to `https://eu.posthog.com` — the **app** host the query API lives on (NOT the `eu.i.` ingestion host). |
 

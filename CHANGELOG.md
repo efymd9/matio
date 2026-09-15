@@ -1,5 +1,94 @@
 # Changelog
 
+## [0.11.0](https://github.com/efymd9/matio/compare/matio-v0.10.0...matio-v0.11.0) (2026-09-15)
+
+
+### Features
+
+* **checkout:** Apple Pay / Google Pay кнопкой прямо на paywall ([#211](https://github.com/efymd9/matio/issues/211)) ([d851db7](https://github.com/efymd9/matio/commit/d851db7aeb1f0ff2175ff76e5b88ce7fb89b99b2)), closes [#210](https://github.com/efymd9/matio/issues/210)
+* **privacy:** стирание у процессоров, часть 2 — lib/erase-user.ts, PostHog person, pnpm erase-user, ранбук ст. 17 ([#180](https://github.com/efymd9/matio/issues/180)) ([#226](https://github.com/efymd9/matio/issues/226)) ([75bfe77](https://github.com/efymd9/matio/commit/75bfe7778d5a63c210f8d664c2d223d028a77131))
+
+
+### Bug fixes
+
+* **admin:** остатки throw в админских формах — номер сезона и удаление эпизода со страницы сезона ([#221](https://github.com/efymd9/matio/issues/221)) ([56e8808](https://github.com/efymd9/matio/commit/56e8808401be9e582e9934999d80c0bd236b849d))
+* **checkout:** гостевой pay-first — не более одной открытой сессии на покупателя ([#224](https://github.com/efymd9/matio/issues/224)) ([#231](https://github.com/efymd9/matio/issues/231)) ([f40d779](https://github.com/efymd9/matio/commit/f40d77954f79665426416c23e35d4c735bd6af42))
+* **checkout:** кошелёк на paywall — принятие Условий, честная запись согласия, аудит логов ([#216](https://github.com/efymd9/matio/issues/216)) ([f390a8c](https://github.com/efymd9/matio/commit/f390a8c2b1de1d943875f5034004f7059368ca4c))
+* **checkout:** лимит на частоту создания Checkout Session у авторизованного — 10/ч на аккаунт ([#227](https://github.com/efymd9/matio/issues/227)) ([#232](https://github.com/efymd9/matio/issues/232)) ([6a794a9](https://github.com/efymd9/matio/commit/6a794a9a34f8f5545ba159243cdc8fc320d83f0e))
+* **checkout:** не более одной оплачиваемой сессии на покупателя — sweep открытых сессий вместо часового ключа ([#217](https://github.com/efymd9/matio/issues/217)) ([#225](https://github.com/efymd9/matio/issues/225)) ([3acd2b4](https://github.com/efymd9/matio/commit/3acd2b4f9469eae71b69a5ef66cb22c1be9dcbb0))
+* **privacy:** стирание тумбстоунит всех клиентов Stripe по адресу — customers.search до DELETE FROM users ([#223](https://github.com/efymd9/matio/issues/223)) ([#230](https://github.com/efymd9/matio/issues/230)) ([ba7d3a3](https://github.com/efymd9/matio/commit/ba7d3a39638e6c2ac281a7870ea63d9f3533057d))
+
+
+### Documentation
+
+* «Production context» и /devops — прод в платном режиме с 09.09.2026, не «free pivot» ([#229](https://github.com/efymd9/matio/issues/229)) ([759ea96](https://github.com/efymd9/matio/commit/759ea96f0625d5b8ef5174297d4cd5b7e5b3568a)), closes [#228](https://github.com/efymd9/matio/issues/228)
+
+## [0.10.0](https://github.com/efymd9/matio/compare/matio-v0.9.2...matio-v0.10.0) (2026-09-09)
+
+
+### Features
+
+* **payments:** цена 25 $/мес со списанием сразу — вводный доллар и пробный период убраны ([#208](https://github.com/efymd9/matio/issues/208)) ([d3480b8](https://github.com/efymd9/matio/commit/d3480b8a7c69ada1eb5f0b1f5a13b2fba4030c0a)), closes [#207](https://github.com/efymd9/matio/issues/207)
+
+## [0.9.2](https://github.com/efymd9/matio/compare/matio-v0.9.1...matio-v0.9.2) (2026-09-09)
+
+
+### Bug fixes
+
+* **watch:** убрать кнопку блокировки управления из плеера ([#205](https://github.com/efymd9/matio/issues/205)) ([587c8c6](https://github.com/efymd9/matio/commit/587c8c68e6928a0c908ee05de8219524025ae5c2)), closes [#204](https://github.com/efymd9/matio/issues/204)
+
+## [0.9.1](https://github.com/efymd9/matio/compare/matio-v0.9.0...matio-v0.9.1) (2026-09-09)
+
+
+### Bug fixes
+
+* **checkout:** адрес возврата после оплаты — платформенные источники вместо localhost ([#203](https://github.com/efymd9/matio/issues/203)) ([d03802b](https://github.com/efymd9/matio/commit/d03802bad8365ac0f30b20fdeb7a224ca37f51a8)), closes [#202](https://github.com/efymd9/matio/issues/202)
+* **staging:** открыть пути вебхуков в замке стенда — Stripe получал 401 ([#201](https://github.com/efymd9/matio/issues/201)) ([cda20db](https://github.com/efymd9/matio/commit/cda20db3acefcb9dc9972629c516925b06a56068)), closes [#200](https://github.com/efymd9/matio/issues/200)
+* **watch:** тир эпизода решает и под гейтом регистрации — free играет без аккаунта ([#199](https://github.com/efymd9/matio/issues/199)) ([121c0ca](https://github.com/efymd9/matio/commit/121c0caba5356623fa3b1378bc192a06d44a0d13))
+
+
+### Documentation
+
+* **registry:** прод мигрирован — 0024 и 0025 применены перед релизом v0.9.0 ([#196](https://github.com/efymd9/matio/issues/196)) ([7bc34db](https://github.com/efymd9/matio/commit/7bc34db2bf1b4222635bf8df8167013313096a67)), closes [#188](https://github.com/efymd9/matio/issues/188)
+
+## [0.9.0](https://github.com/efymd9/matio/compare/matio-v0.8.0...matio-v0.9.0) (2026-09-08)
+
+
+### Features
+
+* **branching:** плеер — оверлей выбора (Lab-first, 5 вариантов), префетч по кандидатам и бесшовный переход по ветке ([#190](https://github.com/efymd9/matio/issues/190)) ([e7e6e13](https://github.com/efymd9/matio/commit/e7e6e13f50f4f919477253e384ae1db5401ad927))
+* **branching:** схема веток + админ-развилки + скрытие веток с публичных поверхностей ([#178](https://github.com/efymd9/matio/issues/178)) ([e6354df](https://github.com/efymd9/matio/commit/e6354dfb54e2922f9b66ef110bf67823fb8824b1))
+* **mobile:** остаток фазы 1 — прогресс просмотра, continue-watching, es/en, вертикальные шоу ([#170](https://github.com/efymd9/matio/issues/170)) ([d76ef75](https://github.com/efymd9/matio/commit/d76ef75461a3ccbf6d40a637492f4def408f7ba0))
+* **mobile:** фаза 2 — паритет плеера: авто-переход на пуле плееров, retention-бакеты через /api/v1/watch-segments, вертикальный фид, PiP и фоновое аудио ([#181](https://github.com/efymd9/matio/issues/181)) ([cbebad6](https://github.com/efymd9/matio/commit/cbebad6ba025ff5bc0dffe4c31b1e608c87bb55c))
+* **payments:** подготовка к включению — конверсия ChatGPT по режиму, дашборд v2 в обоих режимах ([#156](https://github.com/efymd9/matio/issues/156)) ([71122c6](https://github.com/efymd9/matio/commit/71122c6473a9788ce3a127d2a65b0ccf166c3d31))
+* **privacy:** ретеншен по обещаниям /privacy — ежедневный крон чистки trial_sessions / visitors / watch_days / show_reminders ([#186](https://github.com/efymd9/matio/issues/186)) ([a5697df](https://github.com/efymd9/matio/commit/a5697df2c67ae31954de385eccf8788ab336eabf))
+* **privacy:** экспорт данных субъекта (ст. 15/20) — pnpm export-user-data + ранбук GDPR-запросов ([#192](https://github.com/efymd9/matio/issues/192)) ([e5d0c25](https://github.com/efymd9/matio/commit/e5d0c25ffe81cb6f8ba4f855d9c02155fc91312b))
+
+
+### Bug fixes
+
+* **admin:** занятый номер эпизода — сообщение в форме, а не «Что-то пошло не так» ([#194](https://github.com/efymd9/matio/issues/194)) ([a3d3afc](https://github.com/efymd9/matio/commit/a3d3afc6037a1accdc2bdc1e058e878052617bf8))
+* **auth:** authorizedParties на clerkMiddleware — из окружения, без превью, безопасно для нативных токенов ([#174](https://github.com/efymd9/matio/issues/174)) ([de99e5a](https://github.com/efymd9/matio/commit/de99e5a245ac5ee600475cc12d1dc47419d0a96d))
+* **lab:** статика UI Lab рендерится — шим `vitest` вне раннера + пост-сборочный смоук в lab:build ([#176](https://github.com/efymd9/matio/issues/176)) ([0a9f8ab](https://github.com/efymd9/matio/commit/0a9f8abf83d1ce7606871361fa6f092e4f0e082b)), closes [#78](https://github.com/efymd9/matio/issues/78)
+* **privacy:** CAPI-снимок (IP/UA/_fbp/_fbc) не переживает Purchase — стирание из метаданных Stripe + разовая чистка ([#183](https://github.com/efymd9/matio/issues/183)) ([d389e7b](https://github.com/efymd9/matio/commit/d389e7b7199921afa207e42fb16c428b6182959e))
+* **privacy:** вебхук Clerk user.deleted стирает аккаунт — users, каскады и show_reminders по адресу ([#171](https://github.com/efymd9/matio/issues/171)) ([79f5aee](https://github.com/efymd9/matio/commit/79f5aeec08b7bc3e858cc5916af5c5c3beaa93a7))
+* **privacy:** стирание у Stripe при user.deleted — cancel_at_period_end и тумбстоун стёртых customer id ([#179](https://github.com/efymd9/matio/issues/179)) ([a546573](https://github.com/efymd9/matio/commit/a546573976a9f1bc367abe4e37d637658a918feb))
+* **privacy:** хвосты ревью [#179](https://github.com/efymd9/matio/issues/179) — чеклист re-enable, лимит ретраев отмены Stripe, второй customer id ([#185](https://github.com/efymd9/matio/issues/185)) ([5e24903](https://github.com/efymd9/matio/commit/5e2490309c39e91e46a0a6d878350396ce19807b))
+* **site:** хиро на главной прячет превью только по фатальной ошибке и перевыпускает истёкший токен тизера ([#173](https://github.com/efymd9/matio/issues/173)) ([1f140dd](https://github.com/efymd9/matio/commit/1f140dd215dd86ee6c8a6352621b3ad129a8acf6))
+
+
+### Refactoring
+
+* **ui:** долг дизайн-системы — цвета в пропах, тени и градиенты в токены, чек ловит все четыре пласта ([#177](https://github.com/efymd9/matio/issues/177)) ([642c136](https://github.com/efymd9/matio/commit/642c136148a345cf9179278ad3937b0bb61381c6))
+
+
+### Documentation
+
+* CRON_SECRET задан на обоих проектах Vercel, стенд проверен — строка реестра снята ([#162](https://github.com/efymd9/matio/issues/162)) ([#191](https://github.com/efymd9/matio/issues/191)) ([a47e8a5](https://github.com/efymd9/matio/commit/a47e8a5dc48db9f8c05da0f239fc1182d26800ef))
+* **process:** Этап 10 плейбука — privacy/GDPR-процесс ([#166](https://github.com/efymd9/matio/issues/166)) ([665ca0e](https://github.com/efymd9/matio/commit/665ca0ee718a44531519c583b6f63d430dc9838f))
+* **registry:** прод не мигрирован — 0024 и 0025 применены только на staging, применить перед релизом ([#187](https://github.com/efymd9/matio/issues/187)) ([d11db14](https://github.com/efymd9/matio/commit/d11db144f4e55db8a85bcc728c36dc27df25387b))
+* стенд несёт NEXT_PUBLIC_APP_ENV и Sentry DSN — снять устаревшую строку реестра ([#175](https://github.com/efymd9/matio/issues/175)) ([5b87b6e](https://github.com/efymd9/matio/commit/5b87b6e1013e2c42da807c05ac259361e1516359))
+
 ## [0.8.0](https://github.com/efymd9/matio/compare/matio-v0.7.0...matio-v0.8.0) (2026-09-04)
 
 

@@ -142,9 +142,6 @@ export const es = {
     playPauseAria: "Reproducir / Pausar",
     skipIntro: "Saltar intro",
     muteAria: "Silenciar / activar sonido",
-    lockAria: "Bloquear controles",
-    unlockAria: "Desbloquear controles",
-    tapToUnlock: "Toca para desbloquear",
     rateAria: "Velocidad de reproducción",
     episodesBtn: "Episodios",
     upNextBtn: "A continuación",
@@ -171,6 +168,14 @@ export const es = {
     watchNow: "Ver ahora",
     cancel: "Cancelar",
     playingIn: (s: number) => `Empieza en ${s} s`,
+  },
+  // Chrome of the fork prompt only — the prompt itself and the option
+  // labels are viewer copy on the episode rows (fork_prompt_es / label_es).
+  forkOverlay: {
+    label: "Tú decides",
+    autoTag: "Auto",
+    chosenTag: "Elegido",
+    autoIn: (s: number) => `Automático en ${s} s`,
   },
   seriesEndOverlay: {
     label: "Aviso para el próximo episodio",
@@ -213,8 +218,8 @@ export const es = {
     signUpToContinue: "Crea una cuenta gratis para seguir viendo.",
     signUpCta: "Crear cuenta",
     payFirstBody:
-      "Mira 3 días por 1 $, luego 38 $/mes. Creamos tu cuenta con el correo del pago y cancelas cuando quieras.",
-    payFirstCta: "Pruébalo · 1 $ por 3 días",
+      "25 $/mes. Creamos tu cuenta con el correo del pago y cancelas cuando quieras.",
+    payFirstCta: "Hazte miembro · 25 $/mes",
     alreadyMember: "¿Ya tienes cuenta?",
     signInLink: "Inicia sesión",
     continuingToCheckout: "Yendo al pago…",
@@ -262,9 +267,9 @@ export const es = {
     watchEverything: "Disfruta de todo.",
     cancelAnytimeAll: "Cancela cuando quieras. Todos los originales incluidos.",
     monthly: "Membresía",
-    monthlyPrice: "1 $",
-    monthlyInterval: "3 días",
-    monthlySub: "Luego 38 $/mes · cancela cuando quieras",
+    monthlyPrice: "25 $",
+    monthlyInterval: "mes",
+    monthlySub: "Se cobra hoy · cancela cuando quieras",
     secureCheckout: "Pago seguro con Stripe",
     cancelInOneClick: "Cancela con un clic",
     fourKWhenAvailable: "4K cuando está disponible",
@@ -272,6 +277,19 @@ export const es = {
     continueSubscribe: "Continuar · Suscribirse",
     withdrawalWaiver:
       "Solicito que matio comience la reproducción de inmediato y reconozco que pierdo mi derecho de desistimiento de 14 días una vez que comience la reproducción.",
+    // The paywall wallet's one required checkbox (#214): Terms acceptance AND
+    // the withdrawal waiver. Split around the links so the component renders
+    // /terms and /privacy as anchors. Legal copy: approved by the owner
+    // 2026-09-10 (#214); counsel review pending together with /terms.
+    walletConsent: {
+      beforeTerms: "Acepto los ",
+      terms: "Términos del servicio",
+      afterTerms:
+        " y solicito que matio comience la reproducción de inmediato. Entiendo que pierdo mi derecho de desistimiento de 14 días una vez que comience la reproducción.",
+      privacyBefore: "Consulta nuestra ",
+      privacy: "Política de privacidad",
+      privacyAfter: ".",
+    },
     alreadyMemberKicker: "Ya eres miembro",
     youreSubscribed: "Estás suscrito.",
     yourPlanIs: (plan: string, status: string) =>
@@ -285,6 +303,10 @@ export const es = {
     back: "Volver",
     loading: "Cargando el pago seguro…",
     errorBody: "No pudimos cargar el pago. Inténtalo de nuevo.",
+    expiredBody:
+      "Este pago caducó porque empezaste otro más reciente — en otra pestaña o desde el reproductor. Inténtalo de nuevo para continuar aquí.",
+    walletFailed:
+      "El pago con el monedero no se completó. Puedes seguir uniéndote con tarjeta.",
     retry: "Reintentar",
   },
   welcome: {
@@ -621,9 +643,6 @@ export const en: Dict = {
     playPauseAria: "Play/Pause",
     skipIntro: "Skip intro",
     muteAria: "Mute / unmute",
-    lockAria: "Lock controls",
-    unlockAria: "Unlock controls",
-    tapToUnlock: "Tap to unlock",
     rateAria: "Playback speed",
     episodesBtn: "Episodes",
     upNextBtn: "Up Next",
@@ -650,6 +669,12 @@ export const en: Dict = {
     watchNow: "Watch now",
     cancel: "Cancel",
     playingIn: (s: number) => `Playing in ${s}s`,
+  },
+  forkOverlay: {
+    label: "Your call",
+    autoTag: "Auto",
+    chosenTag: "Chosen",
+    autoIn: (s: number) => `Auto in ${s}s`,
   },
   seriesEndOverlay: {
     label: "Next episode reminder",
@@ -692,8 +717,8 @@ export const en: Dict = {
     signUpToContinue: "Create a free account to keep watching.",
     signUpCta: "Sign up",
     payFirstBody:
-      "Watch 3 days for $1, then $38/mo. We set up your account from your checkout email, and you can cancel anytime.",
-    payFirstCta: "Try it · $1 for 3 days",
+      "$25/mo. We set up your account from your checkout email, and you can cancel anytime.",
+    payFirstCta: "Become a member · $25/mo",
     alreadyMember: "Already have an account?",
     signInLink: "Sign in",
     continuingToCheckout: "Continuing to checkout…",
@@ -737,9 +762,9 @@ export const en: Dict = {
     watchEverything: "Watch everything.",
     cancelAnytimeAll: "Cancel anytime. All originals included.",
     monthly: "Membership",
-    monthlyPrice: "$1",
-    monthlyInterval: "3 days",
-    monthlySub: "Then $38/month · cancel anytime",
+    monthlyPrice: "$25",
+    monthlyInterval: "month",
+    monthlySub: "Charged today · cancel anytime",
     secureCheckout: "Secure checkout via Stripe",
     cancelInOneClick: "Cancel in one click",
     fourKWhenAvailable: "4K when available",
@@ -747,6 +772,19 @@ export const en: Dict = {
     continueSubscribe: "Continue · Subscribe",
     withdrawalWaiver:
       "I request that matio begin streaming immediately and I acknowledge that I lose my 14-day right of withdrawal once playback starts.",
+    // The paywall wallet's one required checkbox (#214): Terms acceptance AND
+    // the withdrawal waiver. Split around the links so the component renders
+    // /terms and /privacy as anchors. Legal copy: approved by the owner
+    // 2026-09-10 (#214); counsel review pending together with /terms.
+    walletConsent: {
+      beforeTerms: "I agree to the ",
+      terms: "Terms of Service",
+      afterTerms:
+        " and ask matio to start streaming now. I understand I lose my 14-day right of withdrawal once playback starts.",
+      privacyBefore: "See our ",
+      privacy: "Privacy Policy",
+      privacyAfter: ".",
+    },
     alreadyMemberKicker: "Already a member",
     youreSubscribed: "You're subscribed.",
     yourPlanIs: (plan: string, status: string) =>
@@ -760,6 +798,10 @@ export const en: Dict = {
     back: "Back",
     loading: "Loading secure checkout…",
     errorBody: "We couldn't load checkout. Please try again.",
+    expiredBody:
+      "This checkout expired because you started a newer one — in another tab, or from the player. Try again to continue here.",
+    walletFailed:
+      "That wallet payment didn't go through. You can still join with a card.",
     retry: "Try again",
   },
   welcome: {

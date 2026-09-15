@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_FORK_WINDOW_SECONDS,
+  displayNumber,
+  listedAncestor,
+  listedEpisodes,
+  listedPosition,
   parseForkForm,
+  resolveCandidates,
   resolveNextStep,
   validateBranchGraph,
   validateForkDraft,
@@ -10,6 +15,8 @@ import {
   type ForkDraft,
   type GraphEdge,
   type GraphEpisode,
+  type PlayerChoice,
+  type PlayerEpisodeLike,
 } from "./branching";
 
 // The choice graph's rules, pinned as behaviour: what a set of edges means
@@ -56,6 +63,172 @@ describe("resolveNextStep", () => {
     expect(resolveNextStep({ branchOfEpisodeId: null }, [])).toEqual({
       kind: "linear",
     });
+  });
+});
+
+// ---------- player half (#144) ----------
+//
+// The show on the page: three listed episodes, a fork on ep-2 into two
+// branches (902 default, 901 not) that both reconverge silently into ep-3,
+// and a branch of ep-3 that is an ending. Branches sit AFTER the linear run
+// in the array (900+ numbering sorts them there), which is exactly the
+// order the watch page delivers — so `episodes[idx + 1]` of ep-3 would be a
+// branch, and the linear rule must skip it.
+function pc(overrides: Partial<PlayerChoice> = {}): PlayerChoice {
+  return {
+    toEpisodeId: "b-901",
+    position: 1,
+    label: "Kiss",
+    isDefault: false,
+    ...overrides,
+  };
+}
+
+function ep(
+  id: string,
+  number: number,
+  overrides: Partial<PlayerEpisodeLike> = {},
+): PlayerEpisodeLike {
+  return { id, number, branchOfEpisodeId: null, choices: null, ...overrides };
+}
+
+const PAGE: PlayerEpisodeLike[] = [
+  ep("ep-1", 1),
+  ep("ep-2", 2, {
+    choices: [
+      pc({ toEpisodeId: "b-901", position: 1, label: "Kiss" }),
+      pc({ toEpisodeId: "b-902", position: 2, label: "Hug", isDefault: true }),
+    ],
+  }),
+  ep("ep-3", 3),
+  ep("b-901", 901, {
+    branchOfEpisodeId: "ep-2",
+    choices: [pc({ toEpisodeId: "ep-3" })],
+  }),
+  ep("b-902", 902, {
+    branchOfEpisodeId: "ep-2",
+    choices: [pc({ toEpisodeId: "ep-3" })],
+  }),
+  ep("b-931", 931, { branchOfEpisodeId: "ep-3", choices: [] }),
+];
+const byId = (id: string) => PAGE.find((e) => e.id === id)!;
+
+describe("listedEpisodes / listedPosition", () => {
+  it("lists only the linear run, in array order", () => {
+    expect(listedEpisodes(PAGE).map((e) => e.id)).toEqual([
+      "ep-1",
+      "ep-2",
+      "ep-3",
+    ]);
+  });
+
+  it("positions are 1-based on the listed run and 0 for a branch", () => {
+    expect(listedPosition(PAGE, "ep-1")).toBe(1);
+    expect(listedPosition(PAGE, "ep-3")).toBe(3);
+    expect(listedPosition(PAGE, "b-902")).toBe(0);
+    expect(listedPosition(PAGE, "nope")).toBe(0);
+  });
+});
+
+describe("displayNumber", () => {
+  it("prints a listed episode's position", () => {
+    expect(displayNumber(PAGE, byId("ep-3"))).toBe(3);
+  });
+
+  it("prints the PARENT's number for a branch — never 9xx", () => {
+    expect(displayNumber(PAGE, byId("b-901"))).toBe(2);
+    expect(displayNumber(PAGE, byId("b-931"))).toBe(3);
+  });
+
+  it("walks up nested branches to the listed ancestor", () => {
+    const nested = [
+      ...PAGE,
+      ep("b-921", 921, { branchOfEpisodeId: "b-902", choices: [] }),
+    ];
+    expect(displayNumber(nested, nested[nested.length - 1])).toBe(2);
+  });
+
+  it("falls back to the stored number for an orphan branch", () => {
+    const orphan = ep("b-999", 999, { branchOfEpisodeId: "gone" });
+    expect(displayNumber([...PAGE, orphan], orphan)).toBe(999);
+  });
+
+  it("never loops on a cyclic (invalid) page", () => {
+    const a = ep("x", 5, { branchOfEpisodeId: "y" });
+    const b = ep("y", 6, { branchOfEpisodeId: "x" });
+    expect(displayNumber([a, b], a)).toBe(5);
+    expect(listedAncestor([a, b], a)).toBeNull();
+  });
+
+  it("listedAncestor is the episode itself when listed, the parent for a branch", () => {
+    expect(listedAncestor(PAGE, byId("ep-2"))).toBe(byId("ep-2"));
+    expect(listedAncestor(PAGE, byId("b-901"))).toBe(byId("ep-2"));
+  });
+});
+
+describe("resolveCandidates", () => {
+  it("a fork lists its options in position order with the flagged default", () => {
+    const c = resolveCandidates(byId("ep-2"), PAGE);
+    expect(c.kind).toBe("fork");
+    if (c.kind !== "fork") throw new Error("expected fork");
+    expect(c.options.map((o) => [o.episode.id, o.label, o.isDefault])).toEqual([
+      ["b-901", "Kiss", false],
+      ["b-902", "Hug", true],
+    ]);
+    expect(c.defaultOption.episode.id).toBe("b-902");
+  });
+
+  it("falls back to the first option when no row is flagged default", () => {
+    const parent = ep("p", 1, {
+      choices: [
+        pc({ toEpisodeId: "b-901", position: 2 }),
+        pc({ toEpisodeId: "b-902", position: 1 }),
+      ],
+    });
+    const c = resolveCandidates(parent, [parent, byId("b-901"), byId("b-902")]);
+    if (c.kind !== "fork") throw new Error("expected fork");
+    expect(c.defaultOption.episode.id).toBe("b-902");
+  });
+
+  it("drops a fork option whose target is not on the page", () => {
+    const page = PAGE.filter((e) => e.id !== "b-901");
+    const c = resolveCandidates(byId("ep-2"), page);
+    // One option left → no prompt, a silent transition to what remains.
+    expect(c).toEqual({ kind: "next", episode: byId("b-902") });
+  });
+
+  it("a fork with every target gone plays on linearly", () => {
+    const page = PAGE.filter((e) => !e.id.startsWith("b-90"));
+    expect(resolveCandidates(byId("ep-2"), page)).toEqual({
+      kind: "next",
+      episode: byId("ep-3"),
+    });
+  });
+
+  it("a single choice is a silent transition (reconvergence)", () => {
+    expect(resolveCandidates(byId("b-901"), PAGE)).toEqual({
+      kind: "next",
+      episode: byId("ep-3"),
+    });
+  });
+
+  it("a branch whose only target is gone is an ending, not a linear hop", () => {
+    const page = PAGE.filter((e) => e.id !== "ep-3");
+    expect(resolveCandidates(byId("b-901"), page)).toEqual({ kind: "end" });
+  });
+
+  it("a branch with no choices is an ending", () => {
+    expect(resolveCandidates(byId("b-931"), PAGE)).toEqual({ kind: "end" });
+  });
+
+  it("the linear rule skips the branches stored after the run", () => {
+    expect(resolveCandidates(byId("ep-1"), PAGE)).toEqual({
+      kind: "next",
+      episode: byId("ep-2"),
+    });
+    // ep-3 is the last LISTED episode: the array continues with branches,
+    // and none of them may follow it by position.
+    expect(resolveCandidates(byId("ep-3"), PAGE)).toEqual({ kind: "end" });
   });
 });
 

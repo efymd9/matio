@@ -31,6 +31,51 @@ describe("isStagingLockOpenPath", () => {
     expect(isStagingLockOpenPath("/api/healthz/")).toBe(true);
   });
 
+  it("leaves the retention cron open — Vercel Cron carries its own bearer, not Basic", () => {
+    // The route refuses anything but `Bearer <CRON_SECRET>` itself; a Basic
+    // challenge here would only 401 the platform's nightly call on the bench.
+    expect(isStagingLockOpenPath("/api/cron/retention")).toBe(true);
+    expect(isStagingLockOpenPath("/api/cron")).toBe(false);
+    expect(isStagingLockOpenPath("/api/cron/other")).toBe(false);
+  });
+
+  it.each([
+    ["/api/webhooks/stripe"],
+    ["/api/webhooks/clerk"],
+    ["/api/webhooks/mux"],
+  ])("leaves %s open — a vendor cannot send Basic Auth, it signs instead", (path) => {
+    // Locked, the bench answered 401 to Stripe and no purchase could be
+    // rehearsed (#200). Each route still verifies its own signature, so the
+    // open path costs no protection.
+    expect(isStagingLockOpenPath(path)).toBe(true);
+    expect(isStagingLockOpenPath(`${path}/`)).toBe(true);
+  });
+
+  it("leaves the whole /.well-known tree open — RFC 8615 URIs are machine-fetched and public", () => {
+    // Apple re-fetches the merchant-domain association when it re-verifies a
+    // registered payment-method domain; a 401 there reads as "Apple Pay
+    // stopped working" with no error anywhere (#210).
+    expect(
+      isStagingLockOpenPath(
+        "/.well-known/apple-developer-merchantid-domain-association",
+      ),
+    ).toBe(true);
+    expect(isStagingLockOpenPath("/.well-known/anything/nested")).toBe(true);
+  });
+
+  it("does not open a path that merely mentions well-known", () => {
+    // Prefix, not substring: the open set is the namespace at the root only.
+    expect(isStagingLockOpenPath("/.well-known")).toBe(false);
+    expect(isStagingLockOpenPath("/admin/.well-known/x")).toBe(false);
+    expect(isStagingLockOpenPath("/well-known/x")).toBe(false);
+  });
+
+  it("does not open the webhook tree beyond those three paths", () => {
+    expect(isStagingLockOpenPath("/api/webhooks")).toBe(false);
+    expect(isStagingLockOpenPath("/api/webhooks/stripe/extra")).toBe(false);
+    expect(isStagingLockOpenPath("/api/webhooks/other")).toBe(false);
+  });
+
   it("locks everything else, including the rest of the API", () => {
     // /api/t writes the visitor ledger: an open beacon would fill the bench's
     // tables with drive-by traffic.

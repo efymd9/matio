@@ -44,7 +44,15 @@ import {
 // enforces.
 export type SegmentsCaller =
   | { kind: "user"; userId: string }
-  | { kind: "anonymous"; sessionToken: string; maxPosition: number | null };
+  | {
+      kind: "anonymous";
+      sessionToken: string;
+      maxPosition: number | null;
+      /** Web under the signup gate: only a free episode is anonymously
+       *  playable, so only it may paint counters (#198). The app keeps its
+       *  positional gate instead and passes false. */
+      freeTierOnly: boolean;
+    };
 
 // Why a flush did or did not count. The web action drops this (silent-
 // return contract); the app route maps it to a status code.
@@ -104,6 +112,14 @@ export async function saveWatchSegmentsFor(
       if (ep.access === "subscriber") return { outcome: "forbidden" };
     }
   } else {
+    // Tier gate (the web under REQUIRE_SIGNUP): anything above the free
+    // tier was walled for this viewer, so a flush for it is forged or
+    // stale and must not paint retention counters on an episode nobody
+    // could have watched. Checked here, on the row the query already
+    // fetched — one read, one source of truth about the tier.
+    if (caller.freeTierOnly && ep.access !== "free") {
+      return { outcome: "forbidden" };
+    }
     // Positional gate (the app under after_episodes: N). The token route
     // refuses a token past the gate, but a device that watched episode 1
     // already holds a session row for the show — the row alone would let a

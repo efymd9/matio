@@ -23,11 +23,12 @@ updates:
     # группа стала немержабельной. Мажор — это отдельный PR с миграцией
     # (#157); миноры и патчи тех же пакетов приезжают штатно.
     #
-    # @types/node в игноре НЕТ нарочно: его мажор — это мажор Node, который
-    # он описывает, и поднимать его нужно ВМЕСТЕ с .nvmrc (типы = рантайм;
-    # все workflow читают версию из .nvmrc), а не по отдельности. PR бота на
-    # @types/node мержится только парой с .nvmrc — и с проверкой, что Vercel
-    # на том же LTS.
+    # Группа `npm` с `patterns: ["*"]` сама мажоры НЕ фильтрует: всё, что не
+    # перечислено в `ignore` ниже, бот кладёт в недельный PR вместе с
+    # патчами. Волна 11.09.2026 (#218) так и приехала: vitest 5,
+    # coverage-v8 5 и @types/node 26 в одной пачке с 13 минорами — и 20
+    # красных голденов Lab (разобрано в #220). Новый мажор в таблице бота —
+    # новая строка здесь, а не «разберёмся в PR».
     ignore:
       # TS 7 — нативный компилятор без JS-API; typescript-eslint (зависимость
       # eslint-config-next) без API не загружается, `pnpm lint` падает до
@@ -37,6 +38,27 @@ updates:
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@mux/mux-node"
+        update-types: ["version-update:semver-major"]
+      # @types/node: его мажор — это мажор Node, который он описывает, и
+      # поднимать его нужно ВМЕСТЕ с .nvmrc (типы = рантайм; все workflow
+      # читают версию из .nvmrc) и с проверкой, что Vercel на том же LTS.
+      # Раньше он в игноре НЕ стоял нарочно — «PR бота мержится только парой
+      # с .nvmrc», — но в сгруппированном PR такой пары не бывает: #218
+      # привёз 26 при .nvmrc = 24 внутри пачки патчей. Мажор Node — руками,
+      # отдельным PR; миноры/патчи типов приезжают штатно.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Семейство vitest ходит только строем: у @vitest/browser-playwright
+      # peer — ТОЧНАЯ версия vitest (поэтому он в package.json запинен без
+      # каретки), а @storybook/addon-vitest 10.6 объявляет peer
+      # `vitest ^3 || ^4` — на vitest 5 плагин Storybook ещё не работает:
+      # в #218 каждый голден Lab вернулся шириной 414 px (дефолтный viewport
+      # vitest) вместо 960. Мажор vitest — отдельный PR, когда addon-vitest
+      # объявит поддержку (#157, часть 4); маска ловит coverage-v8 и
+      # browser-playwright вместе с ядром.
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitest/*"
         update-types: ["version-update:semver-major"]
 
   # Expo-приложение: свой package-lock.json, живёт вне pnpm-воркспейса.

@@ -15,7 +15,6 @@ import {
   metadataHasCapiConsent,
   metadataHasCapiIdentity,
 } from "@/lib/capi-identity";
-import { TRIAL_FEE_VALUE } from "@/lib/checkout-trial";
 import {
   claimGuestCheckout,
   isErasedCustomer,
@@ -284,24 +283,15 @@ export async function mirrorSubscription(sub: Stripe.Subscription) {
     !priorWasAccessGranting &&
     (ACCESS_GRANTING_STATUSES as readonly string[]).includes(mappedStatus);
   if (becameAccessGranting) {
-    // With the $1/3-day intro trial, the only money actually collected at the
-    // conversion moment is the $1 fee — the recurring $38 isn't charged until
-    // the trial ends on day 3. Report the conversion at the $1 transacted; the
-    // subscription item's unit_amount is $38 and would overstate it.
-    // (`becameAccessGranting` fires once, so no second Purchase fires when
-    // trialing→active on day 3 — the day-0 $1 is the counted conversion, by
-    // product decision.) Keyed on `sub.trial_start` — a root-level field that
-    // stays populated after the trial ends — NOT on the snapshot status: a trial
-    // sub must still report $1 even in the (near-impossible across a 3-day gap,
-    // but Stripe doesn't guarantee delivery order) case where the day-3 `active`
-    // edge is the first event processed and `mappedStatus` reads `active`. A
-    // genuine non-trial sub has `trial_start == null` and keeps the real amount.
+    // The conversion is reported at what the subscription actually charges:
+    // since #207 there is no intro fee and no trial, so the first invoice IS
+    // the membership price and the item's unit_amount is the honest number.
+    // `becameAccessGranting` fires once per subscription, so a renewal never
+    // reports a second Purchase.
     const amount =
-      sub.trial_start != null
-        ? TRIAL_FEE_VALUE
-        : typeof item?.price.unit_amount === "number"
-          ? item.price.unit_amount / 100
-          : undefined;
+      typeof item?.price.unit_amount === "number"
+        ? item.price.unit_amount / 100
+        : undefined;
     const currency = item?.price.currency?.toUpperCase();
 
     // Meta CAPI Purchase — gated on the Meta capi_consent sentinel.

@@ -1,5 +1,5 @@
 // DRAFT pending legal-counsel review. Trading party + contact details
-// filled 2026-05-27; entity updated 2026-08-16 (DEEP ORDINARY LTD, England
+// filled 2026-05-27; entity updated 2026-08-16; §5 price rewritten 2026-09-09 (#208) — visible "Last updated" set to that edition in #214 (DEEP ORDINARY LTD, England
 // & Wales). The Stripe Checkout consent_collection.terms_of_service flow
 // (digital-content waiver, §6) is wired in app/subscribe/actions.ts.
 import type { Metadata } from "next";
@@ -18,8 +18,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED_ES = "27 de mayo de 2026";
-const LAST_UPDATED_EN = "May 27, 2026";
+const LAST_UPDATED_ES = "9 de septiembre de 2026";
+const LAST_UPDATED_EN = "September 9, 2026";
 
 export default async function TermsPage() {
   const { locale, t } = await getDict();
@@ -133,13 +133,11 @@ function TermsEn() {
 
       <Section id="subscription" title="5. Subscription, price and renewal">
         <p>
-          Your membership begins with a 3-day trial for <strong>USD $1</strong>,
-          charged today. After the trial it costs <strong>USD $38 per
-          month</strong>, billed automatically from day 3, plus any VAT, sales
-          tax or other indirect tax that applies in your billing country
-          (calculated automatically by Stripe Tax at checkout). The subscription
-          then renews monthly until cancelled. Cancel before the trial ends to
-          avoid the $38 charge.
+          Membership costs <strong>USD $25 per month</strong>, charged today
+          and then automatically each month until cancelled, plus any VAT,
+          sales tax or other indirect tax that applies in your billing country
+          (calculated automatically by Stripe Tax at checkout). There is no
+          trial period and no separate introductory fee.
         </p>
         <p>
           You can cancel at any time from the Stripe Customer Portal — accessible
@@ -332,14 +330,11 @@ function TermsEs() {
 
       <Section id="suscripcion" title="5. Suscripción, precio y renovación">
         <p>
-          Tu membresía empieza con una prueba de 3 días por{" "}
-          <strong>1 USD</strong>, que se cobra hoy. Pasada la prueba, cuesta{" "}
-          <strong>38 USD al mes</strong>, con cargo automático a partir del día
-          3, más el IVA, impuesto sobre ventas u otro tributo indirecto
-          aplicable en tu país de facturación (calculado automáticamente por
-          Stripe Tax al pagar). Después la suscripción se renueva mensualmente
-          hasta que se cancele. Cancela antes de que termine la prueba para
-          evitar el cargo de 38 USD.
+          La membresía cuesta <strong>25 USD al mes</strong>, con cargo hoy y
+          después automáticamente cada mes hasta que se cancele, más el IVA,
+          impuesto sobre ventas u otro tributo indirecto aplicable en tu país
+          de facturación (calculado automáticamente por Stripe Tax al pagar).
+          No hay periodo de prueba ni cuota introductoria aparte.
         </p>
         <p>
           Puedes cancelar en cualquier momento desde el Portal del Cliente de

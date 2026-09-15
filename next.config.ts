@@ -27,7 +27,7 @@ if (
   process.env.VERCEL_ENV === "production" &&
   process.env.PAYMENTS_ENABLED === "1"
 ) {
-  for (const key of ["STRIPE_PRICE_MONTHLY", "STRIPE_PRICE_TRIAL_FEE"]) {
+  for (const key of ["STRIPE_PRICE_MONTHLY"]) {
     if (!process.env[key]) {
       throw new Error(
         `${key} must be set for production builds (required by app/subscribe checkout actions).`,

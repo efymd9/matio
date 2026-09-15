@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { EpisodeAccessSelect } from "@/components/admin/access-select";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { createEpisode, deleteEpisode } from "@/app/admin/actions";
+import { TypedActionForm } from "@/components/admin/typed-action-form";
 import { getAdminDict } from "@/lib/i18n/admin-server";
 
 export default async function SeasonPage({
@@ -169,8 +170,21 @@ export default async function SeasonPage({
                     >
                       {t.season.edit}
                     </Link>
-                    <form
-                      action={deleteEpisode.bind(null, episode.id, season.id, show.id)}
+                    {/* The row knows nothing about choice edges; a target
+                        of someone's fork answers with a code shown right
+                        here instead of the masked generic page (#195).
+                        "stay": the list refreshes in place — a redirect
+                        would remount the page and wipe the add-episode
+                        form below. */}
+                    <TypedActionForm
+                      action={deleteEpisode.bind(
+                        null,
+                        episode.id,
+                        season.id,
+                        show.id,
+                        "stay",
+                      )}
+                      className="flex max-w-sm items-center gap-2"
                     >
                       <ConfirmDeleteButton
                         message={t.season.deleteEpisodeConfirm(
@@ -180,7 +194,7 @@ export default async function SeasonPage({
                       >
                         {t.season.delete}
                       </ConfirmDeleteButton>
-                    </form>
+                    </TypedActionForm>
                   </div>
                 </div>
               );
@@ -189,9 +203,10 @@ export default async function SeasonPage({
         </div>
 
         {/* Add episode */}
-        <form
+        <TypedActionForm
           action={createEpisode.bind(null, season.id, show.id)}
           className="mt-5 space-y-4 border-t border-white/[0.06] pt-5"
+          resetOnSuccess
         >
           <p className="text-sm font-semibold text-cream">
             {t.season.addAnEpisode}
@@ -237,7 +252,7 @@ export default async function SeasonPage({
               {t.season.addEpisodeButton}
             </button>
           </div>
-        </form>
+        </TypedActionForm>
       </Panel>
     </div>
   );

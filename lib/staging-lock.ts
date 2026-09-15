@@ -32,13 +32,45 @@ export const NOINDEX_VALUE = "noindex, nofollow";
 
 // Paths that answer WITHOUT the password. Uptime pings and the release smoke
 // test must not carry credentials, and /api/healthz returns nothing but the
-// version, commit and environment of the running build.
-const OPEN_PATHS = new Set(["/api/healthz"]);
+// version, commit and environment of the running build. The retention cron
+// is open for the same reason: Vercel Cron calls it with its own
+// `Authorization: Bearer <CRON_SECRET>` (a Basic challenge would just 401 the
+// platform every night), and the route refuses anything but that bearer.
+// Paths the lock deliberately leaves open. Every one of them is a MACHINE
+// caller that cannot send a browser's Basic Auth header and authenticates
+// itself some other way: the uptime probe (nothing to protect), the
+// platform cron (Bearer CRON_SECRET), and the three vendor webhooks, each
+// of which verifies its own signature before touching anything (Stripe
+// signature, Svix for Clerk, Mux signature). Leaving the webhooks locked
+// meant the bench answered 401 to Stripe and no purchase could ever be
+// rehearsed — found while preparing #153.
+const OPEN_PATHS = new Set([
+  "/api/healthz",
+  "/api/cron/retention",
+  "/api/webhooks/stripe",
+  "/api/webhooks/clerk",
+  "/api/webhooks/mux",
+]);
+
+// Well-known URIs (RFC 8615) are machine-fetched by third parties that can
+// never send a browser's Basic credential, and every one of them is public by
+// definition — that is the entire point of the namespace. Left open as a
+// PREFIX so a future one does not have to be discovered the hard way.
+//
+// The concrete motivation is payment-wallet verification (#210): Stripe's
+// modern payment-method-domain registration needs no hosted file, but Apple's
+// own re-verification of a registered domain still re-fetches
+// /.well-known/apple-developer-merchantid-domain-association. A 401 there
+// surfaces as "Apple Pay just stopped working" with no error anywhere, which
+// is the most expensive kind of failure to diagnose. Nothing under this prefix
+// is generated from user data.
+const OPEN_PREFIXES = ["/.well-known/"];
 
 export type StagingLockVerdict = "allow" | "challenge";
 
 /** True for the handful of paths the lock deliberately leaves open. */
 export function isStagingLockOpenPath(pathname: string): boolean {
+  if (OPEN_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;
   // A trailing slash is the same resource; nothing else is normalised, because
   // the pathname arrives already decoded and normalised from `req.nextUrl`.
   const normalized =

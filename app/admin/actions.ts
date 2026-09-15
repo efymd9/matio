@@ -27,6 +27,7 @@ import {
   type PublishGuardCode,
   type PublishGuardResult,
 } from "@/lib/branching";
+import { isChoiceTarget } from "@/lib/branching-db";
 import { CATALOG_TAG } from "@/lib/catalog";
 import { isUniqueViolation } from "@/lib/db-errors";
 import { getMux } from "@/lib/mux";
@@ -99,6 +100,35 @@ function checkbox(formData: FormData, key: string): boolean {
   return formData.has(key);
 }
 
+// ---------- the throw registry (#195) ----------
+//
+// `throw new Error` in this file is reserved for a FORGED POST — ids a real
+// admin UI never sends together, or a value a `required` control never lets
+// through — and for one vendor failure the caller renders itself. Production
+// masks the message behind a digest, so any throw an admin can reach by
+// typing is a bug (the 2026-07-16 slug incident, #193, #195); it comes back
+// as an AdminFormErrorCode instead. This list is the whole allowance — a new
+// throw either joins it with its reason or becomes a code:
+//
+//   createEpisode        "Season not found for this show"   (season, show) pair
+//   updateEpisode        "Invalid access tier"              tier outside the enum
+//                        "Episode not in this season/show"  (episode, season, show)
+//   updateEpisodeAccess  "Invalid access tier"              tier outside the enum
+//                        "Episode not in this season/show"  (episode, season, show)
+//   deleteEpisode        "Episode not in this season/show"  (episode, season, show)
+//                        — the choice-target refusal is typed (#195)
+//   requireEpisodeChain  "Episode not in this season/show"  every branching action
+//   deleteEpisodeChoice  "Episode not found"                id from the form
+//   addActorToShow       "Pick an actor to add"             <select required> —
+//                        the browser never submits it empty
+//                        "Actor not found" / "Show not found"  ids from the form
+//   createMuxUpload      "Episode not found"                id from the widget
+//                        "Mux did not return an upload URL" vendor failure; the
+//                        upload widget renders it
+//
+// `grep -n 'throw new Error' app/admin/actions.ts` must match this list and
+// nothing else.
+
 // ---------- shows ----------
 
 // Validation failures return typed codes (mapped to localized copy in the
@@ -114,6 +144,12 @@ export type AdminFormErrorCode =
   | "slug_required"
   | "slug_invalid"
   | "slug_taken"
+  | "episode_number_invalid"
+  | "episode_number_taken"
+  | "intro_markers_invalid"
+  | "season_number_invalid"
+  | "season_number_taken"
+  | "episode_is_choice_target"
   | "unknown"
   | ForkErrorCode
   | PublishGuardCode;
@@ -335,22 +371,39 @@ export async function softDeleteShow(id: string) {
 
 // ---------- seasons ----------
 
-export async function createSeason(showId: string, formData: FormData) {
+// Typed like createEpisode (#193): the number is the one thing the admin can
+// get wrong here, and `unique(show_id, number)` is the one thing the browser
+// cannot pre-check — a taken season number used to be a 23505 straight into
+// the masked generic error page (#195).
+export async function createSeason(
+  showId: string,
+  _prev: AdminFormState,
+  formData: FormData,
+): Promise<AdminFormState> {
   await requireAdmin();
 
   const number = num(formData, "number");
-  if (number === null || number < 1) {
-    throw new Error("Season number must be a positive integer");
+  if (number === null || number < 1 || !Number.isInteger(number)) {
+    return { status: "error", code: "season_number_invalid" };
   }
 
-  await db.insert(seasons).values({
-    showId,
-    number,
-    title: str(formData, "title") || null,
-    description: str(formData, "description") || null,
-  });
+  try {
+    await db.insert(seasons).values({
+      showId,
+      number,
+      title: str(formData, "title") || null,
+      description: str(formData, "description") || null,
+    });
+  } catch (e) {
+    // seasons_show_id_number_unique — this show already has that season.
+    if (isUniqueViolation(e)) {
+      return { status: "error", code: "season_number_taken" };
+    }
+    throw e;
+  }
 
   revalidatePath(`/admin/shows/${showId}`);
+  return { status: "ok" };
 }
 
 export async function deleteSeason(id: string, showId: string) {
@@ -385,19 +438,26 @@ export async function deleteSeason(id: string, showId: string) {
 
 // ---------- episodes ----------
 
+// Typed, never thrown: everything an admin can get wrong in the form comes
+// back as a code the form renders inline. A throw here would reach the
+// admin as the generic "Что-то пошло не так" page with only a digest —
+// production masks server-action messages (the 2026-07-16 slug incident,
+// and #193: a duplicate episode number did exactly that). The only throws
+// left are integrity guards a real UI flow cannot reach.
 export async function createEpisode(
   seasonId: string,
   showId: string,
+  _prev: AdminFormState,
   formData: FormData,
-) {
+): Promise<AdminFormState> {
   await requireAdmin();
 
   const title = str(formData, "title");
-  if (!title) throw new Error("Title is required");
+  if (!title) return { status: "error", code: "title_required" };
 
   const number = num(formData, "number");
-  if (number === null || number < 1) {
-    throw new Error("Episode number must be a positive integer");
+  if (number === null || number < 1 || !Number.isInteger(number)) {
+    return { status: "error", code: "episode_number_invalid" };
   }
 
   // Verify the (season, show) pair actually exists together. The form
@@ -411,30 +471,45 @@ export async function createEpisode(
     .limit(1);
   if (!season) throw new Error("Season not found for this show");
 
-  await db.insert(episodes).values({
-    seasonId,
-    number,
-    title,
-    description: str(formData, "description") || null,
-  });
+  try {
+    await db.insert(episodes).values({
+      seasonId,
+      number,
+      title,
+      description: str(formData, "description") || null,
+    });
+  } catch (e) {
+    // episodes_season_id_number_unique — the number is taken in this
+    // season. Nothing the browser can pre-check: the form does not know
+    // the other episodes' numbers, and a parallel insert can take one
+    // between render and submit.
+    if (isUniqueViolation(e)) {
+      return { status: "error", code: "episode_number_taken" };
+    }
+    throw e;
+  }
 
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
+  return { status: "ok" };
 }
 
+// Same contract as createEpisode: typed codes for what an admin types,
+// throws only for a forged post (#193).
 export async function updateEpisode(
   id: string,
   seasonId: string,
   showId: string,
+  _prev: AdminFormState,
   formData: FormData,
-) {
+): Promise<AdminFormState> {
   await requireAdmin();
 
   const title = str(formData, "title");
-  if (!title) throw new Error("Title is required");
+  if (!title) return { status: "error", code: "title_required" };
 
   const number = num(formData, "number");
-  if (number === null || number < 1) {
-    throw new Error("Episode number must be a positive integer");
+  if (number === null || number < 1 || !Number.isInteger(number)) {
+    return { status: "error", code: "episode_number_invalid" };
   }
 
   // Intro markers — both optional. When set, they drive the player's
@@ -442,14 +517,12 @@ export async function updateEpisode(
   // (chip hidden) or end > start (chip seeks from start to end).
   const introStart = num(formData, "introStartSeconds");
   const introEnd = num(formData, "introEndSeconds");
-  if (introStart !== null && (introStart < 0 || !Number.isInteger(introStart))) {
-    throw new Error("Intro start must be a non-negative integer (seconds)");
-  }
-  if (introEnd !== null && (introEnd < 0 || !Number.isInteger(introEnd))) {
-    throw new Error("Intro end must be a non-negative integer (seconds)");
-  }
-  if (introStart !== null && introEnd !== null && introEnd <= introStart) {
-    throw new Error("Intro end must be after intro start");
+  if (
+    (introStart !== null && (introStart < 0 || !Number.isInteger(introStart))) ||
+    (introEnd !== null && (introEnd < 0 || !Number.isInteger(introEnd))) ||
+    (introStart !== null && introEnd !== null && introEnd <= introStart)
+  ) {
+    return { status: "error", code: "intro_markers_invalid" };
   }
   // Partial set: blank one side → null both (skip chip needs both markers).
   const introStartFinal =
@@ -482,20 +555,28 @@ export async function updateEpisode(
     .limit(1);
   if (!chain) throw new Error("Episode not in this season/show");
 
-  await db
-    .update(episodes)
-    .set({
-      title,
-      description: str(formData, "description") || null,
-      number,
-      access,
-      introStartSeconds: introStartFinal,
-      introEndSeconds: introEndFinal,
-    })
-    .where(eq(episodes.id, id));
+  try {
+    await db
+      .update(episodes)
+      .set({
+        title,
+        description: str(formData, "description") || null,
+        number,
+        access,
+        introStartSeconds: introStartFinal,
+        introEndSeconds: introEndFinal,
+      })
+      .where(eq(episodes.id, id));
+  } catch (e) {
+    if (isUniqueViolation(e)) {
+      return { status: "error", code: "episode_number_taken" };
+    }
+    throw e;
+  }
 
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}/episodes/${id}`);
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
+  return { status: "ok" };
 }
 
 // Instant per-episode access change from the season page's row select.
@@ -533,11 +614,24 @@ export async function updateEpisodeAccess(
   );
 }
 
+// Typed for the one refusal an admin can reach: an episode some choice
+// leads to (episode_choices.to_episode_id is ON DELETE RESTRICT, #143). The
+// episode page hides the button for such rows; the season page's row has no
+// edge data, so its form gets the same rule as a code (#195). `after` says
+// where a real delete ends: the episode page LEAVES for the season list (its
+// own row is gone — it would re-render into notFound), the season page STAYS
+// on revalidatePath alone — a redirect from a server action is a push plus a
+// remount of the subtree (Next 16 RedirectBoundary), which would wipe what
+// the admin typed into the neighbouring "add episode" form and stack a spare
+// history entry on the same URL. The flag is bound by the page, never a
+// path from the post; both pages bind all four, so the (prev, formData) pair
+// TypedActionForm appends lands past them and is ignored.
 export async function deleteEpisode(
   id: string,
   seasonId: string,
   showId: string,
-) {
+  after: "stay" | "season",
+): Promise<AdminFormState> {
   await requireAdmin();
   // Verify the full (episode, season, show) chain before deleting.
   // Form posts could otherwise pass mismatched ids and reach across
@@ -555,11 +649,18 @@ export async function deleteEpisode(
     )
     .limit(1);
   if (!chain) throw new Error("Episode not in this season/show");
-  // A target of someone's choice is protected by the RESTRICT FK: the
-  // episode page hides the delete button for such rows and explains why,
-  // so reaching this throw takes a forged post.
+  // Same read the episode page renders its notice from. The RESTRICT FK
+  // remains the safety net for a choice saved between this read and the
+  // DELETE.
+  if (await isChoiceTarget(id)) {
+    return { status: "error", code: "episode_is_choice_target" };
+  }
   await db.delete(episodes).where(eq(episodes.id, id));
   revalidatePath(`/admin/shows/${showId}/seasons/${seasonId}`);
+  if (after === "season") {
+    redirect(`/admin/shows/${showId}/seasons/${seasonId}`);
+  }
+  return { status: "ok" };
 }
 
 // ---------- branching video (#143) ----------
@@ -890,6 +991,9 @@ export async function addActorToShow(showId: string, formData: FormData) {
   await requireAdmin();
 
   const actorId = str(formData, "actorId");
+  // Forged-post guard, not a form error (#195): the cast form's <select> is
+  // `required` with an empty placeholder option, so the browser never
+  // submits without a pick — see the throw registry at the top.
   if (!actorId) throw new Error("Pick an actor to add");
 
   // Verify both sides exist (the actor select is admin-rendered, but the

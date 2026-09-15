@@ -81,6 +81,11 @@ export async function POST(req: NextRequest) {
     }
     caller = {
       kind: "anonymous",
+      // The app gates by POSITION, not by tier: its first episode plays
+      // anonymously whatever the admin set (a login wall on first launch
+      // is the likeliest App Store rejection). Deliberate divergence from
+      // the web — see the mobile rule in CLAUDE.md.
+      freeTierOnly: false,
       sessionToken: deviceId,
       maxPosition: gate.mode === "after_episodes" ? gate.episodes : null,
     };

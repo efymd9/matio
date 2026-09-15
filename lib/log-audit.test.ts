@@ -30,7 +30,11 @@ const {
   batchSend,
   clerkVerify,
   stripeUpdate,
+  stripeSearch,
+  stripeSessionList,
+  stripeSessionExpire,
   erasedCustomer,
+  sentryMessage,
 } = vi.hoisted(() => ({
   execute: vi.fn(),
   select: vi.fn(),
@@ -40,15 +44,45 @@ const {
   batchSend: vi.fn(),
   clerkVerify: vi.fn(),
   stripeUpdate: vi.fn(),
+  stripeSearch: vi.fn(),
+  stripeSessionList: vi.fn(),
+  stripeSessionExpire: vi.fn(),
   erasedCustomer: vi.fn(),
+  sentryMessage: vi.fn(),
 }));
 vi.mock("@/db", () => ({ db: { execute, select, update, delete: del, insert } }));
 vi.mock("server-only", () => ({}));
+// Sentry is the second sink these paths report to (the Clerk erasure and the
+// retention cron both send a message with tags). Spied so the audit can read
+// what would leave the process — the scrubbers in lib/observability.ts are
+// exercised separately above; here the question is what the CALL carries.
+vi.mock("@sentry/nextjs", () => ({ captureMessage: sentryMessage }));
 
-// The erasure handler's one outbound call (cancel the live subscription at
-// Stripe) is a spy so its failure text can be seeded with a marker.
+// The erasure handler's two outbound calls (cancel the live subscription at
+// Stripe; find every customer for the address, #223) are spies so their
+// failure text and their answers can be seeded with a marker.
 vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({ subscriptions: { update: stripeUpdate } }),
+  getStripe: () => ({
+    subscriptions: { update: stripeUpdate, list: async () => ({ data: [] }) },
+    // The checkout session builder's calls (#214): inert, so the audit case
+    // reaches the CAPI identity capture it exists to watch. The one-open-
+    // session sweep that follows every create (#217) is spied, so its failure
+    // text can be seeded with a marker. `search` is the erasure's customer
+    // lookup by address (#223) — a spy for the same reason.
+    customers: { create: async () => ({ id: "cus_dummy" }), search: stripeSearch },
+    checkout: {
+      sessions: {
+        create: async () => ({
+          id: "cs_test_dummy",
+          client_secret: "cs_secret_dummy",
+          url: "https://checkout.stripe.com/dummy",
+        }),
+        list: stripeSessionList,
+        expire: stripeSessionExpire,
+        retrieve: async (id: string) => ({ id, status: "open" }),
+      },
+    },
+  }),
 }));
 // The Stripe mirror's guest branch: the tombstone answer is the switch under
 // audit; the claim itself must never be reached from a tombstoned customer.
@@ -59,6 +93,13 @@ vi.mock("@/lib/guest-checkout", () => ({
   claimGuestCheckout: async () => {
     throw new Error("claim must not run for an erased customer");
   },
+  // The guest checkout builder's constants (#224 cases) — the real values.
+  CHECKOUT_CLAIM_COOKIE: "checkout_claim",
+  GUEST_METADATA_KEYS: {
+    guest: "guest",
+    claimToken: "claim_token",
+    trialToken: "trial_token",
+  },
 }));
 
 // The Clerk webhook's signature check is exercised in its own suite
@@ -67,8 +108,18 @@ vi.mock("@/lib/guest-checkout", () => ({
 vi.mock("@clerk/nextjs/webhooks", () => ({ verifyWebhook: clerkVerify }));
 // The app's progress route resolves the caller through Clerk; a fixed user
 // keeps the audit on the path that actually reaches the database.
+// The guest checkout cases (#224) need an ANONYMOUS caller — a signed-in one
+// is bounced to the auth flow before anything is logged.
 vi.mock("@clerk/nextjs/server", () => ({
-  auth: async () => ({ userId: "user_1" }),
+  auth: async () => ({ userId: walletAudit.authUserId }),
+}));
+// The guest action's per-IP brake is not the thing under audit; inert. The
+// signed-in builders' per-account brake (#227) is a spy: one case flips it to
+// watch the line the refusal logs.
+vi.mock("@/lib/checkout-rate-limit", () => ({
+  guestCheckoutRateLimited: async () => false,
+  checkoutRateLimited: walletAudit.rateLimited,
+  AUTH_CHECKOUT_RATELIMIT_PER_HOUR: 10,
 }));
 
 // The reminder dispatch path pulls in auth, Next's cache and the Resend SDK —
@@ -77,6 +128,13 @@ vi.mock("@clerk/nextjs/server", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/admin", () => ({
   requireAdmin: async () => ({ id: "admin_1" }),
+  // The checkout builder's signed-in user — the address it carries is exactly
+  // what the audit case must keep out of the log.
+  getOrSyncCurrentUser: async () => ({
+    id: "user_1",
+    email: MARKER_EMAIL,
+    stripeCustomerId: "cus_dummy",
+  }),
 }));
 vi.mock("@/lib/resend", () => ({
   resendConfigured: () => true,
@@ -97,12 +155,93 @@ vi.mock("@/lib/mux-token", () => ({
   muxThumbnailUrl: () => "https://image.mux.com/dummy/thumbnail.jpg",
 }));
 
+// The paywall wallet's confirm-time reporting (#214): the CAPI identity
+// capture, the Meta call and PostHog are the vendor steps that can fail with a
+// message quoting what was sent. Partial mocks — everything else in these
+// modules (the #165 scrub keys the mirror case relies on) stays real.
+// The spies DELEGATE to the real functions by default: every other case in
+// this file (the Stripe mirror, the #165 scrub) must keep running the real
+// Meta/PostHog code it always exercised. Only the wallet cases override them,
+// one call at a time.
+const walletAudit = vi.hoisted(() => {
+  const real: Record<string, (...args: unknown[]) => unknown> = {};
+  return {
+    real,
+    capiRead: vi.fn((...args: unknown[]) => real.readCapiIdentity(...args)),
+    capiSend: vi.fn((...args: unknown[]) => real.sendCapiEvents(...args)),
+    posthogCapture: vi.fn((...args: unknown[]) =>
+      real.captureServerEvent(...args),
+    ),
+    consent: "",
+    // The per-account checkout brake (#227) — allows unless a case says so.
+    rateLimited: vi.fn(async () => false),
+    // Who Clerk says is calling (every case but the guest ones: a user).
+    authUserId: "user_1" as string | null,
+    // The guest buyer's checkout_claim cookie (#224 cases) — a value the
+    // audit can look for in the log, because it must never be there.
+    claimCookie: "",
+  };
+});
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "user-agent": "Mozilla/5.0 Safari" }),
+  cookies: async () => ({
+    // The guest builder (re)writes the claim cookie; the write is not under
+    // audit.
+    set: () => undefined,
+    get: (name: string) => {
+      if (name === "checkout_claim" && walletAudit.claimCookie) {
+        return { value: walletAudit.claimCookie };
+      }
+      if (name === "cookie_consent" && walletAudit.consent) {
+        return { value: walletAudit.consent };
+      }
+      return undefined;
+    },
+  }),
+}));
+vi.mock("@/lib/capi-identity", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/capi-identity")>();
+  walletAudit.real.readCapiIdentity = actual.readCapiIdentity as (...args: unknown[]) => unknown;
+  return { ...actual, readCapiIdentity: walletAudit.capiRead };
+});
+vi.mock("@/lib/meta-capi", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/meta-capi")>();
+  walletAudit.real.sendCapiEvents = actual.sendCapiEvents as (...args: unknown[]) => unknown;
+  return { ...actual, sendCapiEvents: walletAudit.capiSend };
+});
+vi.mock("@/lib/posthog-server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/posthog-server")>();
+  walletAudit.real.captureServerEvent = actual.captureServerEvent as (...args: unknown[]) => unknown;
+  return { ...actual, captureServerEvent: walletAudit.posthogCapture };
+});
+
+// No watch-flow target for the builder case: the audit is about the log line,
+// not about resolving a show from the database.
+vi.mock("@/lib/checkout-target", () => ({
+  resolveCheckoutTarget: async () => ({
+    showSlug: null,
+    episodeId: null,
+    resume: null,
+  }),
+  buildWatchPath: () => null,
+}));
+
 import { sendShowReminders } from "@/app/admin/reminder-actions";
+import { GET as retentionCron } from "@/app/api/cron/retention/route";
 import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
+import { eraseUser, summarizeEraseResult } from "@/lib/erase-user";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
+import { assembleUserExport, summarizeExport } from "@/lib/user-export";
+import {
+  createAuthCheckoutSession,
+  reportWalletCheckoutStarted,
+} from "@/app/subscribe/actions";
+import { createGuestCheckoutSession } from "@/app/subscribe/guest-actions";
+import { CheckoutRateLimitedError } from "@/lib/checkout-session";
+import { CONSENT_VERSION, serializeConsent } from "@/lib/cookie-consent";
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -141,11 +280,18 @@ beforeEach(() => {
   batchSend.mockReset();
   clerkVerify.mockReset();
   stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
+  stripeSearch.mockReset().mockResolvedValue({ data: [], has_more: false });
+  stripeSessionList.mockReset().mockResolvedValue({ data: [] });
+  stripeSessionExpire.mockReset().mockResolvedValue({ id: "cs_test_dummy" });
   erasedCustomer.mockReset().mockResolvedValue(false);
+  sentryMessage.mockReset();
+  walletAudit.authUserId = "user_1";
+  walletAudit.claimCookie = "";
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -244,6 +390,53 @@ describe("log audit · /api/readyz", () => {
 
     expect(body).not.toContain(MARKER_SECRET);
     expect(body).not.toContain("db.example.invalid");
+  });
+});
+
+describe("log audit · /api/cron/retention (the daily deletion run)", () => {
+  const cronRequest = () =>
+    new Request("https://matio.tv/api/cron/retention", {
+      headers: { authorization: "Bearer dummy-cron-secret" },
+    });
+
+  it("logs a failed table by name, SQLSTATE and class — never the statement the driver quoted", async () => {
+    vi.stubEnv("CRON_SECRET", "dummy-cron-secret");
+    // The realistic worst case: the driver's error carries the row it choked
+    // on (a subscriber's address) and the URL it was talking to — on BOTH
+    // levels of Drizzle's wrapper, since the outer message repeats the query.
+    const driverText = `DELETE failed on row {email: ${MARKER_EMAIL}} at ${MARKER_DATABASE_URL}`;
+    const cause = Object.assign(new Error(driverText), {
+      name: "PostgresError",
+      code: "42P01",
+    });
+    execute.mockRejectedValue(
+      Object.assign(new Error(`Failed query: ${driverText}`), {
+        name: "DrizzleQueryError",
+        cause,
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await retentionCron(cronRequest());
+    const body = JSON.stringify(await res.json());
+    const sentry = JSON.stringify(sentryMessage.mock.calls);
+
+    expect(res.status).toBe(500);
+    expect(sentryMessage).toHaveBeenCalled(); // the fixture reached the second sink
+    for (const marker of [MARKER_EMAIL, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+      expect(body).not.toContain(marker);
+      expect(sentry).not.toContain(marker);
+    }
+    // What it DOES log, answer and send: which table, the driver's SQLSTATE,
+    // the error's class, and how far it got — enough to tell a missing table
+    // from a deadlock from a timeout without a single quoted value.
+    expect(logged()).toContain("trial_sessions");
+    expect(logged()).toContain("42P01");
+    expect(logged()).toContain("DrizzleQueryError");
+    expect(sentry).toContain('"code":"42P01"');
+    expect(body).toContain('"failed":[');
+    expect(body).toContain('"trial_sessions"');
   });
 });
 
@@ -353,6 +546,13 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
   // read carries the address. Only ids may come out.
   const USER_ID = "user_marker";
 
+  beforeEach(() => {
+    // PostHog stays off unless a case turns it on — with credentials in the
+    // shell the erasure would otherwise reach the real persons endpoint.
+    vi.stubEnv("POSTHOG_PERSONAL_API_KEY", "");
+    vi.stubEnv("POSTHOG_PROJECT_ID", "");
+  });
+
   function selectChain(rows: unknown[]) {
     const chain = {
       from: () => chain,
@@ -427,6 +627,152 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     expect(logged()).not.toContain(MARKER_EMAIL);
     expect(logged()).toContain("sub_dummy");
     expect(logged()).toContain("resource_missing");
+  });
+
+  // The customer search (#223) is the one Stripe call whose REQUEST is the
+  // address (`email:'…'` in the query): a refusal echoes the query, and a
+  // found customer object carries the address and the name.
+  it("does not echo the address when the customer search fails — Stripe quotes the query, and the query is the address", async () => {
+    stripeSearch.mockRejectedValue(
+      Object.assign(
+        new Error(`Invalid search query: email:'${MARKER_EMAIL}'`),
+        { name: "StripeInvalidRequestError", code: "parameter_invalid", statusCode: 400 },
+      ),
+    );
+    const req = deletedWithLiveSubscription();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    expect(stripeSearch).toHaveBeenCalledTimes(1);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    // What it DOES say: the subject, the class, the code — and the hand path.
+    expect(logged()).toContain("Stripe customer search FAILED");
+    expect(logged()).toContain(USER_ID);
+    expect(logged()).toContain("StripeInvalidRequestError");
+    expect(logged()).toContain("parameter_invalid");
+    const sentry = sentryMessage.mock.calls.map(render).join("\n");
+    expect(sentry).not.toContain(MARKER_EMAIL);
+    expect(sentry).toContain('"stripeSearch":"failed"');
+  });
+
+  it("names the customers the search found by id only — the customer objects carry the address and the name", async () => {
+    stripeSearch.mockResolvedValue({
+      data: [
+        { id: "cus_older", email: MARKER_EMAIL, name: MARKER_NAME },
+        { id: "cus_dummy", email: MARKER_EMAIL, name: MARKER_NAME },
+      ],
+      has_more: true,
+    });
+    const req = deletedWithLiveSubscription();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).not.toContain(MARKER_NAME);
+    expect(logged()).toContain('"stripeCustomersTombstoned":["cus_dummy","cus_older"]');
+    // The has_more warning is by id too.
+    expect(logged()).toContain("more than 100 Stripe customers");
+    expect(logged()).toContain(USER_ID);
+  });
+
+  // PostHog (#180): the person carries the address as a property, and a
+  // refusal body quotes the request — the request being that person.
+  // Seeded into BOTH answers; only ids and statuses may come out, to the
+  // log and to Sentry alike.
+  function posthogRefusing() {
+    vi.stubEnv("POSTHOG_PERSONAL_API_KEY", "phx_dummy");
+    vi.stubEnv("POSTHOG_PROJECT_ID", "190233");
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            results: [
+              { id: 42, name: MARKER_NAME, properties: { email: MARKER_EMAIL } },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            type: "validation_error",
+            detail: `Person ${MARKER_NAME} <${MARKER_EMAIL}> cannot be deleted`,
+          }),
+          { status: 400 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("does not echo PostHog's person or its error body when the person delete fails", async () => {
+    const fetchMock = posthogRefusing();
+    const req = deletedWithLiveSubscription();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).not.toContain(MARKER_NAME);
+    // What it DOES say: the subject, the person id, the status that decided it.
+    expect(logged()).toContain(USER_ID);
+    expect(logged()).toContain('"personIds":["42"]');
+    expect(logged()).toContain('"httpStatus":400');
+    const sentry = sentryMessage.mock.calls.map(render).join("\n");
+    expect(sentry).not.toContain(MARKER_EMAIL);
+    expect(sentry).not.toContain(MARKER_NAME);
+    expect(sentry).toContain("posthogStatus");
+  });
+
+  it("the script's apply summary (pnpm erase-user --apply) carries counts and statuses only", async () => {
+    posthogRefusing();
+    deletedWithLiveSubscription();
+    const { db } = await import("@/db");
+    const { getStripe } = await import("@/lib/stripe");
+    const logged = captureConsole();
+
+    const result = await eraseUser(USER_ID, {
+      db,
+      getStripe,
+      posthog: { key: "phx_dummy", projectId: "190233" },
+    });
+    const summary = summarizeEraseResult(USER_ID, result);
+
+    expect(summary).not.toContain(MARKER_EMAIL);
+    expect(summary).not.toContain(MARKER_NAME);
+    expect(summary).toContain(`subject: ${USER_ID}`);
+    expect(summary).toContain("posthog: failed persons=1 http=400");
+    expect(logged()).not.toContain(MARKER_EMAIL);
+  });
+
+  it("the script's apply summary lists the customers tombstoned by id, never by the address they carry (#223)", async () => {
+    stripeSearch.mockResolvedValue({
+      data: [{ id: "cus_older", email: MARKER_EMAIL, name: MARKER_NAME }],
+      has_more: false,
+    });
+    deletedWithLiveSubscription();
+    const { db } = await import("@/db");
+    const { getStripe } = await import("@/lib/stripe");
+    const logged = captureConsole();
+
+    const result = await eraseUser(USER_ID, { db, getStripe, posthog: null });
+    const summary = summarizeEraseResult(USER_ID, result);
+
+    expect(summary).not.toContain(MARKER_EMAIL);
+    expect(summary).not.toContain(MARKER_NAME);
+    expect(summary).toContain(
+      "search=ok tombstoned customers=2 (ids cus_dummy, cus_older)",
+    );
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).not.toContain(MARKER_NAME);
   });
 });
 
@@ -674,5 +1020,488 @@ describe("log audit · Stripe subscription mirror (CAPI identity scrub, #165)", 
     }
     // What it DOES log: the subscription id, enough to re-run the sweep by hand.
     expect(logged()).toContain(SUB_ID);
+  });
+});
+
+describe("log audit · subject-access export summary (scripts/export-user-data.ts, #163)", () => {
+  // The export FILE is the person's data by definition — the address, the
+  // name, the billing address are supposed to be in it. What the script
+  // prints to the operator's terminal (and what lands in a shell log) is
+  // the summary, and that may carry counts and ids only. Two worst cases:
+  // a full export where every vendor answered, and a run where every vendor
+  // failed with an error that quotes the address back.
+  const MARKER_STREET = "42 Leak Marker Street";
+  const USER_ID = "user_marker";
+
+  function seededRows() {
+    return {
+      users: [
+        {
+          id: USER_ID,
+          email: MARKER_EMAIL,
+          role: "user",
+          stripeCustomerId: "cus_marker",
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          signupOrigin: "clerk_signup",
+          country: "ES",
+          attributionFirstSource: null,
+          attributionFirstMedium: null,
+          attributionFirstCampaign: null,
+          attributionLastSource: null,
+          attributionLastMedium: null,
+          attributionLastCampaign: null,
+        },
+      ],
+      subscriptions: [],
+      watch_progress: [],
+      watch_days: [],
+      trial_sessions: [],
+      visitors: [],
+      visitor_days: [],
+      show_reminders: [{ id: "rem_marker", email: MARKER_EMAIL }],
+    } as unknown as Parameters<typeof assembleUserExport>[0]["rows"];
+  }
+
+  it("summarises a full export by counts and ids — never the address, the name or the street", async () => {
+    const result = await assembleUserExport({
+      userId: USER_ID,
+      rows: seededRows(),
+      clients: {
+        clerk: {
+          users: {
+            getUser: async () => ({
+              id: USER_ID,
+              emailAddresses: [{ emailAddress: MARKER_EMAIL, verification: { status: "verified" } }],
+              firstName: "Leak",
+              lastName: "Marker",
+              createdAt: 1,
+              lastSignInAt: null,
+            }),
+          },
+        },
+        stripe: {
+          customers: {
+            retrieve: async (id) => ({
+              id,
+              email: MARKER_EMAIL,
+              name: MARKER_NAME,
+              address: { line1: MARKER_STREET, city: "Madrid", country: "ES" },
+              created: 1,
+            }),
+          },
+          invoices: {
+            list: async function* () {
+              yield { id: "in_marker", number: "0001", currency: "usd", status: "paid" };
+            },
+          },
+        },
+        posthog: {
+          runHogQL: async (query) =>
+            query.startsWith("SELECT event,")
+              ? [["$pageview", "t", JSON.stringify({ $current_url: `https://matio.tv/?email=${MARKER_EMAIL}` })]]
+              : [["person-marker", "t", true, JSON.stringify({ email: MARKER_EMAIL, name: MARKER_NAME })]],
+        },
+      },
+    });
+    // The document itself has to be dirty, or the summary check proves nothing.
+    const document = JSON.stringify(result);
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STREET]) {
+      expect(document).toContain(marker);
+    }
+
+    const summary = summarizeExport(result);
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STREET, "Leak"]) {
+      expect(summary).not.toContain(marker);
+    }
+    // What it DOES print: the subject id and the counts.
+    expect(summary).toContain(USER_ID);
+    expect(summary).toContain("show_reminders=1");
+    expect(summary).toContain("stripe=received (invoices=1)");
+  });
+
+  it("keeps a vendor's error text out of the notes and the summary", async () => {
+    // Clerk and Stripe quote request parameters in their messages; a naive
+    // `err.message` in a note would put the address into the file's notes
+    // AND onto the terminal.
+    const quoted = (name: string) =>
+      Object.assign(new Error(`No such customer for ${MARKER_NAME} <${MARKER_EMAIL}>`), {
+        name,
+        statusCode: 404,
+      });
+    const result = await assembleUserExport({
+      userId: USER_ID,
+      rows: seededRows(),
+      clients: {
+        clerk: { users: { getUser: async () => { throw quoted("ClerkAPIResponseError"); } } },
+        stripe: {
+          customers: { retrieve: async () => { throw quoted("StripeInvalidRequestError"); } },
+          invoices: { list: async function* () {} },
+        },
+        posthog: { runHogQL: async () => { throw quoted("Error"); } },
+      },
+    });
+
+    expect(result.processors).toEqual({ clerk: null, stripe: null, posthog: null });
+    const notes = result.notes.join("\n");
+    const summary = summarizeExport(result);
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(notes).not.toContain(marker);
+      expect(summary).not.toContain(marker);
+    }
+    // What it DOES keep: the error's name and status, enough to know what to retry.
+    expect(notes).toContain("StripeInvalidRequestError/404");
+  });
+});
+
+describe("log audit · wallet checkout-intent reporting (#214)", () => {
+  // The paywall wallet reports InitiateCheckout / checkout_started when the
+  // buyer confirms. Every vendor step on that path can fail with a message that
+  // quotes what was sent, and the users row it reads holds the address. Only
+  // step names, error classes, codes and statuses may come out.
+  const quoted = (name: string) =>
+    Object.assign(new Error(`rejected ${MARKER_NAME} <${MARKER_EMAIL}>`), {
+      name,
+      code: "marker_code",
+      statusCode: 400,
+    });
+
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("WALLET_EXPRESS_CHECKOUT", "1");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://matio.tv");
+    walletAudit.consent = serializeConsent({
+      necessary: true,
+      marketing: true,
+      ts: 0,
+      v: CONSENT_VERSION,
+    });
+    const chain = {
+      from: () => chain,
+      where: () => chain,
+      limit: async () => [{ email: MARKER_EMAIL }],
+    };
+    select.mockImplementation(() => chain);
+  });
+
+  it("logs failed vendor calls by step and class — never the buyer's address", async () => {
+    walletAudit.capiRead.mockRejectedValueOnce(quoted("CapiIdentityError"));
+    walletAudit.capiSend.mockRejectedValueOnce(quoted("FetchError"));
+    walletAudit.posthogCapture.mockRejectedValueOnce(quoted("PostHogError"));
+    const logged = captureConsole();
+
+    await reportWalletCheckoutStarted("cs_test_marker");
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    // What it DOES log: which step failed, and the vendor's class and code.
+    expect(logged()).toContain("walletCheckout: CAPI identity capture failed");
+    expect(logged()).toContain("startCheckout: CAPI InitiateCheckout threw");
+    expect(logged()).toContain("startCheckout: PostHog checkout_started threw");
+    expect(logged()).toContain("marker_code");
+  });
+
+  it("logs a failure that escapes the vendor calls by class, not by message", async () => {
+    // A synchronous throw skips the per-call catches and reaches the outer one.
+    walletAudit.posthogCapture.mockImplementationOnce(() => {
+      throw quoted("PostHogError");
+    });
+    const logged = captureConsole();
+
+    await reportWalletCheckoutStarted("cs_test_marker");
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain("walletCheckout: checkout-intent reporting threw");
+    expect(logged()).toContain("PostHogError");
+  });
+});
+
+describe("log audit · checkout session builder (prepareAuthCheckout, #214)", () => {
+  // The one checkout log line the wallet cases above cannot reach: the CAPI
+  // identity capture inside the builder that /checkout and the wallet share.
+  // The signed-in user it works with carries the address.
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://matio.tv");
+    vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "pk_test_dummy");
+    vi.stubEnv("STRIPE_PRICE_MONTHLY", "price_dummy");
+    walletAudit.consent = serializeConsent({
+      necessary: true,
+      marketing: true,
+      ts: 0,
+      v: CONSENT_VERSION,
+    });
+    // No existing access-granting row, so the builder proceeds past layer 1.
+    const chain = { from: () => chain, where: () => chain, limit: async () => [] };
+    select.mockImplementation(() => chain);
+  });
+
+  it("logs a failed CAPI identity capture by class — never the buyer's address", async () => {
+    walletAudit.capiRead.mockRejectedValueOnce(
+      Object.assign(new Error(`rejected ${MARKER_NAME} <${MARKER_EMAIL}>`), {
+        name: "CapiIdentityError",
+        code: "marker_code",
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await createAuthCheckoutSession({ show: null, ep: null, resume: null });
+
+    expect(res.kind).toBe("embedded");
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain("startCheckout: CAPI identity capture failed");
+    expect(logged()).toContain("marker_code");
+  });
+
+  it("logs a refused (rate-limited) checkout by user id only — never the buyer's address (#227)", async () => {
+    walletAudit.rateLimited.mockResolvedValueOnce(true);
+    const logged = captureConsole();
+
+    const err = await createAuthCheckoutSession({
+      show: null,
+      ep: null,
+      resume: null,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(CheckoutRateLimitedError);
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+      // The error travels to the client (masked by a digest in production)
+      // and to Sentry by name; it carries no data either way.
+      expect(render(err)).not.toContain(marker);
+    }
+    expect(logged()).toContain("startCheckout: rate limited");
+    expect(logged()).toContain("user_1");
+  });
+});
+
+describe("log audit · one-open-session sweep after a checkout create (#217)", () => {
+  // Every create is followed by list + expire of the buyer's other open
+  // sessions; when that cannot be completed the new session is closed and the
+  // failure logged. Stripe's error text can quote what was sent — the
+  // customer's e-mail among it — so only ids and the error class may come out.
+  const quoted = (name: string) =>
+    Object.assign(new Error(`rejected ${MARKER_NAME} <${MARKER_EMAIL}>`), {
+      name,
+      code: "marker_code",
+      statusCode: 400,
+    });
+
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://matio.tv");
+    vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "pk_test_dummy");
+    vi.stubEnv("STRIPE_PRICE_MONTHLY", "price_dummy");
+    walletAudit.consent = "";
+    const chain = { from: () => chain, where: () => chain, limit: async () => [] };
+    select.mockImplementation(() => chain);
+  });
+
+  it("logs a failed sweep — and a failed close of the new session — by ids and class, never the buyer's address", async () => {
+    stripeSessionList.mockRejectedValueOnce(quoted("StripeConnectionError"));
+    stripeSessionExpire.mockRejectedValueOnce(quoted("StripeAPIError"));
+    const logged = captureConsole();
+
+    await expect(
+      createAuthCheckoutSession({ show: null, ep: null, resume: null }),
+    ).rejects.toThrow();
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain(
+      "startCheckout: could not expire the customer's other open sessions",
+    );
+    expect(logged()).toContain("startCheckout: closing the new session failed too");
+    expect(logged()).toContain("cs_test_dummy");
+    expect(logged()).toContain("StripeConnectionError");
+    expect(logged()).toContain("StripeAPIError");
+    expect(logged()).toContain("marker_code");
+  });
+});
+
+describe("log audit · guest checkout sweep (#224)", () => {
+  // The pay-first guest's create is followed by the guest half of the sweep:
+  // the session id is recorded under an HMAC of the claim cookie and the
+  // buyer's PREVIOUS session is expired by id. Three things can fail and log
+  // — the Stripe expire (its error text can quote the request), the DB
+  // upsert (Drizzle's wrapper quotes the statement) and the best-effort
+  // prune — and none of them may carry the claim cookie, its hash, or a
+  // person. Only session ids and error classes come out.
+  const MARKER_CLAIM = "11111111-2222-4333-8444-555555555555";
+  const quoted = (name: string) =>
+    Object.assign(
+      new Error(`rejected ${MARKER_NAME} <${MARKER_EMAIL}> claim ${MARKER_CLAIM}`),
+      { name, code: "marker_code", statusCode: 400 },
+    );
+  const claimAnswers = (previousSessionId: string | null) => ({
+    values: () => ({
+      onConflictDoUpdate: () => ({
+        returning: async () => [{ previousSessionId }],
+      }),
+    }),
+  });
+
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("PAY_FIRST_CHECKOUT", "1");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://matio.tv");
+    vi.stubEnv("NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "pk_test_dummy");
+    vi.stubEnv("STRIPE_PRICE_MONTHLY", "price_dummy");
+    walletAudit.consent = "";
+    walletAudit.authUserId = null;
+    walletAudit.claimCookie = MARKER_CLAIM;
+    // No prune unless a case asks for one.
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+  });
+
+  it("logs a failed expire of the previous session — and a failed close of the new one — by session ids and class, never the claim cookie or the buyer", async () => {
+    insert.mockImplementation(() => claimAnswers("cs_prev_dummy"));
+    stripeSessionExpire
+      .mockRejectedValueOnce(quoted("StripeAPIError"))
+      .mockRejectedValueOnce(quoted("StripeConnectionError"));
+    const logged = captureConsole();
+
+    await expect(
+      createGuestCheckoutSession({ show: null, ep: null, resume: null }),
+    ).rejects.toThrow();
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_CLAIM]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain(
+      "startGuestCheckout: could not expire the buyer's previous open session",
+    );
+    expect(logged()).toContain("startGuestCheckout: closing the new session failed too");
+    expect(logged()).toContain("cs_test_dummy");
+    expect(logged()).toContain("cs_prev_dummy");
+    expect(logged()).toContain("StripeAPIError");
+    expect(logged()).toContain("StripeConnectionError");
+    expect(logged()).toContain("marker_code");
+  });
+
+  it("logs the rollback of the claim after a failed expire by session ids only — the displaced-newer-session line and the rollback-failed line", async () => {
+    // Two calls of the upsert per run: the claim (answers the previous id)
+    // and, once the expire has failed, the rollback. First run (calls 1–2):
+    // the rollback displaces a third tab's id. Second run (calls 3–4): the
+    // rollback itself is refused.
+    let call = 0;
+    insert.mockImplementation(() => ({
+      values: () => ({
+        onConflictDoUpdate: () => ({
+          returning: async () => {
+            call += 1;
+            if (call === 1 || call === 3) return [{ previousSessionId: "cs_prev_dummy" }];
+            if (call === 2) return [{ previousSessionId: "cs_third_dummy" }];
+            throw Object.assign(
+              new Error(`upsert refused ('${MARKER_CLAIM}-hash') ${MARKER_DATABASE_URL}`),
+              { name: "PostgresError", code: "53300" },
+            );
+          },
+        }),
+      }),
+    }));
+    stripeSessionExpire.mockRejectedValue(quoted("StripeAPIError"));
+    const logged = captureConsole();
+
+    await expect(
+      createGuestCheckoutSession({ show: null, ep: null, resume: null }),
+    ).rejects.toThrow();
+    await expect(
+      createGuestCheckoutSession({ show: null, ep: null, resume: null }),
+    ).rejects.toThrow();
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_CLAIM, MARKER_SECRET, MARKER_DATABASE_URL]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain(
+      "startGuestCheckout: rolling back the claim displaced a newer session",
+    );
+    expect(logged()).toContain("cs_third_dummy");
+    expect(logged()).toContain(
+      "startGuestCheckout: rolling back the claim failed — the previous session stays unrecorded",
+    );
+    expect(logged()).toContain("cs_prev_dummy");
+    expect(logged()).toContain("PostgresError");
+  });
+
+  it("logs a claim the database refused by class — never the statement or the hash the driver quoted", async () => {
+    insert.mockImplementation(() => ({
+      values: () => ({
+        onConflictDoUpdate: () => ({
+          returning: async () => {
+            throw Object.assign(
+              new Error(
+                `insert into "guest_checkout_sessions" … values ('${MARKER_CLAIM}-hash', …) ${MARKER_DATABASE_URL}`,
+              ),
+              { name: "PostgresError", code: "53300" },
+            );
+          },
+        }),
+      }),
+    }));
+    const logged = captureConsole();
+
+    await expect(
+      createGuestCheckoutSession({ show: null, ep: null, resume: null }),
+    ).rejects.toThrow();
+
+    for (const marker of [MARKER_CLAIM, MARKER_SECRET, MARKER_DATABASE_URL]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).not.toContain("guest_checkout_sessions");
+    expect(logged()).toContain(
+      "startGuestCheckout: could not expire the buyer's previous open session",
+    );
+    expect(logged()).toContain("PostgresError");
+    expect(logged()).toContain("53300");
+  });
+
+  it("logs a failed prune by class only — and the sale goes through", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    insert.mockImplementation(() => claimAnswers(null));
+    del.mockImplementation(() => ({
+      where: async () => {
+        throw Object.assign(
+          new Error(`delete from "guest_checkout_sessions" … ${MARKER_DATABASE_URL}`),
+          { name: "PostgresError", code: "40P01" },
+        );
+      },
+    }));
+    const logged = captureConsole();
+
+    const res = await createGuestCheckoutSession({ show: null, ep: null, resume: null });
+
+    expect(res.kind).toBe("embedded");
+    for (const marker of [MARKER_CLAIM, MARKER_SECRET, MARKER_DATABASE_URL]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).not.toContain("guest_checkout_sessions");
+    expect(logged()).toContain("claimSoleGuestSession: pruning stale rows failed");
+    expect(logged()).toContain("PostgresError");
+  });
+});
+
+describe("log audit · Clerk webhook signature failure", () => {
+  it("rejects a bad signature without echoing the verifier's error text", async () => {
+    clerkVerify.mockRejectedValue(
+      Object.assign(new Error(`signature mismatch for ${MARKER_EMAIL}`), {
+        name: "WebhookVerificationError",
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(
+      new Request("https://matio.tv/api/webhooks/clerk", { method: "POST" }) as never,
+    );
+
+    expect(res.status).toBe(400);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(logged()).toContain("WebhookVerificationError");
   });
 });

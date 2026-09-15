@@ -43,14 +43,11 @@ export function VerticalChrome({
   episodesCount,
   hasNext,
   hasCaptions,
-  locked,
   showSkipIntro,
   showUnmutePill,
   needsTap,
   chipVisible,
   onOpenEpisodes,
-  onLock,
-  onUnlock,
   onUnmute,
   onTapPlay,
   onSkipIntro,
@@ -64,14 +61,11 @@ export function VerticalChrome({
   episodesCount: number;
   hasNext: boolean;
   hasCaptions: boolean;
-  locked: boolean;
   showSkipIntro: boolean;
   showUnmutePill: boolean;
   needsTap: boolean;
   chipVisible: boolean;
   onOpenEpisodes: () => void;
-  onLock: () => void;
-  onUnlock: () => void;
   onUnmute: () => void;
   onTapPlay: () => void;
   onSkipIntro: () => void;
@@ -92,23 +86,6 @@ export function VerticalChrome({
       if ((err as { name?: string })?.name === "AbortError") return;
     }
   };
-
-  // Locked: hide the whole TikTok layout (including the full-surface play
-  // toggle) and surface a single unlock pill — matching the standard chrome's
-  // lock behavior.
-  if (locked) {
-    return (
-      <button
-        type="button"
-        onClick={onUnlock}
-        aria-label={t.player.unlockAria}
-        className="absolute left-1/2 top-1/2 z-30 inline-flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-full border border-rust/60 bg-burgundy/50 px-4 py-2.5 text-sm font-semibold text-cream backdrop-blur-xl transition-colors hover:bg-burgundy/70"
-      >
-        <Icon name="lock" size={16} />
-        {t.player.tapToUnlock}
-      </button>
-    );
-  }
 
   const minutes = durationSeconds ? Math.floor(durationSeconds / 60) : null;
 
@@ -131,7 +108,7 @@ export function VerticalChrome({
         <span slot="pause" className="contents" />
       </MediaPlayButton>
 
-      {/* Top bar — back (left), lock (right). */}
+      {/* Top bar — back to the show. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 bg-gradient-to-b from-black/70 via-black/25 to-transparent pb-14 pt-[max(env(safe-area-inset-top),1rem)] pl-[max(env(safe-area-inset-left),1rem)] pr-[max(env(safe-area-inset-right),1rem)]">
         <Link
           href={`/shows/${showSlug}`}
@@ -140,14 +117,6 @@ export function VerticalChrome({
         >
           <Icon name="back" size={17} />
         </Link>
-        <button
-          type="button"
-          onClick={onLock}
-          aria-label={t.player.lockAria}
-          className="pointer-events-auto inline-flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full bg-black/40 text-cream backdrop-blur-xl transition-colors hover:bg-black/60"
-        >
-          <Icon name="lock" size={16} />
-        </button>
       </div>
 
       {/* "Tap for sound" pill — autoplay landed in the muted fallback. Routes

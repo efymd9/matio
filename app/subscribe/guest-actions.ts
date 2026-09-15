@@ -6,6 +6,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
 import { db } from "@/db";
 import { subscriptions, trialSessions } from "@/db/schema";
+import { checkoutOrigin } from "@/lib/checkout-origin";
 import { readAttributionCookies, toStripeMetadata } from "@/lib/attribution";
 import {
   type CapiIdentity,
@@ -16,13 +17,9 @@ import {
   type CheckoutSessionResult,
   type CheckoutTargetInput,
   embeddedCheckoutEnabled,
+  expireIfOpen,
 } from "@/lib/checkout-session";
 import { buildWatchPath, resolveCheckoutTarget } from "@/lib/checkout-target";
-import {
-  checkoutLineItems,
-  TRIAL_FEE_VALUE,
-  TRIAL_SUBSCRIPTION_DATA,
-} from "@/lib/checkout-trial";
 import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { isInAppBrowser } from "@/lib/in-app-browser";
@@ -30,9 +27,18 @@ import {
   CHECKOUT_CLAIM_COOKIE,
   GUEST_METADATA_KEYS,
 } from "@/lib/guest-checkout";
+import {
+  claimSoleGuestSession,
+  hashClaimToken,
+} from "@/lib/guest-checkout-sessions";
 import { getDict } from "@/lib/i18n/server";
+import { describeError } from "@/lib/observability";
+import { buildCheckoutSessionParams } from "@/lib/checkout-session-params";
 import { sendCapiEvents } from "@/lib/meta-capi";
-import { MEMBERSHIP_CURRENCY } from "@/lib/meta-pixel-events";
+import {
+  MEMBERSHIP_CURRENCY,
+  MEMBERSHIP_VALUE,
+} from "@/lib/meta-pixel-events";
 import {
   captureServerEvent,
   toPosthogConsentMetadata,
@@ -101,8 +107,7 @@ export async function createGuestCheckoutSession(
   // In-app browsers (FB/IG webviews) make the Embedded Checkout iframe +
   // Apple/Google Pay flaky and routinely drop the checkout_claim cookie across
   // the Stripe round-trip — fall back to the HOSTED Stripe page for them (more
-  // robust, better wallet support). Folded into the idempotency variant below
-  // so a webview's hosted session never collides a same-token embedded one.
+  // robust, better wallet support).
   const inApp = isInAppBrowser(reqHeaders.get("user-agent"));
   if (await guestCheckoutRateLimited(ipHash)) {
     return { kind: "redirect", to: subscribeFallback };
@@ -137,8 +142,9 @@ export async function createGuestCheckoutSession(
   }
 
   // Claim token: binds this browser to the Checkout session. Reused from
-  // the cookie when present so parallel-tab submits share one token (and
-  // therefore one Stripe idempotency key → one session). httpOnly: the
+  // the cookie when present so every tab of this browser is ONE buying
+  // party — it is the key the sweep below remembers the previous session
+  // under (a guest has no Stripe customer to list sessions by). httpOnly: the
   // /welcome page compares it server-side against the session's
   // client_reference_id before minting a sign-in ticket; client JS must
   // never be able to read or fake it.
@@ -159,14 +165,10 @@ export async function createGuestCheckoutSession(
   if (!priceId) {
     throw new Error("Stripe price for monthly not configured");
   }
-  // $1/3-day intro trial is mandatory once live — fail loud rather than
-  // silently charge $38 today against the "$1 for 3 days" copy.
-  const trialFeePriceId = process.env.STRIPE_PRICE_TRIAL_FEE;
-  if (!trialFeePriceId) {
-    throw new Error("Stripe trial fee price not configured");
-  }
   const stripe = getStripe();
-  const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  // Refuses on a deployment with no usable origin instead of charging the
+  // card and returning the buyer to localhost (#202).
+  const origin = checkoutOrigin();
 
   // After payment, Stripe sends the top frame to /welcome, which verifies the
   // session + the claim cookie and signs the buyer in. Used as return_url in
@@ -227,65 +229,39 @@ export async function createGuestCheckoutSession(
     ...analyticsMetadata,
   };
 
-  // One session per (claim token, hour, request-variant): parallel-tab
-  // submits with identical params replay the same Checkout session, but a
-  // changed-intent retry within the hour (a new resume playhead, a
-  // different show/ep on cancel-and-retry, a rotated mobile IP in capi_ip,
-  // a fresh attribution_last, a locale switch) MUST get a new session —
-  // Stripe 400s `idempotency_error` when the same key is replayed with
-  // different params, which would otherwise dead-end the only anonymous
-  // purchase path until the hour rolls. The variant digest folds the
-  // drifting parts into the key so only true duplicates collide.
   // Embedded (in-site iframe) when a publishable key is configured, else the
-  // hosted-redirect fallback. Folded into the idempotency variant so the same
-  // claim token can't collide an embedded session with a hosted one across a
-  // deploy that flips the key (Stripe 400s on a key replayed with different
-  // params — see below).
+  // hosted-redirect fallback.
   const embedded = embeddedCheckoutEnabled() && !inApp;
   // NB: pinned Stripe API (2026-04-22.dahlia) names the value 'embedded_page'.
   const urlParams = embedded
     ? { ui_mode: "embedded_page" as const, return_url: successUrl }
     : { success_url: successUrl, cancel_url: cancelUrl };
 
-  const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
-  const variant = crypto
-    .createHash("sha256")
-    .update(
-      JSON.stringify({ successUrl, cancelUrl, sessionMetadata, locale, embedded }),
-    )
-    .digest("hex")
-    .slice(0, 16);
-  const idempotencyKey = `checkout:guest:${claimToken}:${hourBucket}:${variant}`;
-
+  // No idempotency key, for the same reason the signed-in flow dropped its
+  // own (#217, ADR 0002): a key that folds drifting request snapshots (the
+  // resume playhead, capi_ip, attribution_last, the consent cookie) into a
+  // digest is not "one session per buyer" — every drift is a second key and
+  // a second live, billable session — and next to a sweep it is actively
+  // harmful, because Stripe replays the CACHED first response for a key,
+  // `status: 'open'` included, long after a newer session's sweep has expired
+  // it. The invariant is enforced by the sweep right below instead; the brake
+  // on session creation is guestCheckoutRateLimited above.
   const session = await stripe.checkout.sessions.create(
-    {
-      mode: "subscription",
-      // Deliberately NO `customer` (none exists yet — Stripe creates one
-      // from the email typed on the checkout form) and NO `customer_update`
-      // (Stripe rejects it without an existing customer; the collected
-      // billing address lands on the new customer automatically).
-      client_reference_id: claimToken,
-      line_items: checkoutLineItems(priceId, trialFeePriceId),
-      ...urlParams,
-      subscription_data: {
-        // $1 today, 3-day trial, then $38/mo (see lib/checkout-trial.ts).
-        ...TRIAL_SUBSCRIPTION_DATA,
-        metadata: sessionMetadata,
-      },
-      // Stripe Tax + EU withdrawal waiver: identical to the signed-in flow
-      // (see app/subscribe/actions.ts for the rationale on each).
-      automatic_tax: { enabled: true },
-      billing_address_collection: "required",
-      consent_collection: { terms_of_service: "required" },
-      custom_text: {
-        terms_of_service_acceptance: {
-          message: t.subscribe.withdrawalWaiver,
-        },
-      },
+    buildCheckoutSessionParams({
+      priceId,
+      urlParams,
+      subscriptionMetadata: sessionMetadata,
       locale,
-    },
-    { idempotencyKey },
+      withdrawalWaiver: t.subscribe.withdrawalWaiver,
+      clientReferenceId: claimToken,
+    }),
   );
+
+  // Not more than one open session per buying party (#224) — the guest half
+  // of createSoleOpenSession. Create-then-sweep, so two same-instant creates
+  // cannot both believe they were first; fail closed, so a client secret is
+  // handed out only once the previous session is provably not payable.
+  await expirePreviousGuestSession(stripe, claimToken, session.id);
 
   // Checkout-intent signals, server-side before the redirect (browser
   // beacons race the cross-origin navigation — see startCheckout). No
@@ -314,7 +290,7 @@ export async function createGuestCheckoutSession(
             clientUserAgent: capiIdentity?.ua,
           },
           customData: {
-            value: TRIAL_FEE_VALUE,
+            value: MEMBERSHIP_VALUE,
             currency: MEMBERSHIP_CURRENCY,
             content_type: "product",
             content_ids: ["matio-membership"],
@@ -330,7 +306,7 @@ export async function createGuestCheckoutSession(
             distinctId: phDistinctId,
             event: "checkout_started",
             properties: {
-              value: TRIAL_FEE_VALUE,
+              value: MEMBERSHIP_VALUE,
               currency: MEMBERSHIP_CURRENCY,
               flow: "pay_first",
               ...(attribution.first.source
@@ -356,10 +332,110 @@ export async function createGuestCheckoutSession(
     if (!session.client_secret) {
       throw new Error("Stripe did not return an embedded client secret");
     }
-    return { kind: "embedded", clientSecret: session.client_secret };
+    return {
+      kind: "embedded",
+      clientSecret: session.client_secret,
+      sessionId: session.id,
+    };
   }
   if (!session.url) throw new Error("Stripe did not return a session URL");
   return { kind: "hosted", url: session.url };
+}
+
+// The guest sweep (#224, ADR 0002). A signed-in buyer's other open sessions
+// are found at Stripe by customer; a guest has no customer before payment and
+// Stripe's list cannot filter by `client_reference_id`, so the previous session
+// is remembered on our side under an HMAC of the claim cookie
+// (guest_checkout_sessions) and expired BY ID: claimSoleGuestSession swaps the
+// new id in and hands the old one back in one statement, so of two parallel
+// tabs the later claim always sees the earlier tab's session and closes it.
+//
+// Fail closed, like createSoleOpenSession: if the id cannot be recorded (a DB
+// error here is NOT the rate limiter's fail-open — an unrecorded session is
+// one the NEXT creation can never find and expire, i.e. two live sessions) or
+// the previous session cannot be proven closed, the new session is expired
+// (best effort) and the error propagates. Logged by session ids and error
+// class only — never the claim token, never the buyer.
+//
+// The claim runs BEFORE the expire (it is what tells us which id to expire),
+// so by the time an expire fails the table already names the NEW session. If
+// the previous one is then left open — Stripe 429/5xx, `retrieve` still says
+// `open` — that open session would be on record nowhere: the next checkout
+// would be handed the id of the session closed below, find nothing to expire,
+// and the buyer would hold two live sessions again (the #224 defect, one
+// step later). So on that path the claim is ROLLED BACK — `previous` is
+// written back with the same upsert — before the error leaves; the next
+// checkout then tries the same session again. If the rollback displaces a
+// third tab's id (it claimed in the meantime), that tab's session stays live
+// and unrecorded: logged by ids, accepted as a residual (ADR 0002, registry).
+async function expirePreviousGuestSession(
+  stripe: ReturnType<typeof getStripe>,
+  claimToken: string,
+  newSessionId: string,
+): Promise<void> {
+  const claimTokenHash = hashClaimToken(claimToken);
+  let previous: string | null = null;
+  // Set once the claim has returned: from here on a failure means the table
+  // names the new session while `previous` may still be open.
+  let claimed = false;
+  try {
+    previous = await claimSoleGuestSession(db, claimTokenHash, newSessionId);
+    claimed = true;
+    if (previous && previous !== newSessionId) {
+      await expireIfOpen(stripe, previous);
+    }
+  } catch (err) {
+    console.error(
+      "startGuestCheckout: could not expire the buyer's previous open session — closing the new one",
+      {
+        sessionId: newSessionId,
+        previousSessionId: previous,
+        error: describeError(err),
+      },
+    );
+    if (claimed && previous && previous !== newSessionId) {
+      await rollBackGuestClaim(claimTokenHash, previous, newSessionId);
+    }
+    await stripe.checkout.sessions.expire(newSessionId).catch((closeErr) => {
+      console.error("startGuestCheckout: closing the new session failed too", {
+        sessionId: newSessionId,
+        error: describeError(closeErr),
+      });
+    });
+    throw err;
+  }
+}
+
+// Puts `previous` back on record after its expire failed (see above). Only
+// reached when expireIfOpen threw, i.e. the session is still open or its
+// state could not be read — never when Stripe reported it closed (nothing to
+// keep on record then). Best effort: the error is already on its way out.
+async function rollBackGuestClaim(
+  claimTokenHash: string,
+  previous: string,
+  newSessionId: string,
+): Promise<void> {
+  try {
+    const displaced = await claimSoleGuestSession(db, claimTokenHash, previous);
+    if (displaced !== newSessionId) {
+      // A third tab claimed between our claim and this rollback: its session
+      // is live and now off the record. Third-order residual — logged, not
+      // handled (ADR 0002 "Accepted residuals", registry).
+      console.error(
+        "startGuestCheckout: rolling back the claim displaced a newer session — it stays open and unrecorded",
+        { previousSessionId: previous, displacedSessionId: displaced, sessionId: newSessionId },
+      );
+    }
+  } catch (rollbackErr) {
+    // The table still names the session being closed; the previous one stays
+    // open and unrecorded until it expires on its own (≤24h) — a double
+    // fault (Stripe AND the database), logged so it can be seen.
+    console.error("startGuestCheckout: rolling back the claim failed — the previous session stays unrecorded", {
+      previousSessionId: previous,
+      sessionId: newSessionId,
+      error: describeError(rollbackErr),
+    });
+  }
 }
 
 // posthog-js persists {distinct_id} in a `ph_<key>_posthog` cookie. Reading

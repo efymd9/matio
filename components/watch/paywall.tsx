@@ -3,10 +3,20 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { Show, SignInButton, SignUpButton } from "@clerk/nextjs";
+import dynamic from "next/dynamic";
 import { OpenInBrowserHint } from "@/components/watch/open-in-browser-hint";
 import { TONE_GRADIENT, WALL_SCRIM } from "@/lib/design";
 import { useT } from "@/lib/i18n/client";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
+
+// Stripe.js is ~200KB and only ever needed by a signed-in viewer who is
+// actually looking at the wall with a key configured — keep it out of the
+// player's bundle the same way the Paywall itself is kept out.
+const WalletExpressCheckout = dynamic(
+  () =>
+    import("./wallet-express-checkout").then((m) => m.WalletExpressCheckout),
+  { ssr: false },
+);
 
 // Trial-end prompt. The conversion path is:
 //   trial ends → "Sign up to keep watching" → Clerk sign-up modal
@@ -28,6 +38,7 @@ export function Paywall({
   variant = "trial",
   episodeId,
   payFirst = false,
+  walletPublishableKey = null,
 }: {
   showSlug: string;
   resumeSeconds?: number;
@@ -47,6 +58,13 @@ export function Paywall({
   // (account created after payment) instead of opening Clerk sign-up.
   // Signed-in non-subscribers keep the /subscribe path either way.
   payFirst?: boolean;
+  // Stripe publishable key (runtime-read server-side). When present, a
+  // signed-in viewer gets the in-place Apple Pay / Google Pay button (#210)
+  // ABOVE the existing CTA, so the wall itself can take the payment. The
+  // server still decides whether a session may be created at all — the flag,
+  // the webview check and the duplicate guards all live there — so a key here
+  // is permission to try, not permission to pay.
+  walletPublishableKey?: string | null;
 }) {
   const t = useT();
 
@@ -194,6 +212,25 @@ export function Paywall({
               </Link>
             </Show>
           </div>
+
+          {/* In-place wallet payment (#210). Signed-in only in v1 — the guest
+              path additionally mints a Clerk account from the wallet's email
+              and is a separate PR. Rendered BELOW the card CTA, which stays
+              visible: Apple's Acceptable Use Guidelines require Apple Pay to
+              sit alongside other payment methods with equal prominence, not
+              to replace them. Renders nothing at all when no key is
+              configured, when the server declines, or when the device has no
+              wallet — the CTA above is always the complete offer on its own. */}
+          {walletPublishableKey ? (
+            <Show when="signed-in">
+              <WalletExpressCheckout
+                showSlug={showSlug}
+                episodeId={episodeId}
+                resumeSeconds={resumeSeconds}
+                publishableKey={walletPublishableKey}
+              />
+            </Show>
+          ) : null}
 
           {payFirst ? (
             <Show when="signed-out">

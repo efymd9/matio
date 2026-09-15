@@ -22,6 +22,7 @@ import { saveWatchSegmentsFor } from "@/lib/watch-segments-write";
 import {
   getOrderedReadyEpisodeIds,
   showHasTierGating,
+  resolveEffectiveTier,
 } from "@/lib/episode-access";
 import {
   TRIAL_COOKIE,
@@ -64,16 +65,23 @@ export async function saveWatchSegments(episodeId: string, buckets: number[]) {
     return;
   }
   // Anonymous flushes are only legitimate where anonymous playback exists:
-  // open free mode (no signup gate). Signup-gate era → signed-in only;
-  // paid-mode anonymous previews are deliberately excluded (a 60s-capped
-  // preview cohort would paint a fake everyone-leaves-at-60s cliff onto
-  // the episode's retention curve). Open free mode has no positional gate
-  // on the web, hence maxPosition: null.
-  if (paymentsEnabled() || signupRequired()) return;
+  // open free mode, and — since #198 — a free-tier episode under the signup
+  // gate. Paid-mode anonymous previews stay deliberately excluded (a
+  // 60s-capped preview cohort would paint a fake everyone-leaves-at-60s
+  // cliff onto the episode's retention curve). Neither free-mode shape has
+  // a positional gate on the web, hence maxPosition: null.
+  if (paymentsEnabled()) return;
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   if (!sessionToken) return;
   await saveWatchSegmentsFor(
-    { kind: "anonymous", sessionToken, maxPosition: null },
+    {
+      kind: "anonymous",
+      sessionToken,
+      maxPosition: null,
+      // Under the gate only a free episode was anonymously playable; the
+      // write refuses the rest on the row it already reads (#198).
+      freeTierOnly: signupRequired(),
+    },
     episodeId,
     buckets,
   );
@@ -133,14 +141,13 @@ export async function saveTrialPosition(
   // Free pivot: with payments off every episode is anonymously playable as
   // the free tier, so every save takes the full-tracking branch (no 60s
   // cap, no member/tier-gating rejects) — mirrors the token route.
-  // Signup gate: anonymous playback doesn't exist, so an anonymous save is
-  // by definition forged/stale — coerce to member (reject, no write),
-  // mirroring the token route's coercion.
-  const access = paymentsEnabled()
-    ? row.access
-    : signupRequired()
-      ? "member"
-      : "free";
+  // Signup gate: only a free episode is anonymously playable, so only it
+  // may write; a save for anything above it is forged or stale and is
+  // rejected — the same resolveEffectiveTier the token route mints from.
+  const access = resolveEffectiveTier(row.access, {
+    paymentsOn: paymentsEnabled(),
+    signupGate: signupRequired(),
+  });
   if (access === "free") {
     const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
     const position = orderedIds.indexOf(episodeId) + 1;

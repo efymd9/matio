@@ -7,6 +7,7 @@ import { auth } from "@clerk/nextjs/server";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  episodeChoices,
   episodes,
   seasons,
   shows,
@@ -14,18 +15,23 @@ import {
   watchProgress,
 } from "@/db/schema";
 import { Player, type PlayerEpisode } from "@/components/watch/player";
+import type { PlayerChoice } from "@/lib/branching";
 import { WatchShell } from "@/components/watch/watch-shell";
 import { CompleteRegistrationPixel } from "@/components/site/complete-registration-pixel";
 import { PurchaseBeacon } from "@/components/site/purchase-beacon";
 import { verifyCheckoutReturn } from "@/lib/checkout-return-verify";
 import { Icon } from "@/components/site/icon";
 import { muxThumbnailUrl } from "@/lib/mux-token";
-import { getDict } from "@/lib/i18n/server";
+import { getDict, getLocale } from "@/lib/i18n/server";
+import type { Locale } from "@/lib/i18n/dictionaries";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import {
   applyUserAttribution,
   readAttributionCookies,
 } from "@/lib/attribution";
+import { resolveEffectiveTier } from "@/lib/episode-access";
+import { getPublishableKey } from "@/lib/checkout-session";
+import { walletCheckoutEnabled } from "@/lib/wallet-checkout";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import {
@@ -45,6 +51,18 @@ import { linkVisitorToUser } from "@/lib/visitor";
 export const metadata: Metadata = {
   robots: { index: false, follow: true },
 };
+
+// Fork copy lives on the rows in both site locales (#143); the player gets
+// ONE string per field, picked here. A row missing one locale falls back to
+// the other rather than to nothing — the admin form requires both for a
+// real fork, so this only ever covers a half-typed silent transition.
+function inLocale(
+  locale: Locale,
+  es: string | null,
+  en: string | null,
+): string | null {
+  return locale === "es" ? (es || en) : (en || es);
+}
 
 export default async function WatchPage({
   params,
@@ -98,20 +116,21 @@ export default async function WatchPage({
       access: episodes.access,
       introStartSeconds: episodes.introStartSeconds,
       introEndSeconds: episodes.introEndSeconds,
+      branchOfEpisodeId: episodes.branchOfEpisodeId,
+      forkPromptEn: episodes.forkPromptEn,
+      forkPromptEs: episodes.forkPromptEs,
+      forkWindowSeconds: episodes.forkWindowSeconds,
     })
     .from(episodes)
     .where(
       and(
         inArray(episodes.seasonId, seasonIds),
         eq(episodes.status, "ready"),
-        // Branching video, PR 1 of 2 (#143): branches stay off this page
-        // entirely. The Player's `episodes` prop feeds BOTH its episodes
-        // overlay and its `episodes[idx + 1]` auto-advance, so until PR 2
-        // (#144) teaches it about choices, a branch in that array would be
-        // listed in the overlay and auto-played after the last linear
-        // episode. PR 2 threads the branches through as playable-but-
-        // unlisted; this filter is the seam it replaces.
-        isNull(episodes.branchOfEpisodeId),
+        // Branching video (#144): branches are INCLUDED — playable but
+        // unlisted. The Player keeps them in its `episodes` array (a
+        // choice or a ?ep= deep link lands on one) and filters every list
+        // it renders through listedEpisodes(); its transition reads the
+        // choice graph (resolveCandidates), never `episodes[idx + 1]`.
       ),
     )
     .orderBy(asc(episodes.seasonId), asc(episodes.number));
@@ -129,6 +148,49 @@ export default async function WatchPage({
     return sa - sb || a.number - b.number;
   });
 
+  // Branching (#144): the edges of every ready episode in one query,
+  // grouped by parent. Labels and the prompt are picked in the SITE locale
+  // here — the player never reads the locale for row copy (its dictionary
+  // covers only the prompt's own chrome). Targets are resolved against the
+  // playable array client-side (resolveCandidates drops a missing one).
+  // The query runs only for a show that HAS a branch — this page is
+  // force-dynamic, so a linear show would otherwise pay it on every render
+  // (a choice between two listed episodes with no branch anywhere in the
+  // show is not a case the admin form produces on purpose, and is not
+  // honoured).
+  const locale = await getLocale();
+  const hasBranches = ordered.some((e) => e.branchOfEpisodeId !== null);
+  const edges = hasBranches
+    ? await db
+        .select({
+          fromEpisodeId: episodeChoices.fromEpisodeId,
+          toEpisodeId: episodeChoices.toEpisodeId,
+          position: episodeChoices.position,
+          labelEn: episodeChoices.labelEn,
+          labelEs: episodeChoices.labelEs,
+          isDefault: episodeChoices.isDefault,
+        })
+        .from(episodeChoices)
+        .where(
+          inArray(
+            episodeChoices.fromEpisodeId,
+            ordered.map((e) => e.id),
+          ),
+        )
+        .orderBy(asc(episodeChoices.position))
+    : [];
+  const choicesByParent = new Map<string, PlayerChoice[]>();
+  for (const edge of edges) {
+    const list = choicesByParent.get(edge.fromEpisodeId) ?? [];
+    list.push({
+      toEpisodeId: edge.toEpisodeId,
+      position: edge.position,
+      label: inLocale(locale, edge.labelEs, edge.labelEn) ?? "",
+      isDefault: edge.isDefault,
+    });
+    choicesByParent.set(edge.fromEpisodeId, list);
+  }
+
   // Tier-gated iff any ready episode is open below the subscriber tier
   // (mirrors showHasTierGating in lib/episode-access.ts). All-subscriber
   // shows keep the legacy 60s-trial flow below.
@@ -140,15 +202,25 @@ export default async function WatchPage({
   // route) is load-bearing. The legacy 60s-trial branch and the
   // expired-trial redirect below become unreachable.
   //
-  // Signup gate (REQUIRE_SIGNUP=1, free mode only): anonymous visitors get
-  // the episodes presented as the MEMBER tier instead — every episode reads
-  // locked in mode="free", so the player renders the SignupWall full-surface
-  // with zero token fetches (the same prop-driven path a member-tier deep
-  // link takes in paid mode). Signed-in viewers are in mode="member" where
-  // the member tier is unlocked, so they play everything unchanged.
+  // Signup gate (REQUIRE_SIGNUP=1, free mode only): the admin's per-episode
+  // tier decides (resolveEffectiveTier) — a free episode plays for anyone,
+  // anything above it reads locked in mode="free" and the player renders the
+  // SignupWall full-surface with zero token fetches (the same prop-driven
+  // path a member-tier deep link takes in paid mode). Signed-in viewers are
+  // in mode="member" where the member tier is unlocked, so they play
+  // everything unchanged.
   const paymentsOn = paymentsEnabled();
   const signupGate = signupRequired();
-  const gated = !paymentsOn || ordered.some((e) => e.access !== "subscriber");
+  // Listed episodes only — the twin of showHasTierGating's
+  // `isNull(branchOfEpisodeId)` (lib/episode-access.ts): since #144 `ordered`
+  // carries the branches too, and a hidden free/member branch must not flip
+  // an all-subscriber show to per-episode walls in paid mode. Keep the two
+  // predicates identical.
+  const gated =
+    !paymentsOn ||
+    ordered.some(
+      (e) => e.branchOfEpisodeId === null && e.access !== "subscriber",
+    );
 
   const playable: PlayerEpisode[] = ordered
     .filter((e) => !!e.muxPlaybackId)
@@ -174,11 +246,11 @@ export default async function WatchPage({
         introStartSeconds: e.introStartSeconds,
         introEndSeconds: e.introEndSeconds,
         thumbnailUrl,
-        tier: paymentsOn
-          ? e.access
-          : signupGate
-            ? ("member" as const)
-            : ("free" as const),
+        tier: resolveEffectiveTier(e.access, { paymentsOn, signupGate }),
+        branchOfEpisodeId: e.branchOfEpisodeId,
+        forkPrompt: inLocale(locale, e.forkPromptEs, e.forkPromptEn),
+        forkWindowSeconds: e.forkWindowSeconds,
+        choices: choicesByParent.get(e.id) ?? null,
       };
     });
 
@@ -187,7 +259,9 @@ export default async function WatchPage({
   }
 
   // Resolve ?ep=<id>; fall back to first playable when the query param
-  // doesn't match (treat unknown ids as "start over").
+  // doesn't match (treat unknown ids as "start over"). A branch id resolves
+  // too (#144) — the continue-watching tile and the post-signup redirect
+  // land on the branch itself, and the player prints its parent's number.
   const initial = epParam
     ? (playable.find((e) => e.id === epParam) ?? playable[0])
     : playable[0];
@@ -310,6 +384,11 @@ export default async function WatchPage({
       // signup_completed) historically fired on /subscribe; this flow
       // returns users here instead. Same deduped component + same
       // localStorage flag → no double-fires for users who saw /subscribe.
+      // Same runtime read as the other branches (see the note there). THIS is
+      // the branch the wallet button exists for: a signed-in non-subscriber
+      // whose member tier ran out is looking at the subscription paywall.
+      const walletKey = walletCheckoutEnabled() ? getPublishableKey() : null;
+
       const { first: firstTouch } = await readAttributionCookies();
       const signupUtm: Record<string, string> = {};
       if (firstTouch.source) signupUtm.utm_source = firstTouch.source;
@@ -331,6 +410,7 @@ export default async function WatchPage({
             initialEpisodeId={initial.id}
             resumeSeconds={queryResume ?? resumeFromProgress}
             userEmail={userEmail}
+            walletPublishableKey={walletKey}
             freeMode={!paymentsOn}
           />
         </WatchShell>
@@ -342,6 +422,12 @@ export default async function WatchPage({
     // position. payFirst routes the wall's signed-out CTA straight to
     // guest Stripe Checkout (PAY_FIRST_CHECKOUT flag).
     const payFirst = process.env.PAY_FIRST_CHECKOUT === "1";
+    // Runtime read (getPublishableKey), never an inlined `process.env
+    // .NEXT_PUBLIC_…`: the key can be added to an already-built deployment and
+    // Vercel reuses Next's inlined client chunks across an env-only change.
+    // Null unless the wallet flag is on too, so the paywall mounts nothing —
+    // and pulls no Stripe.js — while the vertical is dark. (#210)
+    const walletKey = walletCheckoutEnabled() ? getPublishableKey() : null;
     const freeSessionToken =
       (await cookies()).get(TRIAL_COOKIE)?.value ?? null;
     const freeSession = freeSessionToken
@@ -366,9 +452,10 @@ export default async function WatchPage({
         <Player
           mode="free"
           orientation={show.orientation}
-          // Gate sessions render the SignupWall before any playback — skip
-          // the muted-autoplay capability probe they could never use.
-          autoplay={signupGate ? false : autoplay}
+          // A gated start renders the SignupWall before any playback — skip
+          // the muted-autoplay capability probe it could never use. A free
+          // first episode under the same gate autoplays like any other.
+          autoplay={freeInitial.tier === "free" ? autoplay : false}
           showId={show.id}
           showSlug={show.slug}
           showTitle={show.title}
@@ -377,6 +464,7 @@ export default async function WatchPage({
           resumeSeconds={queryResume ?? freeResume}
           userEmail={userEmail}
           payFirst={payFirst}
+          walletPublishableKey={walletKey}
           freeMode={!paymentsOn}
           signupGate={signupGate}
         />
@@ -408,6 +496,8 @@ export default async function WatchPage({
   // /subscribe would bounce an anonymous visitor off Clerk sign-up instead,
   // re-erecting exactly the wall the flag removes.
   const payFirst = process.env.PAY_FIRST_CHECKOUT === "1";
+  // See the note on the tier-gated branch: runtime read, gated on the flag.
+  const walletKey = walletCheckoutEnabled() ? getPublishableKey() : null;
   if (trial && !isTrialActive(trial) && !payFirst) {
     const sp = new URLSearchParams({ show: show.slug });
     // lastPositionSeconds is only meaningful for the user's first trial of
@@ -434,6 +524,7 @@ export default async function WatchPage({
         resumeSeconds={queryResume ?? (trial?.lastPositionSeconds || null)}
         userEmail={userEmail}
         payFirst={payFirst}
+        walletPublishableKey={walletKey}
       />
     </WatchShell>
   );

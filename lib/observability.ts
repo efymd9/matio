@@ -240,3 +240,23 @@ export function sentryPrivacyOptions(): SentryPrivacyOptions {
     beforeBreadcrumb: (breadcrumb) => scrubSentryBreadcrumb(breadcrumb),
   };
 }
+
+/**
+ * The loggable shape of a failed vendor call: class, vendor error code and HTTP
+ * status — never the message. Vendors quote what was sent (Stripe echoes request
+ * parameters, fetch errors carry URLs), so `err.message` in a log is how an
+ * address leaks. Moved here from the Clerk erasure route once the checkout paths
+ * needed the same answer (#214); both are covered by lib/log-audit.test.ts.
+ */
+export function describeError(err: unknown): {
+  name: string;
+  code?: string;
+  statusCode?: number;
+} {
+  const e = err as { name?: unknown; code?: unknown; statusCode?: unknown };
+  return {
+    name: typeof e?.name === "string" ? e.name : "unknown",
+    code: typeof e?.code === "string" ? e.code : undefined,
+    statusCode: typeof e?.statusCode === "number" ? e.statusCode : undefined,
+  };
+}

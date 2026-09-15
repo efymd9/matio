@@ -13,7 +13,7 @@
 
 | Хранилище | Регион | Что лежит | Ретеншен (факт) |
 |---|---|---|---|
-| **Neon Postgres**, проект `little-base-06482402`, ветка production | AWS eu-central-1 (Франкфурт) | все таблицы из §2 | бессрочно — джоб чистки нет (#162); PITR 6 ч |
+| **Neon Postgres**, проект `little-base-06482402`, ветка production | AWS eu-central-1 (Франкфурт) | все таблицы из §2 | по окнам §2: ежедневный крон `/api/cron/retention` (`lib/retention.ts`, Vercel Cron 04:10 UTC, политики = обещания `/privacy` §6) удаляет батчами `trial_sessions` (30 дн., анонимные), `visitors`+`visitor_days` (25 мес.), `watch_days` (25 мес.), отправленные `show_reminders` (30 дн. после отправки); остальное — с аккаунтом; PITR 6 ч |
 | Neon, ветка staging | тот же регион | только сид-данные (нет аккаунтов, истории, адресов — реестр) | — |
 | **Vercel Blob** `matio-blob` (public store) | Франкфурт | (а) артворк шоу + аватары виртуальных актёров — не персональное; (б) `db-backups/production/db-<UTC>.dump.age` — полный дамп базы, зашифрован age (публичный ключ в GH vars; приватный — менеджер паролей владельца + секрет `BACKUP_AGE_SECRET_KEY`), объект приватный | (б) 35 дней + самый свежий дамп всегда остаётся (`infra/backup/retention.ts`) |
 | **GitHub Actions**, раннер `ubuntu-latest` | США, эфемерный | `db-backup`: дамп в открытом виде во временном каталоге до шифрования (минуты, `trap rm`); `db-restore-check` (1-го числа): полное восстановление в открытом виде в контейнере Postgres 18 на время джобы; артефактов нет, наружу — одна строка со счётчиками | жизнь джобы |
@@ -23,13 +23,14 @@
 | **Stripe** (Stripe Payments Europe Ltd) | Ирландия + US-аффилиаты | Customer (email, billing name/address), способ оплаты (токен), инвойсы, Subscription с `metadata` (см. §3) | по правилам Stripe; инвойсы — налоговые записи (6–10 лет) |
 | **Mux** | США | видеоассеты (контент, не персональное); CDN-логи доставки (IP/UA зрителя на каждом сегменте — инфраструктура Mux); Mux Data (по согласию): cookie viewer-id, QoE, watch time | по правилам Mux |
 | **Resend** | США (отправка из eu-west-1) | адрес получателя, тема, тело письма (название шоу/эпизода, логлайн, подписанный URL кадра), события доставки | логи 30 дней (Free/Pro/Scale) |
-| **PostHog Cloud EU** | Франкфурт | события с `distinct_id` (анонимный uuid → Clerk id после `identify`), свойства персоны `{email}`, супер-свойства `locale`/`locale_source`, session replay (все input/text замаскированы), `$ip`/geo, referrer/utm | по плану PostHog (уточнить) |
+| **PostHog Cloud EU** | Франкфурт | события с `distinct_id` (анонимный uuid → Clerk id после `identify`), свойства персоны `{email}`, супер-свойства `locale`/`locale_source`, session replay (все input/text замаскированы), `$ip`/geo, referrer/utm | по плану PostHog (уточнить); при стирании аккаунта person по `distinct_id` = Clerk id удаляется вместе с событиями И записями сессий (`delete_events=true&delete_recordings=true`, `lib/posthog-erase.ts`, best-effort, #180) |
 | **Meta** (Pixel + CAPI) | Ирландия / США | браузерные события с `_fbp`/`_fbc`, IP/UA запроса; CAPI `Purchase` с SHA-256 email, SHA-256 Clerk id, `_fbp`, `_fbc`, сырой IP, UA | по правилам Meta |
 | **Google** (GA4) | Ирландия / США | `page_view` и события gtag, client id `_ga`; user_id/email кодом не передаются | настройка ретеншена событий в свойстве GA4 (2 или 14 мес. — уточнить) |
 | **OpenAI** (ChatGPT Ads pixel `oaiq`) | Ирландия / США | `page_viewed`, `registration_completed`/`subscription_created` с `event_id` = `signup:<Clerk id>` или Stripe subscription id, `plan_id`, `amount`, `currency`; cookie `__oppref` (click id), IP/UA запроса | по правилам OpenAI |
 | **Sentry** (org-регион EU) | ЕС | ошибки/трейсы: `user.id` (Clerk id) и только он, URL без query, UA, `content-type`/`content-length`; без cookies, тел, breadcrumbs консоли, replay, feedback | ошибки 30/90 дней по плану |
 | **Устройство — браузер** | у пользователя | cookies (таблица в §4), `localStorage`-флаги дедупа событий (`matio:fb:lead`, `matio:fb:creg:<Clerk id>`, `matio:ph:signup:<Clerk id>`, `matio:oaiq:signup:<Clerk id>`, `matio:oaiq:purchase:<sub id>`), настройки media-chrome (mute) | до очистки браузера |
 | **Устройство — приложение (Expo)** | у пользователя | `expo-secure-store`: Clerk session JWT; `matio_device_id` — UUID (аналог `matio_aid`; **iOS keychain переживает переустановку**); `matio_locale` — выбранный язык (`es`/`en`, предпочтение, не идентификатор; #96). Только в памяти процесса (не на диске): очередь неотправленных 10-секундных бакетов просмотра — `episode_id` + номера бакетов, без позиции и без идентификатора (`mobile/src/watch/segment-queue.ts`, #97) | SecureStore — до удаления/сброса; очередь — до закрытия приложения |
+| **Машина оператора** (ответ на запрос субъекта, #163) | у оператора | `export-<Clerk id>-<дата>.json` от `pnpm export-user-data` — полная запись ОДНОГО человека (восемь таблиц §2 + профиль Clerk, Customer/инвойсы Stripe, персона/события PostHog), права `0600`; при отправке — зашифрованный архив (`age -p`) | до отправки ответа, затем удалить (`docs/runbooks/gdpr-requests.md` §3, шаг 5); в репозиторий, issue и чат агента не попадает |
 
 ## 2. Таблицы по чувствительности
 
@@ -40,16 +41,17 @@
 
 | Таблица | Персональные поля | Класс | Как стирается | Ретеншен |
 |---|---|---|---|---|
-| `users` | `id` (Clerk id), `email`, `role`, `stripe_customer_id`, `signup_origin`, `country`, `attribution_{first,last}_{source,medium,campaign}`, `created_at` | PII | корень каскада: вебхук Clerk `user.deleted` → `DELETE FROM users` (`app/api/webhooks/clerk/route.ts`; идемпотентно). До DELETE: живая подписка Stripe получает `cancel_at_period_end: true` (best-effort, лог + Sentry по id), а `stripe_customer_id` пишется в `erased_customers` (см. ниже) | пока есть аккаунт |
-| `erased_customers` | `stripe_customer_id`, `erased_at` | псевдо (только id клиента Stripe — ни адреса, ни Clerk id; без FK — строка `users` уже стёрта) | **не стирается — это тумбстоун**: `claimGuestCheckout` (единственный путь, создающий аккаунт из клиента Stripe) не запускается для id из этой таблицы — иначе следующий вебхук Stripe по клиенту (`guest = "1"` в метаданных подписки не истекает) воскресил бы Clerk-пользователя и `users` с адресом. Проверяется в `mirrorSubscription` (ветка «нет пользователя») и на `/welcome` (`lib/guest-checkout.ts:isErasedCustomer`) | бессрочно — «не воскрешать» не имеет срока: Stripe хранит клиента как налоговую запись годами, и его вебхуки могут прийти через годы. Ст. 17(3)(b)/(e)-образное основание: минимальная запись, нужная, чтобы стирание было необратимым |
+| `users` | `id` (Clerk id), `email`, `role`, `stripe_customer_id`, `signup_origin`, `country`, `attribution_{first,last}_{source,medium,campaign}`, `created_at` | PII | корень каскада: вебхук Clerk `user.deleted` → `lib/erase-user.ts:eraseUser` → `DELETE FROM users` (идемпотентно; тот же `eraseUser` руками — `pnpm erase-user <id> --apply`, #180). До DELETE: живая подписка Stripe получает `cancel_at_period_end: true` (best-effort, лог + Sentry по id), а в `erased_customers` (см. ниже) пишутся `stripe_customer_id` И все `cus_…`, которые `customers.search` находит по адресу аккаунта (#223). После DELETE: PostHog person по Clerk id + события (best-effort, `lib/posthog-erase.ts`) | пока есть аккаунт |
+| `erased_customers` | `stripe_customer_id`, `erased_at` | псевдо (только id клиента Stripe — ни адреса, ни Clerk id; без FK — строка `users` уже стёрта). Источник id при стирании: `users.stripe_customer_id` **плюс** все клиенты, которых `customers.search({ query: "email:'<адрес>'" })` находит по адресу аккаунта (#223 — гостевой checkout создаёт Customer из адреса на форме, поздняя покупка из-под аккаунта перезаписывает id в `users`, старого помнит только Stripe); поиск best-effort, одна страница ≤100, ДО `DELETE FROM users` (последний момент, когда адрес есть) и ТОЛЬКО при платёжном следе — `stripe_customer_id` или строка `subscriptions` (иначе `skipped_no_stripe_footprint`: адрес аккаунта эпохи free/gate в Stripe не уходит); из ответа тумбстоунятся только клиенты с ТОЧНО этим адресом (у Stripe `:` по строковому полю — «все слова по порядку», `a@b.com` вернул бы и `a@b.com.mx`), остальные пропускаются и только считаются; сбой — лог + Sentry по id, ручной путь в ранбуке §4 | **не стирается — это тумбстоун**: `claimGuestCheckout` (единственный путь, создающий аккаунт из клиента Stripe) не запускается для id из этой таблицы — иначе следующий вебхук Stripe по клиенту (`guest = "1"` в метаданных подписки не истекает) воскресил бы Clerk-пользователя и `users` с адресом. Проверяется в `mirrorSubscription` (ветка «нет пользователя») и на `/welcome` (`lib/guest-checkout.ts:isErasedCustomer`) | бессрочно — «не воскрешать» не имеет срока: Stripe хранит клиента как налоговую запись годами, и его вебхуки могут прийти через годы. Ст. 17(3)(b)/(e)-образное основание: минимальная запись, нужная, чтобы стирание было необратимым |
 | `subscriptions` | `user_id` → CASCADE, `stripe_subscription_id`, `status`, `plan`, `current_period_end`, `cancel_at_period_end`, `attribution_*`, `created_at`/`updated_at` | псевдо | каскад с `users` | с аккаунтом; налоговые записи — у Stripe, не здесь |
 | `watch_progress` | `user_id` → CASCADE, `episode_id`, `position_seconds`, `max_position_seconds`, `total_watched_seconds`, `completed`, `first_watched_at`, `updated_at` | псевдо (история просмотра) | каскад с `users` | с аккаунтом |
-| `watch_days` | `user_id` → CASCADE, `day` | псевдо | каскад с `users` | с аккаунтом (#162 — окно для аналитики) |
-| `trial_sessions` | `session_token` (UUID cookie `trial_session` **или** `matio_device_id` приложения), `show_id`, `started_at`/`expires_at`, `user_id` → SET NULL, `converted`, `last_position_seconds`, `ip_hash` (HMAC-SHA256 IP, соль = `MUX_SIGNING_KEY_PRIVATE_KEY`), `attribution_*`, `kind`, `furthest_episode_number`, `last_episode_id`, `signup_wall_at` | псевдо | при удалении аккаунта строка остаётся без `user_id`; иначе — ничем | бессрочно; `/privacy` обещает 30 дней (#162) |
-| `visitors` | `aid` (UUID cookie `matio_aid`), `first_seen_at`, `first_path`, `referrer` (сырой `document.referrer`, ≤300 символов — может нести чужие query-параметры), `utm_*`, `country`, `user_id` → SET NULL, `linked_at` | псевдо | при удалении аккаунта остаётся без `user_id`; иначе — ничем | бессрочно; `/privacy` обещает 25 месяцев (#162) |
-| `visitor_days` | `aid` → CASCADE от `visitors`, `day`, `landed_home`, `show_viewed`, `wall_seen` | псевдо | каскад с `visitors` | как `visitors` |
-| `show_reminders` | `email`, `show_id`, `user_id` → SET NULL, `locale`, `ip_hash`, `created_at`, `notified_at` | PII | `unsubscribeEmail` (все строки адреса, `lib/email-unsubscribe.ts`) и удаление аккаунта: `user.deleted` удаляет все строки по адресу аккаунта + по `user_id` до каскада (анонимные строки с другим адресом не затрагиваются — их стирает только отписка) | бессрочно, отправленные тоже (#162) |
-| `guest_checkout_attempts` | `ip_hash`, `window_start`, `count` | псевдо | самопрунинг строк старше 2 ч (`lib/checkout-rate-limit.ts`) | 2 ч |
+| `watch_days` | `user_id` → CASCADE, `day` | псевдо | каскад с `users`; крон ретеншена | **25 месяцев** по `day` (крон, `lib/retention.ts`; окно «Audience-measurement data» `/privacy` §6 — вошедшая половина той же метрики: WAU/new/returning/lost; самый длинный диапазон дашборда — 366 дней) |
+| `trial_sessions` | `session_token` (UUID cookie `trial_session` **или** `matio_device_id` приложения), `show_id`, `started_at`/`expires_at`, `user_id` → SET NULL, `converted`, `last_position_seconds`, `ip_hash` (HMAC-SHA256 IP, соль = `MUX_SIGNING_KEY_PRIVATE_KEY`), `attribution_*`, `kind`, `furthest_episode_number`, `last_episode_id`, `signup_wall_at` | псевдо | крон ретеншена (анонимные строки); при удалении аккаунта строка теряет `user_id` (SET NULL) и попадает под крон следующим прогоном | **30 дней** по `started_at` для строк без `user_id` (`/privacy` §6 «Trial sessions … 30 days»); строки с `user_id` — данные аккаунта, живут с ним («Account: while your account exists») и уезжают ≤30 дней после стирания. Строки приложения (device UUID) — те же анонимные строки; после удаления на следующем воспроизведении минтится свежая |
+| `visitors` | `aid` (UUID cookie `matio_aid`), `first_seen_at`, `first_path`, `referrer` (сырой `document.referrer`, ≤300 символов — может нести чужие query-параметры), `utm_*`, `country`, `user_id` → SET NULL, `linked_at` | псевдо | крон ретеншена; при удалении аккаунта остаётся без `user_id` до своего окна | **25 месяцев** по `first_seen_at` (`/privacy` §6 «Audience-measurement data … up to 25 months»), независимо от `user_id` — источник/страна регистрации уже проштампованы в `users` |
+| `visitor_days` | `aid` → CASCADE от `visitors`, `day`, `landed_home`, `show_viewed`, `wall_seen` | псевдо | каскад с `visitors` | как `visitors` — день не может быть раньше `first_seen_at`, так что каскад забирает всё |
+| `show_reminders` | `email`, `show_id`, `user_id` → SET NULL, `locale`, `ip_hash`, `created_at`, `notified_at` | PII | `unsubscribeEmail` (все строки адреса, `lib/email-unsubscribe.ts`) и удаление аккаунта: `user.deleted` удаляет все строки по адресу аккаунта + по `user_id` до каскада (анонимные строки с другим адресом не затрагиваются — их стирает только отписка); отправленные — крон ретеншена | ожидающие (`notified_at IS NULL`) — до отправки или отписки; **отправленные — 30 дней после `notified_at`** (крон; `/privacy` §6 напоминания не называет — взят самый короткий срок политики, совпадает с 30-дневным логом доставки Resend; пометка юристу в реестре). Индекса по `notified_at` нет — подзапрос крона идёт seq-scan с `LIMIT`, что при десятках строк дешевле миграции; порог: выше ~10⁴ строк — частичный индекс `WHERE notified_at IS NOT NULL` одной миграцией (существующий `show_reminders_show_id_pending_idx` — обратная популяция, крону не служит) |
+| `guest_checkout_attempts` | `ip_hash` (ключ бакета: HMAC-SHA256 IP гостя **или** `user:` + HMAC-SHA256 Clerk id аккаунта, #227 — та же соль `MUX_SIGNING_KEY_PRIVATE_KEY`, `lib/trial.ts:hashClientIp`; ни сырого IP, ни id, ни адреса — имя колонки историческое), `window_start`, `count` | псевдо (счётчик частоты создания Checkout Session: гость — 30/ч на IP, аккаунт — 10/ч, `AUTH_CHECKOUT_RATELIMIT_PER_HOUR`) | самопрунинг строк старше 2 ч (`lib/checkout-rate-limit.ts`); к аккаунту не привязывается никаким ключом, который мы держим — в экспорт ст. 15/20 не входит, каскада со стиранием нет (строка сама истекает раньше, чем стирание успевает понадобиться) | 2 ч |
+| `guest_checkout_sessions` | `claim_token_hash` (HMAC-SHA256 значения cookie `checkout_claim`, соль = `MUX_SIGNING_KEY_PRIVATE_KEY` — само значение не хранится: по нему `/welcome` минтит sign-in ticket), `session_id` (id Checkout Session Stripe), `created_at` | псевдо (технический ключ гостевого sweep'а «одна открытая сессия», #224; ни e-mail, ни Clerk id — у гостя их ещё нет) | самопрунинг строк старше 24 ч на 5 % вызовов (`lib/guest-checkout-sessions.ts`); в экспорт ст. 15/20 не входит — к человеку не привязывается никаким ключом, который мы держим | 24 ч (срок жизни самой Checkout Session у Stripe) |
 | `marketing_links` | `created_by` → SET NULL (id админа) | внутреннее | SET NULL | бессрочно (админские ссылки) |
 
 ### Не персональные (для полноты схемы)
@@ -71,8 +73,11 @@
 от `users`. Новые колонки `episodes.branch_of_episode_id` /
 `fork_prompt_en/es` / `fork_window_seconds` — тоже контент.
 `watch_segments` — счётчики по (эпизод, день,
-10-секундный бакет), агрегат. `stripe_events` — id событий Stripe для
-идемпотентности, растёт бессрочно (#162).
+10-секундный бакет), агрегат — крон ретеншена его не трогает (не о человеке;
+кривая удержания старого эпизода читается по всем дням). `stripe_events` — id
+событий Stripe для идемпотентности, растёт бессрочно: намеренно вне #162
+(персональных данных нет; окно — отдельное решение, строка в
+`docs/registry.md`).
 
 ## 3. Что уходит во внешние сервисы — дословно какие поля
 
@@ -83,9 +88,9 @@
 | Куда | Когда | Что именно (поля) | Гейт |
 |---|---|---|---|
 | **Clerk** | регистрация/вход; `claimGuestCheckout` | всё, что вводит пользователь в Clerk UI; сервер: `users.createUser({emailAddress:[email], skipPasswordRequirement:true})`, `signInTokens.createSignInToken` (id) | договор |
-| **Stripe** | `createAuthCheckoutSession` / `createGuestCheckoutSession` | `customers.create({email, metadata:{userId}})`; Checkout Session `locale`, `client_reference_id` (claim token); `subscription_data.metadata`: `userId`, `attr_first_*`/`attr_last_*` (UTM), `capi_consent`, `capi_ip` (сырой IP), `capi_ua`, `capi_fbp`, `capi_fbc` — **только до `Purchase`**: сразу после события `mirrorSubscription` стирает четыре сигнала (`subscriptions.update`, пустая строка = удаление ключа; best-effort, следующий вебхук с теми же ключами повторяет; `capi_consent` остаётся — флаг, не данные), `ph_consent`, `guest`, `claim_token`, `trial_token`; billing address и карта — вводятся у Stripe | договор; `capi_*` и `ph_*` — только при маркетинговом согласии; подписки до #165 и те, чьи события ушли в ранний выход зеркала (нет локального юзера / неизвестная цена), чистит `pnpm stripe:scrub-capi` (явный `STRIPE_SECRET_KEY`, dry-run по умолчанию) |
-| **Stripe** | `createAuthCheckoutSession` / `createGuestCheckoutSession` | `customers.create({email, metadata:{userId}})`; Checkout Session `locale`, `client_reference_id` (claim token); `subscription_data.metadata`: `userId`, `attr_first_*`/`attr_last_*` (UTM), `capi_consent`, **`capi_ip` (сырой IP)**, **`capi_ua`**, `capi_fbp`, `capi_fbc`, `ph_consent`, `guest`, `claim_token`, `trial_token`; billing address и карта — вводятся у Stripe | договор; `capi_*` и `ph_*` — только при маркетинговом согласии; `capi_ip/ua` не чистятся после использования (#165) |
-| **Stripe** (стирание) | вебхук Clerk `user.deleted` | `subscriptions.update(<sub id>, {cancel_at_period_end: true})` — только id подписки, ничего о пользователе; Customer не удаляется (`customers.del` — решение владельца, `docs/registry.md`) | ст. 17 — исполнение запроса |
+| **Stripe** | `createAuthCheckoutSession` / `createGuestCheckoutSession` | `customers.create({email, metadata:{userId}})`; Checkout Session `locale`, `client_reference_id` (claim token); `subscription_data.metadata`: `userId`, `attr_first_*`/`attr_last_*` (UTM), `capi_consent`, `capi_ip` (сырой IP), `capi_ua`, `capi_fbp`, `capi_fbc` — **только до `Purchase`**: сразу после события `mirrorSubscription` стирает четыре сигнала (`subscriptions.update`, пустая строка = удаление ключа; best-effort, следующий вебхук с теми же ключами повторяет; `capi_consent` остаётся — флаг, не данные), `ph_consent`, `guest`, `claim_token`, `trial_token`, **`tos_version`** (только кошелёк на paywall, #210/#214 — см. ниже; метки времени нет); billing address и карта — вводятся у Stripe | договор; `capi_*` и `ph_*` — только при маркетинговом согласии; подписки до #165 и те, чьи события ушли в ранний выход зеркала (нет локального юзера / неизвестная цена), чистит `pnpm stripe:scrub-capi` (явный `STRIPE_SECRET_KEY`, dry-run по умолчанию) |
+| **Stripe** (стирание) | вебхук Clerk `user.deleted` / `pnpm erase-user --apply` | `subscriptions.update(<sub id>, {cancel_at_period_end: true})` — только id подписки, ничего о пользователе; Customer не удаляется (`customers.del` — решение владельца, `docs/registry.md`) | ст. 17 — исполнение запроса |
+| **PostHog** (стирание, `lib/posthog-erase.ts`) | вебхук Clerk `user.deleted` / `pnpm erase-user --apply` — ПОСЛЕ локальных DELETE | `GET persons/?distinct_id=<Clerk id>` → `DELETE persons/{id}/?delete_events=true&delete_recordings=true` — стираются персона (с `email`), её события и записи сессий (replay в проекте включён); наружу уходит только id; тело ответа не читается и не логируется; 401/403 (нет `person:write`) → `skipped_forbidden`, таймаут/5xx → `failed` — оба в лог + Sentry по id, ручной путь в ранбуке §4 | ст. 17 — исполнение запроса |
 | **Meta CAPI** (`lib/meta-capi.ts`) | вебхук Stripe, переход в access-granting | `Purchase`: `em` = SHA-256(email), `external_id` = SHA-256(Clerk id), `fbp`, `fbc`, `client_ip_address` (сырой), `client_user_agent`, `event_id` = sub id, `value`/`currency`, `content_ids` | `capi_consent` из метаданных |
 | **Meta Pixel** (браузер) | по странице | `PageView`, `ViewContent`, `Lead`, `InitiateCheckout`, `CompleteRegistration` + `_fbp`/`_fbc`, IP/UA запроса — самим пикселем | `cookie_consent.marketing` |
 | **PostHog** (браузер) | по странице | `$pageview`, `show_viewed`, `trial_play_started`, `signup_wall_shown`, `signup_completed`, `checkout_started`, … со свойствами `show_slug`, `episode_number`, `mode`, `auth`, `gate`; супер-свойства `locale`, `locale_source`; `identify(userId, {email})` после входа; session replay с маской всех input/text; UTM нормализуются в `before_send` | `cookie_consent.marketing` |
@@ -97,6 +102,29 @@
 | **Sentry** | ошибка | событие после `scrubSentryEvent`: `user.id` только, URL без query/credentials, заголовки по allowlist, email-подобные строки → `[redacted-email]` | всегда (DSN задан) |
 | **Vercel** | каждый запрос | edge видит IP (нами не сохраняется), cookies, UA; runtime-логи — id/статусы | инфраструктура |
 | **GitHub Actions** | ночной бэкап; ежемесячная проба | полный дамп (см. §1) | инфраструктура |
+
+**Согласие на поверхности кошелька (#210, исправлено в #214).** Apple Pay /
+Google Pay прямо на paywall создают Checkout Session с `ui_mode: 'elements'`,
+а Stripe на этом ui_mode согласие не рендерит: `custom_text` отбивается
+(`400 … not supported with ui_mode: elements`, проверено на живом API), а
+единственный рендерер `consent_collection` — `TermsElement` — закрыт бетой.
+Поэтому один обязательный чекбокс показываем мы сами
+(`components/watch/wallet-express-checkout.tsx`, ключ `subscribe.walletConsent`
+на языке зрителя): **принятие Условий** (ссылка на /terms) **и** отказ от
+14-дневного права; /privacy — ссылкой-уведомлением под чекбоксом, не частью
+«соглашаюсь». В `subscription_data.metadata` едет один строковый ключ —
+`tos_version` (редакция /terms). **Времени принятия в записи нет намеренно:**
+время в параметрах создания попадает в дайджест ключа идемпотентности
+(уникальный ключ на вызов = двойное списание), а округление до часа ради
+стабильности ключа датирует принятие задним числом; точное время — `created`
+самой сессии Stripe, которое не может предшествовать отметке. Отметка —
+утверждение клиента: сервер отказывает клиенту, приславшему «не отмечено», но
+доказать, что галочку поставил человек, не может ни один чекбокс. **Новой
+колонки и нового хранилища не заводится** — минимизация. `tos_version` не
+стирается после `Purchase` (в отличие от `capi_*`): это часть записи о договоре.
+Стирание — по общему каскаду аккаунта. Новых процессоров нет: Apple и Google —
+кошельки внутри существующего платёжного потока Stripe, реквизиты у нас не оседают.
+
 
 ## 4. Устройство пользователя — cookies и хранилища
 
@@ -125,10 +153,6 @@ PR этапа 10 не требовалось; закрывающий PR убир
 
 | # | Дыра | Где |
 |---|---|---|
-| #162 | ни одной джобы ретеншена: `trial_sessions`, `visitors`/`visitor_days`, `watch_days`, отправленные `show_reminders`, `stripe_events` — бессрочно; `/privacy` обещает 30 дней / 25 месяцев; Vercel-логи короче обещанных 30 дней | вся БД |
-| #163 | доступ/портируемость (ст. 15/20): ни скрипта экспорта, ни ранбука | — |
-| #164 | стирание не доходит до процессоров (Stripe Customer, PostHog person с email); реестра заявок, по которому §7 ранбука восстановления велит повторять стирание, не существует | `docs/runbooks/db-restore.md` |
-| #164 (хвост) | у Stripe остаётся Customer (email, billing address) — `customers.del` при стирании не вызывается, решение владельца; PostHog person с `email` не удаляется; реестра заявок, по которому §7 ранбука восстановления велит повторять стирание, не существует (`erased_customers` — реестр только тех стёртых, у кого был Stripe customer; аккаунт без покупок следа не оставляет) | `docs/runbooks/db-restore.md`, `docs/registry.md` |
 | #165 | сырой IP и UA (`capi_ip`/`capi_ua`) живут в `subscription_data.metadata` у Stripe бессрочно после единственного `Purchase` | `lib/capi-identity.ts`, `lib/subscription-mirror.ts` |
 
 Не дыры, а решения владельца (пометки для юриста — список в PR этапа 10):
@@ -137,9 +161,28 @@ AEPD; отсутствие возрастного гейта; расхожден
 (§1–§2). Удаление `show_reminders` вместе с аккаунтом — решение PR #161
 (до него строки намеренно переживали аккаунт).
 
-Закрыто: #161 — `user.deleted` стирает `users` + каскады + `show_reminders`
+Закрыто: #162 — ретеншен исполняет ежедневный крон (`lib/retention.ts` +
+`/api/cron/retention`); что осталось от него — не код, а текст: `/privacy`
+обещает «логи 30 дней», а Vercel хранит Hobby 1 ч / Pro 1 сутки, и §6 не
+называет ни отправленные напоминания, ни дни просмотра — обе пометки юристу
+в `docs/registry.md`; `CRON_SECRET` на обоих проектах Vercel — ops владельца.
+#161 — `user.deleted` стирает `users` + каскады + `show_reminders`
 по адресу; ops-хвост (подписка прод-эндпойнта Clerk на событие) — в
 `docs/registry.md`. #164, блокеры включения платежей (#155): живая подписка
 Stripe отменяется на конец периода тем же обработчиком, а стёртый customer
 id тумбстоунится в `erased_customers`, чтобы вебхук Stripe с `guest = "1"`
-не воскресил аккаунт через `claimGuestCheckout`.
+не воскресил аккаунт через `claimGuestCheckout`; #223 — тумбстоун покрывает
+ВСЕХ клиентов по адресу (`customers.search` в Stripe ДО `DELETE FROM users`,
+best-effort, только при платёжном следе и только точное совпадение адреса),
+а не только id из строки `users`. #163 — доступ и
+портируемость: `pnpm export-user-data <userId>` (`scripts/export-user-data.ts`
+поверх `lib/user-export*.ts`) собирает восемь таблиц §2 плюс Clerk / Stripe /
+PostHog best-effort в JSON-файл `0600`; приём, верификация, ответ и реестр
+заявок — `docs/runbooks/gdpr-requests.md`. #180 — стирание у процессоров,
+часть 2: обработчик `user.deleted` вынесен в `lib/erase-user.ts:eraseUser` и
+ПОСЛЕ локальных DELETE удаляет PostHog person по Clerk id вместе с событиями
+(best-effort, честный статус, ручной путь в ранбуке §4);
+`pnpm erase-user <id> [--apply]` повторяет то же стирание без вебхука
+(dry-run по умолчанию); реестр заявок ранбука (§6) — список, по которому
+§7 `db-restore.md` переприменяет стирания после восстановления. Stripe
+`customers.del` — по-прежнему решение владельца (`docs/registry.md`).

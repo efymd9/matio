@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
   save: vi.fn(),
   saveSegments: vi.fn(),
   select: vi.fn(),
+  update: vi.fn(() => ({ set: () => ({ where: async () => undefined }) })),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -22,7 +23,12 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => (h.cookie ? { value: h.cookie } : undefined) }),
   headers: async () => new Headers(),
 }));
-vi.mock("@/db", () => ({ db: { select: h.select } }));
+vi.mock("@/db", () => ({
+  db: {
+    select: h.select,
+    update: () => h.update(),
+  },
+}));
 vi.mock("@/db/schema", () => ({
   episodes: {},
   seasons: {},
@@ -42,10 +48,16 @@ vi.mock("drizzle-orm", () => ({
 vi.mock("@/lib/visitor", () => ({ stampVisitorWallSeen: vi.fn() }));
 vi.mock("@/lib/i18n/server", () => ({ getLocale: async () => "en" }));
 vi.mock("@/lib/subscription-access", () => ({ hasActiveSubscription: vi.fn() }));
-vi.mock("@/lib/episode-access", () => ({
-  getOrderedReadyEpisodeIds: vi.fn(),
-  showHasTierGating: vi.fn(),
-}));
+vi.mock("@/lib/episode-access", async (importOriginal) => {
+  // resolveEffectiveTier is pure and IS the subject of the gate cases —
+  // stubbing it would test the stub.
+  const actual = await importOriginal<typeof import("@/lib/episode-access")>();
+  return {
+    resolveEffectiveTier: actual.resolveEffectiveTier,
+    getOrderedReadyEpisodeIds: vi.fn(),
+    showHasTierGating: vi.fn(),
+  };
+});
 vi.mock("@/lib/trial", () => ({
   TRIAL_COOKIE: "trial_session",
   TRIAL_DURATION_SECONDS: 60,
@@ -66,12 +78,14 @@ import { saveTrialPosition, saveWatchProgress, saveWatchSegments } from "./actio
 
 const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 
+
 beforeEach(() => {
   h.userId = null;
   h.cookie = undefined;
   h.save.mockReset().mockResolvedValue("saved");
   h.saveSegments.mockReset().mockResolvedValue({ outcome: "saved", accepted: 1 });
   h.select.mockReset();
+  h.update = vi.fn(() => ({ set: () => ({ where: async () => undefined }) }));
   vi.stubEnv("PAYMENTS_ENABLED", "");
   vi.stubEnv("REQUIRE_SIGNUP", "");
 });
@@ -121,17 +135,36 @@ describe("saveWatchSegments (web server action)", () => {
     h.cookie = "trial-token";
     await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
     expect(h.saveSegments).toHaveBeenCalledWith(
-      { kind: "anonymous", sessionToken: "trial-token", maxPosition: null },
+      {
+        kind: "anonymous",
+        sessionToken: "trial-token",
+        maxPosition: null,
+        freeTierOnly: false,
+      },
       EPISODE,
       [3],
     );
   });
 
-  it("drops an anonymous flush under the signup gate — anonymous playback does not exist there", async () => {
+  it("asks the write to accept only a free episode under the signup gate (#198)", async () => {
     vi.stubEnv("REQUIRE_SIGNUP", "1");
     h.cookie = "trial-token";
+
     await expect(saveWatchSegments(EPISODE, [3])).resolves.toBeUndefined();
-    expect(h.saveSegments).not.toHaveBeenCalled();
+
+    // The tier itself is checked inside the write, on the episode row it
+    // already reads — the action only states which rule applies, so the two
+    // surfaces cannot disagree about what "playable" means.
+    expect(h.saveSegments).toHaveBeenCalledWith(
+      {
+        kind: "anonymous",
+        sessionToken: "trial-token",
+        maxPosition: null,
+        freeTierOnly: true,
+      },
+      EPISODE,
+      [3],
+    );
   });
 
   it("keeps paid-mode anonymous previews off the retention curve", async () => {
@@ -161,4 +194,53 @@ describe("saveTrialPosition still shares the position clamp", () => {
     await expect(saveTrialPosition(EPISODE, -1)).resolves.toBeUndefined();
     expect(h.select).not.toHaveBeenCalled();
   });
+});
+
+// db.select(...).from(episodes).innerJoin(...).innerJoin(...).where(...).limit(1)
+function episodeRow(rows: unknown[]) {
+  const chain = {
+    from: () => chain,
+    innerJoin: () => chain,
+    where: () => chain,
+    limit: async () => rows,
+  };
+  return chain;
+}
+
+// The anonymous resume/depth write under the signup gate (#198): the same
+// tier rule the token route mints from decides whether it may write at all.
+describe("saveTrialPosition — the episode's tier decides for an anonymous save", () => {
+  beforeEach(() => {
+    h.cookie = "trial-token";
+    vi.stubEnv("REQUIRE_SIGNUP", "1");
+  });
+
+  it("writes for a free episode — the one an anonymous viewer could play", async () => {
+    h.select.mockReturnValueOnce(
+      episodeRow([{ showId: "show-1", access: "free" }]),
+    );
+    const ordered = vi.mocked(
+      (await import("@/lib/episode-access")).getOrderedReadyEpisodeIds,
+    );
+    ordered.mockResolvedValueOnce([EPISODE]);
+    const update = vi.fn(() => ({ set: () => ({ where: async () => undefined }) }));
+    h.update = update;
+
+    await expect(saveTrialPosition(EPISODE, 30)).resolves.toBeUndefined();
+
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([["member"], ["subscriber"]])(
+    "writes nothing for a %s episode — it was walled for this viewer",
+    async (access) => {
+      h.select.mockReturnValueOnce(episodeRow([{ showId: "show-1", access }]));
+      const update = vi.fn();
+      h.update = update;
+
+      await expect(saveTrialPosition(EPISODE, 30)).resolves.toBeUndefined();
+
+      expect(update).not.toHaveBeenCalled();
+    },
+  );
 });

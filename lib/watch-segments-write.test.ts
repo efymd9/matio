@@ -134,6 +134,7 @@ const anonymousOpen: SegmentsCaller = {
   kind: "anonymous",
   sessionToken: DEVICE,
   maxPosition: null,
+      freeTierOnly: false
 };
 
 type SegmentUpsert = {
@@ -348,7 +349,7 @@ describe("saveWatchSegmentsFor — anonymous callers", () => {
   });
 
   it("enforces the positional gate: episode N+1 is forbidden even with a session row", async () => {
-    const gated: SegmentsCaller = { kind: "anonymous", sessionToken: DEVICE, maxPosition: 1 };
+    const gated: SegmentsCaller = { kind: "anonymous", sessionToken: DEVICE, maxPosition: 1, freeTierOnly: false };
     h.episode = { id: EPISODE_2, showId: SHOW, access: "free", durationSeconds: 600 };
 
     await expect(saveWatchSegmentsFor(gated, EPISODE_2, [1])).resolves.toEqual({
@@ -358,7 +359,7 @@ describe("saveWatchSegmentsFor — anonymous callers", () => {
   });
 
   it("lets episode N through the positional gate", async () => {
-    const gated: SegmentsCaller = { kind: "anonymous", sessionToken: DEVICE, maxPosition: 1 };
+    const gated: SegmentsCaller = { kind: "anonymous", sessionToken: DEVICE, maxPosition: 1, freeTierOnly: false };
     await expect(saveWatchSegmentsFor(gated, EPISODE, [1])).resolves.toEqual({
       outcome: "saved",
       accepted: 1,
@@ -366,7 +367,7 @@ describe("saveWatchSegmentsFor — anonymous callers", () => {
   });
 
   it("forbids an episode missing from the show's ready ordering under a gate", async () => {
-    const gated: SegmentsCaller = { kind: "anonymous", sessionToken: DEVICE, maxPosition: 5 };
+    const gated: SegmentsCaller = { kind: "anonymous", sessionToken: DEVICE, maxPosition: 5, freeTierOnly: false };
     h.orderedEpisodeIds.mockResolvedValue([EPISODE_2]);
     await expect(saveWatchSegmentsFor(gated, EPISODE, [1])).resolves.toEqual({
       outcome: "forbidden",
@@ -377,4 +378,40 @@ describe("saveWatchSegmentsFor — anonymous callers", () => {
     await saveWatchSegmentsFor(anonymousOpen, EPISODE, [1]);
     expect(h.orderedEpisodeIds).not.toHaveBeenCalled();
   });
+});
+
+// The web's gate era (#198): only a free episode was anonymously playable,
+// so only it may paint counters. The check lives here, next to the episode
+// row the write already reads.
+describe("saveWatchSegmentsFor — anonymous tier gate", () => {
+  const gated: SegmentsCaller = {
+    kind: "anonymous",
+    sessionToken: DEVICE,
+    maxPosition: null,
+    freeTierOnly: true,
+  };
+
+  it("accepts a free episode", async () => {
+    h.episode = { id: EPISODE, showId: SHOW, access: "free", durationSeconds: 600 };
+    h.sessions = [{ token: DEVICE, showId: SHOW }];
+
+    const res = await saveWatchSegmentsFor(gated, EPISODE, [1]);
+
+    expect(res.outcome).toBe("saved");
+  });
+
+  it.each([["member"], ["subscriber"]])(
+    "refuses a %s episode before any write",
+    async (access) => {
+      h.episode = { id: EPISODE, showId: SHOW, access, durationSeconds: 600 };
+      h.sessions = [{ token: DEVICE, showId: SHOW }];
+
+      const res = await saveWatchSegmentsFor(gated, EPISODE, [1]);
+
+      expect(res).toEqual({ outcome: "forbidden" });
+      // Nothing written: not the bucket counters, not the watched total.
+      expect(h.inserts).toEqual([]);
+      expect(h.updates).toEqual([]);
+    },
+  );
 });

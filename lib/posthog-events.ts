@@ -53,6 +53,11 @@ export type FunnelEvent =
   // Instant next-episode transition at `ended` (subscriber/member/free —
   // the legacy 60s trial keeps the countdown card instead).
   | "episode_auto_advanced"
+  // Branching video (#144): the viewer's pick at a fork, fired at the
+  // parent's `ended` alongside episode_auto_advanced. Properties are ids
+  // and flags only — show_slug, episode_id (the parent), choice_position
+  // (1-based), is_default, timed_out (nothing tapped → the default played).
+  | "fork_choice_made"
   // Pay-first /welcome page observability (the critical post-purchase
   // surface). All consent-gated like every client event:
   //   welcome_signin_succeeded — session established (method: 'ticket' for
@@ -64,7 +69,13 @@ export type FunnelEvent =
   //     'other_session' | 'ticket_mint_failed')
   | "welcome_signin_succeeded"
   | "welcome_signin_failed"
-  | "welcome_fallback_shown";
+  | "welcome_fallback_shown"
+  // Paywall in-place wallet button (#210): the buyer authorised Apple Pay /
+  // Google Pay in the sheet. Fired at confirm — the moment of intent — so the
+  // saved conversion funnel keeps its meaning even though the underlying
+  // Checkout Session was created a step earlier (when the consent box was
+  // ticked). Properties are ids only.
+  | "wallet_checkout_confirmed";
 
 // Minimal surface we use. The provider assigns the real posthog-js instance
 // (which is structurally compatible) to window.posthog after init.

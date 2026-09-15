@@ -1,6 +1,7 @@
 import "server-only";
 import { auth } from "@clerk/nextjs/server";
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { cookies } from "next/headers";
 import { db } from "@/db";
 import {
@@ -64,7 +65,13 @@ type CandidateRow = {
   updatedAt: Date;
   // Branching video (#143): set when the row's episode is a branch.
   branchOfEpisodeId: string | null;
+  // The parent's number for a branch row (#144) — what the tile prints,
+  // because a branch is numbered 900+ and continues its parent's episode.
+  parentNumber: number | null;
 };
+
+// Self-join for the parent of a branch row — one alias, both queries.
+const parentEpisode = alias(episodes, "parent_episode");
 
 // Where a finished BRANCH leads next: the target of its single silent
 // choice (the reconvergence hop), keyed by the branch's episode id. Only
@@ -88,9 +95,9 @@ type Continuation = {
 // leaves the rail when finished because auto-advance writes the next row
 // within seconds; a branch's silent hop is the same moment, but a viewer who
 // stops exactly at the seam would otherwise lose the show from the rail. An
-// UNFINISHED branch yields no tile at all until the player can play one
-// (#144): today its ?ep= deep link falls back to episode 1, and a tile that
-// promises "resume 901" and lands elsewhere is worse than no tile.
+// UNFINISHED branch resumes like any episode (#144: the watch page resolves
+// a branch id from ?ep= and plays it), printed under its PARENT's number —
+// the viewer sees "Ep. 2" for branch 902, the same number the player shows.
 function collapse(
   rows: CandidateRow[],
   continuations: Map<string, Continuation>,
@@ -110,8 +117,6 @@ function collapse(
       ? continuations.get(row.episodeId)
       : undefined;
     if (finished && !next) continue;
-    // Until #144 a branch cannot be resumed (see above) — no tile.
-    if (!finished && row.branchOfEpisodeId) continue;
     const show = {
       slug: row.slug,
       title: row.title,
@@ -136,7 +141,10 @@ function collapse(
       items.push({
         show,
         episodeId: row.episodeId,
-        episodeNumber: row.episodeNumber,
+        episodeNumber:
+          row.branchOfEpisodeId && row.parentNumber !== null
+            ? row.parentNumber
+            : row.episodeNumber,
         episodeTitle: row.episodeTitle,
         positionSeconds: row.positionSeconds,
         durationSeconds: duration,
@@ -217,9 +225,11 @@ export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
         completed: watchProgress.completed,
         updatedAt: watchProgress.updatedAt,
         branchOfEpisodeId: episodes.branchOfEpisodeId,
+        parentNumber: parentEpisode.number,
       })
       .from(watchProgress)
       .innerJoin(episodes, eq(episodes.id, watchProgress.episodeId))
+      .leftJoin(parentEpisode, eq(parentEpisode.id, episodes.branchOfEpisodeId))
       .innerJoin(seasons, eq(seasons.id, episodes.seasonId))
       .innerJoin(shows, eq(shows.id, seasons.showId))
       .where(
@@ -257,9 +267,11 @@ export async function getContinueWatching(): Promise<ContinueWatchingItem[]> {
       // for "most recent session" ordering.
       updatedAt: trialSessions.startedAt,
       branchOfEpisodeId: episodes.branchOfEpisodeId,
+      parentNumber: parentEpisode.number,
     })
     .from(trialSessions)
     .innerJoin(episodes, eq(episodes.id, trialSessions.lastEpisodeId))
+    .leftJoin(parentEpisode, eq(parentEpisode.id, episodes.branchOfEpisodeId))
     .innerJoin(shows, eq(shows.id, trialSessions.showId))
     .where(
       and(
