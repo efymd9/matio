@@ -6,10 +6,13 @@ import { POSTHOG_API_HOST, type PosthogQueryConfig } from "@/lib/posthog-hogql";
 // person carries the address as a property) together with its events.
 //
 //   GET    /api/projects/{id}/persons/?distinct_id=<clerk id>   → person ids
-//   DELETE /api/projects/{id}/persons/{personId}/?delete_events=true
+//   DELETE /api/projects/{id}/persons/{personId}/?delete_events=true&delete_recordings=true
 //
 // `delete_events=true` queues the events for PostHog's weekly async deletion
-// (the person itself goes at once). Best-effort with the same contract as
+// (the person itself goes at once); `delete_recordings=true` takes the
+// session replays with it — replay is ON in this project, and a recording
+// is the viewer's screen, the one thing here that outlives the person row
+// by default. Best-effort with the same contract as
 // the Stripe cancellation in lib/erase-user.ts: one bounded attempt per
 // request, no retries, never throws — a PostHog outage must not hold the
 // local erasure back, and the honest typed status is what the caller logs
@@ -118,7 +121,7 @@ export async function erasePosthogPerson(
     for (const personId of personIds) {
       const res = await request(
         config,
-        `${encodeURIComponent(personId)}/?delete_events=true`,
+        `${encodeURIComponent(personId)}/?delete_events=true&delete_recordings=true`,
         { method: "DELETE" },
       );
       if (isForbidden(res.status)) {

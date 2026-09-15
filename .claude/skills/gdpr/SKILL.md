@@ -191,7 +191,8 @@ PR: данные не размножаются бесконтрольно, ст�
   = решение владельца (`docs/registry.md`). PostHog — тот же `eraseUser`
   ПОСЛЕ локальных DELETE удаляет person по `distinct_id` = Clerk id вместе с
   событиями (`lib/posthog-erase.ts`, #180: `GET persons?distinct_id` →
-  `DELETE persons/{id}?delete_events=true`, 5 с, без ретраев, никогда не
+  `DELETE persons/{id}?delete_events=true&delete_recordings=true` — персона,
+  события И записи сессий (replay в проекте включён), 5 с, без ретраев, никогда не
   бросает, тело ответа не читается; типизированный статус — `deleted` /
   `not_found` / `skipped_unconfigured` / `skipped_forbidden` (у personal
   key нет `person:write`) / `failed`; два последних — лог + Sentry по id и

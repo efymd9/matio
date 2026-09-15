@@ -9,7 +9,8 @@ import { POSTHOG_API_HOST } from "./posthog-hogql";
 
 // The processor half of the account erasure. Under test: WHICH requests go
 // to PostHog (the lookup by distinct_id, then one DELETE per person with
-// delete_events=true, all bearing the key and a timeout), and that every
+// delete_events=true&delete_recordings=true, all bearing the key and a
+// timeout), and that every
 // way PostHog can disappoint — no person, no scope, an outage, a timeout,
 // no credentials — comes back as a typed status, never as a throw.
 
@@ -64,13 +65,27 @@ describe("erasePosthogPerson · the happy path", () => {
     expect(result).toEqual({ status: "deleted", personIds: ["42", "43"] });
     expect(calls().map(({ method, url }) => `${method} ${url}`)).toEqual([
       `GET ${BASE}?distinct_id=${DISTINCT_ID}`,
-      `DELETE ${BASE}42/?delete_events=true`,
-      `DELETE ${BASE}43/?delete_events=true`,
+      `DELETE ${BASE}42/?delete_events=true&delete_recordings=true`,
+      `DELETE ${BASE}43/?delete_events=true&delete_recordings=true`,
     ]);
     for (const call of calls()) {
       expect(call.auth).toBe("Bearer phx_dummy");
       expect(call.signal).toBeInstanceOf(AbortSignal);
     }
+  });
+
+  it("every DELETE asks for the events AND the session recordings — replay is on, a recording outlives the person row by default", async () => {
+    fetchMock
+      .mockResolvedValueOnce(json(200, { results: [{ id: 42 }] }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await erasePosthogPerson(CFG, DISTINCT_ID);
+
+    const [, del] = calls();
+    expect(del.method).toBe("DELETE");
+    const flags = new URL(del.url).searchParams;
+    expect(flags.get("delete_events")).toBe("true");
+    expect(flags.get("delete_recordings")).toBe("true");
   });
 
   it("encodes the distinct id and the project id into the path, so neither can add a query or a segment", async () => {

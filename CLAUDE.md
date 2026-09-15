@@ -862,7 +862,9 @@ lib/
                            #   summaries (ids / counts / statuses only)
   posthog-erase.ts         # universal: erasePosthogPerson(cfg, distinctId) —
                            #   GET persons?distinct_id → DELETE each with
-                           #   delete_events=true; 5s, no retries, never
+                           #   delete_events=true&delete_recordings=true
+                           #   (person + events + session replays — replay
+                           #   is ON in the project); 5s, no retries, never
                            #   throws; typed status (deleted / not_found /
                            #   skipped_unconfigured / skipped_forbidden /
                            #   failed); never reads a response body

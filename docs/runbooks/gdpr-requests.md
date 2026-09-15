@@ -211,9 +211,11 @@ Clerk его уже не покажет, а скрипт и реестр клю�
 4. `DELETE FROM users` → каскады FK: `subscriptions`, `watch_progress`,
    `watch_days` удаляются; `trial_sessions`, `visitors`,
    `marketing_links.created_by` остаются с `user_id = NULL` (псевдонимно);
-5. PostHog: person с `distinct_id` = Clerk id и его события —
-   `DELETE …/persons/{id}/?delete_events=true` (best-effort, 5 с, без
-   ретраев; сами события PostHog удаляет отложенной задачей, раз в неделю).
+5. PostHog: person с `distinct_id` = Clerk id, его события **и записи
+   сессий** (session replay в проекте включён) —
+   `DELETE …/persons/{id}/?delete_events=true&delete_recordings=true`
+   (best-effort, 5 с, без ретраев; сами события и записи PostHog удаляет
+   отложенной задачей, раз в неделю).
    Этот шаг идёт и когда строки `users` уже нет — так повтор скрипта
    добирает PostHog после сбоя.
 
@@ -262,7 +264,10 @@ nothing changed (dry run — re-run with --apply)
 `pnpm erase-user <id> --apply` повторяется (локально — no-op, PostHog —
 заново), либо руками: https://eu.posthog.com/project/190233/persons → поиск
 по `user_…` → карточка персоны → **Delete person** → галка «Delete all
-events of this person» → подтвердить. `failed` (таймаут / 5xx) — повторить
+events of this person» → подтвердить; затем Session replay → фильтр по этой
+персоне → удалить каждую запись (диалог удаления персоны записи сессий не
+трогает — их стирает только флаг `delete_recordings` API или ручное
+удаление). `failed` (таймаут / 5xx) — повторить
 скрипт позже или так же руками. Сигнал без запроса: строка
 `erase user: PostHog person NOT erased` в логах Vercel и событие в Sentry по
 `userId` — значит, этот шаг нужен.

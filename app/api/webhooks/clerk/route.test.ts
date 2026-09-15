@@ -472,7 +472,9 @@ describe("Clerk webhook · user.deleted × PostHog (#180)", () => {
 
     expect(res.status).toBe(200);
     expect(order).toEqual(["posthog GET", "posthog DELETE"]);
-    expect(String(fetchMock.mock.calls[1][0])).toContain("/persons/42/?delete_events=true");
+    expect(String(fetchMock.mock.calls[1][0])).toContain(
+      "/persons/42/?delete_events=true&delete_recordings=true",
+    );
     expect(h.writes).toEqual(["delete show_reminders", "delete users"]);
     expect(info.mock.calls.at(-1)?.[1]).toMatchObject({
       posthog: "deleted",
