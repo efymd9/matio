@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { AccessFormSelect } from "@/components/admin/access-select";
+import { isChoiceTarget } from "@/lib/branching-db";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { deleteEpisode, updateEpisode } from "@/app/admin/actions";
 import { TypedActionForm } from "@/components/admin/typed-action-form";
@@ -78,8 +79,9 @@ export default async function EditEpisodePage({
   // Branching (#143): the panel's candidates (every other episode of the
   // show), this episode's saved options, and whether some OTHER episode's
   // choice points here — in which case the RESTRICT FK would refuse a
-  // delete, so the page says so instead of letting the form hit a throw.
-  const [otherEpisodes, savedChoices, [pointedAt]] = await Promise.all([
+  // delete, so the page says so up front. The same read backs
+  // deleteEpisode's typed refusal (#195), so page and action cannot drift.
+  const [otherEpisodes, savedChoices, pointedAt] = await Promise.all([
     db
       .select({
         id: episodes.id,
@@ -103,11 +105,7 @@ export default async function EditEpisodePage({
       .from(episodeChoices)
       .where(eq(episodeChoices.fromEpisodeId, episode.id))
       .orderBy(asc(episodeChoices.position)),
-    db
-      .select({ id: episodeChoices.id })
-      .from(episodeChoices)
-      .where(eq(episodeChoices.toEpisodeId, episode.id))
-      .limit(1),
+    isChoiceTarget(episode.id),
   ]);
   const parent = episode.branchOfEpisodeId
     ? otherEpisodes.find((e) => e.id === episode.branchOfEpisodeId)
@@ -314,15 +312,24 @@ export default async function EditEpisodePage({
         {pointedAt ? (
           <p className="text-sm text-cream/60">{t.fork.deleteBlockedByChoices}</p>
         ) : (
-          <form
-            action={deleteEpisode.bind(null, episode.id, season.id, show.id)}
+          <TypedActionForm
+            // "season": this page's own row is gone after the delete, so the
+            // action leaves for the season list instead of re-rendering
+            // into notFound.
+            action={deleteEpisode.bind(
+              null,
+              episode.id,
+              season.id,
+              show.id,
+              "season",
+            )}
           >
             <ConfirmDeleteButton
               message={t.episode.deleteConfirm(episode.number, episode.title)}
             >
               {t.episode.deleteThisEpisode}
             </ConfirmDeleteButton>
-          </form>
+          </TypedActionForm>
         )}
       </DangerPanel>
     </div>
