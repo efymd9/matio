@@ -9,7 +9,7 @@
 |---|---|---|
 | Apple Developer Program | Team **`MTFRZQ8SRX`**, тип **Individual** (Personal Team, оплачен) | тот же, что у Focu (репо agentapp); продавец в App Store — физлицо. Перенос на Organization-аккаунт DEEP ORDINARY LTD (D-U-N-S, проверка Apple 1–2 нед.) — App Transfer в App Store Connect перед публичной подачей, строка в `docs/registry.md` |
 | Expo / EAS | организация **`matvei-dev`**, проект **`@matvei-dev/matio`**, id `755ce20c-6975-4c09-99f4-082d1386dacf` | https://expo.dev/accounts/matvei-dev/projects/matio ; логин на машине владельца (`eas whoami`) |
-| iOS App ID | `tv.matio.app` | регистрируется EAS при первой сборке |
+| iOS App ID | `tv.matio.app` | зарегистрирован 15.09.2026; запись в App Store Connect: **ASC App ID `6812321366`** (в `eas.json → submit.production.ios.ascAppId` — без него `--auto-submit`/`eas submit` в `--non-interactive` отказывают) |
 | Android | `tv.matio.app` | Google Play Console ($25) ещё не заведён; keystore после первой сборки — **бэкап обязателен** (`eas credentials`), потерянный keystore = приложение нельзя обновить никогда |
 
 ## Профили (`mobile/eas.json`)
