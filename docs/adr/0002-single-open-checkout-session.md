@@ -130,7 +130,24 @@ on our side and expired **by id**:
   committed, and returned NULL in that very scenario (both callers would get
   NULL — the bug); a `SELECT … FOR UPDATE` + `UPDATE` pair in a transaction
   is correct but three round-trips through the pooler for what one statement
-  says;
+  says. Where the guarantee is pinned: the statement's TEXT, rendered by the
+  real dialect through a pg-proxy recorder, in
+  `lib/guest-checkout-sessions.test.ts` (a change to the upsert fails there
+  by name), plus the two-session check on Postgres 18.4 above; the guest
+  action's own suite (`app/subscribe/guest-actions.test.ts`, the "parallel
+  tabs" case) proves only the action's create → claim → expire ORDER on an
+  in-memory claim — it is not what proves the atomicity;
+- **the claim precedes the expire, so a failed expire rolls the claim
+  back.** By the time `expireIfOpen(previous)` throws — Stripe 429/5xx and
+  `retrieve` still says `open`, or the retrieve itself failed — the table
+  already names the NEW session, which the action is about to close. Left
+  like that, the next checkout would be handed a dead id, find nothing to
+  expire, and the buyer would hold `previous` + the newest session — the
+  #224 defect one step later. So on that path `previous` is written back
+  with the same upsert before the error leaves (`rollBackGuestClaim`), and
+  the next checkout tries the same session again (test "(г′)"). Not rolled
+  back when Stripe reported the previous session closed — nothing open to
+  keep on record then;
 - the sweep, in `createGuestCheckoutSession`, is create → claim → `expireIfOpen(previous)`
   (`lib/checkout-session.ts`, the one step shared with the signed-in sweep:
   an `expire` refused because someone else closed the session first is the
@@ -175,6 +192,13 @@ dead when it comes back into view, exactly like a signed-in buyer's.
   manual (the same residual exists for a guest whose first session is
   `complete` when the second is created — `expireIfOpen` sees it closed and
   the second session lives; the mirror's duplicate guard is the backstop);
+  a guest's rollback after a failed expire displacing a THIRD tab's id (that
+  tab claimed between the failed tab's claim and its rollback) — the third
+  tab's session stays open and unrecorded until Stripe expires it (≤24h),
+  logged by ids, third-order (a Stripe failure AND a third tab inside the
+  same second; registry); and the double fault of that rollback itself
+  being refused by the database — the table keeps naming the closed session
+  and `previous` stays open and unrecorded for the same ≤24h, logged;
   a mid-3DS session expired by a newer checkout fails that payment,
   which is the intended outcome; two creates in the same instant can expire
   *each other* (each one's sweep sees the other's session) — zero open

@@ -1280,6 +1280,51 @@ describe("log audit · guest checkout sweep (#224)", () => {
     expect(logged()).toContain("marker_code");
   });
 
+  it("logs the rollback of the claim after a failed expire by session ids only — the displaced-newer-session line and the rollback-failed line", async () => {
+    // Two calls of the upsert per run: the claim (answers the previous id)
+    // and, once the expire has failed, the rollback. First run (calls 1–2):
+    // the rollback displaces a third tab's id. Second run (calls 3–4): the
+    // rollback itself is refused.
+    let call = 0;
+    insert.mockImplementation(() => ({
+      values: () => ({
+        onConflictDoUpdate: () => ({
+          returning: async () => {
+            call += 1;
+            if (call === 1 || call === 3) return [{ previousSessionId: "cs_prev_dummy" }];
+            if (call === 2) return [{ previousSessionId: "cs_third_dummy" }];
+            throw Object.assign(
+              new Error(`upsert refused ('${MARKER_CLAIM}-hash') ${MARKER_DATABASE_URL}`),
+              { name: "PostgresError", code: "53300" },
+            );
+          },
+        }),
+      }),
+    }));
+    stripeSessionExpire.mockRejectedValue(quoted("StripeAPIError"));
+    const logged = captureConsole();
+
+    await expect(
+      createGuestCheckoutSession({ show: null, ep: null, resume: null }),
+    ).rejects.toThrow();
+    await expect(
+      createGuestCheckoutSession({ show: null, ep: null, resume: null }),
+    ).rejects.toThrow();
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_CLAIM, MARKER_SECRET, MARKER_DATABASE_URL]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain(
+      "startGuestCheckout: rolling back the claim displaced a newer session",
+    );
+    expect(logged()).toContain("cs_third_dummy");
+    expect(logged()).toContain(
+      "startGuestCheckout: rolling back the claim failed — the previous session stays unrecorded",
+    );
+    expect(logged()).toContain("cs_prev_dummy");
+    expect(logged()).toContain("PostgresError");
+  });
+
   it("logs a claim the database refused by class — never the statement or the hash the driver quoted", async () => {
     insert.mockImplementation(() => ({
       values: () => ({

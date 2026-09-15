@@ -356,18 +356,31 @@ export async function createGuestCheckoutSession(
 // the previous session cannot be proven closed, the new session is expired
 // (best effort) and the error propagates. Logged by session ids and error
 // class only — never the claim token, never the buyer.
+//
+// The claim runs BEFORE the expire (it is what tells us which id to expire),
+// so by the time an expire fails the table already names the NEW session. If
+// the previous one is then left open — Stripe 429/5xx, `retrieve` still says
+// `open` — that open session would be on record nowhere: the next checkout
+// would be handed the id of the session closed below, find nothing to expire,
+// and the buyer would hold two live sessions again (the #224 defect, one
+// step later). So on that path the claim is ROLLED BACK — `previous` is
+// written back with the same upsert — before the error leaves; the next
+// checkout then tries the same session again. If the rollback displaces a
+// third tab's id (it claimed in the meantime), that tab's session stays live
+// and unrecorded: logged by ids, accepted as a residual (ADR 0002, registry).
 async function expirePreviousGuestSession(
   stripe: ReturnType<typeof getStripe>,
   claimToken: string,
   newSessionId: string,
 ): Promise<void> {
+  const claimTokenHash = hashClaimToken(claimToken);
   let previous: string | null = null;
+  // Set once the claim has returned: from here on a failure means the table
+  // names the new session while `previous` may still be open.
+  let claimed = false;
   try {
-    previous = await claimSoleGuestSession(
-      db,
-      hashClaimToken(claimToken),
-      newSessionId,
-    );
+    previous = await claimSoleGuestSession(db, claimTokenHash, newSessionId);
+    claimed = true;
     if (previous && previous !== newSessionId) {
       await expireIfOpen(stripe, previous);
     }
@@ -380,6 +393,9 @@ async function expirePreviousGuestSession(
         error: describeError(err),
       },
     );
+    if (claimed && previous && previous !== newSessionId) {
+      await rollBackGuestClaim(claimTokenHash, previous, newSessionId);
+    }
     await stripe.checkout.sessions.expire(newSessionId).catch((closeErr) => {
       console.error("startGuestCheckout: closing the new session failed too", {
         sessionId: newSessionId,
@@ -387,6 +403,38 @@ async function expirePreviousGuestSession(
       });
     });
     throw err;
+  }
+}
+
+// Puts `previous` back on record after its expire failed (see above). Only
+// reached when expireIfOpen threw, i.e. the session is still open or its
+// state could not be read — never when Stripe reported it closed (nothing to
+// keep on record then). Best effort: the error is already on its way out.
+async function rollBackGuestClaim(
+  claimTokenHash: string,
+  previous: string,
+  newSessionId: string,
+): Promise<void> {
+  try {
+    const displaced = await claimSoleGuestSession(db, claimTokenHash, previous);
+    if (displaced !== newSessionId) {
+      // A third tab claimed between our claim and this rollback: its session
+      // is live and now off the record. Third-order residual — logged, not
+      // handled (ADR 0002 "Accepted residuals", registry).
+      console.error(
+        "startGuestCheckout: rolling back the claim displaced a newer session — it stays open and unrecorded",
+        { previousSessionId: previous, displacedSessionId: displaced, sessionId: newSessionId },
+      );
+    }
+  } catch (rollbackErr) {
+    // The table still names the session being closed; the previous one stays
+    // open and unrecorded until it expires on its own (≤24h) — a double
+    // fault (Stripe AND the database), logged so it can be seen.
+    console.error("startGuestCheckout: rolling back the claim failed — the previous session stays unrecorded", {
+      previousSessionId: previous,
+      sessionId: newSessionId,
+      error: describeError(rollbackErr),
+    });
   }
 }
 

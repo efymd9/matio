@@ -32,7 +32,11 @@ const h = vi.hoisted(() => ({
   // The remembered-session table: claim hash → last session id.
   claims: new Map<string, string>(),
   claimCalls: [] as Array<{ hash: string; sessionId: string }>,
-  claimFails: null as Error | null,
+  // Fault injection for the claim: which call (1-based) throws — `1` is the
+  // claim itself, `2` the rollback after a failed expire — and a hook run
+  // before a call, to play a third tab claiming in between.
+  claimFailOn: null as number | null,
+  beforeClaim: null as ((call: number) => void) | null,
   capiEvents: [] as unknown[],
   posthogEvents: [] as unknown[],
 }));
@@ -86,7 +90,8 @@ vi.mock("@/lib/guest-checkout-sessions", async (importOriginal) => {
     ...actual,
     claimSoleGuestSession: async (_db: unknown, hash: string, sessionId: string) => {
       h.claimCalls.push({ hash, sessionId });
-      if (h.claimFails) throw h.claimFails;
+      h.beforeClaim?.(h.claimCalls.length);
+      if (h.claimFailOn === h.claimCalls.length) throw new Error("db down");
       const previous = h.claims.get(hash) ?? null;
       h.claims.set(hash, sessionId);
       return previous;
@@ -174,7 +179,8 @@ beforeEach(() => {
   h.cookieSets = [];
   h.claims = new Map();
   h.claimCalls = [];
-  h.claimFails = null;
+  h.claimFailOn = null;
+  h.beforeClaim = null;
   h.capiEvents = [];
   h.posthogEvents = [];
   vi.stubEnv("PAYMENTS_ENABLED", "1");
@@ -207,7 +213,14 @@ describe("#224 — one open session per guest buyer", () => {
     expect(openSessionIds()).toEqual(["cs_test_2"]);
   });
 
-  it("(б) two tabs creating IN PARALLEL end with exactly one open session", async () => {
+  it("(б) two tabs creating IN PARALLEL end with exactly one open session — the action's create → claim → expire order, on the in-memory claim", async () => {
+    // What this proves is the ORDER inside the action: each tab claims only
+    // after its own create, so whichever claims last is handed the other's
+    // id and expires it. The atomicity of the claim itself under two real
+    // connections is not this fake's to prove — it rests on the statement
+    // pinned by text in lib/guest-checkout-sessions.test.ts (`… RETURNING
+    // old.session_id`) and on the two-session check against Postgres 18.4
+    // recorded in ADR 0002.
     await Promise.all([
       createGuestCheckoutSession({ ...INPUT, resume: "128" }),
       createGuestCheckoutSession({ ...INPUT, resume: "138" }),
@@ -217,9 +230,10 @@ describe("#224 — one open session per guest buyer", () => {
     expect(openSessionIds()).toHaveLength(1);
   });
 
-  it("(в) an expire that fails because somebody else already closed the previous session is fine", async () => {
+  it("(в) an expire that fails because somebody else already closed the previous session is fine — and nothing is rolled back", async () => {
     // The buyer paid in the other tab a moment earlier (or a parallel sweep
-    // got there first) — the state the sweep wanted is already there.
+    // got there first) — the state the sweep wanted is already there, so the
+    // table keeps naming the NEW session.
     await createGuestCheckoutSession(INPUT);
     st.fault = { on: "expire", then: "closed_by_other" };
 
@@ -228,6 +242,8 @@ describe("#224 — one open session per guest buyer", () => {
     expect(res).toMatchObject({ kind: "embedded", sessionId: "cs_test_2" });
     expect(statusOf("cs_test_1")).toBe("complete");
     expect(openSessionIds()).toEqual(["cs_test_2"]);
+    expect(h.claims.get(hashClaimToken(CLAIM))).toBe("cs_test_2");
+    expect(h.claimCalls).toHaveLength(2);
   });
 
   it("(г) an expire that fails while the previous session is STILL open closes the new session and throws", async () => {
@@ -247,6 +263,71 @@ describe("#224 — one open session per guest buyer", () => {
     expect(openSessionIds()).toEqual(["cs_test_1"]);
     expect(h.capiEvents).toHaveLength(0);
     expect(h.posthogEvents).toHaveLength(0);
+  });
+
+  it("(г′) after that failure the table points at the previous session AGAIN — the next checkout retries it and succeeds, one session open", async () => {
+    // The claim had already replaced cs_test_1 with cs_test_2 when the
+    // expire failed. Without the rollback the next checkout would be handed
+    // cs_test_2 (dead), find nothing to expire, and cs_test_1 + cs_test_3
+    // would both be live — the #224 defect, one step later.
+    const hash = hashClaimToken(CLAIM);
+    await createGuestCheckoutSession(INPUT);
+    st.fault = { on: "expire", then: "still_open" };
+    await expect(createGuestCheckoutSession(INPUT)).rejects.toThrow();
+
+    expect(h.claims.get(hash)).toBe("cs_test_1");
+    expect(h.claimCalls.map((c) => c.sessionId)).toEqual(["cs_test_1", "cs_test_2", "cs_test_1"]);
+
+    const third = await createGuestCheckoutSession(INPUT);
+
+    expect(third).toMatchObject({ kind: "embedded", sessionId: "cs_test_3" });
+    expect(st.expireCalls).toEqual(["cs_test_1", "cs_test_2", "cs_test_1"]);
+    expect(openSessionIds()).toEqual(["cs_test_3"]);
+    expect(h.claims.get(hash)).toBe("cs_test_3");
+  });
+
+  it("the rollback displacing a THIRD tab's id is logged by ids — that session stays open, an accepted residual", async () => {
+    const hash = hashClaimToken(CLAIM);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await createGuestCheckoutSession(INPUT);
+    st.fault = { on: "expire", then: "still_open" };
+    // Between tab 2's claim (call 2) and its rollback (call 3), tab 3 claims.
+    h.beforeClaim = (call) => {
+      if (call === 3) h.claims.set(hash, "cs_third_tab");
+    };
+
+    await expect(createGuestCheckoutSession(INPUT)).rejects.toThrow();
+
+    expect(h.claims.get(hash)).toBe("cs_test_1");
+    expect(error.mock.calls.map(([line]) => line)).toContain(
+      "startGuestCheckout: rolling back the claim displaced a newer session — it stays open and unrecorded",
+    );
+    const displaced = error.mock.calls.find(([line]) =>
+      String(line).includes("displaced a newer session"),
+    );
+    expect(displaced?.[1]).toEqual({
+      previousSessionId: "cs_test_1",
+      displacedSessionId: "cs_third_tab",
+      sessionId: "cs_test_2",
+    });
+  });
+
+  it("the rollback itself failing is logged and the action still fails closed", async () => {
+    const hash = hashClaimToken(CLAIM);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await createGuestCheckoutSession(INPUT);
+    st.fault = { on: "expire", then: "still_open" };
+    h.claimFailOn = 3;
+
+    await expect(createGuestCheckoutSession(INPUT)).rejects.toThrow("stripe expire failed");
+
+    // The double fault: the table keeps naming the closed session, the
+    // previous one stays open until Stripe expires it on its own.
+    expect(h.claims.get(hash)).toBe("cs_test_2");
+    expect(statusOf("cs_test_2")).toBe("expired");
+    expect(error.mock.calls.map(([line]) => line)).toContain(
+      "startGuestCheckout: rolling back the claim failed — the previous session stays unrecorded",
+    );
   });
 
   it("(д) creates the session with NO idempotency key — the guard against adding one back", async () => {
@@ -294,13 +375,15 @@ describe("#224 — one open session per guest buyer", () => {
     // Unlike the rate limiter (fail-open: an anti-abuse blip must not block
     // revenue), the claim is the money path: a session that is not on
     // record is one the NEXT creation can never find and expire.
-    h.claimFails = new Error("db down");
+    h.claimFailOn = 1;
 
     await expect(createGuestCheckoutSession(INPUT)).rejects.toThrow("db down");
 
     expect(statusOf("cs_test_1")).toBe("expired");
     expect(openSessionIds()).toEqual([]);
     expect(h.capiEvents).toHaveLength(0);
+    // Nothing was claimed, so there is nothing to roll back.
+    expect(h.claimCalls).toHaveLength(1);
   });
 
   it("a fresh browser (no claim cookie) mints its own token, so it is a different buying party", async () => {
