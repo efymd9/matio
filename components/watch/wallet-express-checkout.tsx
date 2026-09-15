@@ -56,6 +56,15 @@ export function WalletExpressCheckout(props: Props) {
   // surface (flag off, webview, anonymous, no publishable key). Never an error
   // banner: the paywall's own card CTA is the answer, and it is already there.
   const [available, setAvailable] = useState<boolean | null>(null);
+  // A confirm that came back with an error. Since #217 the likeliest one is
+  // "this session is no longer open": a buyer who ticked the box here and then
+  // started a checkout elsewhere (a /checkout tab, this wall in another tab)
+  // had THIS session expired by that newer one — and a 3DS challenge in flight
+  // on it fails the same way, which is the intended outcome. The slot hides
+  // and one human line says so; the card CTA above is the way forward. No
+  // re-arm: re-creating a session from a failed confirm would in turn expire
+  // the newer checkout the buyer is presumably paying in.
+  const [confirmFailed, setConfirmFailed] = useState(false);
   const startedRef = useRef(false);
 
   const { showSlug, episodeId, resumeSeconds, publishableKey } = props;
@@ -97,6 +106,10 @@ export function WalletExpressCheckout(props: Props) {
   // Stable identity: WalletButton reports failure from an effect keyed on this
   // callback, and a fresh closure every render would re-run it in a loop.
   const markUnavailable = useCallback(() => setAvailable(false), []);
+  const markConfirmFailed = useCallback(() => {
+    setConfirmFailed(true);
+    setAvailable(false);
+  }, []);
 
   const onAccept = (next: boolean) => {
     setAccepted(next);
@@ -158,9 +171,16 @@ export function WalletExpressCheckout(props: Props) {
               sessionId={sessionId}
               showSlug={showSlug}
               onUnavailable={markUnavailable}
+              onConfirmFailed={markConfirmFailed}
             />
           </CheckoutElementsProvider>
         </div>
+      ) : null}
+
+      {confirmFailed ? (
+        <p className="mt-3 text-[11px] font-medium text-cream/70">
+          {t.checkout.walletFailed}
+        </p>
       ) : null}
     </div>
   );
@@ -173,20 +193,20 @@ function WalletButton({
   sessionId,
   showSlug,
   onUnavailable,
+  onConfirmFailed,
 }: {
   returnUrl: string;
   sessionId: string;
   showSlug: string;
   onUnavailable: () => void;
+  onConfirmFailed: () => void;
 }) {
-  const t = useT();
   const router = useRouter();
   const checkout = useCheckoutElements();
-  const [error, setError] = useState<string | null>(null);
   // A wallet confirm can resolve inline (no SCA), so `cancel` may arrive AFTER
   // a successful confirm — Stripe documents exactly that ordering. This ref is
-  // what stops us treating it as "the buyer backed out" and re-arming a button
-  // for a payment that already went through.
+  // what stops us treating it as "the buyer backed out" once a payment has
+  // gone through.
   const confirmedRef = useRef(false);
 
   const onConfirm = async (
@@ -215,8 +235,12 @@ function WalletButton({
     });
 
     if (result.type === "error") {
+      // The slot goes away (the parent unmounts this button) and the card CTA
+      // stands — the owner's call for #217: an expired session, a declined
+      // wallet or a dropped 3DS all end the same way, without a second
+      // session being minted underneath the buyer's other checkout.
       confirmedRef.current = false;
-      setError(result.error.message);
+      onConfirmFailed();
       return;
     }
 
@@ -259,9 +283,10 @@ function WalletButton({
           paymentMethods: { applePay: "auto", googlePay: "auto", link: "never" },
         }}
         onConfirm={onConfirm}
-        onCancel={() => {
-          if (!confirmedRef.current) setError(null);
-        }}
+        // A cancel before any confirm is the buyer closing the sheet — the
+        // button simply stays; after a confirm it is Stripe's documented
+        // late `cancel` and equally nothing to act on.
+        onCancel={() => {}}
         onLoadError={onUnavailable}
         onAvailablePaymentMethodsChange={(event) => {
           // The honest availability signal (the deprecated
@@ -272,11 +297,6 @@ function WalletButton({
           if (!event.paymentMethods) onUnavailable();
         }}
       />
-      {error ? (
-        <p className="mt-2 text-[11px] font-medium text-cream/70">
-          {t.checkout.errorBody}
-        </p>
-      ) : null}
     </>
   );
 }

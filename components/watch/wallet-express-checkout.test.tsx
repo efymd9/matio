@@ -269,6 +269,31 @@ describe("WalletExpressCheckout — confirming a payment", () => {
     await waitFor(() => expect(stripeMock.confirm).toHaveBeenCalled());
     expect(nav.push).not.toHaveBeenCalled();
   });
+
+  it("hides the button and says so when the confirm fails — the session was expired by a newer checkout (#217)", async () => {
+    // Every newer checkout of this buyer (a /checkout tab, this wall in
+    // another tab) expires this session; a 3DS challenge in flight on it
+    // fails the same way, by design. The slot goes, one human line stays,
+    // the card CTA above is the way forward — and NO second session is minted
+    // underneath the checkout the buyer is presumably paying in.
+    stripeMock.confirm.mockResolvedValue({
+      type: "error",
+      error: { message: "This Checkout Session has expired." },
+    } as never);
+    await arm();
+    fireEvent.click(screen.getByTestId("ece"));
+
+    await waitFor(() => expect(screen.queryByTestId("ece")).toBeNull());
+    expect(
+      screen.getByText(/wallet payment didn't go through/i),
+    ).toBeTruthy();
+    // Our own words, never Stripe's error text: that is vendor copy in the
+    // vendor's language, and the regression "just show result.error.message"
+    // has to fail here.
+    expect(screen.queryByText(/Checkout Session has expired/)).toBeNull();
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(actions.createWalletCheckoutSession).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("WalletExpressCheckout — degrading without a scene", () => {

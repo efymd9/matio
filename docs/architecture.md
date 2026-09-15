@@ -506,8 +506,13 @@ startCheckout (app/subscribe/actions.ts)
    ├── Layer 2: Stripe-list dedupe (catches the race where our DB
    │           mirror is behind because the previous webhook hasn't
    │           landed)
-   ├── findOrCreate Stripe customer (stores stripe_customer_id on users)
-   ├── checkout.sessions.create with idempotencyKey = checkout:user:hour
+   ├── findOrCreate Stripe customer (idempotencyKey = customer:<userId>;
+   │     stores stripe_customer_id on users — two parallel first checkouts
+   │     converge on ONE customer, #217)
+   ├── checkout.sessions.create with NO idempotency key, then
+   │     sessions.list({customer, status:'open'}) + expire every other one
+   │     (createSoleOpenSession, #217: one open billable session per buyer;
+   │     a sweep that fails expires the new session and throws)
    │     - success_url = /watch/<slug>?resume=<n> (or /?welcome=1 when
    │       there's no show context — /account is gone)
    │     - automatic_tax + customer_update.address + billing_address_

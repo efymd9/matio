@@ -41,11 +41,12 @@ export const TOS_VERSION_KEY = "tos_version";
 
 /**
  * The consent record written onto the subscription: WHICH terms were accepted,
- * and deliberately no time. A clock read here would ride the create params into
- * the idempotency digest — a key unique per call, which is the parallel-tab
- * double charge — and rounding it to keep the key stable back-dates the
- * acceptance (#214). The exact moment is the Checkout Session's own `created`,
- * which cannot precede the tick that caused it.
+ * and deliberately no time (#214). The exact moment is the Checkout Session's
+ * own `created`, which cannot precede the tick that caused it; a second clock
+ * in the record would be a second, contestable, answer to the same question.
+ * (Until #217 there was a second reason — a clock read rode the create params
+ * into the hour-bucketed idempotency digest; that key is gone, the "one open
+ * session per customer" sweep in app/subscribe/actions.ts replaced it.)
  */
 export function toConsentMetadata(): Record<string, string> {
   return { [TOS_VERSION_KEY]: TOS_VERSION };
