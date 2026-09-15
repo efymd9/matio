@@ -21,12 +21,12 @@ description: Карта живой инфраструктуры Matio (хост�
 | Vercel (staging) | второй проект на том же репозитории, `matio-staging.vercel.app` | production-ветка `main`; на PR присутствуют чеки обоих проектов (`Vercel – matio` — обязательный, `Vercel – matio-staging` — нет); вход по паролю (`STAGING_LOCK_PASSWORD`, см. «Staging») |
 | Neon (Postgres 18) | проект `little-base-06482402`, aws-eu-central-1 | пулер; `db/index.ts` с `prepare: false`; у staging — своя ветка того же проекта |
 | Clerk | продовый инстанс, домены `clerk.matio.tv` / `accounts.matio.tv` | вход по email-коду включён (гостевые аккаунты беспарольные) |
-| Stripe | **LIVE**, вебхук `we_1Tbdh2CGXbzphNyzsw1zWSZf` → `https://matio.tv/api/webhooks/stripe` | платежи ВЫКЛЮЧЕНЫ (`PAYMENTS_ENABLED` не задан), но ключи удалять нельзя, пока жив хоть один подписчик |
-| Mux | **бесплатный план — жёсткий потолок 10 ассетов на аккаунт** | при 10/10 любой `uploads.create` отдаёт 400, а админка показывает обычную маскированную ошибку |
+| Stripe | **LIVE**, вебхук `we_1Tbdh2CGXbzphNyzsw1zWSZf` → `https://matio.tv/api/webhooks/stripe` | **платежи ВКЛЮЧЕНЫ с 09.09.2026**: `PAYMENTS_ENABLED=1`, `STRIPE_PRICE_MONTHLY` = $25/мес (`price_1UDhk3…`, #207), `PAY_FIRST_CHECKOUT` стоит, `WALLET_EXPRESS_CHECKOUT` в проде НЕ задан (только стенд). Стенд — **песочница Stripe**: sk_test/pk_test, свой `STRIPE_WEBHOOK_SECRET`, payment-method domain `matio-staging.vercel.app` зарегистрирован, head office задан в тестовом Stripe Tax. Ключи удалять нельзя (build guard + зеркало вебхука) |
+| Mux | **платный план; аккаунт ОБЩИЙ с другим проектом владельца (courseplayer)** | потолка 10 ассетов больше нет; чужие ассеты в дашборде — не мусор matio, не удалять; свои — по `passthrough` = `episodes.id` (см. CLAUDE.md «Mux») |
 | Vercel Blob | store `matio-blob`, Frankfurt, Public | артворк шоу; заливка client-direct, байты не проходят через функции |
-| Resend | код внедрён, **аккаунт и DNS не заведены** | без `RESEND_API_KEY` форма сбора работает, письма не уходят |
+| Resend | **LIVE**: домен `matio.tv` верифицирован (eu-west-1), `RESEND_API_KEY` в проде с июля 2026 | на стенде ключ пустой — форма сбора работает, письма не уходят; free tier 100/день |
 | PostHog | EU Cloud, проект 190233 | прокси через `/ingest` |
-| Sentry | **живой с 15.08.2026**: организация `deep-ordinary` (регион EU), проект `javascript-nextjs` (id 4511916989743184); DSN задан на проде и стенде, прод-события приходят с 0.5.0 | регион менялся бы только пересозданием организации. Один проект на весь веб; без `NEXT_PUBLIC_SENTRY_DSN` SDK не инициализируется вообще. **У стенда нет `NEXT_PUBLIC_APP_ENV=staging`**, поэтому его браузерные события помечены `environment: production` — при разборе смотреть `request.url`, а не только `environment` (грабля из #126) |
+| Sentry | **живой с 15.08.2026**: организация `deep-ordinary` (регион EU), проект `javascript-nextjs` (id 4511916989743184); DSN задан на проде и стенде, прод-события приходят с 0.5.0 | регион менялся бы только пересозданием организации. Один проект на весь веб; без `NEXT_PUBLIC_SENTRY_DSN` SDK не инициализируется вообще. У стенда есть свой DSN и `NEXT_PUBLIC_APP_ENV=staging` (проверено `vercel env ls` 06.09.2026), поэтому его события помечены `environment: staging`; `request.url` остаётся вторым признаком при разборе (грабля из #126) |
 | GitHub App `matio-release-please` | App ID 4447605, установлен на репозиторий | секреты `RELEASE_PLEASE_APP_ID` / `RELEASE_PLEASE_APP_PRIVATE_KEY`; приватный ключ — у владельца в менеджере паролей |
 
 ## CI
@@ -174,8 +174,10 @@ deployments`. Бесплатный уровень (`prod_deployment_urls_and_all
   на стенде **пустые**. Тестовые клики в боевом дашборде задним числом не
   чинятся.
 - **Письма выключены**: `RESEND_API_KEY` пустой.
-- **Вебхуков у стенда нет**: Stripe/Clerk/Mux шлют на `matio.tv`, секреты
-  подписи разные, чужое событие стенд не обработает и не должен.
+- **Вебхуки у стенда**: с 09.09.2026 песочница Stripe шлёт на
+  `matio-staging.vercel.app/api/webhooks/stripe` со своим `STRIPE_WEBHOOK_SECRET`
+  (репетиция покупки); Clerk и Mux по-прежнему шлют только на `matio.tv`,
+  секреты подписи разные, чужое событие стенд не обработает и не должен.
 - **Ступень называет переменная `APP_ENV`**: на проекте стенда она задана в
   `staging`, на проде **не задана никогда**. `/api/healthz` отдаёт
   `environment` из неё, а без неё — из `VERCEL_ENV` (прежнее поведение, и
