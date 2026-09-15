@@ -141,11 +141,19 @@ export default defineConfig({
       //   разошёлся с CI на 0.74 п.п. — больше запаса 0.7 из правила
       //   «локальный − 0.7», и первая версия пола (41.4) легла ровно на
       //   число CI, без запаса на дрейф).
+      // → 41.7/33.7/35.4/41.2 (#195: остатки throw в админских формах —
+      //   createSeason и deleteEpisode со страницы сезона отвечают кодами
+      //   (season_number_invalid / season_number_taken /
+      //   episode_is_choice_target), общий read isChoiceTarget в
+      //   lib/branching-db.ts под тестами через экшен, редирект после
+      //   удаления доказан броском NEXT_REDIRECT. Локально
+      //   42.46/34.41/36.17/41.96 поверх f390a8c2; полы по правилу
+      //   «max(main, локальный − 0.7)» — окончательные числа по логу CI).
       thresholds: {
-        lines: 41.3,
-        functions: 33.6,
-        branches: 35.3,
-        statements: 40.8,
+        lines: 41.6,
+        functions: 33.7,
+        branches: 35.4,
+        statements: 41.2,
       },
     },
 

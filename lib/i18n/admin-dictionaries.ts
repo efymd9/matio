@@ -827,6 +827,13 @@ export const ru = {
       "Этот номер в сезоне уже занят — выберите другой.",
     introMarkersInvalid:
       "Маркеры интро: целые секунды, конец позже начала.",
+    // Сезоны и удаление эпизода (#195). Причина отказа удалить — та же, что
+    // fork.deleteBlockedByChoices, но как ответ формы: на странице сезона
+    // рёбер не видно, и кнопку там не спрятать.
+    seasonNumberInvalid: "Номер сезона — целое число от 1.",
+    seasonNumberTaken: "Такой номер сезона уже есть — выберите другой.",
+    episodeIsChoiceTarget:
+      "Не удалено: этот эпизод — цель развилки или перехода другого эпизода. Сначала уберите его из вариантов там.",
     unknown: "Не удалось сохранить. Попробуйте ещё раз.",
     notSaved: "Не сохранено",
     // Ветвление (#143): панель на странице эпизода + publish-guard сериала.
@@ -1780,6 +1787,10 @@ export const en: AdminDict = {
       "That number is already used in this season — pick another.",
     introMarkersInvalid:
       "Intro markers must be whole seconds, with the end after the start.",
+    seasonNumberInvalid: "Season number must be a whole number from 1.",
+    seasonNumberTaken: "That season number already exists — pick another.",
+    episodeIsChoiceTarget:
+      "Not deleted: this episode is the target of another episode's fork or transition. Remove it from the options there first.",
     unknown: "Couldn’t save. Try again.",
     notSaved: "Not saved",
     forkWindowOutOfRange:
