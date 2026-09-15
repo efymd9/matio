@@ -182,11 +182,18 @@ PR: данные не размножаются бесконтрольно, ст�
 - **Процессоры**: Clerk — источник истины. Stripe — обработчик
   `user.deleted` сам ставит живой подписке `cancel_at_period_end: true`
   (best-effort: сбой Stripe стирание не останавливает, но уходит в лог и
-  Sentry по id) и ДО `DELETE FROM users` пишет `stripe_customer_id` в
-  тумбстоун `erased_customers` — без него следующий вебхук Stripe по этому
-  клиенту (`guest = "1"` в метаданных не истекает) воссоздал бы Clerk-
-  пользователя и `users` с адресом через `claimGuestCheckout`;
-  `mirrorSubscription` и `/welcome` спрашивают тумбстоун ПЕРЕД claim.
+  Sentry по id) и ДО `DELETE FROM users` пишет в тумбстоун
+  `erased_customers` `stripe_customer_id` **и все `cus_…`, которые
+  `customers.search` находит по адресу аккаунта** (#223: гостевой checkout
+  создаёт Customer из адреса на форме, поздняя покупка из-под аккаунта
+  перезаписывает id в `users` — старого помнит только Stripe; одна страница
+  ≤100, 5 с, без ретраев, best-effort; сбой поиска — лог + Sentry по id и
+  ручной путь в ранбуке §4, повторить скриптом нельзя: адрес уходит вместе
+  со строкой, payload Clerk его не несёт) — без тумбстоуна следующий вебхук
+  Stripe по любому из этих клиентов (`guest = "1"` в метаданных не
+  истекает) воссоздал бы Clerk-пользователя и `users` с адресом через
+  `claimGuestCheckout`; `mirrorSubscription` и `/welcome` спрашивают
+  тумбстоун ПЕРЕД claim.
   Stripe Customer (email, billing address) при этом остаётся — `customers.del`
   = решение владельца (`docs/registry.md`). PostHog — тот же `eraseUser`
   ПОСЛЕ локальных DELETE удаляет person по `distinct_id` = Clerk id вместе с

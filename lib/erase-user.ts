@@ -37,10 +37,13 @@ import { isSubjectId } from "@/lib/user-export";
 // Order, unchanged since #161/#179 and pinned by the tests:
 //   1. a live Stripe subscription is set to cancel at period end
 //      (best-effort — the erasure never waits for Stripe);
-//   2. the customer id is tombstoned in erased_customers BEFORE the users
-//      row goes, so the customer's later webhooks cannot re-create the
-//      account through claimGuestCheckout (a failure here throws — the
-//      tombstone is what makes the erasure stick);
+//   2. EVERY Stripe customer the account can be reached through is
+//      tombstoned in erased_customers BEFORE the users row goes — the id
+//      the row holds plus every customer Stripe itself finds for the
+//      address (the Stripe customer search, best-effort, #223) — so a customer's
+//      later webhooks cannot re-create the account through
+//      claimGuestCheckout (a failure of the INSERT throws — the tombstone
+//      is what makes the erasure stick);
 //   3. DELETE show_reminders by the account's address and by user_id
 //      (the one PII table keyed on the address rather than the account);
 //   4. DELETE users — the FK actions declared in db/schema/* take the rest
@@ -74,15 +77,25 @@ export type EraseStripeLike = {
       options: { timeout: number; maxNetworkRetries: number },
     ) => Promise<unknown>;
   };
+  customers: {
+    search: (
+      params: { query: string; limit: number },
+      options: { timeout: number; maxNetworkRetries: number },
+    ) => Promise<{ data: { id: string }[]; has_more: boolean }>;
+  };
 };
 
 export type EraseUserDeps = {
   db: EraseDb;
   /**
-   * Lazy on purpose: the client is built only when there is a live
-   * subscription to cancel, and a missing key surfaces exactly like a
-   * Stripe outage — the loud "cancel it at Stripe by hand" line by id
-   * (lib/stripe.ts:getStripe throws without STRIPE_SECRET_KEY).
+   * Lazy on purpose: the client is built only when there is something to
+   * ask Stripe — a live subscription to cancel, or an address to find the
+   * customers for. Both callers' getters throw only for a missing key
+   * (lib/stripe.ts:getStripe, scripts/erase-user.ts), and the two steps
+   * read that throw differently: the cancellation, which HAS a subscription
+   * to cancel, reports it exactly like a Stripe outage — the loud "cancel it
+   * at Stripe by hand" line by id; the customer search reports
+   * `skipped_unconfigured` and tombstones the id the users row holds.
    */
   getStripe: () => EraseStripeLike;
   /** null → PostHog is skipped with `skipped_unconfigured`, no request made. */
@@ -101,6 +114,10 @@ export type EraseUserResult =
       stripeCustomer: boolean;
       liveSubscription: boolean;
       cancelRequested: boolean;
+      /** What the Stripe customer search by the account's address did (#223). */
+      stripeSearch: StripeSearchStatus;
+      /** Every id written to erased_customers: the users row's, then the found ones. */
+      stripeCustomersTombstoned: string[];
       posthog: PosthogEraseResult;
     };
 
@@ -116,6 +133,116 @@ export const STRIPE_CANCEL_TIMEOUT_MS = 5_000;
 // handler finds no user — so after the last attempt the loud error log below
 // is the only recovery path.
 export const STRIPE_CANCEL_RETRIES = 2;
+
+// ── The customers behind the address (#223) ─────────────────────────────
+// The users row knows ONE Stripe customer id. A guest checkout followed by
+// a signed-in purchase leaves an older customer behind: Stripe created it
+// from the address typed on the checkout form, the signed-in purchase
+// overwrote users.stripe_customer_id with a new one, and nothing local
+// remembers the first (subscriptions carries no customer id). Its later
+// webhook — a guest sub's `guest = "1"` metadata never expires — would pass
+// isErasedCustomer and re-create the account through claimGuestCheckout.
+// Only Stripe still knows that id, so the erasure asks Stripe by the
+// address: the Search API (`GET /v1/customers/search`), one page, the same
+// request ceiling as the cancellation, no retries, never throws — the
+// erasure never waits for Stripe. Search is eventually consistent (Stripe:
+// under a minute after a
+// write), which for an erasure is noise — a customer minted in the last
+// minute before the account was deleted has no subscription to fire a
+// webhook from yet. The exact match on `email` is case-insensitive at
+// Stripe, so the address goes as stored. One page IS the whole answer: an
+// address with more than STRIPE_SEARCH_LIMIT customers does not happen
+// (one guest checkout mints one customer), so `has_more` is a warning by
+// id, not a second request.
+export const STRIPE_SEARCH_LIMIT = 100;
+
+export type StripeSearchStatus = "ok" | "skipped_unconfigured" | "failed";
+
+export type StripeCustomerSearch = {
+  status: StripeSearchStatus;
+  /** Customer ids Stripe holds for the address — ids only, never the address. */
+  customerIds: string[];
+  /** A second page exists: only the first STRIPE_SEARCH_LIMIT ids are here. */
+  hasMore: boolean;
+  /** For a failed search: class and code only — Stripe quotes the query, i.e. the address. */
+  error?: ReturnType<typeof describeError>;
+};
+
+/**
+ * A value for the Stripe Search Query Language, to sit between single
+ * quotes: the backslash first, then the quote — `\` → `\\`, `'` → `\'`.
+ */
+export function escapeStripeSearchValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+/** The one place the address is turned into a Stripe query. */
+export function stripeCustomerSearchQuery(email: string): string {
+  return `email:'${escapeStripeSearchValue(email)}'`;
+}
+
+async function searchStripeCustomers(
+  userId: string,
+  email: string,
+  getStripe: () => EraseStripeLike,
+): Promise<StripeCustomerSearch> {
+  let stripe: EraseStripeLike;
+  try {
+    stripe = getStripe();
+  } catch {
+    return { status: "skipped_unconfigured", customerIds: [], hasMore: false };
+  }
+  try {
+    const page = await stripe.customers.search(
+      { query: stripeCustomerSearchQuery(email), limit: STRIPE_SEARCH_LIMIT },
+      { timeout: STRIPE_CANCEL_TIMEOUT_MS, maxNetworkRetries: 0 },
+    );
+    if (page.has_more) {
+      console.warn(
+        `erase user: more than ${STRIPE_SEARCH_LIMIT} Stripe customers carry the address — only the first page is tombstoned`,
+        { userId },
+      );
+    }
+    return {
+      status: "ok",
+      customerIds: page.data.map((customer) => customer.id),
+      hasMore: page.has_more,
+    };
+  } catch (err) {
+    // Never the message: Stripe echoes the query, and the query is the
+    // address. Name, code and HTTP status tell an outage from a bad key.
+    return {
+      status: "failed",
+      customerIds: [],
+      hasMore: false,
+      error: describeError(err),
+    };
+  }
+}
+
+// The erasure's reporting for a failed search: the address is about to leave
+// `users` and Clerk's payload never had it, so this step CANNOT be repeated
+// by the script — a human finds the address in the Stripe Dashboard
+// (runbook §4). Shouted by id to the log AND to Sentry, like the PostHog
+// step. `skipped_unconfigured` and `ok` ride the info line only.
+async function searchStripeCustomersAndReport(
+  userId: string,
+  email: string,
+  getStripe: () => EraseStripeLike,
+): Promise<StripeCustomerSearch> {
+  const result = await searchStripeCustomers(userId, email, getStripe);
+  if (result.status === "failed") {
+    console.error(
+      "erase user: Stripe customer search FAILED — find the address in the Stripe Dashboard and tombstone every customer by hand (docs/runbooks/gdpr-requests.md §4)",
+      { userId, error: result.error },
+    );
+    Sentry.captureMessage(
+      "erase user: Stripe customers NOT searched — tombstone by hand",
+      { level: "error", tags: { userId, stripeSearch: "failed" } },
+    );
+  }
+  return result;
+}
 
 /** The one predicate for "a subscription Stripe is still billing". */
 function liveSubscriptionWhere(userId: string) {
@@ -218,17 +345,35 @@ export async function eraseUser(
     );
   }
 
-  // Tombstone the Stripe customer BEFORE the users row goes: from here on
-  // the customer's webhooks (the cancel-at-period-end update just
-  // requested, a renewal, the final subscription.deleted) find no local
-  // user, and a guest sub's `guest = "1"` metadata would otherwise send them
-  // into claimGuestCheckout to re-create the account. Write-if-absent, so a
-  // redelivery is a no-op; a failure here throws (500 → Clerk retries) —
-  // unlike the Stripe call above, this row is what makes the erasure stick.
-  if (user.stripeCustomerId) {
+  // Tombstone EVERY Stripe customer BEFORE the users row goes: from here on
+  // a customer's webhooks (the cancel-at-period-end update just requested,
+  // a renewal, the final subscription.deleted) find no local user, and a
+  // guest sub's `guest = "1"` metadata would otherwise send them into
+  // claimGuestCheckout to re-create the account. The row's id plus what
+  // Stripe finds for the address (see searchStripeCustomers) — this is the
+  // last moment the address is readable, so the search runs here, and a
+  // failed one changes nothing about the order: the erasure goes on with
+  // the id the row holds, because the address must leave `users` either
+  // way. One write-if-absent INSERT for all of them, so a redelivery is a
+  // no-op; a failure here throws (500 → Clerk retries) — unlike the Stripe
+  // calls, this row is what makes the erasure stick.
+  const search = await searchStripeCustomersAndReport(
+    userId,
+    user.email,
+    deps.getStripe,
+  );
+  const stripeCustomersTombstoned = [
+    ...new Set([
+      ...(user.stripeCustomerId ? [user.stripeCustomerId] : []),
+      ...search.customerIds,
+    ]),
+  ];
+  if (stripeCustomersTombstoned.length > 0) {
     await db
       .insert(erasedCustomers)
-      .values({ stripeCustomerId: user.stripeCustomerId })
+      .values(
+        stripeCustomersTombstoned.map((stripeCustomerId) => ({ stripeCustomerId })),
+      )
       .onConflictDoNothing({ target: erasedCustomers.stripeCustomerId });
   }
 
@@ -259,6 +404,8 @@ export async function eraseUser(
     stripeCustomer: user.stripeCustomerId !== null,
     liveSubscription: liveSub !== undefined,
     cancelRequested,
+    stripeSearch: search.status,
+    stripeCustomersTombstoned,
     posthog: posthog.status,
     posthogPersons: posthog.personIds.length,
   });
@@ -268,6 +415,8 @@ export async function eraseUser(
     stripeCustomer: user.stripeCustomerId !== null,
     liveSubscription: liveSub !== undefined,
     cancelRequested,
+    stripeSearch: search.status,
+    stripeCustomersTombstoned,
     posthog,
   };
 }
@@ -333,12 +482,22 @@ export type ErasePreview = {
   tombstoned: boolean;
   /** A subscription Stripe is still billing — --apply asks Stripe to cancel it. */
   liveSubscription: boolean;
+  /**
+   * The Stripe customer search by the account's address, read-only — the
+   * only way to see the tombstone's scope before --apply. null without a
+   * users row: there is no address to search by.
+   */
+  stripeSearch: StripeCustomerSearch | null;
   posthog: PosthogLookupResult;
 };
 
 export async function previewErasure(
   userId: string,
-  deps: { db: EraseDb; posthog: PosthogQueryConfig | null },
+  deps: {
+    db: EraseDb;
+    getStripe: () => EraseStripeLike;
+    posthog: PosthogQueryConfig | null;
+  },
 ): Promise<ErasePreview> {
   const { db } = deps;
   const total = async (
@@ -404,12 +563,27 @@ export async function previewErasure(
     stripeCustomer: Boolean(user?.stripeCustomerId),
     tombstoned,
     liveSubscription: live > 0,
+    stripeSearch: user
+      ? await searchStripeCustomers(userId, user.email, deps.getStripe)
+      : null,
     posthog: await lookupPosthogPersons(deps.posthog, userId),
   };
 }
 
 // ── The script's stdout ─────────────────────────────────────────────────
 // Ids, counts and statuses — never a value. The log audit pins it.
+
+/** `customers=<n> (ids …)` — the search's scope, ids only. */
+function customersSummary(ids: string[]): string {
+  return `customers=${ids.length}${ids.length > 0 ? ` (ids ${ids.join(", ")})` : ""}`;
+}
+
+function searchSummary(s: StripeCustomerSearch): string {
+  if (s.status === "ok") {
+    return `search=ok ${customersSummary(s.customerIds)}${s.hasMore ? ` has_more=yes (first ${STRIPE_SEARCH_LIMIT} only)` : ""}`;
+  }
+  return `search=${s.status}${s.error ? ` error=${s.error.name}` : ""}`;
+}
 
 export function summarizeErasePreview(
   userId: string,
@@ -423,7 +597,7 @@ export function summarizeErasePreview(
     `subject: ${userId}${p.found ? "" : " (no users row — already erased or never mirrored)"}`,
     `would delete: ${counts(p.deleted)}`,
     `would de-identify (user_id → NULL): ${counts(p.deidentified)}`,
-    `stripe: customer=${p.stripeCustomer ? (p.tombstoned ? "yes (tombstoned)" : "yes") : "none"} live_subscription=${p.liveSubscription ? "yes (would be set to cancel at period end)" : "no"}`,
+    `stripe: customer=${p.stripeCustomer ? (p.tombstoned ? "yes (tombstoned)" : "yes") : "none"} live_subscription=${p.liveSubscription ? "yes (would be set to cancel at period end)" : "no"}${p.stripeSearch ? ` ${searchSummary(p.stripeSearch)}` : ""}`,
     `posthog: ${p.posthog.status}${p.posthog.personIds.length > 0 ? ` persons=${p.posthog.personIds.length}` : ""}${p.posthog.httpStatus ? ` http=${p.posthog.httpStatus}` : ""}${p.posthog.error ? ` error=${p.posthog.error.name}` : ""}`,
   ].join("\n");
 }
@@ -439,7 +613,7 @@ export function summarizeEraseResult(
   return [
     `subject: ${userId}`,
     `local: erased (show_reminders=${r.reminderRows}, users=1 + cascades)`,
-    `stripe: customer=${r.stripeCustomer ? "tombstoned" : "none"} live_subscription=${r.liveSubscription ? (r.cancelRequested ? "cancel at period end requested" : "NOT cancelled — cancel by hand") : "no"}`,
+    `stripe: customer=${r.stripeCustomer ? "tombstoned" : "none"} live_subscription=${r.liveSubscription ? (r.cancelRequested ? "cancel at period end requested" : "NOT cancelled — cancel by hand") : "no"} search=${r.stripeSearch} tombstoned ${customersSummary(r.stripeCustomersTombstoned)}`,
     posthog,
   ].join("\n");
 }
@@ -449,6 +623,11 @@ export function stepsLeftByHand(r: EraseUserResult): string[] {
   const left: string[] = [];
   if (r.status === "erased" && r.liveSubscription && !r.cancelRequested) {
     left.push("stripe: cancel the live subscription by hand");
+  }
+  if (r.status === "erased" && r.stripeSearch === "failed") {
+    left.push(
+      "stripe: the customer search failed — find the address in the Dashboard and tombstone every customer by hand (runbook §4)",
+    );
   }
   if (r.posthog.status === "skipped_forbidden" || r.posthog.status === "failed") {
     left.push("posthog: delete the person by hand (runbook §4)");
@@ -462,7 +641,7 @@ export const ERASE_USAGE =
   "usage: DATABASE_URL=<host> pnpm erase-user <userId> [--apply]\n" +
   "  userId   — the Clerk id (users.id), e.g. user_2abc…; the account must already be deleted in Clerk\n" +
   "  --apply  — actually erase; without it the script prints what WOULD be erased and changes nothing\n" +
-  "  Optional, best-effort: STRIPE_SECRET_KEY (cancel a live subscription), POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID (delete the person).\n" +
+  "  Optional, best-effort: STRIPE_SECRET_KEY (cancel a live subscription; find EVERY Stripe customer for the address — the dry run lists their ids), POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID (delete the person).\n" +
   "  Nothing is read from .env.local on purpose — every variable is passed explicitly.";
 
 export type ParsedEraseArgs =

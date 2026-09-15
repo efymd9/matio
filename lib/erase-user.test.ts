@@ -8,11 +8,14 @@ vi.mock("@sentry/nextjs", () => ({ captureMessage: sentryMessage }));
 import {
   ERASE_USAGE,
   eraseUser,
+  escapeStripeSearchValue,
   parseEraseArgs,
   previewErasure,
   stepsLeftByHand,
   STRIPE_CANCEL_RETRIES,
   STRIPE_CANCEL_TIMEOUT_MS,
+  STRIPE_SEARCH_LIMIT,
+  stripeCustomerSearchQuery,
   summarizeErasePreview,
   summarizeEraseResult,
   type EraseDb,
@@ -48,6 +51,7 @@ const h = {
 };
 
 const stripeUpdate = vi.fn();
+const stripeSearch = vi.fn();
 const fetchMock = vi.fn<typeof fetch>();
 
 /** A recorder shaped like the three Drizzle entry points the core uses. */
@@ -93,11 +97,13 @@ function makeDb(): EraseDb {
   } as unknown as EraseDb;
 }
 
-const deps = () => ({
-  db: makeDb(),
-  getStripe: () => ({ subscriptions: { update: stripeUpdate } }),
-  posthog: null,
+/** The two Stripe calls the erasure makes, both spies. */
+const stripe = () => ({
+  subscriptions: { update: stripeUpdate },
+  customers: { search: stripeSearch },
 });
+
+const deps = () => ({ db: makeDb(), getStripe: stripe, posthog: null });
 
 function render(where: unknown) {
   return new PgDialect().sqlToQuery(where as SQL);
@@ -127,10 +133,13 @@ beforeEach(() => {
   h.writes.length = 0;
   h.insertFails = undefined;
   stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
+  // Stripe knows no customer for the address unless a case says otherwise.
+  stripeSearch.mockReset().mockResolvedValue({ data: [], has_more: false });
   fetchMock.mockReset();
   sentryMessage.mockReset();
   vi.stubGlobal("fetch", fetchMock);
   vi.spyOn(console, "info").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -151,7 +160,7 @@ describe("eraseUser · the local erasure through an injected client", () => {
       "delete users",
     ]);
     expect(h.inserts).toEqual([
-      { table: "erased_customers", values: { stripeCustomerId: "cus_dummy" } },
+      { table: "erased_customers", values: [{ stripeCustomerId: "cus_dummy" }] },
     ]);
     const reminders = render(h.deletes[0].where);
     expect(reminders.sql).toBe(
@@ -168,6 +177,8 @@ describe("eraseUser · the local erasure through an injected client", () => {
       stripeCustomer: true,
       liveSubscription: false,
       cancelRequested: false,
+      stripeSearch: "ok",
+      stripeCustomersTombstoned: ["cus_dummy"],
       posthog: { status: "skipped_unconfigured", personIds: [] },
     });
     expect(stripeUpdate).not.toHaveBeenCalled();
@@ -239,6 +250,177 @@ describe("eraseUser · the local erasure through an injected client", () => {
       level: "error",
       tags: { cancelRequested: "false" },
     });
+  });
+});
+
+describe("eraseUser · the customers behind the address (#223)", () => {
+  // The users row holds ONE customer id; a guest checkout followed by a
+  // signed-in purchase left an older one behind that only Stripe knows.
+  // Stripe is asked by the address BEFORE the row (and with it the address)
+  // is gone, and every id it answers with lands in the SAME insert as the
+  // row's own — still ahead of the deletes.
+
+  it("(а) tombstones the row's customer AND every customer Stripe finds for the address — one insert, before the deletes", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_B" };
+    stripeSearch.mockResolvedValue({
+      data: [{ id: "cus_A" }, { id: "cus_B" }],
+      has_more: false,
+    });
+
+    const result = await eraseUser(USER_ID, deps());
+
+    expect(stripeSearch).toHaveBeenCalledTimes(1);
+    // The address goes as stored (Stripe's exact match is case-insensitive);
+    // one page, the cancellation's ceiling, no retries.
+    expect(stripeSearch).toHaveBeenCalledWith(
+      { query: `email:'${EMAIL}'`, limit: STRIPE_SEARCH_LIMIT },
+      { timeout: STRIPE_CANCEL_TIMEOUT_MS, maxNetworkRetries: 0 },
+    );
+    expect(h.writes).toEqual([
+      "insert erased_customers",
+      "delete show_reminders",
+      "delete users",
+    ]);
+    expect(h.inserts).toEqual([
+      {
+        table: "erased_customers",
+        values: [{ stripeCustomerId: "cus_B" }, { stripeCustomerId: "cus_A" }],
+      },
+    ]);
+    expect(result).toMatchObject({
+      status: "erased",
+      stripeSearch: "ok",
+      stripeCustomersTombstoned: ["cus_B", "cus_A"],
+    });
+    expect(sentryMessage).not.toHaveBeenCalled();
+  });
+
+  it("tombstones a customer Stripe finds even when the users row holds none", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: null };
+    stripeSearch.mockResolvedValue({ data: [{ id: "cus_A" }], has_more: false });
+
+    const result = await eraseUser(USER_ID, deps());
+
+    expect(h.writes[0]).toBe("insert erased_customers");
+    expect(h.inserts).toEqual([
+      { table: "erased_customers", values: [{ stripeCustomerId: "cus_A" }] },
+    ]);
+    expect(result).toMatchObject({
+      stripeCustomer: false,
+      stripeCustomersTombstoned: ["cus_A"],
+    });
+  });
+
+  it("(б) a failed search (timeout, outage) is `failed`: the erasure completes with the row's id, shouted by id — log AND Sentry, never the address", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_B" };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Stripe echoes the query in its message — the query is the address.
+    stripeSearch.mockRejectedValue(
+      Object.assign(new Error(`Request timed out: email:'${EMAIL}'`), {
+        name: "StripeConnectionError",
+        code: "ETIMEDOUT",
+      }),
+    );
+
+    const result = await eraseUser(USER_ID, deps());
+
+    expect(result).toMatchObject({
+      status: "erased",
+      stripeSearch: "failed",
+      stripeCustomersTombstoned: ["cus_B"],
+    });
+    expect(h.writes).toEqual([
+      "insert erased_customers",
+      "delete show_reminders",
+      "delete users",
+    ]);
+    expect(h.inserts).toEqual([
+      { table: "erased_customers", values: [{ stripeCustomerId: "cus_B" }] },
+    ]);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error.mock.calls[0][0]).toContain("Stripe customer search FAILED");
+    expect(error.mock.calls[0][1]).toEqual({
+      userId: USER_ID,
+      error: { name: "StripeConnectionError", code: "ETIMEDOUT", statusCode: undefined },
+    });
+    expect(sentryMessage).toHaveBeenCalledTimes(1);
+    expect(sentryMessage.mock.calls[0][0]).toContain("NOT searched");
+    expect(sentryMessage.mock.calls[0][1]).toEqual({
+      level: "error",
+      tags: { userId: USER_ID, stripeSearch: "failed" },
+    });
+    expect(stepsLeftByHand(result)).toEqual([
+      "stripe: the customer search failed — find the address in the Dashboard and tombstone every customer by hand (runbook §4)",
+    ]);
+  });
+
+  it("(в) a client that cannot be built (no STRIPE_SECRET_KEY) is `skipped_unconfigured`: no request, no alarm, the row's id still tombstoned", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_B" };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await eraseUser(USER_ID, {
+      ...deps(),
+      getStripe: () => {
+        throw Object.assign(new Error("STRIPE_SECRET_KEY is not set"), {
+          name: "StripeKeyMissing",
+        });
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "erased",
+      stripeSearch: "skipped_unconfigured",
+      stripeCustomersTombstoned: ["cus_B"],
+    });
+    expect(stripeSearch).not.toHaveBeenCalled();
+    expect(h.inserts).toEqual([
+      { table: "erased_customers", values: [{ stripeCustomerId: "cus_B" }] },
+    ]);
+    expect(error).not.toHaveBeenCalled();
+    expect(sentryMessage).not.toHaveBeenCalled();
+    expect(stepsLeftByHand(result)).toEqual([]);
+  });
+
+  it("(г) the address is escaped for the Stripe Search Query Language — the backslash first, then the quote", async () => {
+    h.userRow = { email: "o'brien\\x@example.invalid", stripeCustomerId: null };
+
+    await eraseUser(USER_ID, deps());
+
+    expect(stripeSearch.mock.calls[0][0].query).toBe(
+      "email:'o\\'brien\\\\x@example.invalid'",
+    );
+    expect(escapeStripeSearchValue("a\\'b")).toBe("a\\\\\\'b");
+    expect(stripeCustomerSearchQuery("plain@example.invalid")).toBe(
+      "email:'plain@example.invalid'",
+    );
+  });
+
+  it("(д) a second page (has_more) is a warning by id, not a second request — the first page is tombstoned", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: null };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    stripeSearch.mockResolvedValue({ data: [{ id: "cus_A" }], has_more: true });
+
+    const result = await eraseUser(USER_ID, deps());
+
+    expect(stripeSearch).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      stripeSearch: "ok",
+      stripeCustomersTombstoned: ["cus_A"],
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain(
+      `more than ${STRIPE_SEARCH_LIMIT} Stripe customers`,
+    );
+    expect(warn.mock.calls[0][1]).toEqual({ userId: USER_ID });
+    expect(sentryMessage).not.toHaveBeenCalled();
+  });
+
+  it("is not asked when the users row is already gone — there is no address to search by", async () => {
+    h.userRow = undefined;
+
+    await eraseUser(USER_ID, deps());
+
+    expect(stripeSearch).not.toHaveBeenCalled();
   });
 });
 
@@ -356,8 +538,16 @@ describe("previewErasure (the dry run)", () => {
       erased_customers: 1,
     };
     fetchMock.mockResolvedValueOnce(json(200, { results: [{ id: 42 }] }));
+    stripeSearch.mockResolvedValue({
+      data: [{ id: "cus_dummy" }, { id: "cus_older" }],
+      has_more: false,
+    });
 
-    const preview = await previewErasure(USER_ID, { db: makeDb(), posthog: CFG });
+    const preview = await previewErasure(USER_ID, {
+      db: makeDb(),
+      getStripe: stripe,
+      posthog: CFG,
+    });
 
     expect(preview).toEqual({
       found: true,
@@ -374,10 +564,20 @@ describe("previewErasure (the dry run)", () => {
       // subscriptions counted twice: all rows, and the live one by the
       // access-granting predicate — the recorder answers 1 to both.
       liveSubscription: true,
+      stripeSearch: {
+        status: "ok",
+        customerIds: ["cus_dummy", "cus_older"],
+        hasMore: false,
+      },
       posthog: { status: "found", personIds: ["42"] },
     });
     expect(h.writes).toEqual([]);
     expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["GET"]);
+    // The same read-only search the erasure runs — the address as stored.
+    expect(stripeSearch).toHaveBeenCalledWith(
+      { query: `email:'${EMAIL}'`, limit: STRIPE_SEARCH_LIMIT },
+      { timeout: STRIPE_CANCEL_TIMEOUT_MS, maxNetworkRetries: 0 },
+    );
 
     const byTable = Object.fromEntries(
       h.selects.map((s) => [
@@ -410,10 +610,14 @@ describe("previewErasure (the dry run)", () => {
     ]);
   });
 
-  it("without a users row keys reminders by user_id alone, skips the tombstone read and reports found=false", async () => {
+  it("without a users row keys reminders by user_id alone, skips the tombstone read and the Stripe search, and reports found=false", async () => {
     h.userRow = undefined;
 
-    const preview = await previewErasure(USER_ID, { db: makeDb(), posthog: null });
+    const preview = await previewErasure(USER_ID, {
+      db: makeDb(),
+      getStripe: stripe,
+      posthog: null,
+    });
 
     expect(preview).toMatchObject({
       found: false,
@@ -421,12 +625,50 @@ describe("previewErasure (the dry run)", () => {
       stripeCustomer: false,
       tombstoned: false,
       liveSubscription: false,
+      stripeSearch: null,
       posthog: { status: "skipped_unconfigured" },
     });
     const reminders = h.selects.find((s) => s.table === "show_reminders");
     expect(render(reminders?.where).sql).toBe('"show_reminders"."user_id" = $1');
     expect(h.selects.some((s) => s.table === "erased_customers")).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(stripeSearch).not.toHaveBeenCalled();
+  });
+
+  it("a failed or unconfigured search is a status in the preview — never a throw, never an alarm (the dry run's stdout is the channel)", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    stripeSearch.mockRejectedValue(
+      Object.assign(new Error("boom"), { name: "StripeAPIError", statusCode: 503 }),
+    );
+
+    const failed = await previewErasure(USER_ID, {
+      db: makeDb(),
+      getStripe: stripe,
+      posthog: null,
+    });
+    const skipped = await previewErasure(USER_ID, {
+      db: makeDb(),
+      getStripe: () => {
+        throw new Error("STRIPE_SECRET_KEY is not set");
+      },
+      posthog: null,
+    });
+
+    expect(failed.stripeSearch).toEqual({
+      status: "failed",
+      customerIds: [],
+      hasMore: false,
+      error: { name: "StripeAPIError", code: undefined, statusCode: 503 },
+    });
+    expect(skipped.stripeSearch).toEqual({
+      status: "skipped_unconfigured",
+      customerIds: [],
+      hasMore: false,
+    });
+    expect(h.writes).toEqual([]);
+    expect(error).not.toHaveBeenCalled();
+    expect(sentryMessage).not.toHaveBeenCalled();
   });
 });
 
@@ -438,6 +680,11 @@ describe("the script's stdout", () => {
     stripeCustomer: true,
     tombstoned: false,
     liveSubscription: true,
+    stripeSearch: {
+      status: "ok",
+      customerIds: ["cus_dummy", "cus_older"],
+      hasMore: false,
+    },
     posthog: { status: "skipped_forbidden", personIds: [], httpStatus: 403 },
   };
 
@@ -447,7 +694,7 @@ describe("the script's stdout", () => {
         "subject: user_2abc",
         "would delete: users=1 show_reminders=3 subscriptions=1 watch_progress=12 watch_days=5",
         "would de-identify (user_id → NULL): trial_sessions=2 visitors=1 marketing_links=0",
-        "stripe: customer=yes live_subscription=yes (would be set to cancel at period end)",
+        "stripe: customer=yes live_subscription=yes (would be set to cancel at period end) search=ok customers=2 (ids cus_dummy, cus_older)",
         "posthog: skipped_forbidden http=403",
       ].join("\n"),
     );
@@ -469,6 +716,28 @@ describe("the script's stdout", () => {
     expect(
       summarizeErasePreview(USER_ID, { ...preview, tombstoned: true, liveSubscription: false }),
     ).toContain("stripe: customer=yes (tombstoned) live_subscription=no");
+    // The search's scope, by status: ids only, never the address.
+    const stripeLine = (search: ErasePreview["stripeSearch"]) =>
+      summarizeErasePreview(USER_ID, { ...preview, liveSubscription: false, stripeSearch: search })
+        .split("\n")[3];
+    expect(stripeLine(null)).toBe("stripe: customer=yes live_subscription=no");
+    expect(stripeLine({ status: "ok", customerIds: [], hasMore: false })).toBe(
+      "stripe: customer=yes live_subscription=no search=ok customers=0",
+    );
+    expect(stripeLine({ status: "ok", customerIds: ["cus_a"], hasMore: true })).toBe(
+      "stripe: customer=yes live_subscription=no search=ok customers=1 (ids cus_a) has_more=yes (first 100 only)",
+    );
+    expect(
+      stripeLine({
+        status: "failed",
+        customerIds: [],
+        hasMore: false,
+        error: { name: "TimeoutError" },
+      }),
+    ).toBe("stripe: customer=yes live_subscription=no search=failed error=TimeoutError");
+    expect(
+      stripeLine({ status: "skipped_unconfigured", customerIds: [], hasMore: false }),
+    ).toBe("stripe: customer=yes live_subscription=no search=skipped_unconfigured");
     expect(
       summarizeErasePreview(USER_ID, {
         ...preview,
@@ -484,13 +753,15 @@ describe("the script's stdout", () => {
       stripeCustomer: true,
       liveSubscription: true,
       cancelRequested: false,
+      stripeSearch: "ok",
+      stripeCustomersTombstoned: ["cus_dummy", "cus_older"],
       posthog: { status: "failed", personIds: ["42"], error: { name: "TimeoutError" } },
     };
     expect(summarizeEraseResult(USER_ID, erased)).toBe(
       [
         "subject: user_2abc",
         "local: erased (show_reminders=2, users=1 + cascades)",
-        "stripe: customer=tombstoned live_subscription=NOT cancelled — cancel by hand",
+        "stripe: customer=tombstoned live_subscription=NOT cancelled — cancel by hand search=ok tombstoned customers=2 (ids cus_dummy, cus_older)",
         "posthog: failed persons=1 error=TimeoutError",
       ].join("\n"),
     );
@@ -499,11 +770,31 @@ describe("the script's stdout", () => {
       "posthog: delete the person by hand (runbook §4)",
     ]);
 
+    // A failed search is a hand step of its own, between the two above —
+    // the address is gone with the row, so no script re-run can repeat it.
+    const unsearched: EraseUserResult = {
+      ...erased,
+      stripeSearch: "failed",
+      stripeCustomersTombstoned: ["cus_dummy"],
+    };
+    expect(summarizeEraseResult(USER_ID, unsearched)).toContain(
+      "search=failed tombstoned customers=1 (ids cus_dummy)",
+    );
+    expect(stepsLeftByHand(unsearched)).toEqual([
+      "stripe: cancel the live subscription by hand",
+      "stripe: the customer search failed — find the address in the Dashboard and tombstone every customer by hand (runbook §4)",
+      "posthog: delete the person by hand (runbook §4)",
+    ]);
+
     const clean: EraseUserResult = {
       ...erased,
       cancelRequested: true,
+      stripeCustomersTombstoned: ["cus_dummy"],
       posthog: { status: "deleted", personIds: ["42"] },
     };
+    expect(summarizeEraseResult(USER_ID, clean)).toContain(
+      "search=ok tombstoned customers=1 (ids cus_dummy)\n",
+    );
     expect(summarizeEraseResult(USER_ID, clean)).toContain(
       "live_subscription=cancel at period end requested",
     );
