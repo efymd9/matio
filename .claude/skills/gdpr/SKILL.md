@@ -23,7 +23,9 @@ PR: данные не размножаются бесконтрольно, ст�
 
 Что уже есть в кодовой базе по теме (не изобретать заново): HMAC-хеш IP
 вместо сырого (`lib/trial.ts:hashClientIp`, тот же приём в
-`show_reminders.ip_hash`, `guest_checkout_attempts`); стирание CAPI-снимка
+`show_reminders.ip_hash`, `guest_checkout_attempts`, и HMAC значения cookie
+вместо самого значения — `guest_checkout_sessions.claim_token_hash`,
+`lib/guest-checkout-sessions.ts`); стирание CAPI-снимка
 (сырой IP/UA, `_fbp`/`_fbc`) из метаданных Stripe сразу после `Purchase`
 (`lib/subscription-mirror.ts`, #165); скрабберы Sentry
 (`lib/observability.ts`) и лог-аудит (`lib/log-audit.test.ts`); гейт
@@ -170,8 +172,9 @@ PR: данные не размножаются бесконтрольно, ст�
   `marketing_links.created_by` (админ).
 - **Не привязано к `users` вовсе** (псевдонимное): `trial_sessions` без
   `user_id` (session_token, ip_hash), `visitors` без `user_id`,
-  `guest_checkout_attempts` (ip_hash, самопрунинг 2 ч), `stripe_events`
-  (id событий).
+  `guest_checkout_attempts` (ip_hash, самопрунинг 2 ч),
+  `guest_checkout_sessions` (HMAC cookie `checkout_claim` + id сессии
+  Stripe, самопрунинг 24 ч — #224), `stripe_events` (id событий).
 - **Кеши**: `roleCache` (5 с, process-local) истекает сам; Data Cache —
   каталог и агрегаты без PII. Чистить нечего.
 - **Файлы/медиа**: у пользователей нет загрузок. Чистить нечего.

@@ -14,46 +14,21 @@ vi.mock("server-only", () => ({}));
 // The db is the queue-driven fake used by the admin action suites: each
 // db.select() resolves to the next queued result.
 //
-// The Stripe fake is STATEFUL, because the #217 invariant is about lifecycle:
-// a session is created open, `list` filters by customer + status the way the
-// real endpoint does, `expire` flips an open session and refuses a closed one,
-// `retrieve` reads the current status, `customers.create` honours an
-// idempotency key, and `checkout.sessions.create` replays the CACHED first
-// response for a repeated key — exactly the Stripe semantics that made an
-// hour-bucketed key unsafe next to the sweep.
-type FakeSession = {
-  id: string;
-  customer: string | undefined;
-  status: "open" | "expired" | "complete";
-  params: Record<string, unknown>;
-  opts: { idempotencyKey?: string } | undefined;
-};
+// The Stripe fake is STATEFUL, because the #217 invariant is about lifecycle
+// (a session is created open, `list` filters by customer + status, `expire`
+// refuses a closed session, `create` replays the CACHED response for a
+// repeated idempotency key). It lives in tools/test/stripe-checkout-fake.ts,
+// shared with the guest suite (#224) so the two cannot drift in what "Stripe"
+// means; `st` is its state — sessions, customers, one-shot faults, paging.
+const fake = await vi.hoisted(async () =>
+  (await import("@/tools/test/stripe-checkout-fake")).createStripeCheckoutFake(),
+);
+const st = fake.state;
 
 const h = vi.hoisted(() => ({
   selects: [] as unknown[][],
-  sessions: [] as Array<{
-    id: string;
-    customer: string | undefined;
-    status: "open" | "expired" | "complete";
-    params: Record<string, unknown>;
-    opts: { idempotencyKey?: string } | undefined;
-  }>,
-  customers: [] as Array<{ id: string; idempotencyKey?: string }>,
-  customersCreated: 0,
   userCustomerId: "cus_existing" as string | null,
   userUpdates: [] as unknown[],
-  stripeSubs: [] as Array<{ status: string }>,
-  // One-shot fault injection for the sweep: `list` throws; `expire` throws
-  // and either leaves the session open (transient) or marks it closed first
-  // (somebody else got there — a parallel sweep, or the buyer paying).
-  fault: null as
-    | null
-    | { on: "list" }
-    | { on: "expire"; then: "still_open" | "closed_by_other" },
-  // Page size of the fake `list` — Stripe's `limit` is honoured and
-  // `has_more` set like the real endpoint, so the sweep's paging is real.
-  listPageSize: 100,
-  listCalls: 0,
   userAgent: "Mozilla/5.0 (iPhone) Safari",
   // Built with the real serializer, not a hand-written literal: parseConsent
   // also requires the version field, and a literal that silently fails to
@@ -115,105 +90,7 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-function sessionResponse(s: FakeSession) {
-  return {
-    id: s.id,
-    status: s.status,
-    client_secret: `${s.id}_secret`,
-    url: `https://checkout.stripe.com/${s.id}`,
-  };
-}
-
-vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({
-    customers: {
-      create: async (
-        _params: Record<string, unknown>,
-        opts?: { idempotencyKey?: string },
-      ) => {
-        h.customersCreated += 1;
-        const key = opts?.idempotencyKey;
-        const replay = key
-          ? h.customers.find((c) => c.idempotencyKey === key)
-          : undefined;
-        if (replay) return { id: replay.id };
-        const id = `cus_new_${h.customers.length + 1}`;
-        h.customers.push({ id, idempotencyKey: key });
-        return { id };
-      },
-    },
-    subscriptions: { list: async () => ({ data: h.stripeSubs }) },
-    checkout: {
-      sessions: {
-        create: async (
-          params: Record<string, unknown>,
-          opts?: { idempotencyKey?: string },
-        ) => {
-          const key = opts?.idempotencyKey;
-          const replay = key
-            ? h.sessions.find((s) => s.opts?.idempotencyKey === key)
-            : undefined;
-          // Stripe replays the response it CACHED for the first request —
-          // including a `status: 'open'` that may no longer be true.
-          if (replay) return sessionResponse({ ...replay, status: "open" });
-          const s: FakeSession = {
-            id: `cs_test_${h.sessions.length + 1}`,
-            customer: params.customer as string | undefined,
-            status: "open",
-            params,
-            opts,
-          };
-          h.sessions.push(s);
-          return sessionResponse(s);
-        },
-        list: async ({
-          customer,
-          status,
-          limit,
-        }: {
-          customer?: string;
-          status?: string;
-          limit?: number;
-        }) => {
-          h.listCalls += 1;
-          if (h.fault?.on === "list") {
-            h.fault = null;
-            throw new Error("stripe list down");
-          }
-          const matching = h.sessions.filter(
-            (s) => s.customer === customer && (!status || s.status === status),
-          );
-          const pageSize = Math.min(limit ?? 10, h.listPageSize);
-          return {
-            data: matching
-              .slice(0, pageSize)
-              .map((s) => ({ id: s.id, status: s.status })),
-            has_more: matching.length > pageSize,
-          };
-        },
-        expire: async (id: string) => {
-          const s = h.sessions.find((x) => x.id === id);
-          if (h.fault?.on === "expire") {
-            const fault = h.fault;
-            h.fault = null;
-            if (fault.then === "closed_by_other" && s) s.status = "complete";
-            throw new Error("stripe expire failed");
-          }
-          if (!s || s.status !== "open") {
-            throw new Error("You cannot expire a Checkout Session that is not open");
-          }
-          s.status = "expired";
-          return { id, status: "expired" };
-        },
-        retrieve: async (id: string) => {
-          const s = h.sessions.find((x) => x.id === id);
-          if (!s) throw new Error("No such checkout.session");
-          return { id, status: s.status };
-        },
-      },
-    },
-  }),
-}));
+vi.mock("@/lib/stripe", () => ({ getStripe: () => fake.stripe }));
 
 // The UTM snapshot is not under test here, and lib/attribution.ts reaches
 // next/headers through a dynamic import that vitest's mocker resolves to the
@@ -282,23 +159,17 @@ const CONSENT_GIVEN = () =>
   });
 
 const metadataOf = (i: number) =>
-  (h.sessions[i].params.subscription_data as { metadata: Record<string, string> })
+  (st.sessions[i].params.subscription_data as { metadata: Record<string, string> })
     .metadata;
 
 const openSessionIds = () =>
-  h.sessions.filter((s) => s.status === "open").map((s) => s.id);
+  st.sessions.filter((s) => s.status === "open").map((s) => s.id);
 
 beforeEach(() => {
+  fake.reset();
   h.selects = [[]];
-  h.sessions = [];
-  h.customers = [];
-  h.customersCreated = 0;
   h.userCustomerId = "cus_existing";
   h.userUpdates = [];
-  h.stripeSubs = [];
-  h.fault = null;
-  h.listPageSize = 100;
-  h.listCalls = 0;
   h.userAgent = "Mozilla/5.0 (iPhone) Safari";
   h.consentCookie = CONSENT_GIVEN();
   h.authUserId = "user_1";
@@ -325,7 +196,7 @@ describe("createAuthWalletCheckoutSession — refusals reach Stripe as silence",
     expect(res).toEqual({ kind: "redirect", to: "/" });
     // The action is independently POST-invocable; the paywall's own gating is
     // never the only thing between free mode and a real charge.
-    expect(h.sessions).toHaveLength(0);
+    expect(st.sessions).toHaveLength(0);
   });
 
   it("is unavailable — and silent — with the kill-switch unset", async () => {
@@ -334,7 +205,7 @@ describe("createAuthWalletCheckoutSession — refusals reach Stripe as silence",
     expect(await createAuthWalletCheckoutSession(INPUT, true)).toEqual({
       kind: "unavailable",
     });
-    expect(h.sessions).toHaveLength(0);
+    expect(st.sessions).toHaveLength(0);
   });
 
   it("is unavailable with no publishable key — a dead slot is worse than none", async () => {
@@ -343,7 +214,7 @@ describe("createAuthWalletCheckoutSession — refusals reach Stripe as silence",
     expect(await createAuthWalletCheckoutSession(INPUT, true)).toEqual({
       kind: "unavailable",
     });
-    expect(h.sessions).toHaveLength(0);
+    expect(st.sessions).toHaveLength(0);
   });
 
   it("is unavailable inside the Instagram webview", async () => {
@@ -354,7 +225,7 @@ describe("createAuthWalletCheckoutSession — refusals reach Stripe as silence",
     expect(await createAuthWalletCheckoutSession(INPUT, true)).toEqual({
       kind: "unavailable",
     });
-    expect(h.sessions).toHaveLength(0);
+    expect(st.sessions).toHaveLength(0);
   });
 
   it("is unavailable for an anonymous buyer in v1", async () => {
@@ -363,7 +234,7 @@ describe("createAuthWalletCheckoutSession — refusals reach Stripe as silence",
     expect(await createAuthWalletCheckoutSession(INPUT, true)).toEqual({
       kind: "unavailable",
     });
-    expect(h.sessions).toHaveLength(0);
+    expect(st.sessions).toHaveLength(0);
   });
 
   it("refuses to sell without the withdrawal waiver", async () => {
@@ -372,7 +243,7 @@ describe("createAuthWalletCheckoutSession — refusals reach Stripe as silence",
     expect(await createAuthWalletCheckoutSession(INPUT, false)).toEqual({
       kind: "unavailable",
     });
-    expect(h.sessions).toHaveLength(0);
+    expect(st.sessions).toHaveLength(0);
   });
 
   it("redirects a buyer who already holds an access-granting row", async () => {
@@ -382,19 +253,19 @@ describe("createAuthWalletCheckoutSession — refusals reach Stripe as silence",
       kind: "redirect",
       to: "/",
     });
-    expect(h.sessions).toHaveLength(0);
+    expect(st.sessions).toHaveLength(0);
   });
 
   it("redirects when Stripe itself still shows a live subscription", async () => {
     // The DB mirror can lag behind an in-flight webhook; Stripe is the
     // source of truth, and a double-tap here is a second $25/mo charge.
-    h.stripeSubs = [{ status: "active" }];
+    st.stripeSubs = [{ status: "active" }];
 
     expect(await createAuthWalletCheckoutSession(INPUT, true)).toEqual({
       kind: "redirect",
       to: "/",
     });
-    expect(h.sessions).toHaveLength(0);
+    expect(st.sessions).toHaveLength(0);
   });
 });
 
@@ -402,7 +273,7 @@ describe("createAuthWalletCheckoutSession — the session it builds", () => {
   it("creates an elements-mode subscription session for the membership price", async () => {
     const res = await createAuthWalletCheckoutSession(INPUT, true);
 
-    const { params } = h.sessions[0];
+    const { params } = st.sessions[0];
     expect(params.ui_mode).toBe("elements");
     expect(params.mode).toBe("subscription");
     expect(params.line_items).toEqual([
@@ -414,7 +285,7 @@ describe("createAuthWalletCheckoutSession — the session it builds", () => {
   it("keeps tax and address collection — renewals must invoice correctly", async () => {
     await createAuthWalletCheckoutSession(INPUT, true);
 
-    const { params } = h.sessions[0];
+    const { params } = st.sessions[0];
     expect(params.automatic_tax).toEqual({ enabled: true });
     expect(params.billing_address_collection).toBe("required");
     expect(params.customer).toBe("cus_existing");
@@ -425,7 +296,7 @@ describe("createAuthWalletCheckoutSession — the session it builds", () => {
 
     // `custom_text` is a hard 400 here and `consent_collection` has no
     // renderer — the waiver moved into our own checkbox instead.
-    const { params } = h.sessions[0];
+    const { params } = st.sessions[0];
     expect(params.custom_text).toBeUndefined();
     expect(params.consent_collection).toBeUndefined();
   });
@@ -518,7 +389,7 @@ describe("#217 — one open session per buyer", () => {
     h.consentCookie = CONSENT_GIVEN();
     await createAuthWalletCheckoutSession(INPUT, true);
 
-    expect(h.sessions).toHaveLength(2);
+    expect(st.sessions).toHaveLength(2);
     expect(metadataOf(0).capi_consent).toBeUndefined();
     expect(metadataOf(1).capi_consent).toBe("1");
     expect(openSessionIds()).toEqual(["cs_test_2"]);
@@ -529,8 +400,8 @@ describe("#217 — one open session per buyer", () => {
     await createAuthCheckoutSession({ ...INPUT, resume: "138" });
 
     // The return URLs really differ — the old key hashed them.
-    expect(h.sessions[0].params.return_url).toContain("resume=128");
-    expect(h.sessions[1].params.return_url).toContain("resume=138");
+    expect(st.sessions[0].params.return_url).toContain("resume=128");
+    expect(st.sessions[1].params.return_url).toContain("resume=138");
     expect(openSessionIds()).toEqual(["cs_test_2"]);
   });
 
@@ -539,8 +410,8 @@ describe("#217 — one open session per buyer", () => {
     await createAuthCheckoutSession(INPUT);
 
     expect(wallet.kind === "wallet" && wallet.sessionId).toBe("cs_test_1");
-    expect(h.sessions[0].params.ui_mode).toBe("elements");
-    expect(h.sessions[1].params.ui_mode).toBe("embedded_page");
+    expect(st.sessions[0].params.ui_mode).toBe("elements");
+    expect(st.sessions[1].params.ui_mode).toBe("embedded_page");
     expect(openSessionIds()).toEqual(["cs_test_2"]);
   });
 
@@ -564,22 +435,22 @@ describe("#217 — one open session per buyer", () => {
       createAuthWalletCheckoutSession(INPUT, true),
     ]);
 
-    expect(h.customersCreated).toBe(2);
-    expect(h.customers).toHaveLength(1);
-    expect(h.customers[0].idempotencyKey).toBe("customer:user_1");
-    expect(new Set(h.sessions.map((s) => s.customer))).toEqual(
-      new Set([h.customers[0].id]),
+    expect(st.customersCreated).toBe(2);
+    expect(st.customers).toHaveLength(1);
+    expect(st.customers[0].idempotencyKey).toBe("customer:user_1");
+    expect(new Set(st.sessions.map((s) => s.customer))).toEqual(
+      new Set([st.customers[0].id]),
     );
     expect(h.userUpdates).toEqual([
-      { stripeCustomerId: h.customers[0].id },
-      { stripeCustomerId: h.customers[0].id },
+      { stripeCustomerId: st.customers[0].id },
+      { stripeCustomerId: st.customers[0].id },
     ]);
   });
 
   it("creating a session expires every OTHER open session of this customer — and only those", async () => {
     // Left over from earlier tabs: two open for this buyer, one open for
     // somebody else, one this buyer already completed.
-    h.sessions = [
+    st.sessions = [
       { id: "cs_old_a", customer: "cus_existing", status: "open", params: {}, opts: undefined },
       { id: "cs_old_b", customer: "cus_existing", status: "open", params: {}, opts: undefined },
       { id: "cs_other", customer: "cus_other", status: "open", params: {}, opts: undefined },
@@ -589,7 +460,7 @@ describe("#217 — one open session per buyer", () => {
     const res = await createAuthCheckoutSession(INPUT);
 
     expect(res.kind).toBe("embedded");
-    const byId = Object.fromEntries(h.sessions.map((s) => [s.id, s.status]));
+    const byId = Object.fromEntries(st.sessions.map((s) => [s.id, s.status]));
     expect(byId).toEqual({
       cs_old_a: "expired",
       cs_old_b: "expired",
@@ -602,8 +473,8 @@ describe("#217 — one open session per buyer", () => {
   it("sweeps past the first page — a customer with more open sessions than one list returns", async () => {
     // Paged by re-listing: each expired session drops out of the `open`
     // result set, so the next first page surfaces what was behind it.
-    h.listPageSize = 2;
-    h.sessions = [
+    st.listPageSize = 2;
+    st.sessions = [
       { id: "cs_old_a", customer: "cus_existing", status: "open", params: {}, opts: undefined },
       { id: "cs_old_b", customer: "cus_existing", status: "open", params: {}, opts: undefined },
       { id: "cs_old_c", customer: "cus_existing", status: "open", params: {}, opts: undefined },
@@ -615,7 +486,7 @@ describe("#217 — one open session per buyer", () => {
     expect(openSessionIds()).toEqual(["cs_test_4"]);
     // Two pages of two: the first two olds (has_more), then — those two now
     // gone from the open set — the third old + the new one (last page).
-    expect(h.listCalls).toBe(2);
+    expect(st.listCalls).toBe(2);
   });
 
   it("the same intent in two tabs, seconds apart: the later tab holds the live session", async () => {
@@ -634,10 +505,10 @@ describe("#217 — one open session per buyer", () => {
   });
 
   it("never hands out a session it could not prove to be the only open one — the sweep failing closes the new session and throws", async () => {
-    h.sessions = [
+    st.sessions = [
       { id: "cs_old", customer: "cus_existing", status: "open", params: {}, opts: undefined },
     ];
-    h.fault = { on: "list" };
+    st.fault = { on: "list" };
 
     await expect(createAuthCheckoutSession(INPUT)).rejects.toThrow(
       "stripe list down",
@@ -645,30 +516,30 @@ describe("#217 — one open session per buyer", () => {
 
     // Fail closed on the money path: the new session is expired before the
     // error leaves, so no client secret and no live second session exist.
-    expect(h.sessions.find((s) => s.id === "cs_test_2")?.status).toBe("expired");
+    expect(st.sessions.find((s) => s.id === "cs_test_2")?.status).toBe("expired");
     expect(h.capiEvents).toHaveLength(0);
   });
 
   it("an expire that fails while the other session is STILL open is a failure, not a shrug", async () => {
-    h.sessions = [
+    st.sessions = [
       { id: "cs_old", customer: "cus_existing", status: "open", params: {}, opts: undefined },
     ];
-    h.fault = { on: "expire", then: "still_open" };
+    st.fault = { on: "expire", then: "still_open" };
 
     await expect(createAuthWalletCheckoutSession(INPUT, true)).rejects.toThrow(
       "stripe expire failed",
     );
 
-    expect(h.sessions.find((s) => s.id === "cs_test_2")?.status).toBe("expired");
+    expect(st.sessions.find((s) => s.id === "cs_test_2")?.status).toBe("expired");
   });
 
   it("an expire that fails because somebody else already closed that session is fine", async () => {
     // A parallel sweep, or the buyer completing it in the other tab a moment
     // earlier — the state the sweep wanted is already there.
-    h.sessions = [
+    st.sessions = [
       { id: "cs_old", customer: "cus_existing", status: "open", params: {}, opts: undefined },
     ];
-    h.fault = { on: "expire", then: "closed_by_other" };
+    st.fault = { on: "expire", then: "closed_by_other" };
 
     const res = await createAuthWalletCheckoutSession(INPUT, true);
 
@@ -687,7 +558,7 @@ describe("#217 — one open session per buyer", () => {
     await createAuthCheckoutSession(INPUT);
     const third = await createAuthWalletCheckoutSession(INPUT, true);
 
-    expect(h.sessions.every((s) => s.opts?.idempotencyKey === undefined)).toBe(
+    expect(st.sessions.every((s) => s.opts?.idempotencyKey === undefined)).toBe(
       true,
     );
     expect(first.kind === "wallet" && first.sessionId).toBe("cs_test_1");
@@ -768,7 +639,7 @@ describe("createAuthCheckoutSession — unchanged by the wallet refactor", () =>
   it("still builds an embedded_page session with the consent pair intact", async () => {
     const res = await createAuthCheckoutSession(INPUT);
 
-    const { params } = h.sessions[0];
+    const { params } = st.sessions[0];
     expect(params.ui_mode).toBe("embedded_page");
     expect(params.consent_collection).toEqual({ terms_of_service: "required" });
     expect(params.custom_text).toBeTruthy();
@@ -786,7 +657,7 @@ describe("createAuthCheckoutSession — unchanged by the wallet refactor", () =>
 
     // Here Stripe substitutes the id on the redirect back; only the wallet
     // surface bakes it in itself.
-    expect(h.sessions[0].params.return_url).toBe(
+    expect(st.sessions[0].params.return_url).toBe(
       "https://matio.tv/watch/the-scarlet-oath?ep=ep-3&resume=128&cs={CHECKOUT_SESSION_ID}",
     );
   });
@@ -799,7 +670,7 @@ describe("createAuthCheckoutSession — unchanged by the wallet refactor", () =>
 
     const res = await createAuthCheckoutSession(INPUT);
 
-    const { params } = h.sessions[0];
+    const { params } = st.sessions[0];
     expect(params.ui_mode).toBeUndefined();
     expect(params.success_url).toContain("/watch/the-scarlet-oath");
     expect(params.cancel_url).toContain("/subscribe?show=the-scarlet-oath");
@@ -833,7 +704,7 @@ describe("createAuthCheckoutSession — unchanged by the wallet refactor", () =>
       kind: "redirect",
       to: "/",
     });
-    expect(h.sessions).toHaveLength(0);
+    expect(st.sessions).toHaveLength(0);
   });
 
   it("creates the Stripe customer and writes it back when the user has none", async () => {
@@ -844,8 +715,8 @@ describe("createAuthCheckoutSession — unchanged by the wallet refactor", () =>
     // Without the write-back the webhook cannot resolve the local user — it
     // looks up ONLY by users.stripe_customer_id — and a paying customer
     // silently gets nothing.
-    expect(h.customersCreated).toBe(1);
-    expect(h.sessions[0].params.customer).toBe("cus_new_1");
+    expect(st.customersCreated).toBe(1);
+    expect(st.sessions[0].params.customer).toBe("cus_new_1");
     expect(h.userUpdates).toEqual([{ stripeCustomerId: "cus_new_1" }]);
   });
 

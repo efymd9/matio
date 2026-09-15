@@ -28,7 +28,9 @@ import type { UserExportRows } from "@/lib/user-export";
 //                    keyed by address, user_id is a coalesce-backfill
 //
 // Not here on purpose: watch_segments (an aggregate without a user key),
-// stripe_events (raw webhook ids), guest_checkout_attempts (ip_hash only,
+// stripe_events (raw webhook ids), guest_checkout_sessions (an HMAC of a
+// cookie + a Stripe session id, self-pruned in 24h — no key of a person we
+// hold), guest_checkout_attempts (ip_hash only,
 // self-pruned in 2h), marketing_links (an admin's id).
 //
 // `db` is a parameter rather than the module singleton so the script hands

@@ -183,6 +183,13 @@
       "when": 1788776860912,
       "tag": "0025_uneven_bastion",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789449118208,
+      "tag": "0026_thankful_colossus",
+      "breakpoints": true
     }
   ]
 }

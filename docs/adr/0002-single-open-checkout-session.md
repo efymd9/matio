@@ -97,7 +97,82 @@ meaning.
 `resume` stays in `return_url` (safe now; moving it to DB progress on the
 return leg is a separate UX call) and `surface` stays on
 `buildCheckoutSessionParams` (it selects the consent pair, it was never the
-key). The guest flow keeps its digest key: it has no customer to list by.
+key). The guest flow kept its digest key at first — it has no customer to
+list by — and got its own half of the invariant in #224 (addendum below).
+
+## Addendum — the guest flow (#224, 2026-09-15)
+
+The pay-first guest (`createGuestCheckoutSession`) has no Stripe customer
+before payment, and `checkout.sessions.list` cannot filter by
+`client_reference_id` (`Stripe.Checkout.SessionListParams`: `customer`,
+`customer_details.email`, `payment_intent`, `subscription`, `status`,
+`created`), so "the buyer's other open sessions" are not findable at Stripe.
+The buying party the guest flow already has is the `checkout_claim` cookie
+(one per browser, reused across tabs), so the previous session is remembered
+on our side and expired **by id**:
+
+- a table `guest_checkout_sessions (claim_token_hash PK, session_id,
+  created_at)` — the key is an HMAC of the cookie value (same salt as the
+  trial IP hash), never the value: the cookie is what `/welcome` compares
+  against `client_reference_id` before minting a sign-in ticket, so a table
+  of raw tokens would be a table of sign-in tickets;
+- `claimSoleGuestSession(db, hash, newId)` (`lib/guest-checkout-sessions.ts`)
+  — **one statement**: `INSERT … ON CONFLICT (claim_token_hash) DO UPDATE SET
+  session_id = …, created_at = now() RETURNING old.session_id`. `ON CONFLICT
+  DO UPDATE` waits on the conflicting row's lock and updates its *latest*
+  version; `old.session_id` (Postgres 18) is that version's value before the
+  update, NULL on the plain-insert path. So of two parallel claims for one
+  cookie the second sees the first's id — they can never both answer "nothing
+  to expire". Verified on a local Postgres 18: session A's uncommitted upsert
+  held for 8s, session B's upsert blocked 4s and returned A's id. The
+  alternatives were rejected on the same bench: a `(SELECT session_id …)`
+  subquery in RETURNING reads the statement's START snapshot, taken before A
+  committed, and returned NULL in that very scenario (both callers would get
+  NULL — the bug); a `SELECT … FOR UPDATE` + `UPDATE` pair in a transaction
+  is correct but three round-trips through the pooler for what one statement
+  says. Where the guarantee is pinned: the statement's TEXT, rendered by the
+  real dialect through a pg-proxy recorder, in
+  `lib/guest-checkout-sessions.test.ts` (a change to the upsert fails there
+  by name), plus the two-session check on Postgres 18.4 above; the guest
+  action's own suite (`app/subscribe/guest-actions.test.ts`, the "parallel
+  tabs" case) proves only the action's create → claim → expire ORDER on an
+  in-memory claim — it is not what proves the atomicity;
+- **the claim precedes the expire, so a failed expire rolls the claim
+  back.** By the time `expireIfOpen(previous)` throws — Stripe 429/5xx and
+  `retrieve` still says `open`, or the retrieve itself failed — the table
+  already names the NEW session, which the action is about to close. Left
+  like that, the next checkout would be handed a dead id, find nothing to
+  expire, and the buyer would hold `previous` + the newest session — the
+  #224 defect one step later. So on that path `previous` is written back
+  with the same upsert before the error leaves (`rollBackGuestClaim`), and
+  the next checkout tries the same session again (test "(г′)"). Not rolled
+  back when Stripe reported the previous session closed — nothing open to
+  keep on record then;
+- the sweep, in `createGuestCheckoutSession`, is create → claim → `expireIfOpen(previous)`
+  (`lib/checkout-session.ts`, the one step shared with the signed-in sweep:
+  an `expire` refused because someone else closed the session first is the
+  state wanted; a session still `open` after a failed expire propagates).
+  Fail closed like `createSoleOpenSession`: a failure to record the id (a DB
+  error here is NOT the rate limiter's fail-open — an unrecorded session is
+  one the next creation can never find) or to prove the previous session
+  closed expires the new session and throws;
+- the guest create carries **no idempotency key** any more, for the reason
+  given above for the signed-in flow (the cached-replay dead end); the brake
+  on creation is `guestCheckoutRateLimited` (30/h per IP, fail-open);
+- rows self-prune after 24h (a Checkout Session's own maximum life) on 5% of
+  claims, like the rate limiter's table — a technical key, not a `/privacy`
+  window, so not a `lib/retention.ts` policy; the data map has the row.
+
+Rejected: creating a Stripe Customer for the guest up front so the sweep
+could list by it — that changes what `claimGuestCheckout` reads (the e-mail
+comes from the Customer Stripe creates from the form) and mints an empty
+Customer per rate-limited call. Also rejected: `list({ created: {gte},
+status: 'open' })` filtered by `client_reference_id` on our side — a scan of
+the whole account per checkout.
+
+The `/checkout` client already binds a guest's refocus probe by
+`client_reference_id` = the cookie, so the older tab learns its session is
+dead when it comes back into view, exactly like a signed-in buyer's.
 
 ## Consequences
 
@@ -114,8 +189,17 @@ key). The guest flow keeps its digest key: it has no customer to list by.
 - Accepted residuals: a buyer who pays in tab A and, inside the ~1s before
   Stripe lists the new subscription, creates *and* pays in tab B — the
   mirror's partial unique index refuses the second row and the refund is
-  manual; the guest pay-first flow keeps the drift-prone digest key (issue
-  #224); a mid-3DS session expired by a newer checkout fails that payment,
+  manual (the same residual exists for a guest whose first session is
+  `complete` when the second is created — `expireIfOpen` sees it closed and
+  the second session lives; the mirror's duplicate guard is the backstop);
+  a guest's rollback after a failed expire displacing a THIRD tab's id (that
+  tab claimed between the failed tab's claim and its rollback) — the third
+  tab's session stays open and unrecorded until Stripe expires it (≤24h),
+  logged by ids, third-order (a Stripe failure AND a third tab inside the
+  same second; registry); and the double fault of that rollback itself
+  being refused by the database — the table keeps naming the closed session
+  and `previous` stays open and unrecorded for the same ≤24h, logged;
+  a mid-3DS session expired by a newer checkout fails that payment,
   which is the intended outcome; two creates in the same instant can expire
   *each other* (each one's sweep sees the other's session) — zero open
   sessions, both tabs holding a dead secret, which is safe (nobody can pay
@@ -128,5 +212,9 @@ key). The guest flow keeps its digest key: it has no customer to list by.
   (+ list + expire) and a fresh `InitiateCheckout` / `checkout_started` —
   Stripe churn and funnel inflation, not money (issue #227).
 - Revisit if: Stripe's `list` stops being read-your-writes consistent; the
-  guest flow gains a customer before payment (then it joins the sweep); or
-  Stripe adds a first-class "single open session per customer" setting.
+  guest flow gains a customer before payment (then it joins the list-based
+  sweep and the table can go); Stripe's list learns to filter by
+  `client_reference_id` (same); the database leaves Postgres 18 (the
+  `RETURNING old.…` form is 18+ — the `FOR UPDATE` transaction is the
+  fallback); or Stripe adds a first-class "single open session per
+  customer" setting.
