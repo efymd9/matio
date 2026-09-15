@@ -10,6 +10,12 @@ import { integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-co
 // rate limit and break checkout for real buyers, or (c) run up Vercel/Neon
 // cost. IP hashing reuses the trial limiter's HMAC bucket — no raw IPs stored.
 // Self-pruned (rows older than 2h) by the limiter; see lib/checkout-rate-limit.
+//
+// Since #227 the same table also brakes the SIGNED-IN builders
+// (app/subscribe/actions.ts:prepareAuthCheckout): the key is the HMAC of the
+// guest's IP OR `user:<hmac>` of the account (same salt, lib/trial.ts
+// hashClientIp) — never a raw IP, a Clerk id or an address. `ip_hash` keeps
+// its name: renaming a primary-key column is a migration for nothing.
 export const guestCheckoutAttempts = pgTable(
   "guest_checkout_attempts",
   {

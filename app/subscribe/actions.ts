@@ -8,12 +8,18 @@ import { subscriptions, users } from "@/db/schema";
 import { checkoutOrigin } from "@/lib/checkout-origin";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import {
+  AUTH_CHECKOUT_RATELIMIT_PER_HOUR,
+  checkoutRateLimited,
+} from "@/lib/checkout-rate-limit";
+import {
+  CheckoutRateLimitedError,
   type CheckoutSessionResult,
   type CheckoutTargetInput,
   type WalletCheckoutResult,
   embeddedCheckoutEnabled,
   expireIfOpen,
 } from "@/lib/checkout-session";
+import { hashClientIp } from "@/lib/trial";
 import {
   resolveWalletGate,
   toConsentMetadata,
@@ -90,6 +96,7 @@ async function prepareAuthCheckout(
   input: CheckoutTargetInput,
 ): Promise<
   | { kind: "redirect"; to: string }
+  | { kind: "rate_limited" }
   | ({ kind: "ready" } & PreparedAuthCheckout)
 > {
   // Payments off → nothing may create a Stripe session. First statement on
@@ -104,6 +111,26 @@ async function prepareAuthCheckout(
   const user = await getOrSyncCurrentUser();
   if (!user) return { kind: "redirect", to: "/" };
   const userId = user.id;
+
+  // Per-account brake on session creation (#227) — right after the auth guard
+  // and BEFORE anything that talks to Stripe (customers.create, the create +
+  // sweep in createSoleOpenSession). Since #217 the create carries no
+  // idempotency key, so without this every reload of /checkout and every
+  // re-tick of the wallet box is a real Stripe create + list + N expire and,
+  // with consent, a fresh InitiateCheckout / checkout_started. Counted on
+  // EVERY call, like the guest brake, so a flood that ends in errors is braked
+  // too. The bucket is `user:` + HMAC(userId) with the trial limiter's salt —
+  // the table sees a hash, not the Clerk id (lib/checkout-rate-limit.ts).
+  // Fail-open by construction: a DB blip must never block a real buyer.
+  if (
+    await checkoutRateLimited(
+      `user:${hashClientIp(userId)}`,
+      AUTH_CHECKOUT_RATELIMIT_PER_HOUR,
+    )
+  ) {
+    console.warn("startCheckout: rate limited", { userId });
+    return { kind: "rate_limited" };
+  }
 
   // Layer 1: prevent duplicate subscriptions from our DB mirror.
   const [existing] = await db
@@ -422,6 +449,10 @@ export async function createAuthCheckoutSession(
 ): Promise<CheckoutSessionResult> {
   const prepared = await prepareAuthCheckout(input);
   if (prepared.kind === "redirect") return prepared;
+  // Over the per-account budget (#227): the /checkout client turns a rejected
+  // action into its existing retry card — the right words for "later", where
+  // a redirect home would read as "you cannot buy".
+  if (prepared.kind === "rate_limited") throw new CheckoutRateLimitedError();
   const {
     userId,
     email,
@@ -563,6 +594,10 @@ export async function createAuthWalletCheckoutSession(
 
   const prepared = await prepareAuthCheckout(input);
   if (prepared.kind === "redirect") return prepared;
+  // Over the per-account budget (#227): the wallet slot simply does not
+  // render — `unavailable` is the paywall's normal "keep the card CTA" state,
+  // not an error, and the buyer still has /checkout.
+  if (prepared.kind === "rate_limited") return { kind: "unavailable" };
   const {
     email,
     customerId,
