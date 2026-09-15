@@ -16,12 +16,16 @@ export type CheckoutTargetInput = {
 };
 
 // What a checkout action returns to the client. `embedded` carries the Stripe
-// Checkout Session client secret to mount the in-page iframe; `hosted` is the
-// graceful fallback (no publishable key configured) that full-navigates to the
-// Stripe-hosted page exactly as before; `redirect` is a guard bounce (already
-// subscribed, rate-limited, flag off) the client performs with router.replace.
+// Checkout Session client secret to mount the in-page iframe — plus the
+// session id, so the client can ask whether that session is still open when
+// its tab comes back into view (every newer checkout expires the buyer's other
+// open sessions, #217; the id is public-ish and grants nothing); `hosted` is
+// the graceful fallback (no publishable key configured) that full-navigates to
+// the Stripe-hosted page exactly as before; `redirect` is a guard bounce
+// (already subscribed, rate-limited, flag off) the client performs with
+// router.replace.
 export type CheckoutSessionResult =
-  | { kind: "embedded"; clientSecret: string }
+  | { kind: "embedded"; clientSecret: string; sessionId: string }
   | { kind: "hosted"; url: string }
   | { kind: "redirect"; to: string };
 

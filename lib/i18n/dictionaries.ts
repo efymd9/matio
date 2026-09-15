@@ -303,6 +303,10 @@ export const es = {
     back: "Volver",
     loading: "Cargando el pago seguro…",
     errorBody: "No pudimos cargar el pago. Inténtalo de nuevo.",
+    expiredBody:
+      "Este pago caducó porque empezaste otro más reciente — en otra pestaña o desde el reproductor. Inténtalo de nuevo para continuar aquí.",
+    walletFailed:
+      "El pago con el monedero no se completó. Puedes seguir uniéndote con tarjeta.",
     retry: "Reintentar",
   },
   welcome: {
@@ -794,6 +798,10 @@ export const en: Dict = {
     back: "Back",
     loading: "Loading secure checkout…",
     errorBody: "We couldn't load checkout. Please try again.",
+    expiredBody:
+      "This checkout expired because you started a newer one — in another tab, or from the player. Try again to continue here.",
+    walletFailed:
+      "That wallet payment didn't go through. You can still join with a card.",
     retry: "Try again",
   },
   welcome: {
