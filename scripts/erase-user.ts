@@ -13,16 +13,21 @@
 // to be an explicit act — every variable is passed on the command line.
 // DATABASE_URL is required (exit 2 without it). The vendor halves are
 // best-effort and opt-in by variable, like the export script:
-// STRIPE_SECRET_KEY (a live subscription is set to cancel at period end),
-// POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID (the person and its events
-// are deleted) — unset → that step is skipped and SAID so.
+// STRIPE_SECRET_KEY (a live subscription is set to cancel at period end, and
+// EVERY Stripe customer carrying the account's address is found by
+// customers.search and tombstoned — #223), POSTHOG_PERSONAL_API_KEY +
+// POSTHOG_PROJECT_ID (the person and its events are deleted) — unset → that
+// step is skipped and SAID so.
 //
 // Dry run prints the row COUNTS an --apply would delete or de-identify, the
-// Stripe customer / tombstone / live-subscription facts and how many
-// PostHog persons carry the id; it writes nothing anywhere. --apply is
-// idempotent: a second run finds no users row and changes nothing locally
-// (the PostHog step still runs — that is how a failed one is retried).
-// Stdout carries ids, counts and statuses only, never a value.
+// Stripe customer / tombstone / live-subscription facts, the customer ids
+// Stripe finds for the address (the only way to see the tombstone's scope
+// before --apply) and how many PostHog persons carry the id; it writes
+// nothing anywhere. --apply is idempotent: a second run finds no users row
+// and changes nothing locally (the PostHog step still runs — that is how a
+// failed one is retried; the Stripe search cannot be — the address is gone
+// with the row, so a failed search is a hand step, runbook §4). Stdout
+// carries ids, counts and statuses only, never a value.
 //
 // Exit codes: 2 — bad arguments or no DATABASE_URL (nothing done);
 // 1 — the database or a local write failed (re-run: the erasure converges);
@@ -67,19 +72,12 @@ async function main() {
       ? { key: posthogKey, projectId: posthogProject }
       : null;
 
-  console.log(`${apply ? "APPLY" : "DRY RUN"} — erase ${userId}`);
-  const preview = await previewErasure(userId, { db, posthog });
-  console.log(summarizeErasePreview(userId, preview));
-
-  if (!apply) {
-    console.log("nothing changed (dry run — re-run with --apply)");
-    process.exit(0);
-  }
-
   const stripeKey = process.env.STRIPE_SECRET_KEY;
   // Without a key the cancellation surfaces as the same "cancel by hand"
   // line a Stripe outage would produce — and only if there is something to
-  // cancel; the getter is never called otherwise.
+  // cancel; the customer search reads the same throw as
+  // `skipped_unconfigured` (the dry run says so too, so the operator sees
+  // BEFORE --apply that the tombstone's scope was not looked up at Stripe).
   const getStripe = () => {
     if (!stripeKey) {
       throw Object.assign(new Error("STRIPE_SECRET_KEY is not set"), {
@@ -88,6 +86,15 @@ async function main() {
     }
     return new Stripe(stripeKey);
   };
+
+  console.log(`${apply ? "APPLY" : "DRY RUN"} — erase ${userId}`);
+  const preview = await previewErasure(userId, { db, getStripe, posthog });
+  console.log(summarizeErasePreview(userId, preview));
+
+  if (!apply) {
+    console.log("nothing changed (dry run — re-run with --apply)");
+    process.exit(0);
+  }
 
   const result = await eraseUser(userId, { db, getStripe, posthog });
   console.log(summarizeEraseResult(userId, result));

@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   writes: [] as string[],
   insertFails: undefined as Error | undefined,
   stripeUpdate: vi.fn(),
+  stripeSearch: vi.fn(),
   sentryMessage: vi.fn(),
 }));
 
@@ -73,7 +74,10 @@ vi.mock("@/db", async () => {
 });
 
 vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({ subscriptions: { update: h.stripeUpdate } }),
+  getStripe: () => ({
+    subscriptions: { update: h.stripeUpdate },
+    customers: { search: h.stripeSearch },
+  }),
 }));
 
 vi.mock("@sentry/nextjs", () => ({ captureMessage: h.sentryMessage }));
@@ -145,6 +149,8 @@ beforeEach(() => {
   h.writes.length = 0;
   h.insertFails = undefined;
   h.stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
+  // Stripe knows no customer for the address unless a case says otherwise.
+  h.stripeSearch.mockReset().mockResolvedValue({ data: [], has_more: false });
   h.sentryMessage.mockReset();
   vi.stubEnv("CLERK_WEBHOOK_SIGNING_SECRET", SIGNING_SECRET);
   // PostHog is off unless a case turns it on: with credentials in the
@@ -366,7 +372,72 @@ describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)"
       "delete users",
     ]);
     expect(h.inserts).toEqual([
-      { table: "erased_customers", values: { stripeCustomerId: "cus_dummy" } },
+      { table: "erased_customers", values: [{ stripeCustomerId: "cus_dummy" }] },
+    ]);
+  });
+
+  it("tombstones the second customer Stripe finds for the address too (#223) — both ids, one insert, before the users row goes", async () => {
+    // A guest checkout minted cus_older from the address typed on the form;
+    // the later signed-in purchase overwrote users.stripe_customer_id with
+    // cus_dummy. Only Stripe still knows cus_older — asked by the address
+    // while the row still has one.
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
+    h.stripeSearch.mockResolvedValue({
+      data: [
+        { id: "cus_older", email: EMAIL },
+        { id: "cus_dummy", email: EMAIL },
+        // `:` on a string field also matches a superstring — not ours.
+        { id: "cus_stranger", email: `${EMAIL}.mx` },
+      ],
+      has_more: false,
+    });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    expect(res.status).toBe(200);
+    expect(h.stripeSearch).toHaveBeenCalledTimes(1);
+    expect(h.stripeSearch).toHaveBeenCalledWith(
+      { query: `email:'${EMAIL}'`, limit: 100 },
+      { timeout: 5_000, maxNetworkRetries: 0 },
+    );
+    expect(h.writes).toEqual([
+      "insert erased_customers",
+      "delete show_reminders",
+      "delete users",
+    ]);
+    expect(h.inserts).toEqual([
+      {
+        table: "erased_customers",
+        values: [{ stripeCustomerId: "cus_dummy" }, { stripeCustomerId: "cus_older" }],
+      },
+    ]);
+    expect(info.mock.calls.at(-1)?.[1]).toMatchObject({
+      stripeSearch: "ok",
+      stripeCustomersTombstoned: ["cus_dummy", "cus_older"],
+      stripeCustomersSkipped: 1,
+    });
+    expect(h.sentryMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not ask Stripe about an account that never had a Stripe footprint — no customer id, no subscriptions row (#223)", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: null };
+    h.liveSub = undefined;
+
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    expect(res.status).toBe(200);
+    expect(h.stripeSearch).not.toHaveBeenCalled();
+    expect(h.inserts).toEqual([]);
+    expect(h.writes).toEqual(["delete show_reminders", "delete users"]);
+    // The footprint probe: any subscriptions row by user_id, after the
+    // live-subscription probe.
+    const probes = h.selects
+      .filter((s) => s.table === "subscriptions")
+      .map((s) => render(s.where).sql);
+    expect(probes).toEqual([
+      '("subscriptions"."user_id" = $1 and "subscriptions"."status" in ($2, $3, $4) and "subscriptions"."current_period_end" > $5)',
+      '"subscriptions"."user_id" = $1',
     ]);
   });
 
