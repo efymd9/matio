@@ -270,7 +270,7 @@ recipe and event list.
 | `NEXT_PUBLIC_POSTHOG_KEY` | Project API key (`phc_…`). **Public** — safe in the browser bundle. Also read server-side by `posthog-node` in `lib/posthog-server.ts`. |
 | `NEXT_PUBLIC_POSTHOG_HOST` | Set to `/ingest` so the client proxies through the Next.js rewrite and bypasses ad blockers. |
 | `POSTHOG_HOST` | `https://eu.i.posthog.com` — the direct EU ingestion endpoint used by the server-side `posthog-node` client (no proxy needed server-side). |
-| `POSTHOG_PERSONAL_API_KEY` | **Personal API key** with the `query:read` scope (PostHog → Settings → Personal API keys) — powers the admin dashboard's "Signup funnel" panel via the query API (`lib/posthog-query.ts`). Secret, server-only. Unset → the panel shows a connect hint. |
+| `POSTHOG_PERSONAL_API_KEY` | **Personal API key** (PostHog → Settings → Personal API keys). Scopes: `query:read` for the admin panels via the query API (`/admin/analytics/sessions`, `lib/posthog-query.ts`) **plus `person:read` + `person:write` for the account erasure** (`lib/posthog-erase.ts`, #180 — the Clerk `user.deleted` webhook deletes the person and its events by Clerk id). Secret, server-only — `lib/posthog-config.ts` is the one env read. Unset → the panels show a connect hint and the erasure reports `skipped_unconfigured`; a key without `person:write` → `skipped_forbidden` (runbook §4 has the manual path). |
 | `POSTHOG_PROJECT_ID` | Numeric project id for the query API path (EU project: `190233`). Distinct from the `phc_…` token. |
 | `POSTHOG_API_HOST` | Optional; defaults to `https://eu.posthog.com` — the **app** host the query API lives on (NOT the `eu.i.` ingestion host). |
 
