@@ -76,12 +76,23 @@ converge on one customer and the users write-back converges with them.
 Clients: the wallet's confirm error hides the slot and shows one human line
 (`checkout.walletFailed`), never re-arming — a new session there would expire
 the checkout the buyer is presumably paying in elsewhere. `/checkout` keeps
-its session id and, on every return of the tab to the foreground, asks
+its session id and, on every return of the tab to the foreground
+(`visibilitychange` → visible) and on every `window` `focus`, asks
 `checkoutSessionState(sessionId)`; `closed` swaps the iframe for the retry
 card (`checkout.expiredBody`); the retry is a reload, i.e. a fresh session,
 which in turn closes the newer one elsewhere — the tab the buyer is looking
 at is the live one. The probe answers `open` on every uncertainty so it can
-never tear down a working form.
+never tear down a working form — and it answers only about a session that is
+provably the caller's (a signed-in buyer's own Stripe customer, or a guest's
+`checkout_claim` cookie as `client_reference_id`); with neither binding it
+answers before Stripe is asked, so an anonymous caller cannot make the server
+look up arbitrary session ids.
+
+The sweep is paged by re-listing the first page until `has_more` is false
+(bounded at ten rounds), not by cursor: every expired session leaves the
+`status: 'open'` result set, and a `starting_after` cursor pointing at an
+object this loop just removed from the filtered list has no documented
+meaning.
 
 `resume` stays in `return_url` (safe now; moving it to DB progress on the
 return leg is a separate UX call) and `surface` stays on
@@ -103,9 +114,19 @@ key). The guest flow keeps its digest key: it has no customer to list by.
 - Accepted residuals: a buyer who pays in tab A and, inside the ~1s before
   Stripe lists the new subscription, creates *and* pays in tab B — the
   mirror's partial unique index refuses the second row and the refund is
-  manual; the guest pay-first flow keeps the drift-prone digest key (issue on
-  the board); a mid-3DS session expired by a newer checkout fails that
-  payment, which is the intended outcome.
+  manual; the guest pay-first flow keeps the drift-prone digest key (issue
+  #224); a mid-3DS session expired by a newer checkout fails that payment,
+  which is the intended outcome; two creates in the same instant can expire
+  *each other* (each one's sweep sees the other's session) — zero open
+  sessions, both tabs holding a dead secret, which is safe (nobody can pay
+  twice) but means neither form works until the buyer acts: the visible tab
+  gets no `visibilitychange`, so the `/checkout` probe also runs on `window`
+  `focus`, and the wallet learns at confirm; either way the recovery is one
+  click on the retry card, never a second charge. Removing the key also
+  removed the only brake on session creation for a signed-in buyer: reloads
+  of `/checkout` and repeated ticks of the wallet box each mint a session
+  (+ list + expire) and a fresh `InitiateCheckout` / `checkout_started` —
+  Stripe churn and funnel inflation, not money (issue #227).
 - Revisit if: Stripe's `list` stops being read-your-writes consistent; the
   guest flow gains a customer before payment (then it joins the sweep); or
   Stripe adds a first-class "single open session per customer" setting.

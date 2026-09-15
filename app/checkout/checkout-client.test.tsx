@@ -57,9 +57,32 @@ function setVisibility(state: "visible" | "hidden") {
   });
 }
 
+function focusWindow() {
+  act(() => {
+    window.dispatchEvent(new Event("focus"));
+  });
+}
+
+// The probe listeners are attached from an effect that runs AFTER the render
+// in which the iframe first appears. Waiting for the iframe alone therefore
+// leaves a window in which an event dispatched by the test is simply missed
+// (it did, in CI). Wait for the registration itself instead — deterministic
+// on any machine, no reliance on microtask ordering.
+const listeners = {
+  document: vi.spyOn(document, "addEventListener"),
+  window: vi.spyOn(window, "addEventListener"),
+};
+
 async function mountLiveForm() {
   render(<CheckoutClient {...PROPS} />);
   await waitFor(() => expect(screen.getByTestId("embedded")).toBeTruthy());
+  await vi.waitFor(() => {
+    expect(listeners.document).toHaveBeenCalledWith(
+      "visibilitychange",
+      expect.any(Function),
+    );
+    expect(listeners.window).toHaveBeenCalledWith("focus", expect.any(Function));
+  });
 }
 
 beforeEach(() => {
@@ -119,7 +142,20 @@ describe("CheckoutClient — a session expired by a newer checkout (#217)", () =
     setVisibility("hidden");
     setVisibility("visible");
 
-    await waitFor(() =>
+    await vi.waitFor(() =>
+      expect(actions.checkoutSessionState).toHaveBeenCalledWith("cs_test_1"),
+    );
+  });
+
+  it("asks again when the window regains focus — the tab that never left the screen", async () => {
+    // Two same-instant creates can expire EACH OTHER: both tabs hold a dead
+    // secret, and the one the buyer is looking at never gets a
+    // visibilitychange. Clicking back into it is the only signal left.
+    await mountLiveForm();
+
+    focusWindow();
+
+    await vi.waitFor(() =>
       expect(actions.checkoutSessionState).toHaveBeenCalledWith("cs_test_1"),
     );
   });
@@ -135,7 +171,7 @@ describe("CheckoutClient — a session expired by a newer checkout (#217)", () =
     setVisibility("hidden");
     setVisibility("visible");
 
-    await waitFor(() => expect(screen.queryByTestId("embedded")).toBeNull());
+    await vi.waitFor(() => expect(screen.queryByTestId("embedded")).toBeNull());
     expect(screen.getByText(/started a newer one/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy();
     // No silent re-creation: that would in turn expire the checkout the buyer
@@ -149,7 +185,11 @@ describe("CheckoutClient — a session expired by a newer checkout (#217)", () =
     setVisibility("hidden");
     setVisibility("visible");
 
-    await waitFor(() => expect(actions.checkoutSessionState).toHaveBeenCalled());
+    await vi.waitFor(() =>
+      expect(actions.checkoutSessionState).toHaveBeenCalledWith("cs_test_1"),
+    );
+    // Let the resolved "open" land before asserting the form survived it.
+    await act(async () => {});
     expect(screen.getByTestId("embedded")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /try again/i })).toBeNull();
   });
@@ -169,6 +209,7 @@ describe("CheckoutClient — a session expired by a newer checkout (#217)", () =
 
     setVisibility("hidden");
     setVisibility("visible");
+    focusWindow();
 
     await act(async () => {});
     expect(actions.checkoutSessionState).not.toHaveBeenCalled();

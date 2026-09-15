@@ -287,6 +287,10 @@ describe("WalletExpressCheckout — confirming a payment", () => {
     expect(
       screen.getByText(/wallet payment didn't go through/i),
     ).toBeTruthy();
+    // Our own words, never Stripe's error text: that is vendor copy in the
+    // vendor's language, and the regression "just show result.error.message"
+    // has to fail here.
+    expect(screen.queryByText(/Checkout Session has expired/)).toBeNull();
     expect(nav.push).not.toHaveBeenCalled();
     expect(actions.createWalletCheckoutSession).toHaveBeenCalledTimes(1);
   });

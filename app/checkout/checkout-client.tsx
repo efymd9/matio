@@ -94,15 +94,19 @@ export function CheckoutClient({
       .catch(() => setFailure("load"));
   }, [show, ep, resume, router, publishableKey]);
 
-  // The refocus probe (#217). Only while a session is mounted, only when the
-  // tab becomes visible, one probe in flight at a time. A probe that fails
-  // answers "open" on the server side, so nothing here can tear down a working
-  // form by accident; only a definite "closed" does.
+  // The refocus probe (#217). Only while a session is mounted, one probe in
+  // flight at a time, on two signals: the tab becoming visible again (the
+  // buyer switched tabs) and the window regaining focus (the buyer came back
+  // to a tab that never left the screen — the case where two same-instant
+  // creates expired EACH OTHER, both tabs hold a dead secret, and neither
+  // ever gets a visibilitychange). A probe that fails answers "open" on the
+  // server side, so nothing here can tear down a working form by accident;
+  // only a definite "closed" does.
   useEffect(() => {
     if (!sessionId || failure) return;
     let probing = false;
-    const onVisibility = () => {
-      if (document.visibilityState !== "visible" || probing) return;
+    const probe = () => {
+      if (probing) return;
       probing = true;
       checkoutSessionState(sessionId)
         .then((state) => {
@@ -113,8 +117,15 @@ export function CheckoutClient({
           probing = false;
         });
     };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") probe();
+    };
     document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", probe);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", probe);
+    };
   }, [sessionId, failure]);
 
   if (failure) {

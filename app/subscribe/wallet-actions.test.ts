@@ -50,6 +50,10 @@ const h = vi.hoisted(() => ({
     | null
     | { on: "list" }
     | { on: "expire"; then: "still_open" | "closed_by_other" },
+  // Page size of the fake `list` — Stripe's `limit` is honoured and
+  // `has_more` set like the real endpoint, so the sweep's paging is real.
+  listPageSize: 100,
+  listCalls: 0,
   userAgent: "Mozilla/5.0 (iPhone) Safari",
   // Built with the real serializer, not a hand-written literal: parseConsent
   // also requires the version field, and a literal that silently fails to
@@ -165,20 +169,26 @@ vi.mock("@/lib/stripe", () => ({
         list: async ({
           customer,
           status,
+          limit,
         }: {
           customer?: string;
           status?: string;
+          limit?: number;
         }) => {
+          h.listCalls += 1;
           if (h.fault?.on === "list") {
             h.fault = null;
             throw new Error("stripe list down");
           }
+          const matching = h.sessions.filter(
+            (s) => s.customer === customer && (!status || s.status === status),
+          );
+          const pageSize = Math.min(limit ?? 10, h.listPageSize);
           return {
-            data: h.sessions
-              .filter(
-                (s) => s.customer === customer && (!status || s.status === status),
-              )
+            data: matching
+              .slice(0, pageSize)
               .map((s) => ({ id: s.id, status: s.status })),
+            has_more: matching.length > pageSize,
           };
         },
         expire: async (id: string) => {
@@ -287,6 +297,8 @@ beforeEach(() => {
   h.userUpdates = [];
   h.stripeSubs = [];
   h.fault = null;
+  h.listPageSize = 100;
+  h.listCalls = 0;
   h.userAgent = "Mozilla/5.0 (iPhone) Safari";
   h.consentCookie = CONSENT_GIVEN();
   h.authUserId = "user_1";
@@ -585,6 +597,25 @@ describe("#217 — one open session per buyer", () => {
       cs_done: "complete",
       cs_test_5: "open",
     });
+  });
+
+  it("sweeps past the first page — a customer with more open sessions than one list returns", async () => {
+    // Paged by re-listing: each expired session drops out of the `open`
+    // result set, so the next first page surfaces what was behind it.
+    h.listPageSize = 2;
+    h.sessions = [
+      { id: "cs_old_a", customer: "cus_existing", status: "open", params: {}, opts: undefined },
+      { id: "cs_old_b", customer: "cus_existing", status: "open", params: {}, opts: undefined },
+      { id: "cs_old_c", customer: "cus_existing", status: "open", params: {}, opts: undefined },
+    ];
+
+    const res = await createAuthCheckoutSession(INPUT);
+
+    expect(res.kind).toBe("embedded");
+    expect(openSessionIds()).toEqual(["cs_test_4"]);
+    // Two pages of two: the first two olds (has_more), then — those two now
+    // gone from the open set — the third old + the new one (last page).
+    expect(h.listCalls).toBe(2);
   });
 
   it("the same intent in two tabs, seconds apart: the later tab holds the live session", async () => {

@@ -371,6 +371,12 @@ async function createSoleOpenSession(
   return session;
 }
 
+// How many list pages the sweep will work through before giving up. Each
+// round expires up to 100 sessions, so this bounds a customer at 1,000 open
+// sessions — a number nothing legitimate produces; past it the sweep fails
+// closed like any other failure, rather than looping on a runaway account.
+const SWEEP_MAX_ROUNDS = 10;
+
 async function expireOtherOpenSessions(
   stripe: Stripe,
   customerId: string,
@@ -378,23 +384,35 @@ async function expireOtherOpenSessions(
 ): Promise<void> {
   // Only sessions created WITH `customer` are listable this way — the guest
   // flow's sessions are not, and are out of scope here (registry).
-  const open = await stripe.checkout.sessions.list({
-    customer: customerId,
-    status: "open",
-    limit: 100,
-  });
-  for (const other of open.data) {
-    if (other.id === keepId) continue;
-    try {
-      await stripe.checkout.sessions.expire(other.id);
-    } catch (err) {
-      // Losing the race to whoever closed it first — a parallel sweep, or the
-      // buyer finishing it in the other tab — is exactly the state wanted.
-      // Anything that leaves it OPEN is not, and propagates.
-      const now = await stripe.checkout.sessions.retrieve(other.id);
-      if (now.status === "open") throw err;
+  //
+  // Paged by RE-LISTING, not by cursor: every session expired here leaves the
+  // `status: 'open'` result set, so the next unfiltered first page surfaces
+  // what was behind it. A `starting_after` cursor would point at an object
+  // this very loop has just removed from the filtered list — Stripe does not
+  // document what that yields, and the money path is no place to find out.
+  for (let round = 0; round < SWEEP_MAX_ROUNDS; round++) {
+    const page = await stripe.checkout.sessions.list({
+      customer: customerId,
+      status: "open",
+      limit: 100,
+    });
+    for (const other of page.data) {
+      if (other.id === keepId) continue;
+      try {
+        await stripe.checkout.sessions.expire(other.id);
+      } catch (err) {
+        // Losing the race to whoever closed it first — a parallel sweep, or
+        // the buyer finishing it in the other tab — is exactly the state
+        // wanted. Anything that leaves it OPEN is not, and propagates.
+        const now = await stripe.checkout.sessions.retrieve(other.id);
+        if (now.status === "open") throw err;
+      }
     }
+    if (!page.has_more) return;
   }
+  throw new Error(
+    `checkout sweep: customer still has more open sessions after ${SWEEP_MAX_ROUNDS} pages`,
+  );
 }
 
 // Signed-in checkout. Returns a CheckoutSessionResult the in-site /checkout
@@ -550,7 +568,6 @@ export async function createAuthWalletCheckoutSession(
   const prepared = await prepareAuthCheckout(input);
   if (prepared.kind === "redirect") return prepared;
   const {
-    userId,
     email,
     customerId,
     priceId,
