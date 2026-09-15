@@ -292,11 +292,11 @@ TestFlight from the end of phase 1; the store listing can be prepared in paralle
 
 | Item | Blocks | Status |
 |---|---|---|
-| **Mux paid plan** | phase 4 entirely (static renditions), and the 10-asset cap blocks content growth | **open — hard blocker** |
-| Apple Developer Program ($99/yr) | any device testing beyond simulator | open |
+| **Mux paid plan** | phase 4 entirely (static renditions), and the 10-asset cap blocks content growth | **done** — paid, shared account (see CLAUDE.md «Mux») |
+| Apple Developer Program ($99/yr) | any device testing beyond simulator | **done 2026-09-15** — reusing the owner's Individual membership, Team `MTFRZQ8SRX` (#99); App Transfer to an Organization account for DEEP ORDINARY LTD before the public launch (registry) |
 | Google Play Console ($25 one-time) | Android release | open |
 | **EAS dev builds from day one** | everything — Expo Go cannot load `react-native-video`, Cast, or the Mux Data SDK | n/a, just a workflow rule |
-| Expo account + EAS Build | CI | open |
+| Expo account + EAS Build | CI | **done 2026-09-15** — project `@matvei-dev/matio`, profiles in `mobile/eas.json`, runbook `docs/runbooks/mobile-builds.md` |
 | `authorizedParties` on `clerkMiddleware` | secure `/v1` auth | open |
 
 ## 14. Decisions — locked 2026-07-29

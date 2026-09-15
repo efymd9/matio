@@ -27,6 +27,7 @@ description: Карта живой инфраструктуры Matio (хост�
 | Resend | **LIVE**: домен `matio.tv` верифицирован (eu-west-1), `RESEND_API_KEY` в проде с июля 2026 | на стенде ключ пустой — форма сбора работает, письма не уходят; free tier 100/день |
 | PostHog | EU Cloud, проект 190233 | прокси через `/ingest` |
 | Sentry | **живой с 15.08.2026**: организация `deep-ordinary` (регион EU), проект `javascript-nextjs` (id 4511916989743184); DSN задан на проде и стенде, прод-события приходят с 0.5.0 | регион менялся бы только пересозданием организации. Один проект на весь веб; без `NEXT_PUBLIC_SENTRY_DSN` SDK не инициализируется вообще. У стенда есть свой DSN и `NEXT_PUBLIC_APP_ENV=staging` (проверено `vercel env ls` 06.09.2026), поэтому его события помечены `environment: staging`; `request.url` остаётся вторым признаком при разборе (грабля из #126) |
+| Apple / EAS (мобильное) | Apple Developer Program: Team `MTFRZQ8SRX` (Individual, тот же, что у Focu); EAS-проект `@matvei-dev/matio` (id `755ce20c-…`) | сборки и TestFlight — `docs/runbooks/mobile-builds.md`; первая сборка требует логина Apple ID владельцем (2FA); Android/Play Console не заведён; перенос на Organization-аккаунт LTD — до публичной подачи |
 | GitHub App `matio-release-please` | App ID 4447605, установлен на репозиторий | секреты `RELEASE_PLEASE_APP_ID` / `RELEASE_PLEASE_APP_PRIVATE_KEY`; приватный ключ — у владельца в менеджере паролей |
 
 ## CI
