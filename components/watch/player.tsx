@@ -476,25 +476,26 @@ function EpisodePlayback({
   // What a consent flip does to the LIVE element (issue #127). This is NOT
   // the hero's situation: <mux-player> is a custom element whose
   // attributeChangedCallback tears the stream down on `disable-tracking`
-  // (#126), whereas @mux/mux-video-react renders a bare <video> and reads
-  // envKey/disableTracking/disableCookies ONLY inside playback-core's
-  // initialize(), from an effect keyed on the src alone (dist/index.mjs:
-  // `useEffect(() => { … initialize(t, a, …) … }, [d])`, d = the Mux URL).
-  // So flipping the props on <MuxVideo> mid-episode never unloads, reloads
-  // or play()s anything — no orphan rejection is possible on this path —
-  // but it also changes NOTHING on a monitor that is already running.
+  // (#126), whereas @mux/mux-video-react renders a bare <video>: envKey /
+  // disableTracking are read only inside playback-core's initialize() (an
+  // effect keyed on the src alone), and — since 0.31.3, muxinc/elements#1349
+  // — a `disableCookies` change re-attaches Mux Data in place: mux-embed's
+  // destroy() on the running monitor, then setupMux with the CURRENT props
+  // on a microtask, media and hls.js untouched. So flipping the props on
+  // <MuxVideo> mid-episode never unloads, reloads or play()s anything — no
+  // orphan rejection is possible on this path — and both directions land on
+  // the spot: a GRANT starts the monitor mid-episode (before 0.31.3 it
+  // waited for the next initialize), a WITHDRAWAL stops it.
   //
-  // A GRANT therefore takes effect at the next initialize (auto-advance src
-  // swap, token-refresh remount, manual swap): the conservative direction —
-  // nothing fires without consent, the viewer is merely unmeasured until the
-  // next episode. A WITHDRAWAL must not wait for that: stop the running
-  // monitor on the spot through mux-embed's own `video.mux.destroy()` — the
-  // very call playback-core's teardown makes. It removes the element
-  // listeners, flushes the final view-end beacon (the same one teardown
-  // would send at the next episode, only earlier), and marks the handle
-  // `deleted`, so that later teardown skips it. The stream is untouched, and
-  // the next initialize sees disableTracking=true and stays off. The muxData
-  // cookie is cleared by the banner (clearMarketingCookies).
+  // This effect stays as the synchronous belt-and-braces for the withdrawal:
+  // it stops the running monitor through mux-embed's own `video.mux.destroy()`
+  // — the very call playback-core's teardown (and the wrapper's re-init)
+  // makes. It removes the element listeners, flushes the final view-end
+  // beacon and marks the handle `deleted`, so whichever of the two effects
+  // runs second (child effects run first, so normally the wrapper) finds
+  // nothing left to stop. The stream is untouched, and the next initialize
+  // sees disableTracking=true and stays off. The muxData cookie is cleared
+  // by the banner (clearMarketingCookies) and by the wrapper.
   useEffect(() => {
     if (muxDataEnabled) return;
     const handle = videoRef.current?.mux;
