@@ -384,13 +384,13 @@ describe("@mux/mux-video-react (real) — a consent flip on a mounted element", 
     return { view, ref, element };
   }
 
-  it("withdrawal: nothing is unloaded, reloaded or play()ed — and nothing is stopped either", async () => {
+  it("withdrawal: the wrapper stops the monitor itself — nothing is unloaded, reloaded or play()ed", async () => {
     const { view, ref, element } = await mountReal(true);
     const el = ref.current!;
     const handle = el.mux;
     expect(handle?.deleted).toBe(false);
     // What a consented view leaves behind — the cookie clearMarketingCookies
-    // now takes with it on withdrawal (lib/cookie-consent.test.ts).
+    // also takes with it on withdrawal (lib/cookie-consent.test.ts).
     expect(document.cookie).toContain("muxData=");
     const src = el.getAttribute("src");
     expect(src).toContain("pb-real");
@@ -398,34 +398,47 @@ describe("@mux/mux-video-react (real) — a consent flip on a mounted element", 
     view.rerender(element(false));
     await act(async () => {});
 
-    // The good news (#127's premise does not hold here)…
+    // The stream is left alone (#127's premise does not hold here)…
     expect(ref.current).toBe(el);
     expect(el.getAttribute("src")).toBe(src);
     expect(media.load).not.toHaveBeenCalled();
     expect(media.play).not.toHaveBeenCalled();
     expect(media.pause).not.toHaveBeenCalled();
-    // …and the defect the Player has to cover: the very same monitor keeps
-    // running after the props said "stop".
-    expect(el.mux).toBe(handle);
-    expect(handle?.deleted).toBe(false);
+    // …and since 0.31.3 (muxinc/elements#1349) the wrapper's own
+    // `disableCookies` effect re-attaches Mux Data: the running monitor is
+    // destroyed (final beacon flushed), the handle dropped, and the re-init
+    // on the microtask sees disableTracking=true and installs nothing.
+    expect(handle?.deleted).toBe(true);
+    expect(el.mux).toBeUndefined();
+    // It expires the muxData cookie too (the banner does the same).
+    expect(document.cookie).not.toContain("muxData=");
 
-    // Its lifecycle is initialize/teardown only.
+    // Teardown at unmount finds nothing to stop and does not throw.
     view.unmount();
     expect(handle?.deleted).toBe(true);
   });
 
-  it("grant: the mounted element is left alone — Mux Data does not start mid-stream", async () => {
+  it("grant: the wrapper starts Mux Data mid-stream itself — the element is not remounted", async () => {
     const { view, ref, element } = await mountReal(false);
     const el = ref.current!;
     expect(el.mux).toBeUndefined();
+    // A player mounted with cookies disabled writes no muxData cookie…
+    expect(document.cookie).not.toContain("muxData=");
+    const src = el.getAttribute("src");
 
     view.rerender(element(true));
     await act(async () => {});
 
     expect(ref.current).toBe(el);
-    expect(el.mux).toBeUndefined();
+    expect(el.getAttribute("src")).toBe(src);
     expect(media.load).not.toHaveBeenCalled();
     expect(media.play).not.toHaveBeenCalled();
+    // …and since 0.31.3 a `disableCookies` change re-runs setupMux with the
+    // CURRENT props (envKey, disableTracking=false) on a microtask: the
+    // monitor exists now, not at the next initialize.
+    expect(el.mux).toBeDefined();
+    expect(el.mux?.deleted).toBe(false);
+    expect(document.cookie).toContain("muxData=");
   });
 });
 
