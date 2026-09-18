@@ -24,6 +24,12 @@ describe("app dictionaries", () => {
     expect(appDictFor("en")).toBe(appEn);
   });
 
+  // Leaves that are legitimately the same word in both languages. Every
+  // entry is a deliberate exception, named so a pasted sentence can never
+  // hide behind it: the Browse chip «Vertical» (#245) is a one-word loanword
+  // — Spanish has no other word for the orientation.
+  const SAME_IN_BOTH = new Set(["browse.vertical"]);
+
   it("has every leaf translated, not pasted between locales", () => {
     const es = new Map(leaves(appEs));
     for (const [path, en] of leaves(appEn)) {
@@ -31,10 +37,21 @@ describe("app dictionaries", () => {
       expect(esValue, path).toBeDefined();
       if (typeof en === "string") {
         // A brand name alone ("Matio") is the same in both; every other
-        // leaf here carries a sentence, so identical text means untranslated.
-        expect(esValue, path).not.toBe(en);
+        // leaf here carries a sentence, so identical text means untranslated
+        // — unless it is one of the named loanwords above.
+        if (SAME_IN_BOTH.has(path)) expect(esValue, path).toBe(en);
+        else expect(esValue, path).not.toBe(en);
         expect(en.trim().length, path).toBeGreaterThan(0);
       }
+    }
+  });
+
+  it("keeps the loanword allowlist honest — every entry exists and is a single word", () => {
+    const en = new Map(leaves(appEn));
+    for (const path of SAME_IN_BOTH) {
+      const value = en.get(path);
+      expect(value, path).toBeTypeOf("string");
+      expect((value as string).trim(), path).toMatch(/^\S+$/);
     }
   });
 

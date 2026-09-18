@@ -388,7 +388,7 @@ React 19.2, expo-router with a `src/app` root. See [`mobile/README.md`](../mobil
 | Metro | `watchFolders: [../lib]` so those resolve, plus `resolver.disableHierarchicalLookup = true` — without it Metro walks up and bundles the **web app's** React as a second copy. |
 | Isolation | root `tsconfig.json` excludes `mobile`; eslint ignores `mobile/**` (the app has its own toolchain). `design_handoff_matio_redesign/**` was also added to the eslint ignores, which cleared 2 pre-existing lint errors. |
 | Design tokens | `lib/design.ts` extended additively with `PALETTE`, `INK_MUTED`, `INK_DIM`, and `TONE_STOPS`. `TONE_GRADIENT` is now **derived** from `TONE_STOPS` (byte-identical output) so the RN colour-stop arrays and the CSS gradient strings can't drift. |
-| Screens | `index.tsx` (hero + Just released / Popular now / All shows rails), `show/[slug].tsx` (hero, synopsis, episode cards with signed thumbnails). |
+| Screens | `index.tsx` (hero + Just released / Popular now / All shows rails), `show/[slug].tsx` (hero, synopsis, episode cards with signed thumbnails). *Superseded by the native shell of 2026-09-19 (#245) below: `(tabs)/index` · `browse` · `account` · `settings` under the glass tab bar.* |
 
 Verified: both typechecks clean, web lint clean, Metro produced a 5.67 MB iOS bundle containing
 the shared tokens, and the app rendered **live API data** on an iPhone 16 Pro simulator (correct
@@ -578,6 +578,71 @@ props + its config plugin).
 Verified: web lint/typecheck/tests green, `pnpm qa:styles` clean; `npx tsc --noEmit` in
 `mobile/` clean; `npx expo export --platform ios` produced the Hermes bundle. **Not verified on
 a device or simulator** — none reachable in the session; the owner's checklist is in the PR.
+
+**Native shell, 2026-09-19 (#245) — tabs, Liquid Glass, Account, Settings, Browse.** The app
+stopped being a copy of the website. Design was approved live on the owner's board (the
+#245 artifact, «Поток целиком» with bar B1 «Clear»); the app is outside Storybook, so the
+board was its Lab.
+
+- **Navigation.** `src/app/(tabs)/` — `_layout.tsx` + `index` (Home) · `browse` · `account` ·
+  `settings` — is ONE screen of the root `Stack` (`src/app/_layout.tsx`); `show/[slug]`,
+  `watch/[episodeId]` and `sign-in` are its siblings, pushed OVER the tabs. So the show page
+  and the player never carry the bar — the owner's «bar hidden on the show page» by
+  construction, not by a per-screen `tabBarStyle: { display: 'none' }`. The player is still a
+  push (no modal rework).
+- **The bar** (`components/glass-tab-bar.tsx`): a JS `Tabs` (`expo-router/js-tabs`) with a
+  custom `tabBar` — NativeTabs can only do the UITabBar look (style A on board 1). A floating
+  pill inset 18 from the sides, 26 + safe-area above the bottom, 64 high; four icons; the
+  active tab a gold pill (`flex 1.9`) with its label, the rest icon-only at cream 62%. Titles
+  come from the live dictionary, so a language change re-labels the bar in place. Every tab
+  screen pads its scrolling content by `useTabBarClearance()` (= 64 + 26 + `insets.bottom`).
+- **Glass** (`components/glass.tsx`): `isLiquidGlassAvailable()` read once at load. iOS 26+ —
+  `expo-glass-effect`'s `GlassView glassEffectStyle="regular"` (bar, search field, the «‹»;
+  `isInteractive` on the tappable ones) and a `tintColor={gold}` GlassView for the active
+  pill. Android / iOS < 26 — a translucent espresso (`rgba(26,18,12,.72)`) with a cream
+  hairline, the active pill the same goldHi→goldLo gradient as `GoldButton`. **No blur and no
+  `expo-blur`** — the owner's call (19.09); zero new dependencies in the whole feature.
+- **Icons** (`components/icon.tsx`): SF Symbols through `expo-symbols` on iOS; seven white
+  SVGs under `assets/icons/` through `expo-image` + `tintColor` elsewhere (Metro serves `.svg`
+  as an asset; `src/types/assets.d.ts` types the import). No `@expo/vector-icons`.
+- **Home** (`(tabs)/index.tsx`): centred wordmark, a reanimated cover carousel (262×392,
+  step 276, `snapToInterval`, neighbours at .92 / .55 from a shared scroll value; featured
+  first, then catalog order), the focused show's badge · genre · episode count · Play —
+  episode 1 by the SAME rule as the show page (`watch/first-episode.ts`: locked ⇒ sign-in,
+  else the player; the show is loaded on the tap since the catalog carries no episodes) —
+  and the continue-watching rail (signed-in; hook moved to `watch/use-continue-watching.ts`).
+  The Just released / Popular now / All shows rails and the footer tagline are gone from Home.
+- **Browse** (`(tabs)/browse.tsx`): a glass search field (title, client-side, case- and
+  accent-insensitive) AND one chip — All · the genres · Vertical (drawn only when a vertical
+  show exists) — over a two-column `FlatList` of `PosterCard`s (vertical shows badged). The
+  rules are the pure, dependency-free `lib/catalog-filters.ts` (`normalizeGenreKey` = trim +
+  lowercase + collapse spaces; `genreLabel` = first letter up; `genreChips` = distinct keys in
+  first-appearance order; `matchesQuery` = NFD + `\p{Diacritic}` strip; `filterShows` = chip
+  AND query), re-exported through `src/shared/catalog-filters.ts` and tested in vitest — the
+  admin's raw genre strings stay on the wire; folding «dark Romance» / «Drama» / «drama» into
+  one chip is a presentation decision an app update can revise.
+- **Account** (`(tabs)/account.tsx`): signed in — avatar initial (goldHi→burgundy), email,
+  a gold «Member» pill (always Member: `/v1` carries no subscription state — registry), the
+  full continue-watching list, «Manage subscription» → `config.urls.web` in the system
+  browser (paid mode only), «Sign out». Signed out — the sign-up wall's gate copy as a calm
+  tab over the shared two-step form (`components/sign-in-form.tsx`, extracted from
+  `sign-in.tsx`; `onDone` stays put on the tab, goes back on the modal screen) and a «why an
+  account» card.
+- **Settings** (`(tabs)/settings.tsx`): Language (English / Español radio + «follows your
+  device language until you choose» — the EN|ES pill left the home header and
+  `components/locale-switch.tsx` is deleted), Playback (one toggle, `prefs/autoplay.ts`,
+  SecureStore `matio_autoplay_next` behind `settleOrNull`; the feed reads it synchronously at
+  a landscape show's `ended` and simply does not advance when off — the ONE feed change
+  besides the glass «‹»), About (version = `expoConfig.version` + native build, Terms /
+  Privacy / Cookies via `expo-web-browser`, Contact via `mailto:`). Notifications (#98) and
+  Downloads (`flags.downloadsEnabled`) are deliberately not drawn.
+- **Show page**: hero 330, the glass «‹», genre chips, a wide «Play · Ep. 1», the synopsis in
+  two lines under Episodes and in full under About (segmented), the episode cards as before.
+- **Copy**: new keys live in `lib/i18n/app-dictionaries.ts` (`app.tabs.*`, `app.browse.*`,
+  `app.account.*`, `app.settings.*`, es + en); everything the web already says is reused.
+  English by default; the first launch follows the device language (unchanged).
+- `/api/v1` untouched. GDPR: no new personal data — the language and the autoplay flag are
+  device-local settings, the email on the Account tab is Clerk's and never logged.
 
 ## 15. Traps
 

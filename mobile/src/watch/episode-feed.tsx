@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -17,10 +16,12 @@ import Video, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, ApiError, muxStreamUrl } from "@/api/client";
 import { useConfig } from "@/api/config-context";
+import { GlassBackButton } from "@/components/glass";
 import { SignupWall } from "@/components/signup-wall";
 import { Artwork, ErrorState, Loading } from "@/components/ui";
 import { VerticalChrome } from "@/components/vertical-chrome";
 import { useT } from "@/i18n/locale";
+import { autoplayNextEnabled, loadAutoplayNext } from "@/prefs/autoplay";
 import {
   isEpisodeLockedForApp,
   type EpisodeSummary,
@@ -28,7 +29,7 @@ import {
   type PlaybackTokenResponse,
   type ShowDetail,
 } from "@/shared/api-types";
-import { colors, display, radius, SCREEN_PAD, space } from "@/theme";
+import { colors, display, SCREEN_PAD, space } from "@/theme";
 import { useProgressSaver } from "./use-progress-saver";
 import { useSegmentTracker } from "./use-segment-tracker";
 
@@ -148,12 +149,24 @@ export function EpisodeFeed({
     [episodes.length, vertical],
   );
 
+  // The «Play next episode automatically» setting is read synchronously at
+  // `ended`; warm its cache now so the first end of this session sees the
+  // stored value, not the default.
+  useEffect(() => {
+    void loadAutoplayNext();
+  }, []);
+
   // `ended` on the current page: advance. Returns whether it did, so the
   // last episode's page can settle into its paused end state instead.
   const onEnded = useCallback(
     (index: number): boolean => {
       if (index !== currentRef.current) return false;
       if (index + 1 >= episodes.length) return false;
+      // Settings → Playback → autoplay off: a landscape show rests on its
+      // ended page (the native transport's own end state) instead of
+      // rolling into the next episode. A vertical show is a feed — the
+      // swipe is the viewer's choice and `ended` advances as before.
+      if (!vertical && !autoplayNextEnabled()) return false;
       goTo(index + 1, vertical);
       return true;
     },
@@ -593,15 +606,13 @@ function FeedPage({
         />
       ) : (
         <>
-          <Pressable
+          {/* The same glass «‹» as the show page — the board's one new
+              piece of player chrome. */}
+          <GlassBackButton
             onPress={onBack}
-            accessibilityRole="button"
             accessibilityLabel={t.player.backToShowAria}
             style={[styles.back, { top: insets.top + space(2) }]}
-            hitSlop={10}
-          >
-            <Text style={styles.backGlyph}>‹</Text>
-          </Pressable>
+          />
           <Text style={[styles.title, { top: insets.top + space(4) }]} numberOfLines={1}>
             {episode.title}
           </Text>
@@ -614,17 +625,7 @@ function FeedPage({
 const styles = StyleSheet.create({
   list: { flex: 1, backgroundColor: "#000" },
   stage: { flex: 1, backgroundColor: "#000" },
-  back: {
-    position: "absolute",
-    left: SCREEN_PAD,
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backGlyph: { color: colors.ink, fontSize: 28, lineHeight: 30, marginTop: -2 },
+  back: { position: "absolute", left: SCREEN_PAD },
   title: {
     position: "absolute",
     left: SCREEN_PAD + 52,

@@ -19,6 +19,11 @@ export const colors = {
   // Translucent cream, used by the 8a header pills and circular controls.
   glass: "rgba(246,239,228,0.08)",
   hairline: "rgba(168,64,31,0.3)",
+  // Cream at the two quieter opacities the native shell (#245) needs:
+  // chevrons and the unselected radio ring (.28), and the off track of a
+  // switch (.18). The board's --ink-faint and .sw, verbatim.
+  inkFaint: "rgba(246,239,228,0.28)",
+  track: "rgba(246,239,228,0.18)",
 } as const;
 
 // The 8a spec's 4px base rhythm.

@@ -1,18 +1,18 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/api/client";
 import { useConfig } from "@/api/config-context";
 import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
+import { GlassBackButton } from "@/components/glass";
 import {
   Artwork,
   durationMinutes,
   ErrorState,
   GoldButton,
   Loading,
-  MetaRow,
   Pill,
   Scrim,
 } from "@/components/ui";
@@ -23,9 +23,18 @@ import type {
   ShowDetail,
 } from "@/shared/api-types";
 import { isEpisodeLockedForApp } from "@/shared/api-types";
-import { body, colors, display, radius, SCREEN_PAD, space } from "@/theme";
+import { genreLabel, normalizeGenreKey } from "@/shared/catalog-filters";
+import { body, colors, display, fonts, radius, SCREEN_PAD, space } from "@/theme";
+import { firstEpisodeLocked } from "@/watch/first-episode";
 
-const HERO_HEIGHT = 420;
+// The show page (#245): a screen of the ROOT stack, so the tab bar is never
+// here — the whole height goes to the episode list, and the only chrome is
+// the glass «‹». Hero 330 with the title and genre chips, a wide «Play ·
+// Ep. 1», the synopsis (two lines under Episodes, in full under About), and
+// the episode cards.
+const HERO_HEIGHT = 330;
+
+type Segment = "episodes" | "about";
 
 export default function ShowScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
@@ -33,12 +42,13 @@ export default function ShowScreen() {
   const insets = useSafeAreaInsets();
   const config = useConfig();
   const t = useT();
+  const [segment, setSegment] = useState<Segment>("episodes");
 
   const { isSignedIn } = useOptionalAuth();
   const signedIn = isSignedIn;
   // Subscription state is not yet exposed to the app. It only matters in paid
-  // mode, which is dormant; free/gate mode never consults it. When payments
-  // return, /v1/config should carry it rather than the app guessing.
+  // mode; free/gate mode never consults it. When payments return in the app,
+  // /v1/config should carry it rather than the app guessing (registry).
   const hasSubscription = false;
 
   // A locked episode routes to sign-in instead of the player: the wall is the
@@ -79,86 +89,110 @@ export default function ShowScreen() {
 
   const data = show.data;
   // The Play CTA targets episode 1 — including when it's locked, so the button
-  // leads to the wall rather than silently doing nothing.
+  // leads to the wall rather than silently doing nothing. Same rule as the
+  // Home carousel's Play (watch/first-episode.ts).
   const first = data.episodes[0];
-  const firstLocked = first
-    ? isEpisodeLockedForApp({
-        gate: config.signupGate,
-        signedIn,
-        hasSubscription,
-        position: 1,
-        access: first.access,
-      })
-    : false;
+  const firstLocked = firstEpisodeLocked(data, config.signupGate, signedIn);
+  const synopsis =
+    data.synopsis ?? t.showDetail.synopsisFallbackFree(data.title, data.genre);
 
   return (
     <ScrollView
       style={{ backgroundColor: colors.bg }}
-      contentContainerStyle={{ paddingBottom: space(14) }}
+      contentContainerStyle={{ paddingBottom: insets.bottom + space(8) }}
     >
       <View style={{ height: HERO_HEIGHT }}>
         <Artwork uri={data.heroImageUrl} toneKey={data.slug} style={StyleSheet.absoluteFill} />
-        <Scrim height={HERO_HEIGHT * 0.7} from="bottom" />
+        <Scrim height={HERO_HEIGHT * 0.72} from="bottom" />
         <Scrim height={insets.top + space(16)} from="top" maxOpacity={0.7} />
 
-        <Pressable
+        <GlassBackButton
           onPress={() => router.back()}
-          accessibilityRole="button"
           accessibilityLabel={t.watch.backToShowAria}
-          style={({ pressed }) => [
-            styles.backButton,
-            { top: insets.top + space(2) },
-            pressed && { opacity: 0.7 },
-          ]}
-          hitSlop={8}
-        >
-          <Text style={styles.backGlyph}>‹</Text>
-        </Pressable>
+          style={[styles.back, { top: insets.top + space(2) }]}
+        />
 
         <View style={styles.heroContent}>
           <Pill label={t.hero.matioOriginal} />
           <Text style={styles.title}>{data.title}</Text>
-          {/* No hardcoded age rating — see the note in app/index.tsx. */}
-          <MetaRow parts={[data.genre[0] ?? "", t.showDetail.episodeCount(data.episodeCount)]} />
+          {data.genre.length > 0 ? (
+            <View style={styles.genres}>
+              {data.genre.map((raw) => (
+                <View key={raw} style={styles.genreChip}>
+                  <Text style={styles.genreText}>{genreLabel(normalizeGenreKey(raw))}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </View>
       </View>
 
-      <View style={{ paddingHorizontal: SCREEN_PAD, marginTop: space(5) }}>
+      <View style={{ paddingHorizontal: SCREEN_PAD, marginTop: space(4), gap: space(3) }}>
         {first ? (
           <GoldButton
-            label={t.showDetail.play}
-            onPress={() => openEpisode(data, first, firstLocked !== false)}
+            label={`${t.showDetail.play} · ${t.home.epShort(1)}`}
+            onPress={() => openEpisode(data, first, firstLocked)}
+            style={{ alignSelf: "stretch" }}
           />
         ) : null}
-        {data.synopsis ? <Text style={styles.synopsis}>{data.synopsis}</Text> : null}
+        {segment === "episodes" ? (
+          <Text style={styles.synopsis} numberOfLines={2}>
+            {synopsis}
+          </Text>
+        ) : null}
       </View>
 
-      <View style={{ paddingHorizontal: SCREEN_PAD, marginTop: space(8), gap: space(3) }}>
-        <Text style={styles.episodesHeading}>{t.showDetail.tabEpisodes}</Text>
-        {data.episodes.length === 0 ? (
-          <Text style={styles.emptyEpisodes}>{t.showDetail.noEpisodesYetLine}</Text>
-        ) : (
-          data.episodes.map((ep, i) => {
-            const locked = isEpisodeLockedForApp({
-              gate: config.signupGate,
-              signedIn,
-              hasSubscription,
-              position: i + 1,
-              access: ep.access,
-            });
-            return (
-              <EpisodeRow
-                key={ep.id}
-                episode={ep}
-                position={i + 1}
-                showSlug={data.slug}
-                locked={locked}
-                onPress={() => openEpisode(data, ep, locked !== false)}
-              />
-            );
-          })
-        )}
+      <View style={styles.segments}>
+        {(["episodes", "about"] as const).map((key) => {
+          const active = segment === key;
+          return (
+            <Pressable
+              key={key}
+              onPress={() => setSegment(key)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              hitSlop={6}
+              style={[styles.segment, active && styles.segmentActive]}
+            >
+              <Text style={[styles.segmentText, active && { color: colors.gold }]}>
+                {key === "episodes" ? t.showDetail.tabEpisodes : t.showDetail.tabAbout}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
+
+      {segment === "about" ? (
+        <View style={{ paddingHorizontal: SCREEN_PAD, marginTop: space(5) }}>
+          <Text style={styles.synopsis}>{synopsis}</Text>
+        </View>
+      ) : (
+        <View style={{ paddingHorizontal: SCREEN_PAD, marginTop: space(5), gap: space(2.5) }}>
+          {data.episodes.length === 0 ? (
+            <Text style={styles.emptyEpisodes}>{t.showDetail.noEpisodesYetLine}</Text>
+          ) : (
+            data.episodes.map((ep, i) => {
+              const locked = isEpisodeLockedForApp({
+                gate: config.signupGate,
+                signedIn,
+                hasSubscription,
+                position: i + 1,
+                access: ep.access,
+              });
+              return (
+                <EpisodeRow
+                  key={ep.id}
+                  episode={ep}
+                  position={i + 1}
+                  showSlug={data.slug}
+                  locked={locked}
+                  onPress={() => openEpisode(data, ep, locked !== false)}
+                />
+              );
+            })
+          )}
+        </View>
+      )}
     </ScrollView>
   );
 }
@@ -222,50 +256,46 @@ function EpisodeRow({
 }
 
 const styles = StyleSheet.create({
-  backButton: {
-    position: "absolute",
-    left: SCREEN_PAD,
-    width: 40,
-    height: 40,
-    borderRadius: radius.pill,
-    backgroundColor: "rgba(143,47,28,0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  backGlyph: {
-    color: colors.ink,
-    fontSize: 28,
-    lineHeight: 30,
-    marginTop: -2,
-  },
+  back: { position: "absolute", left: SCREEN_PAD },
   heroContent: {
     position: "absolute",
     left: SCREEN_PAD,
     right: SCREEN_PAD,
-    bottom: space(6),
-    gap: space(3),
+    bottom: space(5),
+    gap: space(2.5),
   },
   title: {
     ...display,
     color: colors.ink,
     fontSize: 40,
-    // See the note on heroTitle in app/index.tsx — RN clips to lineHeight.
+    // RN clips to lineHeight; 1.1 is the tightest Anton survives.
     lineHeight: 44,
   },
+  genres: { flexDirection: "row", flexWrap: "wrap", gap: space(2) },
+  genreChip: {
+    backgroundColor: colors.glass,
+    borderRadius: radius.pill,
+    paddingVertical: space(1.5),
+    paddingHorizontal: space(2.5),
+  },
+  genreText: { fontFamily: fonts.bodySemi, color: colors.inkMuted, fontSize: 11 },
   synopsis: {
     ...body,
     color: colors.inkMuted,
     fontSize: 14,
     lineHeight: 21,
-    marginTop: space(5),
   },
-  episodesHeading: {
-    ...display,
-    color: colors.gold,
-    fontSize: 16,
-    letterSpacing: 1.9,
-    marginBottom: space(1),
+  segments: {
+    flexDirection: "row",
+    gap: space(5.5),
+    paddingHorizontal: SCREEN_PAD,
+    marginTop: space(4),
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.hairline,
   },
+  segment: { paddingVertical: space(2.5), borderBottomWidth: 2, borderBottomColor: "transparent" },
+  segmentActive: { borderBottomColor: colors.gold },
+  segmentText: { ...display, color: colors.inkDim, fontSize: 14, letterSpacing: 1.2 },
   emptyEpisodes: { ...body, color: colors.inkDim, fontSize: 13 },
   episodeCard: {
     flexDirection: "row",
@@ -296,5 +326,5 @@ const styles = StyleSheet.create({
   },
   episodeTitle: { ...display, color: colors.ink, fontSize: 13, letterSpacing: 0.3 },
   episodeDescription: { ...body, color: colors.inkDim, fontSize: 12, lineHeight: 17 },
-  episodeDuration: { fontFamily: "GeistMono_400Regular", color: colors.rust, fontSize: 11, marginTop: space(0.5) },
+  episodeDuration: { fontFamily: fonts.mono, color: colors.rust, fontSize: 11, marginTop: space(0.5) },
 });
