@@ -104,6 +104,16 @@ updates:
       - dependency-name: "react-native-screens"
       - dependency-name: "react-native-web"
       - dependency-name: "react-native-worklets"
+      # TypeScript мобильного держим на ~5.9 (штатный для Expo SDK 57).
+      # `typescript ~7` не удовлетворяет peer `^5` у `@solana/codecs-*`
+      # (транзитивно из `@clerk/clerk-js`), и `npm ci` на билдере EAS падает
+      # в `Install dependencies` — «Missing: typescript@5.9.3 from lock
+      # file» (сборка 15.09.2026, build 2; локальный npm 11 это прощает).
+      # #240 (TS 7.0.2) закрыт ровно по этой причине, #237 вернул ~5.9.
+      # Мажор TS — только вместе с апгрейдом Expo SDK; миноры/патчи 5.x
+      # приезжают штатно. См. docs/runbooks/mobile-builds.md.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
