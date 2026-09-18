@@ -42,6 +42,7 @@ export const appEs = {
     langHint: "Sigue el idioma del dispositivo hasta que elijas.",
     playback: "Reproducción",
     autoplayNext: "Reproducir el siguiente episodio",
+    autoplayHint: "Solo en series horizontales; el feed vertical siempre continúa.",
     version: "Versión",
   },
   update: {
@@ -97,6 +98,7 @@ export const appEn: AppDict = {
     langHint: "Follows your device language until you choose.",
     playback: "Playback",
     autoplayNext: "Play next episode automatically",
+    autoplayHint: "Applies to horizontal shows; vertical feeds always continue.",
     version: "Version",
   },
   update: {

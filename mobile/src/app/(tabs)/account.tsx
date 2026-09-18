@@ -28,7 +28,7 @@ import {
 } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import type { ContinueWatchingEntry } from "@/shared/api-types";
-import { colors, display, fonts, SCREEN_PAD, space } from "@/theme";
+import { colors, display, fonts, radius, SCREEN_PAD, space } from "@/theme";
 import { useContinueWatching } from "@/watch/use-continue-watching";
 
 // Account (#245). Signed in: who you are, your membership, everything you
@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 64,
     height: 64,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -274,7 +274,7 @@ const styles = StyleSheet.create({
     right: 4,
     bottom: 3,
     height: 2,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.scrimTrack,
     overflow: "hidden",
   },
   thumbFill: { height: "100%", backgroundColor: colors.gold },

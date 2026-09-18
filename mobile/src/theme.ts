@@ -24,6 +24,10 @@ export const colors = {
   // switch (.18). The board's --ink-faint and .sw, verbatim.
   inkFaint: "rgba(246,239,228,0.28)",
   track: "rgba(246,239,228,0.18)",
+  // The dark track under a progress bar drawn over artwork (continue tiles,
+  // the vertical chrome's progress line): black at 45% so the gold fill
+  // reads on any still. One value for the three places that draw it.
+  scrimTrack: "rgba(0,0,0,0.45)",
 } as const;
 
 // The 8a spec's 4px base rhythm.

@@ -62,7 +62,10 @@ export default function SettingsScreen() {
         />
       </Group>
 
-      <Group label={t.app.settings.playback}>
+      {/* The toggle governs landscape shows only — a vertical show is a feed
+          and its `ended` always continues (episode-feed.tsx); the hint says
+          so, so the label's general wording does not over-promise. */}
+      <Group label={t.app.settings.playback} hint={t.app.settings.autoplayHint}>
         <Row
           first
           icon="playback"

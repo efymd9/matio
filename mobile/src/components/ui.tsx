@@ -523,7 +523,7 @@ const styles = StyleSheet.create({
     bottom: space(2),
     height: 3,
     borderRadius: 2,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.scrimTrack,
     overflow: "hidden",
   },
   continueFill: { height: "100%", backgroundColor: colors.gold },

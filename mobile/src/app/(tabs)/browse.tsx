@@ -138,7 +138,13 @@ export default function BrowseScreen() {
         }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        ListEmptyComponent={<Text style={styles.empty}>{t.app.browse.noResults}</Text>}
+        // An empty grid means one of two things: the catalog itself is empty
+        // (nothing published yet) or the filter matched nothing — say which.
+        ListEmptyComponent={
+          <Text style={styles.empty}>
+            {shows.length === 0 ? t.home.catalogBeingCurated : t.app.browse.noResults}
+          </Text>
+        }
         renderItem={({ item }) => (
           <PosterCard
             width={cardWidth}

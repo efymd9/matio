@@ -19,7 +19,7 @@ const PROD_GENRES: string[][] = [
   ["sci-fi", "thriller"],
   ["romance"],
   ["comedy"],
-  ["horror"],
+  ["adventure"],
 ];
 
 const CATALOG = [
@@ -62,7 +62,7 @@ describe("genreChips", () => {
       "thriller",
       "romance",
       "comedy",
-      "horror",
+      "adventure",
     ]);
     expect(chips[0]).toEqual({ key: "dark romance", label: "Dark romance" });
   });
