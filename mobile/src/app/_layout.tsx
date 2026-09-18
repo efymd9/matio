@@ -63,12 +63,22 @@ export default function RootLayout() {
               session silently look anonymous. */}
           <AuthProvider>
             <ConfigProvider>
+              {/* The root stack (#245): the tab group is one screen of it,
+                  and the show page, the player and sign-in are its siblings
+                  — pushed OVER the tabs, so none of them ever has the tab
+                  bar. That is the "bar hidden on the show page" decision,
+                  by construction rather than by a per-screen style. */}
               <Stack
                 screenOptions={{
                   headerShown: false,
                   contentStyle: { backgroundColor: colors.bg },
                 }}
-              />
+              >
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen name="show/[slug]" />
+                <Stack.Screen name="watch/[episodeId]" />
+                <Stack.Screen name="sign-in" />
+              </Stack>
             </ConfigProvider>
           </AuthProvider>
         </LocaleProvider>

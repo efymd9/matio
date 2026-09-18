@@ -39,7 +39,14 @@ stored choice (SecureStore, key `matio_locale`) → the device language → Engl
 detection uses `I18nManager.getConstants().localeIdentifier` (Android) and
 `Intl.DateTimeFormat().resolvedOptions().locale` (iOS — RN 0.86's `RCTI18nManager` does not
 export the constant), both through the web's `pickFromLanguageTags`, with **no new dependency**.
-The EN | ES pill in the home header is the manual switcher; screens read copy via `useT()`.
+The manual switcher is the Language group of the Settings tab (`src/app/(tabs)/settings.tsx`);
+screens read copy via `useT()`, and the tab bar's own labels follow the switch in place.
+
+Navigation (#245): `src/app/(tabs)/` — Home · Browse · Account · Settings under the floating
+glass tab bar (`src/components/glass-tab-bar.tsx`) — is one screen of the root `Stack`;
+`show/[slug]`, `watch/[episodeId]` and `sign-in` are pushed over it, so they never carry the
+bar. Liquid Glass (`expo-glass-effect`) on iOS 26+, a translucent espresso fallback elsewhere
+— on a simulator below iOS 26 the fallback is what you see, and that is expected.
 
 ## Running it
 

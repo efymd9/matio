@@ -1,7 +1,9 @@
 // Copy that exists ONLY in the mobile app — sign-in steps the web delegates
 // to Clerk's modal, the forced-update screen, the app's own load/reachability
-// errors. Everything the web already says (rails, walls, player labels,
-// durations) the app reads straight from dictionaries.ts; nothing is copied.
+// errors, and the native shell's tab titles / Browse / Account / Settings
+// (#245). Everything the web already says (rails, walls, player labels,
+// durations, legal links, the sign-up wall) the app reads straight from
+// dictionaries.ts; nothing is copied.
 //
 // A separate file rather than an `app` section in dictionaries.ts for the
 // same reason admin-dictionaries.ts is separate: dictionaries.ts ships in the
@@ -19,8 +21,29 @@ export const appEs = {
     notNow: "Ahora no",
     pleaseWait: "Un momento…",
   },
-  home: {
-    allShows: "Todas las series",
+  tabs: {
+    home: "Inicio",
+    browse: "Explorar",
+    account: "Cuenta",
+    settings: "Ajustes",
+  },
+  browse: {
+    all: "Todo",
+    vertical: "Vertical",
+    noResults: "Ninguna serie coincide.",
+  },
+  account: {
+    member: "Miembro",
+    signOut: "Cerrar sesión",
+    whyKicker: "Tu progreso, en todos tus dispositivos",
+    whyBody: "Sigue viendo donde lo dejaste, también en matio.tv.",
+  },
+  settings: {
+    langHint: "Sigue el idioma del dispositivo hasta que elijas.",
+    playback: "Reproducción",
+    autoplayNext: "Reproducir el siguiente episodio",
+    autoplayHint: "Solo en series horizontales; el feed vertical siempre continúa.",
+    version: "Versión",
   },
   update: {
     title: "Actualiza Matio",
@@ -54,8 +77,29 @@ export const appEn: AppDict = {
     notNow: "Not now",
     pleaseWait: "Please wait…",
   },
-  home: {
-    allShows: "All shows",
+  tabs: {
+    home: "Home",
+    browse: "Browse",
+    account: "Account",
+    settings: "Settings",
+  },
+  browse: {
+    all: "All",
+    vertical: "Vertical",
+    noResults: "No shows match.",
+  },
+  account: {
+    member: "Member",
+    signOut: "Sign out",
+    whyKicker: "Your progress, on every device",
+    whyBody: "Pick up where you left off — on matio.tv too.",
+  },
+  settings: {
+    langHint: "Follows your device language until you choose.",
+    playback: "Playback",
+    autoplayNext: "Play next episode automatically",
+    autoplayHint: "Applies to horizontal shows; vertical feeds always continue.",
+    version: "Version",
   },
   update: {
     title: "Update Matio",

@@ -8,11 +8,13 @@ import {
   StyleSheet,
   Text,
   View,
+  type AccessibilityRole,
   type ViewStyle,
 } from "react-native";
+import { Icon, type IconName } from "@/components/icon";
 import { useT } from "@/i18n/locale";
 import type { ContinueWatchingEntry } from "@/shared/api-types";
-import { body, colors, display, radius, SCREEN_PAD, space, toneStopsFor } from "@/theme";
+import { body, colors, display, fonts, radius, SCREEN_PAD, space, toneStopsFor } from "@/theme";
 
 // ---------------------------------------------------------------- scrim
 
@@ -110,7 +112,28 @@ export function Artwork({
 
 // ---------------------------------------------------------------- text bits
 
-export function Pill({ label, tone = "burgundy" }: { label: string; tone?: "burgundy" | "glass" }) {
+// Three tones: the burgundy badge (Matio Original), translucent glass (a
+// poster's «Vertical» tag), and the gold membership pill on the Account tab
+// — the same goldHi→goldLo fill as the CTA.
+export function Pill({
+  label,
+  tone = "burgundy",
+}: {
+  label: string;
+  tone?: "burgundy" | "glass" | "gold";
+}) {
+  if (tone === "gold") {
+    return (
+      <LinearGradient
+        colors={[colors.goldHi, colors.goldLo]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={styles.pill}
+      >
+        <Text style={[styles.pillText, { color: colors.goldDeep }]}>{label}</Text>
+      </LinearGradient>
+    );
+  }
   return (
     <View
       style={[
@@ -192,7 +215,8 @@ export function Rail({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-// 2:3 poster card used by the catalog rails.
+// 2:3 poster card used by the catalog rails (148 wide) and, sized by the
+// caller, by the Browse grid.
 const POSTER_W = 148;
 
 export function PosterCard({
@@ -200,24 +224,28 @@ export function PosterCard({
   posterUrl,
   slug,
   badge,
+  badgeTone = "burgundy",
+  width = POSTER_W,
   onPress,
 }: {
   title: string;
   posterUrl: string | null;
   slug: string;
   badge?: string;
+  badgeTone?: "burgundy" | "glass";
+  width?: number;
   onPress?: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ width: POSTER_W }, pressed && { opacity: 0.8 }]}>
+    <Pressable onPress={onPress} style={({ pressed }) => [{ width }, pressed && { opacity: 0.8 }]}>
       <Artwork
         uri={posterUrl}
         toneKey={slug}
-        style={{ width: POSTER_W, height: POSTER_W * 1.5, borderRadius: radius.poster }}
+        style={{ width, height: width * 1.5, borderRadius: radius.poster }}
       />
       {badge ? (
         <View style={styles.posterBadge}>
-          <Pill label={badge} />
+          <Pill label={badge} tone={badgeTone} />
         </View>
       ) : null}
       <Text numberOfLines={2} style={styles.posterTitle}>
@@ -264,6 +292,111 @@ export function ContinueCard({
       </Text>
     </Pressable>
   );
+}
+
+// ---------------------------------------------------------------- cards
+
+// The settings-style card group of the Account and Settings tabs (#245):
+// an Anton kicker over an espresso card of rows separated by hairlines.
+export function GroupLabel({ label }: { label: string }) {
+  return <Text style={styles.groupLabel}>{label}</Text>;
+}
+
+export function Card({ children }: { children: ReactNode }) {
+  return <View style={styles.card}>{children}</View>;
+}
+
+// One row: a leading icon (or an equal-width spacer so a group with an icon
+// on its first row keeps its labels aligned, or any element — the Account
+// tab's episode thumb), a label with an optional second line, an optional
+// value on the right, and a trailing control.
+export function Row({
+  icon,
+  iconSpacer = false,
+  leading,
+  label,
+  titleCase = false,
+  sub,
+  value,
+  mono = false,
+  trailing,
+  onPress,
+  danger = false,
+  first = false,
+  role = "button",
+  selected,
+}: {
+  icon?: IconName;
+  iconSpacer?: boolean;
+  leading?: ReactNode;
+  label: string;
+  // Anton, one line — a show title rather than a setting's name.
+  titleCase?: boolean;
+  sub?: string;
+  value?: string;
+  mono?: boolean;
+  trailing?: ReactNode;
+  onPress?: () => void;
+  danger?: boolean;
+  first?: boolean;
+  role?: AccessibilityRole;
+  selected?: boolean;
+}) {
+  const content = (
+    <>
+      {leading}
+      {icon ? <Icon name={icon} size={22} color={colors.gold} /> : null}
+      {!icon && iconSpacer ? <View style={{ width: 22 }} /> : null}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          style={[
+            styles.rowLabel,
+            titleCase && styles.rowTitle,
+            danger && { color: colors.rust, fontFamily: fonts.bodySemi },
+          ]}
+          numberOfLines={titleCase ? 1 : undefined}
+        >
+          {label}
+        </Text>
+        {sub ? (
+          <Text style={styles.rowSub} numberOfLines={titleCase ? 1 : undefined}>
+            {sub}
+          </Text>
+        ) : null}
+      </View>
+      {value ? (
+        <Text style={[styles.rowValue, mono && { fontFamily: fonts.mono }]} numberOfLines={1}>
+          {value}
+        </Text>
+      ) : null}
+      {trailing}
+    </>
+  );
+  const rowStyle = [styles.row, !first && styles.rowDivider];
+  if (!onPress) return <View style={rowStyle}>{content}</View>;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole={role}
+      accessibilityState={selected === undefined ? undefined : { selected }}
+      style={({ pressed }) => [rowStyle, pressed && { opacity: 0.7 }]}
+    >
+      {content}
+    </Pressable>
+  );
+}
+
+export function Radio({ selected }: { selected: boolean }) {
+  return (
+    <View style={[styles.radio, selected && styles.radioOn]}>
+      {selected ? <View style={styles.radioDot} /> : null}
+    </View>
+  );
+}
+
+// A row's trailing glyph: «›» for a push, «↗» for a link that leaves the app.
+export function Chevron({ external = false }: { external?: boolean }) {
+  return <Text style={[styles.chevron, external && styles.chevronExternal]}>{external ? "↗" : "›"}</Text>;
 }
 
 // ---------------------------------------------------------------- states
@@ -390,11 +523,52 @@ const styles = StyleSheet.create({
     bottom: space(2),
     height: 3,
     borderRadius: 2,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.scrimTrack,
     overflow: "hidden",
   },
   continueFill: { height: "100%", backgroundColor: colors.gold },
   continueMeta: { ...body, color: colors.inkDim, fontSize: 11, marginTop: space(1) },
+  groupLabel: {
+    ...display,
+    color: colors.gold,
+    fontSize: 11,
+    letterSpacing: 1.6,
+    marginHorizontal: space(1),
+    marginBottom: space(2),
+  },
+  card: {
+    backgroundColor: colors.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.hairline,
+    borderRadius: radius.card,
+    overflow: "hidden",
+  },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space(3),
+    minHeight: 52,
+    paddingVertical: space(2.25),
+    paddingHorizontal: space(4),
+  },
+  rowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.hairline },
+  rowLabel: { ...body, color: colors.ink, fontSize: 15 },
+  rowTitle: { ...display, fontSize: 13, letterSpacing: 0.3 },
+  rowSub: { ...body, color: colors.inkDim, fontSize: 12, marginTop: 1 },
+  rowValue: { ...body, color: colors.inkDim, fontSize: 14, flexShrink: 1 },
+  radio: {
+    width: 22,
+    height: 22,
+    borderRadius: radius.pill,
+    borderWidth: 1.5,
+    borderColor: colors.inkFaint,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radioOn: { borderColor: colors.gold },
+  radioDot: { width: 10, height: 10, borderRadius: radius.pill, backgroundColor: colors.gold },
+  chevron: { color: colors.inkFaint, fontSize: 20, lineHeight: 22 },
+  chevronExternal: { fontSize: 14, lineHeight: 18 },
   centred: { flex: 1, alignItems: "center", justifyContent: "center", padding: SCREEN_PAD },
   errorTitle: { ...display, color: colors.ink, fontSize: 18, textAlign: "center" },
   errorHint: {

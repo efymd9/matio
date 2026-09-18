@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
     width: BUTTON,
     height: BUTTON,
     borderRadius: radius.pill,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: colors.scrimTrack,
     alignItems: "center",
     justifyContent: "center",
   },
