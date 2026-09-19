@@ -20,13 +20,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // @clerk/expo as the app sees it: `useAuth` and `useClerk` under a mounted
 // provider, with the load state scripted per case. `on`/`off` are the typed
 // status listeners the hook subscribes; `loadHeadlessClerk` is the provider's
-// internal reload the hook feature-detects.
+// internal reload the hook feature-detects — optional here so one case can
+// delete it, the way a future @clerk/react could.
 const auth = { isLoaded: false, isSignedIn: false };
-const clerk = {
-  status: "loading" as "loading" | "error" | "ready" | "degraded",
-  on: vi.fn<(event: string, handler: (status: string) => void) => void>(),
+const loadHeadlessClerk = vi.fn();
+const clerk: {
+  status: "loading" | "error" | "ready" | "degraded";
+  on: ReturnType<typeof vi.fn<(event: string, handler: (status: string) => void) => void>>;
+  off: ReturnType<typeof vi.fn>;
+  loadHeadlessClerk?: typeof loadHeadlessClerk;
+  signOut: () => Promise<void>;
+} = {
+  status: "loading",
+  on: vi.fn(),
   off: vi.fn(),
-  loadHeadlessClerk: vi.fn(),
+  loadHeadlessClerk,
   signOut: async () => undefined,
 };
 
@@ -119,7 +127,8 @@ describe("AccountScreen — a Clerk that will not load (#253)", { timeout: COLD_
     clerk.status = "loading";
     clerk.on.mockClear();
     clerk.off.mockClear();
-    clerk.loadHeadlessClerk.mockClear();
+    clerk.loadHeadlessClerk = loadHeadlessClerk;
+    loadHeadlessClerk.mockClear();
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -201,7 +210,7 @@ describe("AccountScreen — a Clerk that will not load (#253)", { timeout: COLD_
 
     // Clerk's status getter still says "error" (it never re-emits "loading"
     // on a reload), yet the screen is waiting again, not stuck on the old verdict.
-    expect(clerk.loadHeadlessClerk).toHaveBeenCalledTimes(1);
+    expect(loadHeadlessClerk).toHaveBeenCalledTimes(1);
     expect(spinning()).toBe(true);
     expect(text()).not.toContain(STALLED_TITLE);
     expect(clerk.off).toHaveBeenCalled();
@@ -219,7 +228,34 @@ describe("AccountScreen — a Clerk that will not load (#253)", { timeout: COLD_
       vi.advanceTimersByTime(8_000);
     });
     expect(text()).toContain(STALLED_TITLE);
-    expect(clerk.loadHeadlessClerk).toHaveBeenCalledTimes(2);
+    expect(loadHeadlessClerk).toHaveBeenCalledTimes(2);
+  });
+
+  it("without the internal reload, retry is only a fresh wait — no throw, unavailable again after 8 s", async () => {
+    // A future @clerk/react that renames or drops loadHeadlessClerk: the
+    // feature-detect must degrade to the spec's fallback (a new timer), never
+    // to a TypeError in the press handler.
+    delete clerk.loadHeadlessClerk;
+    clerk.status = "error";
+    const AccountScreen = await loadAccountScreen();
+    render(<AccountScreen />);
+    expect(text()).toContain(STALLED_TITLE);
+
+    expect(() => press(RETRY)).not.toThrow();
+    expect(loadHeadlessClerk).not.toHaveBeenCalled();
+    expect(spinning()).toBe(true);
+    expect(text()).not.toContain(STALLED_TITLE);
+
+    act(() => {
+      vi.advanceTimersByTime(7_999);
+    });
+    expect(spinning()).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(spinning()).toBe(false);
+    expect(text()).toContain(STALLED_TITLE);
+    expect(text()).toContain(RETRY);
   });
 
   it("without a publishable key nothing changes: the #247 unavailable state, no timer, no Clerk", async () => {
