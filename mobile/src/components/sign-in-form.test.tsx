@@ -69,7 +69,13 @@ async function loadSignInForm() {
   return mod.SignInForm;
 }
 
-describe("SignInForm — the Clerk-key gate (#247)", () => {
+// The first import pulls react-native-web and the app's component tree cold;
+// under `pnpm test:coverage` (v8 instrumentation, the whole suite in
+// parallel) that alone has taken >5s — the default per-test budget — while
+// the cases themselves render in milliseconds.
+const COLD_IMPORT_TIMEOUT_MS = 60_000;
+
+describe("SignInForm — the Clerk-key gate (#247)", { timeout: COLD_IMPORT_TIMEOUT_MS }, () => {
   beforeEach(() => {
     // React Native's global; the api client reads it at module load.
     vi.stubGlobal("__DEV__", false);
