@@ -17,8 +17,8 @@
 //         seen, catalog order; no heading when there is nothing under it.
 //   (iv)  the «Popular now» rail carries EVERY popularNow show (compact, so
 //         no exclusions) and sits after the SECOND show card; with fewer
-//         than two, right after the Just released block; no rail when
-//         nothing is popular.
+//         than two, after whatever cards there are — the rail never opens
+//         the feed; no rail when nothing is popular.
 //   (v)   every other show, catalog order; a vertical one is badged so, a
 //         just-released one is badged «new» even when vertical — one pill
 //         per card, new wins.
@@ -72,7 +72,6 @@ export function buildHomeFeed(input: {
     items.push({ kind: "heading", id: "heading:justReleased", label: "justReleased" });
     for (const show of fresh) items.push(showCard(show, "new"));
   }
-  const afterJustReleased = items.length;
 
   // (v) The rest.
   for (const show of shows) {
@@ -81,9 +80,12 @@ export function buildHomeFeed(input: {
   }
 
   // (iv) Popular now — placed last so the show cards it slots between exist.
+  // The fallback is the END of the feed, not the end of the Just released
+  // block: with one card that is the same spot, and with one «rest» card
+  // and no Just released block the rail would otherwise open the feed.
   const popular = shows.filter((s) => s.popularNow);
   if (popular.length > 0) {
-    let at = afterJustReleased;
+    let at = items.length;
     let cards = 0;
     for (let i = 0; i < items.length; i++) {
       if (items[i].kind === "show" && ++cards === 2) {

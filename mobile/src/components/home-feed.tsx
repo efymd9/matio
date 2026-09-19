@@ -313,11 +313,16 @@ export function HeroCard({
         ) : null}
       </View>
 
+      {/* Never `disabled`: a disabled Pressable does not become the
+          responder, so the tap would fall through to the card and open
+          the show page mid-load. The guard lives in the handler instead. */}
       <Pressable
-        onPress={onPlay}
-        disabled={playDisabled}
+        onPress={() => {
+          if (!playDisabled) onPlay();
+        }}
         accessibilityRole="button"
         accessibilityLabel={playLabel}
+        accessibilityState={{ disabled: playDisabled }}
         hitSlop={8}
         style={({ pressed }) => [styles.play, (pressed || playDisabled) && { opacity: 0.7 }]}
       >

@@ -624,7 +624,7 @@ board was its Lab.
   `src/shared/home-feed.ts`): no show twice — the resume slugs and the featured show (it opens
   the carousel) never come back as cards; a just-released vertical show is badged «new», not
   «vertical»; the rail carries EVERY popularNow show and sits after the second show card
-  (fewer than two ⇒ right after the Just released block); an empty catalog is an empty feed.
+  (fewer than two ⇒ after whatever cards there are — the rail never opens the feed); an empty catalog is an empty feed.
   The screen is a `FlatList` whose `ListHeaderComponent` is the carousel block passed as an
   ELEMENT (an inline component type would remount the carousel on every render and lose its
   position) and whose footer is the tagline. The old Continue-watching rail left Home — «Up

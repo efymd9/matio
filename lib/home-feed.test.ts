@@ -145,6 +145,14 @@ describe("buildHomeFeed", () => {
     ).toEqual(["heading:upNext", "resume:featured", "heading:justReleased", "show:only-new[new]", "rail:featured"]);
   });
 
+  it("never opens the feed with the rail: one «rest» card and no Just released block ⇒ card, then rail", () => {
+    const shows = [show("featured", { featured: true, popularNow: true }), show("only-rest")];
+    expect(outline(buildHomeFeed({ shows, resume: [], signedIn: false }))).toEqual([
+      "show:only-rest",
+      "rail:featured",
+    ]);
+  });
+
   it("draws no rail when nothing is popular, and no Just released heading when nothing is new", () => {
     const shows = [show("a"), show("b", { orientation: "vertical" })];
     const items = buildHomeFeed({ shows, resume: [], signedIn: false });
