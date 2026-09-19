@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConfig } from "@/api/config-context";
 import { useOptionalAuth } from "@/auth/clerk";
+import { AuthStalled } from "@/components/auth-stalled";
 import { useTabBarClearance } from "@/components/glass-tab-bar";
 import { SignInForm } from "@/components/sign-in-form";
 import {
@@ -37,11 +38,35 @@ import { useContinueWatching } from "@/watch/use-continue-watching";
 // uses — and one card on why an account is worth having.
 
 export default function AccountScreen() {
-  const { isLoaded, isSignedIn } = useOptionalAuth();
+  const { isLoaded, isSignedIn, stalled, retry } = useOptionalAuth();
   // Clerk answers a beat after mount; a signed-out frame that flips to
-  // signed-in is worse than a spinner.
-  if (!isLoaded) return <Loading />;
+  // signed-in is worse than a spinner. A spinner that never ends is worse
+  // than either (#253): once the hook gives up, say so and offer a retry.
+  if (!isLoaded) return stalled ? <StalledAccount onRetry={retry} /> : <Loading />;
   return isSignedIn ? <SignedInAccount /> : <AnonymousAccount />;
+}
+
+// Clerk did not load (a vendor 400, no network, an outage — #253). Same
+// frame as the signed-out tab, with the honest state where the form would
+// be — the key-less build's look (#247), plus a retry.
+function StalledAccount({ onRetry }: { onRetry: () => void }) {
+  const t = useT();
+  const insets = useSafeAreaInsets();
+  const clearance = useTabBarClearance();
+
+  return (
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, paddingBottom: clearance + space(4) }}
+    >
+      <Text style={[styles.heading, { marginTop: insets.top + space(4), paddingHorizontal: 0 }]}>
+        {t.app.tabs.account}
+      </Text>
+      <View style={{ marginTop: space(6) }}>
+        <AuthStalled onRetry={onRetry} />
+      </View>
+    </ScrollView>
+  );
 }
 
 // Rendered only under a live session, so Clerk's hooks are safe here: the
