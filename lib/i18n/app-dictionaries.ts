@@ -45,6 +45,9 @@ export const appEs = {
     signOut: "Cerrar sesión",
     whyKicker: "Tu progreso, en todos tus dispositivos",
     whyBody: "Sigue viendo donde lo dejaste, también en matio.tv.",
+    // Clerk would not load — a vendor error, no network, an outage (#253).
+    stalledTitle: "No se puede iniciar sesión ahora mismo",
+    stalledBody: "Revisa tu conexión e inténtalo de nuevo.",
   },
   settings: {
     langHint: "Sigue el idioma del dispositivo hasta que elijas.",
@@ -105,6 +108,8 @@ export const appEn: AppDict = {
     signOut: "Sign out",
     whyKicker: "Your progress, on every device",
     whyBody: "Pick up where you left off — on matio.tv too.",
+    stalledTitle: "Sign-in is unavailable right now",
+    stalledBody: "Check your connection and try again.",
   },
   settings: {
     langHint: "Follows your device language until you choose.",

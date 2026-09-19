@@ -1,6 +1,8 @@
 import { useRouter } from "expo-router";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useOptionalAuth } from "@/auth/clerk";
+import { AuthStalled } from "@/components/auth-stalled";
 import { SignInForm } from "@/components/sign-in-form";
 import { useT } from "@/i18n/locale";
 import { colors, SCREEN_PAD, space } from "@/theme";
@@ -14,6 +16,7 @@ export default function SignInScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const t = useT();
+  const { isLoaded, stalled, retry } = useOptionalAuth();
   const back = () => router.back();
 
   return (
@@ -28,14 +31,21 @@ export default function SignInScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <SignInForm
-          kicker={t.signupWall.kicker}
-          headline={t.signupWall.headline}
-          bodyText={t.signupWall.bodyNoCount}
-          cta={t.app.signIn.sendCode}
-          onDone={back}
-          onCancel={back}
-        />
+        {/* While Clerk loads the form renders with its CTA inert, as before;
+            once the hook gives up on Clerk (#253) the form would never work,
+            so the honest state takes its place — with the way back. */}
+        {!isLoaded && stalled ? (
+          <AuthStalled onRetry={retry} onCancel={back} />
+        ) : (
+          <SignInForm
+            kicker={t.signupWall.kicker}
+            headline={t.signupWall.headline}
+            bodyText={t.signupWall.bodyNoCount}
+            cta={t.app.signIn.sendCode}
+            onDone={back}
+            onCancel={back}
+          />
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
