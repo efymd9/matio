@@ -94,7 +94,7 @@ jobs:
       - name: Браузер для UI Lab
         run: pnpm exec playwright install chromium --with-deps
 
-      - name: Тесты с покрытием (unit + истории Lab)
+      - name: Тесты с покрытием (unit + mobile + истории Lab)
         run: |
           set -o pipefail
           pnpm test:coverage 2>&1 | tee coverage-output.txt
