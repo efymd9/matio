@@ -101,6 +101,7 @@ export function EpisodeFeed({
   signedIn,
   onBack,
   onSignIn,
+  onCurrentChange,
 }: {
   show: ShowDetail;
   initialIndex: number;
@@ -109,6 +110,9 @@ export function EpisodeFeed({
   signedIn: boolean;
   onBack: () => void;
   onSignIn: () => void;
+  // The current page, every time it changes (and once on mount) — the watch
+  // screen remembers it across a remount of the feed (#252).
+  onCurrentChange?: (index: number) => void;
 }) {
   const { height } = useWindowDimensions();
   const config = useConfig();
@@ -122,6 +126,10 @@ export function EpisodeFeed({
   const [muted, setMuted] = useState(false);
   const currentRef = useRef(current);
   currentRef.current = current;
+
+  useEffect(() => {
+    onCurrentChange?.(current);
+  }, [current, onCurrentChange]);
 
   // Subscription state is not exposed to the app yet — only paid mode reads
   // it, and paid mode is dormant. Same stance as the show page.

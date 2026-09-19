@@ -673,8 +673,11 @@ edges — `app.json`'s `orientation: "portrait"` pinned the whole app, the fulls
   `"orientation": "default"`) and the module decides per screen. The root layout locks
   `PORTRAIT_UP` once at launch — that is what keeps the tabs, the show page and sign-in upright.
   The watch screen (`useOrientationLock`) locks `LANDSCAPE` (both sides — the viewer picks the
-  charging-port side) for a horizontal show and `PORTRAIT_UP` for a vertical one, and hands
-  `PORTRAIT_UP` back in the effect's cleanup — on unmount, from an error state too. The lock
+  charging-port side) for a horizontal show and `PORTRAIT_UP` for a vertical one — while it is
+  FOCUSED (`useFocusEffect`): the lock is released to `PORTRAIT_UP` on blur, because sign-in
+  pushed from the wall (anonymous → auto-advance into a locked episode → wall → Sign in) is a
+  portrait screen and does not unmount the player underneath (native stack), and taken again on
+  focus; the effect's cleanup still releases on unmount, from an error state too. The lock
   follows the SHOW, so it is taken only once `/v1/shows/:slug` has answered: the spinner is
   portrait, the player is not. Best-effort by construction: a refused lock
   (`UnsupportedOrientationLock`) is swallowed and an unrotated player still plays. The native
@@ -693,14 +696,21 @@ edges — `app.json`'s `orientation: "portrait"` pinned the whole app, the fulls
   episode 2) the stale offset read as the NEXT page: the current page was dropped and
   re-created (a second `/v1/playback-token` for the same episode, a restarted player, and a
   signed-in viewer's unmount flush could write position 0 over the resume point). So the watch
-  screen now mounts the feed only once the window HAS the show's shape (`useOrientationSettled`
-  in `src/orientation.ts`: `width > height` for a horizontal show; a 1s grace where the lock
-  does not act — an iPad, a refused lock — after which the feed mounts in whatever shape the
-  screen has; an iPad is never held). The feed's own re-pin (`scrollToIndex` on a page-height
-  change; `getItemLayout` is exact) stays as the safety net for a rotation of a MOUNTED list —
-  an iPad turned mid-episode — and the viewability callback is now vertical-only (a horizontal
-  show cannot be scrolled and moves through `goTo`; acting on the transient offset was half of
-  the double fetch).
+  screen now mounts the feed only while it is FOCUSED and the window HAS the show's shape
+  (`useOrientationSettled` in `src/orientation.ts`: `width > height` for a horizontal show; a
+  1s grace per focus where the lock does not act — an iPad, a refused lock — after which the
+  feed mounts in whatever shape the screen has; an iPad is never held while focused). The blur
+  half matters as much as the mount half: releasing the lock to portrait under a pushed sign-in
+  would be exactly such a resize of a mounted list (`computeWindowedRenderLimits` rebuilds the
+  render window from the VISIBLE range at the stale pixel offset — for any current index ≥ 1 the
+  page falls out of it on the shrinking resize, and the re-pin never wins that race), so the feed
+  is taken down on the blur itself, before any rotation, and comes back on focus on the page it
+  left (`onCurrentChange` → the screen's `pageRef`; the deep link's `resumeSeconds` applies only
+  while that is still the deep-linked episode). The feed's own re-pin (`scrollToIndex` on a
+  page-height change; `getItemLayout` is exact) stays as the safety net for a rotation of a
+  MOUNTED list — an iPad turned mid-episode — and the viewability callback is now vertical-only
+  (a horizontal show cannot be scrolled and moves through `goTo`; acting on the transient
+  offset was half of the double fetch).
 - **Not touched**: the native transport (`controls`), the vertical feed, PiP / background audio /
   auto-advance (`react-native-video` props on the current page), `/api/v1`. **iPad**:
   `UIRequiresFullScreen` is `false` in the generated Info.plist (Expo's template) and
@@ -724,12 +734,19 @@ top-left inside the leading safe area, and — after the hold-back — exactly O
 `/v1/playback-token` for the opened episode (three before the fix, two with the viewability
 change alone); `matio://` (back to the tabs) returns portrait with the status bar; `morelli`
 (vertical) stays portrait; foregrounding Settings and coming back keeps the player in landscape
-(the module re-applies the last lock on foreground) with playback continued. **Not verified**:
-the native transport's pill next to the «‹» (the controls auto-hide and the simulator takes no
-touch — `osascript` is TCC-blocked here), PiP-on-leave (no PiP window appeared over Settings —
-AVPictureInPictureController is unsupported on the simulator; the props are untouched from
-#97), Android, a physical device. `pnpm test:unit` (unit + mobile), both typechecks, `expo
-export` green.
+(the module re-applies the last lock on foreground) with playback continued. After the review
+(focus/blur): `matio://sign-in` deep-linked OVER the landscape player renders sign-in in
+portrait with the status bar back and ZERO `/v1` traffic while it covers the player (the feed
+is down, nothing fetches); a player opened FROM that portrait screen comes up in landscape with
+exactly one token — the rotation-on-mount no longer re-creates the page. **Not verified**: the
+pop itself (Sign in → back to the SAME player) — a deep link to the watch URL pushes a second
+instance rather than popping to the existing one, and there is no tap in the simulator; the
+focus-return semantics (lock retaken, feed remounted on the remembered page, one token) are
+pinned by `orientation.test.tsx`, not by a device run; the native transport's pill next to the
+«‹» (the controls auto-hide and the simulator takes no touch — `osascript` is TCC-blocked
+here); PiP-on-leave (no PiP window appeared over Settings — AVPictureInPictureController is
+unsupported on the simulator; the props are untouched from #97); Android; a physical device.
+`pnpm test:unit` (unit + mobile), both typechecks, `expo export` green.
 
 ## 15. Traps
 

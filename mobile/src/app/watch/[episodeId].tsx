@@ -83,8 +83,21 @@ export default function WatchScreen() {
   // Before the early returns: hooks — and the lock must also be RELEASED
   // when this screen unmounts from an error state after having rotated.
   const orientation = state.status === "ready" ? state.data.show.orientation : null;
-  useOrientationLock(orientation);
-  const settled = useOrientationSettled(orientation);
+  const focus = useOrientationLock(orientation);
+  const settled = useOrientationSettled(orientation, focus);
+
+  // The feed's current page, remembered across its remounts: the feed is
+  // unmounted while another screen covers this one (sign-in from the wall —
+  // see useOrientationSettled) and must come back on the page the viewer
+  // left, not on the deep-linked one. Keyed on the episode so a stale page
+  // can never survive a change of route params.
+  const pageRef = useRef<{ episodeId: string; index: number } | null>(null);
+  const onCurrentChange = useCallback(
+    (index: number) => {
+      pageRef.current = { episodeId, index };
+    },
+    [episodeId],
+  );
 
   if (state.status === "loading") return <Loading />;
 
@@ -108,13 +121,17 @@ export default function WatchScreen() {
   }
 
   // Landscape is full-bleed: nothing over the picture, from the moment the
-  // show is known. A vertical show keeps the bar — its chrome sits under
-  // insets.top. The prop stack restores the root's <StatusBar style="light" />
-  // on unmount.
-  const statusBar = show.orientation === "horizontal" ? <StatusBar hidden /> : null;
+  // show is known — while THIS screen is focused. The RN status-bar prop
+  // stack is last-mounted-wins, so the element must go when a screen is
+  // pushed over the player (sign-in, in portrait, wants its bar back) and
+  // on unmount; both restore the root's <StatusBar style="light" />. A
+  // vertical show keeps the bar — its chrome sits under insets.top.
+  const statusBar =
+    show.orientation === "horizontal" && focus !== null ? <StatusBar hidden /> : null;
 
   // The feed lays its pages out by the window it mounts with: hold it until
-  // the lock has turned the screen (see useOrientationSettled).
+  // the lock has turned the screen, and while another screen covers this
+  // one (see useOrientationSettled).
   if (!settled) {
     return (
       <>
@@ -124,16 +141,21 @@ export default function WatchScreen() {
     );
   }
 
+  // Back on the page the viewer left, if the feed was up before; the deep
+  // link's resume applies only when that is still the deep-linked episode.
+  const startIndex = pageRef.current?.episodeId === episodeId ? pageRef.current.index : index;
+
   return (
     <>
       {statusBar}
       <EpisodeFeed
         show={show}
-        initialIndex={index}
-        resumeSeconds={resumeSeconds}
+        initialIndex={startIndex}
+        resumeSeconds={startIndex === index ? resumeSeconds : 0}
         signedIn={isSignedIn}
         onBack={onBack}
         onSignIn={onSignIn}
+        onCurrentChange={onCurrentChange}
       />
     </>
   );
