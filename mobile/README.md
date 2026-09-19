@@ -97,7 +97,12 @@ The project aliases `react-native` to the `react-native-web` this app already sh
 to `src/`, and resolves everything else from `mobile/node_modules` — so `npm ci` here first.
 A screen renders to a string through `react-dom/server`; native modules (SecureStore, glass,
 gradients, SF Symbols…) are `vi.mock()`ed per test. `src/components/sign-in-form.test.tsx`
-is the pattern — it pins the gate that keeps a key-less build from crashing (#247).
+is the pattern — it pins the gate that keeps a key-less build from crashing (#247). A test
+that needs effects and timers (`src/auth/clerk.test.tsx`, the Account tab's Clerk timeout,
+#253) opts into jsdom with `/** @vitest-environment jsdom */` and renders through
+`react-dom/client` + `act` under `vi.useFakeTimers()`. Never put a `*.test.tsx` under
+`src/app/` — that is expo-router's route tree, and the file would become a route; a screen's
+test lives next to the hook or component it exercises.
 
 ## Player
 
