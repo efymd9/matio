@@ -121,6 +121,20 @@ PiP, background audio and lock-screen controls are `react-native-video` props on
 page; the native side (iOS `audio` background mode, the Android media-playback foreground
 service, `supportsPictureInPicture`) is written by the plugin options in `app.json`.
 
+Orientation (#252): the app is portrait — the root layout locks `PORTRAIT_UP` once at launch —
+and the horizontal player is landscape. The policy is `src/orientation.ts` on
+`expo-screen-orientation`: `app.json` allows every orientation (`"orientation": "default"`) and
+the locks decide per screen; the watch screen locks by the LOADED show's orientation while it
+is FOCUSED (`useFocusEffect`) and releases to portrait on blur — sign-in pushed from the wall
+is a portrait screen — and on unmount; a vertical show stays portrait; the status bar is hidden
+only over a focused landscape player. The feed is mounted only while the screen is focused AND
+the window has the show's shape (`useOrientationSettled`, a 1s grace per focus where the lock
+does not act) — a `FlatList` mounted in portrait and then rotated, or resized under a screen
+pushed over it, re-creates its page — and comes back on the page it left (`onCurrentChange`).
+The module is native and `app.json` changed — `expo prebuild --clean` before the next dev
+build. A multitasking iPad ignores the lock (`UIRequiresFullScreen` is false), which is the
+pre-existing behaviour there.
+
 ### API base URL
 
 Resolution order in `src/api/client.ts`:

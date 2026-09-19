@@ -101,6 +101,7 @@ export function EpisodeFeed({
   signedIn,
   onBack,
   onSignIn,
+  onCurrentChange,
 }: {
   show: ShowDetail;
   initialIndex: number;
@@ -109,6 +110,9 @@ export function EpisodeFeed({
   signedIn: boolean;
   onBack: () => void;
   onSignIn: () => void;
+  // The current page, every time it changes (and once on mount) — the watch
+  // screen remembers it across a remount of the feed (#252).
+  onCurrentChange?: (index: number) => void;
 }) {
   const { height } = useWindowDimensions();
   const config = useConfig();
@@ -122,6 +126,10 @@ export function EpisodeFeed({
   const [muted, setMuted] = useState(false);
   const currentRef = useRef(current);
   currentRef.current = current;
+
+  useEffect(() => {
+    onCurrentChange?.(current);
+  }, [current, onCurrentChange]);
 
   // Subscription state is not exposed to the app yet — only paid mode reads
   // it, and paid mode is dormant. Same stance as the show page.
@@ -183,6 +191,14 @@ export function EpisodeFeed({
     {
       viewabilityConfig: { itemVisiblePercentThreshold: 60 },
       onViewableItemsChanged: ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+        // Viewability is the SWIPE's way of changing the page. A horizontal
+        // show cannot be scrolled (`scrollEnabled` off) and moves only through
+        // goTo, which sets `current` itself — and during the landscape resize
+        // (#252) the stale pixel offset briefly reads as the NEXT page: acting
+        // on that unmounted the playing page, fetched the neighbour's token
+        // and remounted the page a frame later. Seen in the simulator; hence
+        // vertical only.
+        if (!vertical) return;
         const index = viewableItems[0]?.index;
         if (index === null || index === undefined) return;
         setCurrent(index);
@@ -199,6 +215,22 @@ export function EpisodeFeed({
     }),
     [height],
   );
+
+  // A vertical FlatList keeps its PIXEL offset across a resize, which then
+  // points inside the wrong page for any current index above 0. The watch
+  // screen mounts this list only once the window has the show's shape
+  // (useOrientationSettled, #252), so the landscape lock normally never
+  // resizes a mounted list — this re-pin is for the cases that still can:
+  // an iPad, where the lock is ignored and the viewer rotates the device
+  // mid-episode, or the grace fallback. getItemLayout is exact, so no
+  // measuring. (Rotating a mounted list also drops and re-creates the
+  // current page — the reason the screen waits rather than relying on this.)
+  const pageHeightRef = useRef(height);
+  useEffect(() => {
+    if (pageHeightRef.current === height) return;
+    pageHeightRef.current = height;
+    listRef.current?.scrollToIndex({ index: currentRef.current, animated: false });
+  }, [height]);
 
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<EpisodeSummary>) => {
@@ -607,13 +639,27 @@ function FeedPage({
       ) : (
         <>
           {/* The same glass «‹» as the show page — the board's one new
-              piece of player chrome. */}
+              piece of player chrome. In landscape (#252) the screen is
+              locked with the status bar hidden, so the top inset is ~0 and
+              the LEFT inset is the notch: the «‹» and the title take the
+              leading safe area, top-left, clear of the native transport's
+              pill on the trailing side. */}
           <GlassBackButton
             onPress={onBack}
             accessibilityLabel={t.player.backToShowAria}
-            style={[styles.back, { top: insets.top + space(2) }]}
+            style={[styles.back, { top: insets.top + space(2), left: insets.left + SCREEN_PAD }]}
           />
-          <Text style={[styles.title, { top: insets.top + space(4) }]} numberOfLines={1}>
+          <Text
+            style={[
+              styles.title,
+              {
+                top: insets.top + space(4),
+                left: insets.left + SCREEN_PAD + 52,
+                right: insets.right + SCREEN_PAD,
+              },
+            ]}
+            numberOfLines={1}
+          >
             {episode.title}
           </Text>
         </>
@@ -625,11 +671,10 @@ function FeedPage({
 const styles = StyleSheet.create({
   list: { flex: 1, backgroundColor: "#000" },
   stage: { flex: 1, backgroundColor: "#000" },
-  back: { position: "absolute", left: SCREEN_PAD },
+  // Insets (top/left/right) are applied inline — they differ per orientation.
+  back: { position: "absolute" },
   title: {
     position: "absolute",
-    left: SCREEN_PAD + 52,
-    right: SCREEN_PAD,
     ...display,
     color: colors.ink,
     fontSize: 13,
