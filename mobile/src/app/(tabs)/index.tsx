@@ -2,7 +2,6 @@ import { useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -22,27 +21,24 @@ import { api, API_BASE_URL } from "@/api/client";
 import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
 import { useTabBarClearance } from "@/components/glass-tab-bar";
-import {
-  Artwork,
-  ContinueCard,
-  ErrorState,
-  GoldButton,
-  Loading,
-  MetaRow,
-  Pill,
-  Rail,
-} from "@/components/ui";
+import { HomeFeed } from "@/components/home-feed";
+import { Artwork, ErrorState, GoldButton, Loading, MetaRow, Pill } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import type { ContinueWatchingEntry, ShowSummary } from "@/shared/api-types";
 import { genreLabel, normalizeGenreKey } from "@/shared/catalog-filters";
+import { buildHomeFeed } from "@/shared/home-feed";
 import { colors, display, SCREEN_PAD, space } from "@/theme";
 import { usePlayFirstEpisode } from "@/watch/first-episode";
 import { useContinueWatching } from "@/watch/use-continue-watching";
 
-// Home (#245, board B1): the wordmark, a carousel of covers with the featured
-// show in focus and its neighbours peeking in at 92% / 55%, the focused
-// show's badge · meta · Play under it, and the continue-watching rail below
-// (signed-in only). The rest of the catalog lives on Browse.
+// Home (#245, board B1; the feed #248, board 3 variant «c»): the wordmark, a
+// carousel of covers with the featured show in focus and its neighbours
+// peeking in at 92% / 55%, the focused show's badge · meta · Play under it —
+// and below, one vertical feed of hero cards: «Up next» (signed in, with
+// progress) → Just released → the Popular now rail → the rest, then the
+// tagline. The feed's membership and order are the pure lib/home-feed.ts;
+// the cards are components/home-feed.tsx. An anonymous viewer gets the same
+// feed without Up next and with no sign-up card (owner, 19.09).
 
 // The card geometry of the board — 262×392, radius 18, 14pt apart — and the
 // scroll step the snap points and the neighbour animation both derive from.
@@ -73,6 +69,10 @@ export default function HomeScreen() {
 
   const shows = catalog.status === "ready" ? catalog.data.shows : EMPTY;
   const ordered = useMemo(() => carouselOrder(shows), [shows]);
+  const feed = useMemo(
+    () => buildHomeFeed({ shows, resume, signedIn: isSignedIn }),
+    [shows, resume, isSignedIn],
+  );
 
   // Which card is in focus — the caption under the carousel reads it. The
   // scroll position itself lives on the UI thread (scrollX) and drives the
@@ -91,8 +91,8 @@ export default function HomeScreen() {
     [router],
   );
 
-  // The tile carries everything the player needs to land mid-episode: the
-  // resume position, and the show's orientation, which picks its chrome.
+  // The resume card carries everything the player needs to land mid-episode:
+  // the resume position, and the show's orientation, which picks its chrome.
   const openResume = useCallback(
     (item: ContinueWatchingEntry) =>
       router.push({
@@ -128,11 +128,10 @@ export default function HomeScreen() {
   // one step, so every settled position is a centred card.
   const sidePad = Math.max(SCREEN_PAD, (width - CARD_W) / 2);
 
-  return (
-    <ScrollView
-      style={{ backgroundColor: colors.bg }}
-      contentContainerStyle={{ paddingBottom: clearance + space(4) }}
-    >
+  // The list's header is this ELEMENT — an inline component type would be a
+  // new type on every render and remount the carousel, losing its position.
+  const header = (
+    <>
       <View style={[styles.header, { paddingTop: insets.top + space(2) }]}>
         {/* Stand-in for the gold arched wordmark PNG until the brand asset is wired. */}
         <Text style={styles.wordmark}>Matio</Text>
@@ -187,17 +186,22 @@ export default function HomeScreen() {
       ) : (
         <Text style={styles.empty}>{t.home.catalogBeingCurated}</Text>
       )}
+    </>
+  );
 
-      {resume.length > 0 ? (
-        <View style={{ marginTop: space(9) }}>
-          <Rail label={t.home.continueWatching}>
-            {resume.map((item) => (
-              <ContinueCard key={item.show.slug} item={item} onPress={() => openResume(item)} />
-            ))}
-          </Rail>
-        </View>
-      ) : null}
-    </ScrollView>
+  return (
+    <HomeFeed
+      items={feed}
+      header={header}
+      // The tagline closes the page, as on the old home; an empty catalog
+      // has no feed and no tagline — just the curated line above.
+      footer={focused ? <Text style={styles.tagline}>{t.footer.tagline}</Text> : null}
+      bottomPadding={clearance + space(4)}
+      playBusy={busy}
+      onOpenShow={openShow}
+      onPlayShow={play}
+      onResume={openResume}
+    />
   );
 }
 
@@ -280,6 +284,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: "center",
     marginTop: space(20),
+    paddingHorizontal: SCREEN_PAD,
+  },
+  // The old home's closing line, verbatim: Anton, gold, 11 / 3.1, centred.
+  tagline: {
+    ...display,
+    color: colors.gold,
+    fontSize: 11,
+    letterSpacing: 3.1,
+    textAlign: "center",
     paddingHorizontal: SCREEN_PAD,
   },
 });

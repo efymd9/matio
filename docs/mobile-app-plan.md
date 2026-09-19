@@ -503,7 +503,7 @@ No new dependencies.
   playhead is sampled into a ref (no state, no network per tick), one save per 10s while
   playing and moved, an immediate flush on `AppState` → background/inactive (the phone-lock
   case) and on unmount, `completed=true` once at `ended`. Signed-out viewers send nothing.
-  The home rail refreshes when a save lands (a module-level `onProgressSaved` signal) but only
+  The Home «Up next» block refreshes when a save lands (a module-level `onProgressSaved` signal) but only
   while focused — no network for a screen nobody is looking at.
 - **Resume**: the rail tile passes `resume=<seconds>`; the show page path looks the position up
   from `/v1/continue` in parallel with the token (best-effort). Seek happens on `onLoad`, never
@@ -610,8 +610,27 @@ board was its Lab.
   first, then catalog order), the focused show's badge · genre · episode count · Play —
   episode 1 by the SAME rule as the show page (`watch/first-episode.ts`: locked ⇒ sign-in,
   else the player; the show is loaded on the tap since the catalog carries no episodes) —
-  and the continue-watching rail (signed-in; hook moved to `watch/use-continue-watching.ts`).
-  The Just released / Popular now / All shows rails and the footer tagline are gone from Home.
+  and, since #248 (board 3, variant «c» Feed), ONE vertical feed of full-width hero cards
+  under it (`components/home-feed.tsx`): a 16:10 still (`heroImageUrl`, poster then tone as
+  fallbacks) under a `Scrim`, a pill, the title, a `MetaRow`, two lines of synopsis — or, on
+  a resume card, the continue tile's 3pt progress bar — and a 48pt `GlassSurface` Play disc.
+  The card opens the show page; the disc plays — episode 1 through `usePlayFirstEpisode` on a
+  show card (locked ⇒ sign-in, like the caption's CTA), the player at `resume=<positionSeconds>`
+  on a resume card. Order, signed in: «Up next» (one card per `/v1/continue` entry, the
+  server's order) → Just released → the Popular now rail (`Rail` + `PosterCard`) → the rest →
+  the footer tagline; anonymous: the same feed without Up next, and NO sign-up card or strip
+  (owner, 19.09). The rules are the pure, dependency-free `lib/home-feed.ts` (`buildHomeFeed`
+  → `heading | resume | show | rail` items with stable ids; vitest-tested, re-exported through
+  `src/shared/home-feed.ts`): no show twice — the resume slugs and the featured show (it opens
+  the carousel) never come back as cards; a just-released vertical show is badged «new», not
+  «vertical»; the rail carries EVERY popularNow show and sits after the second show card
+  (fewer than two ⇒ right after the Just released block); an empty catalog is an empty feed.
+  The screen is a `FlatList` whose `ListHeaderComponent` is the carousel block passed as an
+  ELEMENT (an inline component type would remount the carousel on every render and lose its
+  position) and whose footer is the tagline. The old Continue-watching rail left Home — «Up
+  next» is its role (same `useContinueWatching` hook, same refresh-on-save); `ContinueCard`
+  in `ui.tsx` is now unused (registry — `ui.tsx` belongs to #247). No `/v1` change; the two
+  new app strings are `app.home.upNext` / `app.home.resume`.
 - **Browse** (`(tabs)/browse.tsx`): a glass search field (title, client-side, case- and
   accent-insensitive) AND one chip — All · the genres · Vertical (drawn only when a vertical
   show exists) — over a two-column `FlatList` of `PosterCard`s (vertical shows badged). The

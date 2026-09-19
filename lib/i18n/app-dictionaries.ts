@@ -1,7 +1,7 @@
 // Copy that exists ONLY in the mobile app — sign-in steps the web delegates
 // to Clerk's modal, the forced-update screen, the app's own load/reachability
-// errors, and the native shell's tab titles / Browse / Account / Settings
-// (#245). Everything the web already says (rails, walls, player labels,
+// errors, the native shell's tab titles / Browse / Account / Settings (#245)
+// and the Home feed's two strings (#248). Everything the web already says (rails, walls, player labels,
 // durations, legal links, the sign-up wall) the app reads straight from
 // dictionaries.ts; nothing is copied.
 //
@@ -31,6 +31,14 @@ export const appEs = {
     all: "Todo",
     vertical: "Vertical",
     noResults: "Ninguna serie coincide.",
+  },
+  // The Home feed under the carousel (#248): the signed-in «Up next» block and
+  // its resume pill. Everything else the feed prints — Just released, Popular
+  // now, New, Ep. n, Play, minutes, the episode count, the tagline — is the
+  // web's copy, read straight from dictionaries.ts.
+  home: {
+    upNext: "A continuación",
+    resume: "Continuar",
   },
   account: {
     member: "Miembro",
@@ -87,6 +95,10 @@ export const appEn: AppDict = {
     all: "All",
     vertical: "Vertical",
     noResults: "No shows match.",
+  },
+  home: {
+    upNext: "Up next",
+    resume: "Resume",
   },
   account: {
     member: "Member",
