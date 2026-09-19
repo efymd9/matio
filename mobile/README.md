@@ -83,6 +83,22 @@ native projects are stale — regenerate them, do not patch `ios/` by hand:
 rm -rf ios android && npx expo prebuild --clean
 ```
 
+### Tests
+
+Component tests live next to the component (`src/**/*.test.tsx`) and run from the **repo
+root** as the `mobile` vitest project — there is no runner in this directory:
+
+```bash
+cd .. && pnpm test:unit          # unit + mobile projects
+cd .. && npx vitest run --project mobile
+```
+
+The project aliases `react-native` to the `react-native-web` this app already ships and `@/`
+to `src/`, and resolves everything else from `mobile/node_modules` — so `npm ci` here first.
+A screen renders to a string through `react-dom/server`; native modules (SecureStore, glass,
+gradients, SF Symbols…) are `vi.mock()`ed per test. `src/components/sign-in-form.test.tsx`
+is the pattern — it pins the gate that keeps a key-less build from crashing (#247).
+
 ## Player
 
 One engine for both orientations — `src/watch/episode-feed.tsx`. Every episode of the show is

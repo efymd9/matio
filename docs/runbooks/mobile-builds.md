@@ -68,7 +68,19 @@ cd mobile && npm ci && EAS_BUILD_NO_EXPO_GO_WARNING=true npx eas-cli@latest buil
 - `--auto-submit` на первой сборке создаёт запись приложения в App Store
   Connect; название «Matio» должно быть свободно в сторе — если занято, EAS
   спросит другое, тогда `ascAppId` в `eas.json → submit.production`.
-- `eas build` читает переменные из `eas.json → env` во время сборки; секретов
-  у приложения нет (публичный `pk_test`/`pk_live` Clerk задаётся в
-  `mobile/src/auth/clerk.tsx` через `EXPO_PUBLIC_*`) — ничего в `.env`
-  мобильного не класть.
+- **`EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` в облачную сборку сам не попадает.**
+  Локально ключ лежит в `mobile/.env.local` — gitignored, и EAS его не
+  загружает; `eas.json → env` у профиля `production` пуст, а переменных
+  окружения EAS (`eas env:list --environment production`) не было ни одной.
+  Так собралась 0.1.0 (4): в её Hermes-бандле ключа нет (`unzip` IPA →
+  `strings main.jsbundle | grep -o 'pk_live_[A-Za-z0-9=]*'` даёт только
+  8-символьный литерал из кода библиотеки, а не 28-символьный ключ), Clerk в
+  приложении не смонтирован, и таб Account падал (#247 — сама падучесть
+  исправлена, без ключа таб теперь говорит «Sign-in unavailable», но войти в
+  такой сборке нельзя). Перед сборкой в TestFlight ключ должен быть в EAS:
+  `npx eas-cli@latest env:create --environment production --name
+  EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY --value pk_live_… --visibility plain`
+  (значение — из `mobile/.env.local`; ключ публичный, он же лежит в HTML
+  каждой страницы сайта), проверка — `eas env:list --environment production`.
+  Секретов у приложения по-прежнему нет — только этот публичный ключ; в
+  `.env` мобильного (коммитимый) ничего не класть.

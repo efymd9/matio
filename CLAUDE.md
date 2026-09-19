@@ -97,9 +97,12 @@ Web / server (pnpm, repo root):
 pnpm lint          # eslint (mobile/ is excluded — it has its own toolchain)
 pnpm typecheck     # tsc --noEmit
 pnpm build         # next build
-pnpm test          # vitest run — BOTH projects: unit (node) + Lab stories in
-                   #   a real Chromium with screenshot goldens. Not a quick loop
-pnpm test:unit     # the fast node-only suite — right for 90% of edits
+pnpm test          # vitest run — ALL THREE projects: unit (node) + mobile
+                   #   (the Expo app's components on react-native-web, node)
+                   #   + Lab stories in a real Chromium with screenshot
+                   #   goldens. Not a quick loop
+pnpm test:unit     # the fast node-only suite (unit + mobile) — right for 90%
+                   #   of edits; the mobile project needs `cd mobile && npm ci`
 pnpm test:stories  # Lab stories in Chromium only
 pnpm test:watch    # vitest in watch mode, while writing tests
 pnpm test:coverage # vitest run --coverage — what CI measures the ratchet against
@@ -431,7 +434,13 @@ urgent — it costs one command.
 
 - **Runner: Vitest** (`vitest.config.mts`). Default environment is `node`; a
   component test opts into jsdom with `/** @vitest-environment jsdom */` at the
-  top of the file. `mobile/` is a separate project and is excluded everywhere.
+  top of the file. `mobile/` keeps its own toolchain and stays out of coverage,
+  lint and `tsc` here — but its tests run: the `mobile` vitest project (#247)
+  aliases `react-native` to the app's own `react-native-web` and `@/` to
+  `mobile/src`, so a screen renders to a string through `react-dom/server`
+  (`mobile/src/components/sign-in-form.test.tsx` is the pattern: native
+  modules `vi.mock()`ed, the component tree real). It resolves packages from
+  `mobile/node_modules` — `cd mobile && npm ci` first, CI does the same.
 - **The ratchet: thresholds only ever go up.** Raised coverage in a PR? Raise
   the numbers in `vitest.config.mts` in the SAME PR. Lowering a threshold is a
   review blocker, not a negotiation.

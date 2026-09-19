@@ -4,8 +4,11 @@
 # Чего здесь намеренно НЕТ: сборки. `next build` на каждый PR уже делает Vercel
 # своим preview-деплоем — второй раз платить теми же минутами не за что.
 #
-# Мобильное приложение (mobile/) собственных джоб пока не имеет: его код живёт
-# в невлитой ветке feat/mobile-app (issue #17). Появится в main — приедет и CI.
+# Мобильное приложение (mobile/) собственной джобы не имеет — его тесты идут в
+# той же джобе `web`: проект `mobile` vitest'а (vitest.config.mts) рендерит
+# компоненты приложения на react-native-web из mobile/node_modules, поэтому
+# ниже стоит `npm ci` в mobile/ (#247). Нативной сборки здесь нет — её делает
+# EAS (docs/runbooks/mobile-builds.md).
 name: ci
 
 on:
@@ -47,6 +50,23 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      # Зависимости мобильного — npm, нарочно вне pnpm-workspace (см.
+      # mobile/metro.config.js). Нужны проекту `mobile` vitest'а ниже: его
+      # тесты рендерят компоненты приложения на react-native-web из
+      # mobile/node_modules (#247). Побочная польза: `npm ci` здесь ловит
+      # рассинхрон mobile/package-lock.json ДО облачной сборки — тот самый
+      # «Missing … from lock file», который уронил сборку EAS 15.09
+      # (docs/runbooks/mobile-builds.md → «Грабли»).
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-mobile-${{ runner.os }}-${{ hashFiles('mobile/package-lock.json') }}
+          restore-keys: npm-mobile-${{ runner.os }}-
+
+      - name: Зависимости мобильного (npm ci)
+        working-directory: mobile
+        run: npm ci --no-audit --no-fund
 
       - name: Линт
         run: pnpm lint

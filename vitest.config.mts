@@ -7,11 +7,13 @@ import { defineConfig } from "vitest/config";
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Test runner for the web half of the product (`mobile/` has its own toolchain
-// and is excluded everywhere here). Two projects:
+// Test runner for the product. Three projects:
 //
 //   unit      — pure logic in node. Fast, no DOM, no network. This is where
 //               `lib/` lives and where most tests belong.
+//   mobile    — the Expo app's component tests, in node on react-native-web
+//               (see the project below). `mobile/` keeps its own toolchain and
+//               stays out of coverage; only its tests run here.
 //   storybook — every story in the UI Lab is also a test: it must render in a
 //               real browser (Playwright/chromium) without throwing and its
 //               play function must pass. The gallery IS the suite.
@@ -229,6 +231,34 @@ export default defineConfig({
             "{app,components,db,infra,lib,tools}/**/*.{test,spec}.{ts,tsx}",
             "proxy.test.ts",
           ],
+        },
+      },
+      {
+        // The Expo app's component tests (#247). `mobile/` stays outside the
+        // pnpm workspace and outside coverage — but a component that crashes
+        // a release build the moment its tab opens needs a test that renders
+        // it, and the app has no runner of its own. So: the same vitest, in
+        // node, with the app's own node_modules (a file under mobile/ resolves
+        // `react`, `react-dom`, `@clerk/expo`… from mobile/node_modules — one
+        // React, the way Metro sees it) and `react-native` pointed at the
+        // react-native-web the app already ships, so a screen renders to a
+        // string through react-dom/server. Native modules are vi.mock()ed per
+        // test. `@/` is the app's alias (mobile/tsconfig.json), not the web's.
+        extends: true,
+        resolve: {
+          alias: [
+            {
+              find: /^react-native$/,
+              replacement: path.join(dirname, "mobile/node_modules/react-native-web"),
+            },
+            { find: /^@\/assets\//, replacement: path.join(dirname, "mobile/assets/") },
+            { find: /^@\//, replacement: path.join(dirname, "mobile/src/") },
+          ],
+        },
+        test: {
+          name: "mobile",
+          environment: "node",
+          include: ["mobile/src/**/*.{test,spec}.{ts,tsx}"],
         },
       },
       {

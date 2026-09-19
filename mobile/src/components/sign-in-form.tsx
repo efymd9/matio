@@ -24,15 +24,7 @@ import { body, colors, display, radius, space } from "@/theme";
 type Step = "email" | "code";
 type Flow = "signIn" | "signUp";
 
-export function SignInForm({
-  kicker,
-  headline,
-  bodyText,
-  cta,
-  onDone,
-  onCancel,
-  signInHint = false,
-}: {
+type SignInFormProps = {
   // The first step's copy: the modal screen keeps the wall's «Keep watching
   // free» framing, the Account tab greets a viewer who has watched nothing.
   kicker: string;
@@ -47,7 +39,39 @@ export function SignInForm({
   // «Already have an account? Sign in» — same field, same flow: the link just
   // focuses the input. Shown on the tab, where the framing is "create".
   signInHint?: boolean;
-}) {
+};
+
+// The gate — and it has to be a SEPARATE component from the form. Without a
+// publishable key AuthProvider mounts no ClerkProvider at all (auth/clerk.tsx:
+// the deliberate "run signed-out rather than crash" degradation), and every
+// provider-bound Clerk hook — useSignIn/useSignUp here, useUser/useClerk on
+// the Account tab — THROWS in render outside the provider. An uncaught render
+// error is a red box in development and RCTFatal in a release build: the app
+// dies. That is exactly how 0.1.0 (4) crashed on the Account tab (#247): the
+// build carried no key, and this check used to sit AFTER the hook calls,
+// where it could never run. Nothing that calls a Clerk hook may be mounted
+// past this line unless the key exists.
+export function SignInForm(props: SignInFormProps) {
+  const t = useT();
+  if (!CLERK_PUBLISHABLE_KEY) {
+    return (
+      <ErrorState message={t.app.signIn.unavailable} hint={t.app.signIn.unavailableHint} />
+    );
+  }
+  return <ClerkSignInForm {...props} />;
+}
+
+// The form proper. Rendered only behind the gate above, so Clerk's hooks are
+// safe here.
+function ClerkSignInForm({
+  kicker,
+  headline,
+  bodyText,
+  cta,
+  onDone,
+  onCancel,
+  signInHint = false,
+}: SignInFormProps) {
   const t = useT();
 
   const [step, setStep] = useState<Step>("email");
@@ -62,12 +86,6 @@ export function SignInForm({
 
   const { signIn } = useSignIn();
   const { signUp } = useSignUp();
-
-  if (!CLERK_PUBLISHABLE_KEY) {
-    return (
-      <ErrorState message={t.app.signIn.unavailable} hint={t.app.signIn.unavailableHint} />
-    );
-  }
 
   // Clerk errors carry a user-safe message; anything else gets a generic line
   // rather than leaking an internal string into the UI.
