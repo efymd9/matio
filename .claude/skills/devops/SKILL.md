@@ -33,10 +33,13 @@ description: Карта живой инфраструктуры Matio (хост�
 ## CI
 
 `.github/workflows/ci.yml` (джоба `web`), GitHub-раннеры, ~3 минуты:
-линт → типы → чек токенов (`tools/qa/no-magic-styles.sh`) → установка
-chromium → тесты обоих проектов с покрытием → diff-cover ≥85% на изменённых
-строках → стики-коммент с покрытием. Голден упал — артефакт
-`visual-baselines` с диффами и свежими эталонами.
+`pnpm install` → `npm ci` в `mobile/` (кэш `~/.npm` по
+`mobile/package-lock.json`; с #247 — зависимости для проекта `mobile`
+vitest'а, заодно ловит рассинхрон мобильного лока до сборки EAS) → линт →
+типы → чек токенов (`tools/qa/no-magic-styles.sh`) → установка chromium →
+тесты трёх проектов (`unit`, `mobile`, `storybook`) с покрытием →
+diff-cover ≥85% на изменённых строках → стики-коммент с покрытием. Голден
+упал — артефакт `visual-baselines` с диффами и свежими эталонами.
 
 **Сборки `next build` в CI НЕТ**: её на каждый PR делает preview-деплой
 Vercel, и его чек обязателен в ruleset. Если Vercel-чек когда-нибудь
