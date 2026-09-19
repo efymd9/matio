@@ -663,6 +663,74 @@ board was its Lab.
 - `/api/v1` untouched. GDPR: no new personal data — the language and the autoplay flag are
   device-local settings, the email on the Account tab is Clerk's and never logged.
 
+**Landscape player, 2026-09-19 (#252).** One new dependency, approved by the owner (19.09):
+`expo-screen-orientation` (`~57.0.2`, no config plugin). Build 0.1.0 (5) played a horizontal
+episode as a strip in the middle of a portrait screen with the native controls stretched to the
+edges — `app.json`'s `orientation: "portrait"` pinned the whole app, the fullscreen
+`AVPlayerViewController` included.
+
+- **The policy** (`src/orientation.ts`): the OS is told to ALLOW every orientation (`app.json` →
+  `"orientation": "default"`) and the module decides per screen. The root layout locks
+  `PORTRAIT_UP` once at launch — that is what keeps the tabs, the show page and sign-in upright.
+  The watch screen (`useOrientationLock`) locks `LANDSCAPE` (both sides — the viewer picks the
+  charging-port side) for a horizontal show and `PORTRAIT_UP` for a vertical one, and hands
+  `PORTRAIT_UP` back in the effect's cleanup — on unmount, from an error state too. The lock
+  follows the SHOW, so it is taken only once `/v1/shows/:slug` has answered: the spinner is
+  portrait, the player is not. Best-effort by construction: a refused lock
+  (`UnsupportedOrientationLock`) is swallowed and an unrotated player still plays. The native
+  registry keeps ONE mask for the module, so the latest lock wins — no stack to unwind. Pinned by
+  `src/orientation.test.tsx` (the hook in a real react-dom tree under jsdom: which lock, when,
+  and the release).
+- **The landscape page** (`watch/episode-feed.tsx`): the engine is unchanged. The watch screen
+  mounts `<StatusBar hidden />` for a horizontal show (the prop stack restores the root's bar on
+  unmount); the glass «‹» and the title read `insets.left` / `insets.right` as well as
+  `insets.top` — in landscape the top inset is ~0 and the notch is the LEFT inset, so both sit
+  top-left in the leading safe area, clear of the native transport's pill on the trailing side.
+  `resizeMode="contain"` gives the full-bleed 16:9 with pillar bars on a 19.5:9 screen. One real
+  fix underneath, found in the simulator: the lock lands a beat after the show, so the
+  `FlatList` used to mount in portrait and be rotated under itself — it keeps its PIXEL offset
+  across the resize, and for any `initialIndex` above 0 (a resume at episode 3, a deep link to
+  episode 2) the stale offset read as the NEXT page: the current page was dropped and
+  re-created (a second `/v1/playback-token` for the same episode, a restarted player, and a
+  signed-in viewer's unmount flush could write position 0 over the resume point). So the watch
+  screen now mounts the feed only once the window HAS the show's shape (`useOrientationSettled`
+  in `src/orientation.ts`: `width > height` for a horizontal show; a 1s grace where the lock
+  does not act — an iPad, a refused lock — after which the feed mounts in whatever shape the
+  screen has; an iPad is never held). The feed's own re-pin (`scrollToIndex` on a page-height
+  change; `getItemLayout` is exact) stays as the safety net for a rotation of a MOUNTED list —
+  an iPad turned mid-episode — and the viewability callback is now vertical-only (a horizontal
+  show cannot be scrolled and moves through `goTo`; acting on the transient offset was half of
+  the double fetch).
+- **Not touched**: the native transport (`controls`), the vertical feed, PiP / background audio /
+  auto-advance (`react-native-video` props on the current page), `/api/v1`. **iPad**:
+  `UIRequiresFullScreen` is `false` in the generated Info.plist (Expo's template) and
+  `UISupportedInterfaceOrientations~ipad` already listed all four orientations — a multitasking
+  iPad ignores `supportedInterfaceOrientations`, so the iPad rotated freely before this and still
+  does; making it follow the phone's policy means `ios.requireFullScreen: true`, an owner decision
+  outside the spec. **Android**: `lockAsync` sets the activity's requested orientation, and the
+  template's `configChanges` includes `orientation|screenSize`, so a rotation does not restart
+  the activity — not verified on a device or emulator in the session. Two deferred tails in
+  `docs/registry.md`: the sign-up wall / error pages render in landscape when reached inside the
+  landscape player, and the splash can rotate before the JS lock lands (the plugin's
+  `initialOrientation` would close it; the spec said no plugin).
+
+Verified on an **iPhone 17 Pro simulator (iOS 26.4), a Debug `expo run:ios` build** against the
+local `/v1` (reads from the production DB through a dev proxy that strips the device-id header,
+so no `trial_sessions` row and no `watch_segments` counter was written — the anonymous flush
+answers 401 and the queue drops it). Deep links (`matio://watch/<id>?showSlug=…`) stood in for
+taps, screenshots (`simctl io screenshot`) for eyes: episode 2 of `the-scarlet-oath` turns the
+screen to landscape, plays full-bleed 16:9 with pillar bars, status bar hidden, the «‹» + title
+top-left inside the leading safe area, and — after the hold-back — exactly ONE
+`/v1/playback-token` for the opened episode (three before the fix, two with the viewability
+change alone); `matio://` (back to the tabs) returns portrait with the status bar; `morelli`
+(vertical) stays portrait; foregrounding Settings and coming back keeps the player in landscape
+(the module re-applies the last lock on foreground) with playback continued. **Not verified**:
+the native transport's pill next to the «‹» (the controls auto-hide and the simulator takes no
+touch — `osascript` is TCC-blocked here), PiP-on-leave (no PiP window appeared over Settings —
+AVPictureInPictureController is unsupported on the simulator; the props are untouched from
+#97), Android, a physical device. `pnpm test:unit` (unit + mobile), both typechecks, `expo
+export` green.
+
 ## 15. Traps
 
 - **`/api/v1` is inside the Clerk matcher already** — don't add a second auth layer. Do add

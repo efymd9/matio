@@ -1,10 +1,12 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { useCallback, useRef } from "react";
 import { api } from "@/api/client";
 import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
 import { ErrorState, Loading } from "@/components/ui";
 import { useT } from "@/i18n/locale";
+import { useOrientationLock, useOrientationSettled } from "@/orientation";
 import { EpisodeFeed } from "@/watch/episode-feed";
 
 // The watch screen. Loads the show (its ordered ready episodes are what the
@@ -12,6 +14,11 @@ import { EpisodeFeed } from "@/watch/episode-feed";
 // everything to EpisodeFeed — the one player engine for both orientations.
 // Playback itself is only ever reached through /v1/playback-token, per page,
 // inside the feed.
+//
+// Orientation (#252): a horizontal show turns the screen to landscape for as
+// long as this screen is mounted (full-bleed, status bar hidden); a vertical
+// show keeps portrait. The lock follows the SHOW, so it can only be taken
+// once the show has loaded — the spinner is portrait, the player is not.
 
 type Params = {
   episodeId: string;
@@ -73,6 +80,12 @@ export default function WatchScreen() {
   const onBack = useCallback(() => router.back(), [router]);
   const onSignIn = useCallback(() => router.push("/sign-in"), [router]);
 
+  // Before the early returns: hooks — and the lock must also be RELEASED
+  // when this screen unmounts from an error state after having rotated.
+  const orientation = state.status === "ready" ? state.data.show.orientation : null;
+  useOrientationLock(orientation);
+  const settled = useOrientationSettled(orientation);
+
   if (state.status === "loading") return <Loading />;
 
   if (state.status === "error") {
@@ -94,14 +107,34 @@ export default function WatchScreen() {
     return <ErrorState message={t.watch.unavailableKicker} hint={t.watch.unavailableTitle} />;
   }
 
+  // Landscape is full-bleed: nothing over the picture, from the moment the
+  // show is known. A vertical show keeps the bar — its chrome sits under
+  // insets.top. The prop stack restores the root's <StatusBar style="light" />
+  // on unmount.
+  const statusBar = show.orientation === "horizontal" ? <StatusBar hidden /> : null;
+
+  // The feed lays its pages out by the window it mounts with: hold it until
+  // the lock has turned the screen (see useOrientationSettled).
+  if (!settled) {
+    return (
+      <>
+        {statusBar}
+        <Loading />
+      </>
+    );
+  }
+
   return (
-    <EpisodeFeed
-      show={show}
-      initialIndex={index}
-      resumeSeconds={resumeSeconds}
-      signedIn={isSignedIn}
-      onBack={onBack}
-      onSignIn={onSignIn}
-    />
+    <>
+      {statusBar}
+      <EpisodeFeed
+        show={show}
+        initialIndex={index}
+        resumeSeconds={resumeSeconds}
+        signedIn={isSignedIn}
+        onBack={onBack}
+        onSignIn={onSignIn}
+      />
+    </>
   );
 }

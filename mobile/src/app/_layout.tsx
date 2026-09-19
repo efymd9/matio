@@ -4,10 +4,12 @@ import { GeistMono_400Regular } from "@expo-google-fonts/geist-mono";
 import { DarkTheme, Stack, ThemeProvider } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
+import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConfigProvider } from "@/api/config-context";
 import { AuthProvider } from "@/auth/clerk";
 import { LocaleProvider, useInitialLocale } from "@/i18n/locale";
+import { lockOrientation, PORTRAIT_LOCK } from "@/orientation";
 import { colors } from "@/theme";
 
 // Hold the splash until the brand faces are ready. Without this the first
@@ -40,6 +42,15 @@ export default function RootLayout() {
   // for the same reason as the fonts: a first frame in the wrong language
   // that then flips is worse than a few more milliseconds of splash.
   const initialLocale = useInitialLocale();
+
+  // Portrait is the app's orientation (#252): `app.json` allows every
+  // orientation so the landscape player can take one, and this lock — once,
+  // at launch — is what keeps the tabs, the show page and sign-in upright.
+  // The watch screen locks landscape for a horizontal show and hands portrait
+  // back on unmount (`useOrientationLock`).
+  useEffect(() => {
+    lockOrientation(PORTRAIT_LOCK);
+  }, []);
 
   // Render nothing while loading, but do NOT block forever on a font failure —
   // shipping a blank app because a typeface didn't decode is a worse outcome
