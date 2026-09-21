@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.1](https://github.com/efymd9/matio/compare/matio-v0.12.0...matio-v0.12.1) (2026-09-21)
+
+
+### Bug fixes
+
+* версия Stripe API закреплена константой со стражем, no-store на всех redirect-ветках billing-portal ([#266](https://github.com/efymd9/matio/issues/266)) ([#270](https://github.com/efymd9/matio/issues/270)) ([0a7cfa9](https://github.com/efymd9/matio/commit/0a7cfa942609e6678889aa87c3c78773953a8fdf))
+* заблокированные маяки Mux Data на litix.io больше не копятся в Sentry и не прячут настоящие «Failed to fetch» ([#265](https://github.com/efymd9/matio/issues/265)) ([#268](https://github.com/efymd9/matio/issues/268)) ([eeb8d80](https://github.com/efymd9/matio/commit/eeb8d80c81dfdc494087272c09ced18cafa8fb1f))
+* префетч &lt;Link&gt; на /subscribe у вошедшего на paywall больше не исполняет записи в БД без клика ([#264](https://github.com/efymd9/matio/issues/264)) ([#267](https://github.com/efymd9/matio/issues/267)) ([e8f1d51](https://github.com/efymd9/matio/commit/e8f1d51965b4d7a36e0bea9727800bbd8ae40ddc))
+
 ## [0.12.0](https://github.com/efymd9/matio/compare/matio-v0.11.0...matio-v0.12.0) (2026-09-21)
 
 
