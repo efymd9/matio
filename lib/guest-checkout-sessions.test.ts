@@ -49,12 +49,15 @@ afterEach(() => {
 
 describe("hashClaimToken", () => {
   it("is a keyed 64-hex digest that never contains the token", () => {
-    const token = "5b1c9e0a-2d4f-4c8e-9a7b-3f6d1e2c4b5a";
-    const hash = hashClaimToken(token);
+    // A fixture has to LOOK fake (CLAUDE.md §Tests): a random-looking UUID
+    // assigned to a name with "token" in it is what gitleaks' generic-api-key
+    // rule flags, and that kept the nightly scan red (#256).
+    const claimCookie = "00000000-0000-4000-8000-00000000c1a1";
+    const hash = hashClaimToken(claimCookie);
 
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(hash).not.toContain(token);
-    expect(hashClaimToken(token)).toBe(hash);
+    expect(hash).not.toContain(claimCookie);
+    expect(hashClaimToken(claimCookie)).toBe(hash);
     expect(hashClaimToken("another-token")).not.toBe(hash);
   });
 

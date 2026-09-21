@@ -1,0 +1,16 @@
+# Findings gitleaks may skip — one fingerprint per line, in gitleaks' own
+# format `commit:file:rule:line`, copied from the «Fingerprint:» lines of the
+# failing run's log. Never hand-write a fingerprint and never add one for a
+# value that was ever real: a leaked secret is ROTATED, not ignored.
+#
+# The nightly scan reads the WHOLE history on every branch (fetch-depth: 0 +
+# `git log --all`), so fixing the file does not clear a finding — the old
+# commits still carry the line. That is the only reason this file exists.
+#
+# #256 (2026-09-21) — lib/guest-checkout-sessions.test.ts:52, rule
+# generic-api-key. A made-up UUID used as the claim-cookie fixture of
+# hashClaimToken's test (#224 / PR #231); it never was a credential. The fixture
+# itself now looks fake (00000000-…); these two are its historical commits: the
+# PR branch commit and the squash on main. Run 35580194494.
+e1d93bc2b8cb304f81009ac3c293984d8925432b:lib/guest-checkout-sessions.test.ts:generic-api-key:52
+f40d77954f79665426416c23e35d4c735bd6af42:lib/guest-checkout-sessions.test.ts:generic-api-key:52
