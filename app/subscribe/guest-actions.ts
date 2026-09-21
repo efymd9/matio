@@ -232,7 +232,8 @@ export async function createGuestCheckoutSession(
   // Embedded (in-site iframe) when a publishable key is configured, else the
   // hosted-redirect fallback.
   const embedded = embeddedCheckoutEnabled() && !inApp;
-  // NB: pinned Stripe API (2026-04-22.dahlia) names the value 'embedded_page'.
+  // NB: the pinned Stripe API (STRIPE_API_VERSION, lib/stripe.ts) names the
+  // value 'embedded_page'.
   const urlParams = embedded
     ? { ui_mode: "embedded_page" as const, return_url: successUrl }
     : { success_url: successUrl, cancel_url: cancelUrl };

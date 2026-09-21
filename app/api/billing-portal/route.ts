@@ -5,6 +5,16 @@ import { getStripe } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 
+// Every branch below answers with a redirect, and every one of them is a fact
+// about ONE person (signed in? has a Stripe customer?) — so none may be stored
+// by the browser or anything between it and us (#266; before that only the
+// Stripe branch carried the header).
+function redirectNoStore(url: string | URL) {
+  const res = NextResponse.redirect(url);
+  res.headers.set("Cache-Control", "no-store");
+  return res;
+}
+
 // Direct entry into the Stripe Customer Portal. Lets the "Manage
 // subscription" menu item in <UserMenu/> link straight to Stripe without
 // bouncing through /account. Server-only: auth + DB lookup + Stripe session
@@ -18,7 +28,7 @@ export async function GET() {
   // <Show when="signed-in"> guard passes, so this is just defense-in-depth
   // for anyone hitting the URL directly.
   if (!user) {
-    return NextResponse.redirect(new URL("/", origin));
+    return redirectNoStore(new URL("/", origin));
   }
 
   // Subscribed users get a portal session. Pre-subscription users have no
@@ -27,7 +37,7 @@ export async function GET() {
   // double hop. (The portal itself stays functional in free mode — legacy
   // subscribers cancel through here.)
   if (!user.stripeCustomerId) {
-    return NextResponse.redirect(
+    return redirectNoStore(
       new URL(paymentsEnabled() ? "/subscribe" : "/", origin),
     );
   }
@@ -37,7 +47,5 @@ export async function GET() {
     return_url: `${origin}/`,
   });
 
-  const res = NextResponse.redirect(session.url);
-  res.headers.set("Cache-Control", "no-store");
-  return res;
+  return redirectNoStore(session.url);
 }

@@ -55,10 +55,12 @@ export function buildCheckoutSessionParams({
   // The ToS consent pair is the ONLY thing that differs between surfaces, and
   // it differs because Stripe will not render it under `ui_mode: 'elements'`:
   //
-  //   * `custom_text` is hard-rejected there — verified against the live API on
-  //     the pinned 2026-04-22.dahlia: "The following parameters are not
+  //   * `custom_text` is hard-rejected there — verified against the live API
+  //     when this surface was built (#210): "The following parameters are not
   //     supported with `ui_mode: elements`: custom_text". So the localized
-  //     waiver wording below simply cannot be sent.
+  //     waiver wording below simply cannot be sent. (The API version is pinned
+  //     since #266 — STRIPE_API_VERSION in lib/stripe.ts; re-check this when
+  //     that literal moves.)
   //   * `consent_collection` IS accepted, but its only renderer is Stripe's
   //     `TermsElement`, which the installed SDK marks "Requires beta access"
   //     and types with zero options — it could not carry our wording even with
