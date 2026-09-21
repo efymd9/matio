@@ -35,8 +35,13 @@ export function RateLimitedNotice({ showSlug }: { showSlug: string }) {
         </h2>
         <p className="mt-3 text-sm text-cream/72">{t.watch.rateLimitedBody}</p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
+          {/* No prefetch: the viewer who hits this notice is usually signed
+              out, and for them proxy.ts answers /subscribe with a 307 to
+              Clerk's origin — the prefetch fetch dies on CORS as an
+              unhandled "Failed to fetch" (#260, same class as #259). */}
           <Link
             href={`/subscribe?show=${encodeURIComponent(showSlug)}`}
+            prefetch={false}
             className="inline-flex h-11 items-center rounded-full bg-gold-cta px-6 text-sm font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out hover:brightness-105 active:scale-[0.98]"
           >
             {t.watch.rateLimitedSubscribe}
