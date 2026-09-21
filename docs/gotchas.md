@@ -239,6 +239,8 @@ Also: webhook URLs must point at the **apex** (`https://matio.tv/api/webhooks/*`
 
 ## Stripe API 2024+ moves
 
+**The API version is pinned, and a red `lib/stripe-api-version.test.ts` is a decision, not a chore (#266).** `STRIPE_API_VERSION` in `lib/stripe.ts` goes into the `Stripe` constructor; the test holds it equal to `Stripe.API_VERSION` of the installed SDK (and `tsc` to the SDK's literal `apiVersion` type), so an SDK bump that moves the version turns CI red instead of silently changing the wire contract — when it does: read the changelog of the new API version, rehearse checkout on staging (embedded, hosted fallback, guest, wallet), and only then move the literal. The webhook endpoint's version is set in the Stripe dashboard and is not governed by this constant.
+
 These three field moves caused real bugs during build:
 
 ### `subscription.current_period_end` → `subscription.items.data[].current_period_end`

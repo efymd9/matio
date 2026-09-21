@@ -493,7 +493,9 @@ export async function createAuthCheckoutSession(
   // hosted-redirect fallback. Embedded uses return_url and rejects
   // success_url/cancel_url; hosted uses success_url/cancel_url — so the two are
   // mutually exclusive, spread in per mode. NB: the pinned Stripe API
-  // (2026-04-22.dahlia) names the value 'embedded_page', not 'embedded'.
+  // (STRIPE_API_VERSION, lib/stripe.ts) names the value 'embedded_page', not
+  // 'embedded' — and the SDK's UiMode type ends in an open `| OtherString`,
+  // so tsc would NOT catch the old spelling; only the API would.
   // In-app browsers (FB/IG webviews) get the HOSTED page — the embedded iframe
   // + Apple/Google Pay are flaky there (same reason as the guest flow).
   const inApp = isInAppBrowser((await headers()).get("user-agent"));
