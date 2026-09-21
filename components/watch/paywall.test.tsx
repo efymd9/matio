@@ -2,6 +2,13 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { en } from "@/lib/i18n/dictionaries";
+import { isNextLink, prefetchOf } from "@/tools/test/next-link-probe";
+
+// `prefetch={false}` leaves no trace in the HTML — the probe records it
+// (see its header; shared with the #259 / #260 suites).
+vi.mock("next/link", async () => await import("@/tools/test/next-link-probe"));
+
 // Clerk's <Show> is the auth branch; the wallet slot lives inside its
 // "signed-in" arm. Rendering both arms would hide exactly the bug this suite
 // exists to catch, so the mock honours the `when` prop.
@@ -94,5 +101,28 @@ describe("Paywall — the in-place wallet slot (#210)", () => {
     const href = screen.getByRole("link", { name: /subscribe/i }).getAttribute("href");
     expect(href).toContain("ep=ep-3");
     expect(href).toContain("resume=128");
+  });
+});
+
+describe("Paywall — the signed-in /subscribe link is never prefetched (#264)", () => {
+  // Why: rendering /subscribe is not side-effect free. app/subscribe/page.tsx
+  // awaits linkTrialSessionsToCurrentUser() and applyUserAttribution(userId) —
+  // database writes. next/link prefetches whatever scrolls into view, so a
+  // signed-in non-subscriber who was merely SHOWN the paywall got those writes
+  // without a click. Idempotent, but intent must be a click, not an impression
+  // (the same class as #259 / #260).
+
+  it("Continue · Subscribe stays a next/link, with prefetch switched off", () => {
+    render(<Paywall showSlug="the-scarlet-oath" episodeId="ep-3" />);
+
+    const cta = screen.getByRole("link", {
+      name: en.paywall.continueSubscribe,
+    });
+    expect(cta.getAttribute("href")).toBe(
+      "/subscribe?show=the-scarlet-oath&ep=ep-3",
+    );
+    // Still next/link: the click itself keeps client navigation.
+    expect(isNextLink(cta)).toBe(true);
+    expect(prefetchOf(cta)).toBe("false");
   });
 });
