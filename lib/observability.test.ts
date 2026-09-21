@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isBlockedBeaconNoise,
   redactEmails,
   resolveRelease,
   resolveStage,
@@ -9,6 +10,7 @@ import {
   scrubUrl,
   sentryPrivacyOptions,
   type SentryEventLike,
+  type SentryExceptionValueLike,
 } from "./observability";
 
 // These are not "does the function run" tests. The scrubbers are the only thing
@@ -241,6 +243,144 @@ describe("scrubSentryEvent", () => {
   });
 });
 
+// A Mux Data beacon host — the subdomain is the environment's public id; an
+// obviously made-up one here.
+const BEACON_HOST = "dummyenv123.litix.io";
+
+/** The shape the browser SDK reports for a rejected `fetch` nobody caught. */
+function fetchFailure(
+  value: string,
+  thrown: SentryExceptionValueLike = {},
+): SentryEventLike {
+  return {
+    exception: {
+      values: [
+        { type: "TypeError", value, mechanism: { handled: false }, ...thrown },
+      ],
+    },
+  };
+}
+
+describe("blocked Mux Data beacons (#265)", () => {
+  // The point of every case but the first: `Failed to fetch` for OUR host is a
+  // real incident (#259 read exactly like this family), so the filter must
+  // never widen into "drop by text".
+
+  it("drops an unhandled network failure of a litix beacon", () => {
+    const { beforeSend } = sentryPrivacyOptions();
+
+    expect(beforeSend(fetchFailure(`Failed to fetch (${BEACON_HOST})`))).toBeNull();
+  });
+
+  it("lets the very same failure through when the host is ours", () => {
+    const { beforeSend } = sentryPrivacyOptions();
+    const event = fetchFailure("Failed to fetch (matio.tv)");
+
+    expect(beforeSend(event)).toBe(event);
+  });
+
+  it("lets a HANDLED litix failure through — someone reported it on purpose", () => {
+    const { beforeSend } = sentryPrivacyOptions();
+    const event = fetchFailure(`Failed to fetch (${BEACON_HOST})`, {
+      mechanism: { handled: true },
+    });
+
+    expect(beforeSend(event)).toBe(event);
+  });
+
+  it("lets a non-TypeError through, whatever its text says", () => {
+    const { beforeSend } = sentryPrivacyOptions();
+    const event = fetchFailure(`Failed to fetch (${BEACON_HOST})`, {
+      type: "Error",
+    });
+
+    expect(beforeSend(event)).toBe(event);
+  });
+
+  it("survives events with no exception to look at", () => {
+    // beforeSend is shared by Node, edge and the browser: message-only events,
+    // an empty `exception`, an empty chain — none may throw, all must pass.
+    const { beforeSend } = sentryPrivacyOptions();
+    const shapes: SentryEventLike[] = [
+      {},
+      { message: `Failed to fetch (${BEACON_HOST})` },
+      { exception: {} },
+      { exception: { values: [] } },
+      { exception: { values: [{ type: "TypeError", mechanism: { handled: false } }] } },
+    ];
+
+    for (const event of shapes) {
+      expect(beforeSend(event)).toBe(event);
+    }
+  });
+
+  it.each([
+    ["Chromium", `Failed to fetch (${BEACON_HOST})`],
+    ["Safari", `Load failed (${BEACON_HOST})`],
+    ["Firefox", `NetworkError when attempting to fetch resource. (${BEACON_HOST})`],
+    ["the bare domain", "Failed to fetch (litix.io)"],
+    ["an upper-cased host", "Failed to fetch (DUMMYENV123.LITIX.IO)"],
+  ])("recognises %s's spelling", (_name, value) => {
+    expect(isBlockedBeaconNoise(fetchFailure(value))).toBe(true);
+  });
+
+  it.each([
+    ["no host at all", "Failed to fetch"],
+    ["a look-alike domain", "Failed to fetch (notlitix.io)"],
+    ["litix as a subdomain of someone else", "Failed to fetch (litix.io.example.invalid)"],
+    ["litix mentioned in other text", `beacon to ${BEACON_HOST} timed out`],
+  ])("does not match %s", (_name, value) => {
+    expect(isBlockedBeaconNoise(fetchFailure(value))).toBe(false);
+  });
+
+  it("requires handled to be exactly false, not merely absent", () => {
+    // An event without a mechanism says nothing about who caught it — and
+    // "unknown" must read as "report it".
+    expect(
+      isBlockedBeaconNoise(
+        fetchFailure(`Failed to fetch (${BEACON_HOST})`, { mechanism: undefined }),
+      ),
+    ).toBe(false);
+  });
+
+  it("judges the thrown error, not a cause buried under it", () => {
+    // Causes come first, the thrown error last. Our own error wrapping a litix
+    // failure is OUR code speaking and must be reported.
+    const event: SentryEventLike = {
+      exception: {
+        values: [
+          {
+            type: "TypeError",
+            value: `Failed to fetch (${BEACON_HOST})`,
+            mechanism: { handled: false },
+          },
+          {
+            type: "Error",
+            value: "player bootstrap failed",
+            mechanism: { handled: false },
+          },
+        ],
+      },
+    };
+
+    expect(isBlockedBeaconNoise(event)).toBe(false);
+  });
+
+  it("ignores a litix breadcrumb behind a failure of our own host", () => {
+    // Every playback session has beacon fetches in its trail, so a breadcrumb
+    // proves nothing about which request failed.
+    const { beforeSend } = sentryPrivacyOptions();
+    const event: SentryEventLike = {
+      ...fetchFailure("Failed to fetch (matio.tv)"),
+      breadcrumbs: [
+        { category: "fetch", data: { url: `https://${BEACON_HOST}/` } },
+      ],
+    };
+
+    expect(beforeSend(event)).toBe(event);
+  });
+});
+
 describe("sentryPrivacyOptions", () => {
   it("states the two settings that must never drift", () => {
     const options = sentryPrivacyOptions();
@@ -256,8 +396,8 @@ describe("sentryPrivacyOptions", () => {
     const transaction = options.beforeSendTransaction(seededEvent());
 
     for (const event of [error, transaction]) {
-      expect(event.request?.url).toBe("https://matio.tv/welcome");
-      expect(event.request).not.toHaveProperty("cookies");
+      expect(event?.request?.url).toBe("https://matio.tv/welcome");
+      expect(event?.request).not.toHaveProperty("cookies");
     }
   });
 
