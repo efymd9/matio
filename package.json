@@ -96,5 +96,11 @@
     "eslint-plugin-storybook": "^10.6.0",
     "@vitest/browser-playwright": "4.1.11",
     "playwright": "^1.63.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "@clerk/shared@3>js-cookie": "3.0.8",
+      "@esbuild-kit/core-utils>esbuild": "0.25.12"
+    }
   }
 }

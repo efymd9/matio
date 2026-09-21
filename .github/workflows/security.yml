@@ -24,6 +24,9 @@ jobs:
       # Гоняем официальный образ, а не action: имя и интерфейс образа
       # стабильны, а лишний слой сторонней обёртки здесь не нужен.
       # Сканируются локфайлы обеих половин: pnpm-lock.yaml и mobile/package-lock.json.
+      # Ignore — mobile/osv-scanner.toml: сканер читает конфиг из каталога
+      # САМОГО локфайла и вниз его не наследует, поэтому файл лежит в mobile/,
+      # а не в корне. Правила и срок пересмотра — /devops → «Ночной security».
       - name: osv-scanner
         run: |
           docker run --rm -v "${{ github.workspace }}:/src" \
@@ -43,6 +46,9 @@ jobs:
       # ГРАБЛЯ из плейбука: gitleaks старее 8.25 молча игнорирует [[allowlists]]
       # с condition=AND. Action тянет свежий бинарь; если когда-нибудь появится
       # .gitleaks.toml с allowlist'ами — проверить версию в логе прогона.
+      # (На 21.09.2026 action ставит 8.24.3 — как раз старее 8.25. Поэтому
+      # исторические находки гасятся отпечатками в .gitleaksignore, он от
+      # версии не зависит; правила файла — в его шапке.)
       - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
