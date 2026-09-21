@@ -26,7 +26,26 @@ description: Операционка ОСНОВНОЙ сессии Matio — ст
    скриптах — не переписывать по памяти.
 2. Свериться с доской и очередью PR (`gh pr list`), проверить свободные
    слоты автопилота, догнать зависшее.
-3. Утром — глянуть ночные прогоны (e2e, security).
+3. Проверить ночные прогоны — КОМАНДОЙ, не взглядом:
+
+   ```
+   gh run list --event schedule --limit 20 \
+     --json workflowName,conclusion,createdAt,url \
+     --jq '.[]|select(.conclusion!="success")|"\(.createdAt[0:10])  \(.workflowName)  \(.conclusion)  \(.url)"'
+   ```
+
+   Пустой вывод = зелено. Любая строка = **issue ДО любой другой работы**
+   (`type:bug` + `domain:infra` + приоритет по влиянию, затем
+   `tools/claude/board_status.sh <N> tech`) — правило CLAUDE.md «Incidents
+   start in the tracker». Красный прогон, про который «все знают», — это
+   прогон без issue: ночной `security` простоял красным 40+ запусков подряд
+   (#256), потому что шаг звучал как «глянуть» и ничего не требовал.
+   `--event schedule` обязателен: без него `--limit 20` берёт последние 20
+   прогонов ЛЮБОГО события, и в день с потоком PR ночные в окно не попадают —
+   проверка молча печатает пусто.
+   Ночные по расписанию: `security` (03:17 UTC, osv-scanner + gitleaks — чем
+   чинить и когда допустим ignore, см. `/devops` → «Ночной security»),
+   `db-backup` (03:40), `db-restore-check` (ежемесячно).
 
 Живость вотчеров страхует хук-гард (`tools/claude/watcher_guard.sh` в
 `.claude/settings.local.json` основного чекаута): SessionStart впрыскивает
