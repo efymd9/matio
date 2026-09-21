@@ -201,8 +201,13 @@ export function Paywall({
               )}
             </Show>
             <Show when="signed-in">
+              {/* prefetch off (#264): rendering /subscribe WRITES — it links
+                  trial sessions and stamps attribution — so a prefetch would
+                  run those for a viewer who only saw the wall. Still a Link:
+                  the click keeps client navigation. */}
               <Link
                 href={subscribeHref}
+                prefetch={false}
                 onClick={() =>
                   capturePostHog("signup_cta_clicked", { auth: "signed_in" })
                 }
