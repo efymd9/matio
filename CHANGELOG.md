@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.12.0](https://github.com/efymd9/matio/compare/matio-v0.11.0...matio-v0.12.0) (2026-09-21)
+
+
+### Features
+
+* **mobile:** главная v2 — лента hero-карточек под каруселью ([#248](https://github.com/efymd9/matio/issues/248)) ([#249](https://github.com/efymd9/matio/issues/249)) ([6130094](https://github.com/efymd9/matio/commit/6130094294bcca87edc756ed30de950ad1fae1fb))
+* **mobile:** нативный шелл — стеклянный таб-бар B1, карусель Home, Browse, Account, Settings ([#245](https://github.com/efymd9/matio/issues/245)) ([#246](https://github.com/efymd9/matio/issues/246)) ([36ba39c](https://github.com/efymd9/matio/commit/36ba39c5559a0b6534387eb48fe99cfba51139c4))
+
+
+### Bug fixes
+
+* **ci:** ночной security зелёный — фикстура gitleaks + 48 транзитивных уязвимостей osv закрыты, 4 в ignore с датой ([#256](https://github.com/efymd9/matio/issues/256)) ([#258](https://github.com/efymd9/matio/issues/258)) ([8344087](https://github.com/efymd9/matio/commit/83440879eb245541ffe2720cfa2cb8cd2198fbfa))
+* **mobile:** ascAppId/appleTeamId в submit-профиле eas.json — неинтерактивная подача в TestFlight ([#99](https://github.com/efymd9/matio/issues/99)) ([#238](https://github.com/efymd9/matio/issues/238)) ([ab77632](https://github.com/efymd9/matio/commit/ab776320ce2f3b149910a4555378b889d8c06f1d))
+* **mobile:** ITSAppUsesNonExemptEncryption=false в app.json; ранбук — eas-cli@latest и запуск вне «!» ([#99](https://github.com/efymd9/matio/issues/99)) ([#236](https://github.com/efymd9/matio/issues/236)) ([0bec968](https://github.com/efymd9/matio/commit/0bec968a11cf01f9bdb8b414ea24c3ea838ffa34))
+* **mobile:** TypeScript ~5.9 вместо ~7 — лок согласован для npm билдера EAS ([#99](https://github.com/efymd9/matio/issues/99)) ([#237](https://github.com/efymd9/matio/issues/237)) ([2987be4](https://github.com/efymd9/matio/commit/2987be457b4a2dd4369bab2073f555878bd8ceb8))
+* **mobile:** горизонтальный плеер играет в ландшафте на весь экран, остальные экраны — портрет ([#252](https://github.com/efymd9/matio/issues/252)) ([#255](https://github.com/efymd9/matio/issues/255)) ([200cfad](https://github.com/efymd9/matio/commit/200cfadbbc64ebf30d6ef22a7bbd929b19370c8c))
+* **mobile:** таб Account не крутит спиннер вечно при недоступном Clerk — таймаут 8 с, честное состояние и Retry ([#253](https://github.com/efymd9/matio/issues/253)) ([#254](https://github.com/efymd9/matio/issues/254)) ([65e0558](https://github.com/efymd9/matio/commit/65e05584b17da4aee1c308f2d9e9785147ab863b))
+* **mobile:** таб Account не падает в сборке без ключа Clerk — гейт до хуков ([#247](https://github.com/efymd9/matio/issues/247)) ([#250](https://github.com/efymd9/matio/issues/250)) ([45247ca](https://github.com/efymd9/matio/commit/45247ca49a552109dcda22bb64793296077ab0a9))
+* префетч &lt;Link&gt; больше не создаёт портальные сессии Stripe и не роняет «Failed to fetch» на /subscribe у анонима ([#259](https://github.com/efymd9/matio/issues/259)) ([3f6ddb3](https://github.com/efymd9/matio/commit/3f6ddb39edecb7bdab8a9ab559fef7dfeda599dd))
+* префетч &lt;Link&gt; на /subscribe в RateLimitedNotice больше не роняет «Failed to fetch» у анонима ([#260](https://github.com/efymd9/matio/issues/260)) ([891ee34](https://github.com/efymd9/matio/commit/891ee34a31a487ed8896b4d1c02727cbb1a94b6f))
+
+
+### Documentation
+
+* **mobile:** ранбук — сборка и подача одной командой, submit по id, чтение brotli-лога EAS ([#99](https://github.com/efymd9/matio/issues/99)) ([#239](https://github.com/efymd9/matio/issues/239)) ([5c7e00c](https://github.com/efymd9/matio/commit/5c7e00ccea6a59f8b7ce731908551d9c37c80e38))
+* **mobile:** сборки через EAS — проект @matvei-dev/matio, профили, ранбук TestFlight ([#99](https://github.com/efymd9/matio/issues/99)) ([#234](https://github.com/efymd9/matio/issues/234)) ([b284ce2](https://github.com/efymd9/matio/commit/b284ce286af3c08bf1eef83679bc00640974a34c))
+* Neon на плане Launch с 17.09 — CLAUDE.md и /devops по факту, грабля про пинг DB-страницы ([#257](https://github.com/efymd9/matio/issues/257)) ([#262](https://github.com/efymd9/matio/issues/262)) ([42cca16](https://github.com/efymd9/matio/commit/42cca16f69bbd53079a6a3fd97f7b7b0e01a9cf3))
+
 ## [0.11.0](https://github.com/efymd9/matio/compare/matio-v0.10.0...matio-v0.11.0) (2026-09-15)
 
 
