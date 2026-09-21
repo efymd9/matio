@@ -72,7 +72,9 @@ export interface SentrySpanLike {
 }
 
 export interface SentryExceptionValueLike {
+  type?: string;
   value?: string;
+  mechanism?: { handled?: boolean };
 }
 
 export interface SentryEventLike {
@@ -204,10 +206,56 @@ export function scrubSentryEvent(event: SentryEventLike): void {
   if (event.user) event.user = { id: event.user.id };
 }
 
+/**
+ * Hosts whose failed fetch is a viewer's blocker at work, not a fault of ours.
+ * ONE entry on purpose — `litix.io` is where Mux Data beacons go, an ad blocker
+ * or a DNS filter cuts them, and mux-embed leaves the rejection unhandled
+ * (#265). This is not a general noise filter: a host earns a place here only
+ * with its own issue behind it.
+ */
+const BLOCKED_BEACON_HOSTS = ["litix.io"];
+
+/**
+ * The three browser spellings of "the network refused" (Chromium, Safari,
+ * Firefox) followed by ` (host)`. The host is NOT ours and not a scrubber's: the
+ * SDK's own fetch instrumentation rewrites `error.message` to `<text> (<host>)`
+ * for exactly these three texts on a `TypeError` (`enhanceFetchErrorMessages`,
+ * default `always`), so it arrives in `exception.values[].value` — the only
+ * field that names the request that FAILED. Breadcrumbs are deliberately not
+ * consulted: a beacon to litix sits in the trail of every playback session, so
+ * it would also be found behind a genuine `Failed to fetch (matio.tv)`.
+ */
+const FETCH_FAILURE_WITH_HOST =
+  /^(?:Failed to fetch|Load failed|NetworkError when attempting to fetch resource\.?) \(([^()\s]+)\)$/;
+
+/**
+ * True for the one event family we drop instead of report: an UNHANDLED
+ * `TypeError` network failure whose host is a blocked-beacon host.
+ *
+ * Every condition is load-bearing, because the same text for `matio.tv` is a
+ * real incident (#259 looked exactly like this): the thrown error itself — the
+ * LAST value, causes come before it — must be a `TypeError`, nobody caught it
+ * (`handled === false`; a handled one is a report someone asked for), and the
+ * host must be the beacon's. Should the SDK stop appending the host, this
+ * stops matching and the events simply come through again — it fails open.
+ */
+export function isBlockedBeaconNoise(event: SentryEventLike): boolean {
+  const values = event.exception?.values;
+  const thrown = values?.[values.length - 1];
+  if (thrown?.type !== "TypeError" || thrown.mechanism?.handled !== false) {
+    return false;
+  }
+  const host = FETCH_FAILURE_WITH_HOST.exec(thrown.value ?? "")?.[1]?.toLowerCase();
+  if (!host) return false;
+  return BLOCKED_BEACON_HOSTS.some(
+    (blocked) => host === blocked || host.endsWith(`.${blocked}`),
+  );
+}
+
 export interface SentryPrivacyOptions {
   sendDefaultPii: false;
   enableLogs: false;
-  beforeSend: <E extends SentryEventLike>(event: E) => E;
+  beforeSend: <E extends SentryEventLike>(event: E) => E | null;
   beforeSendTransaction: <E extends SentryEventLike>(event: E) => E;
   beforeBreadcrumb: (
     breadcrumb: SentryBreadcrumbLike,
@@ -230,6 +278,7 @@ export function sentryPrivacyOptions(): SentryPrivacyOptions {
     sendDefaultPii: false,
     enableLogs: false,
     beforeSend: (event) => {
+      if (isBlockedBeaconNoise(event)) return null;
       scrubSentryEvent(event);
       return event;
     },
