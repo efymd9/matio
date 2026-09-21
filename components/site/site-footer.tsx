@@ -75,12 +75,17 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
           <FooterLink href="/">{t.footer.browse}</FooterLink>
           <FooterLink href="/about">{t.footer.about}</FooterLink>
           <FooterLink href="/press">{t.footer.press}</FooterLink>
+          {/* No prefetch: for a signed-out visitor proxy.ts answers
+              /subscribe with a 307 to Clerk's origin, and the prefetch
+              fetch dies on CORS as an unhandled "Failed to fetch" (#259). */}
           {paymentsEnabled && (
-            <FooterLink href="/subscribe">
+            <FooterLink href="/subscribe" prefetch={false}>
               {t.footer.subscribe}
             </FooterLink>
           )}
-          <FooterLink href="/api/billing-portal">
+          {/* A route handler with a side effect (it creates a Stripe portal
+              session) — a plain <a>, never a prefetching <Link> (#259). */}
+          <FooterLink href="/api/billing-portal" routeHandler>
             {t.footer.manage}
           </FooterLink>
           <FooterLink href="/terms">{t.footer.terms}</FooterLink>
@@ -114,10 +119,13 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
             <FooterLink href="/">{t.footer.browse}</FooterLink>
             <FooterLink href="/about">{t.footer.about}</FooterLink>
             <FooterLink href="/press">{t.footer.press}</FooterLink>
+            {/* Same two rules as the mobile row above (#259). */}
             {paymentsEnabled && (
-              <FooterLink href="/subscribe">{t.footer.subscribe}</FooterLink>
+              <FooterLink href="/subscribe" prefetch={false}>
+                {t.footer.subscribe}
+              </FooterLink>
             )}
-            <FooterLink href="/api/billing-portal">
+            <FooterLink href="/api/billing-portal" routeHandler>
               {t.footer.manage}
             </FooterLink>
             <li>
@@ -173,15 +181,31 @@ function FooterColumn({
 function FooterLink({
   href,
   children,
+  prefetch,
+  routeHandler = false,
 }: {
   href: string;
   children: React.ReactNode;
+  // `false` only — for a page whose prefetch cannot succeed (#259). Left
+  // out, next/link keeps its default viewport prefetch.
+  prefetch?: false;
+  // The target is a route handler, not a page: render a plain <a>. There is
+  // no client navigation to gain, and next/link would PREFETCH it the moment
+  // the footer scrolls into view — a GET that runs the handler (#259).
+  routeHandler?: boolean;
 }) {
+  const className = "transition-colors hover:text-cream";
   return (
     <li>
-      <Link href={href} className="transition-colors hover:text-cream">
-        {children}
-      </Link>
+      {routeHandler ? (
+        <a href={href} className={className}>
+          {children}
+        </a>
+      ) : (
+        <Link href={href} prefetch={prefetch} className={className}>
+          {children}
+        </Link>
+      )}
     </li>
   );
 }
