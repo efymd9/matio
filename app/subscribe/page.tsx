@@ -178,12 +178,15 @@ function AlreadySubscribed({ sub, t }: { sub: Subscription; t: Dict }) {
           {t.subscribe.yourPlanIs(sub.plan, sub.status)}
         </p>
         <div className="mt-7 flex flex-wrap justify-center gap-2.5">
-          <Link
+          {/* A plain <a>, not <Link>: the target is a route handler that
+              creates a Stripe portal session on every GET, and next/link
+              would prefetch it the moment this button is on screen (#259). */}
+          <a
             href="/api/billing-portal"
             className="inline-flex h-11 items-center rounded-md bg-white px-7 text-sm font-bold text-black transition-colors hover:bg-white/90"
           >
             {t.subscribe.manageSubscription}
-          </Link>
+          </a>
           <Link
             href="/"
             className="inline-flex h-11 items-center rounded-md border border-white/15 bg-white/[0.06] px-7 text-sm font-semibold text-cream transition-colors hover:bg-white/[0.12]"

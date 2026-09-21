@@ -107,8 +107,15 @@ function SiteHeaderContent({
           <NavLink href="/press" active={pathname === "/press"}>
             {t.footer.press}
           </NavLink>
+          {/* No prefetch: for a signed-out visitor proxy.ts answers
+              /subscribe with a 307 to Clerk's origin, and the prefetch
+              fetch dies on CORS as an unhandled "Failed to fetch" (#259). */}
           {paymentsEnabled && (
-            <NavLink href="/subscribe" active={pathname === "/subscribe"}>
+            <NavLink
+              href="/subscribe"
+              active={pathname === "/subscribe"}
+              prefetch={false}
+            >
               {t.header.subscribe}
             </NavLink>
           )}
@@ -129,15 +136,19 @@ function SiteHeaderContent({
 function NavLink({
   href,
   active,
+  prefetch,
   children,
 }: {
   href: string;
   active: boolean;
+  // `false` only — left out, next/link keeps its default viewport prefetch.
+  prefetch?: false;
   children: React.ReactNode;
 }) {
   return (
     <Link
       href={href}
+      prefetch={prefetch}
       className={cn(
         "-my-2 px-2 py-2 transition-colors",
         active
@@ -193,7 +204,8 @@ function MobileNavMenu({
               <Menu.Item
                 closeOnClick
                 className="block rounded-md px-3 py-2.5 text-sm font-medium text-cream/85 outline-none transition-colors data-[highlighted]:bg-cream/8 data-[highlighted]:text-cream"
-                render={<Link href="/subscribe" />}
+                // Same rule as the desktop nav link above (#259).
+                render={<Link href="/subscribe" prefetch={false} />}
               >
                 {t.header.subscribe}
               </Menu.Item>
