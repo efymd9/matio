@@ -19,7 +19,7 @@ description: Карта живой инфраструктуры Matio (хост�
 | GitHub | `efymd9/matio`, **публичный** | ruleset `protect-main`: PR обязателен, обходов нет, обязательные чеки — `web (lint · types · tests)` и `Vercel – matio`, strict (ветка обязана быть актуальной). Доска: `https://github.com/users/efymd9/projects/1` |
 | Vercel (прод) | проект `mad-matttts-projects/matio` (`prj_bT5c7cdVTRzAIPX7uLGYjQLBF5EI`) | production-ветка **`production`**; функции пиннуты в **fra1** (`vercel.json`) — рядом с Neon; без этого каждый запрос к БД шёл через Атлантику (TTFB ~1s → ~300ms) |
 | Vercel (staging) | второй проект на том же репозитории, `matio-staging.vercel.app` | production-ветка `main`; на PR присутствуют чеки обоих проектов (`Vercel – matio` — обязательный, `Vercel – matio-staging` — нет); вход по паролю (`STAGING_LOCK_PASSWORD`, см. «Staging») |
-| Neon (Postgres 18) | проект `little-base-06482402`, aws-eu-central-1 | пулер; `db/index.ts` с `prepare: false`; у staging — своя ветка того же проекта |
+| Neon (Postgres 18) | проект `little-base-06482402`, aws-eu-central-1; план **Launch** с 17.09.2026 (до того free) | пулер; `db/index.ts` с `prepare: false`; у staging — своя ветка того же проекта; compute 0.25–8 CU, авто-suspend через 5 минут простоя; PITR по-прежнему 6 ч (`history_retention_seconds: 21600`) |
 | Clerk | продовый инстанс, домены `clerk.matio.tv` / `accounts.matio.tv` | вход по email-коду включён (гостевые аккаунты беспарольные) |
 | Stripe | **LIVE**, вебхук `we_1Tbdh2CGXbzphNyzsw1zWSZf` → `https://matio.tv/api/webhooks/stripe` | **платежи ВКЛЮЧЕНЫ с 09.09.2026**: `PAYMENTS_ENABLED=1`, `STRIPE_PRICE_MONTHLY` = $25/мес (`price_1UDhk3…`, #207), `PAY_FIRST_CHECKOUT` стоит, `WALLET_EXPRESS_CHECKOUT` в проде НЕ задан (только стенд). Стенд — **песочница Stripe**: sk_test/pk_test, свой `STRIPE_WEBHOOK_SECRET`, payment-method domain `matio-staging.vercel.app` зарегистрирован, head office задан в тестовом Stripe Tax. Ключи удалять нельзя (build guard + зеркало вебхука) |
 | Mux | **платный план; аккаунт ОБЩИЙ с другим проектом владельца (courseplayer)** | потолка 10 ассетов больше нет; чужие ассеты в дашборде — не мусор matio, не удалять; свои — по `passthrough` = `episodes.id` (см. CLAUDE.md «Mux») |
@@ -548,6 +548,19 @@ Release + бамп `package.json`. Ритуал — скилл `/release`. Ме�
     стенд и секреты, проверить выкладку прода ручным запуском воркфлоу — и
     только потом переводить продовый проект на ветку `production`. Наоборот
     получается окно, в котором прод нечем выложить вообще.
+
+14. **Сообщение `exceeded the compute time quota` в «Failed query …» — это
+    лимит плана Neon, а не код.** 17.09.2026 прод отдавал 500 на всём, что
+    ходит в БД, 3 ч 20 мин (#257): на бесплатном плане кончилась месячная
+    квота compute. Базу не давал усыпить Uptime-монитор, который Sentry
+    **создал сам** (auto-detected) на `https://matio.tv` с интервалом 60 с:
+    `/` — `force-dynamic` и на каждый запрос читает БД, а Neon засыпает через
+    5 минут простоя. Отсюда правило: **внешний пинг чаще раза в 5 минут
+    смотрит только в `/api/healthz`** (он намеренно без БД); `/api/readyz`
+    — реже, он будит compute. На Launch квоты нет — тот же пинг теперь
+    превращается в счёт (~200 CU-часов/мес при базе 24/7). Проверка:
+    `active_time_seconds` проекта (Neon `describe_project`) за сутки заметно
+    меньше 86400 — значит, база спит.
 
 ## Куда смотреть дальше
 
