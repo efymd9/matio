@@ -1,0 +1,43 @@
+# osv-scanner config for mobile/package-lock.json.
+#
+# WHERE THIS FILE LIVES MATTERS: osv-scanner reads `osv-scanner.toml` from the
+# directory of the lockfile it is scanning, and the config does NOT propagate to
+# child directories — a file in the repo root would not cover this lock. The
+# root lock (pnpm-lock.yaml) has no ignores and therefore no config file.
+#
+# RULES (#256): an entry here is the LAST resort — first `npm update <pkg>`,
+# then a scoped `overrides` in package.json when the consumer is API-compatible.
+# What remains is what cannot be fixed today. Every entry carries a truthful
+# `reason` (say so plainly when the package DOES ship in the app) and an
+# `ignoreUntil`: on that date the scanner starts reporting it again and the
+# nightly run goes red — that is the review reminder, do not push the date out
+# without re-checking upstream. Mirror every entry in docs/registry.md.
+# Cap: 5 entries. Re-check: 2026-12-20.
+
+# image-size 1.2.1 <- metro 0.84.4 (range ^1.0.2) <- @expo/metro <- expo.
+# No fixed release exists on any line (advisory: last_affected 2.0.2).
+[[IgnoredVulns]]
+id = "GHSA-5p2g-fcmc-qvqq"
+ignoreUntil = 2026-12-20
+reason = "No fixed version exists upstream (all releases through 2.0.2 affected). Build-time only: Metro calls image-size to read the dimensions of the project's OWN asset files while bundling; it never parses untrusted images. Verified absent from the exported iOS bundle (0 modules in the source map, #256)."
+
+[[IgnoredVulns]]
+id = "GHSA-w3rx-r6r6-pgpr"
+ignoreUntil = 2026-12-20
+reason = "Same package and same exposure as GHSA-5p2g-fcmc-qvqq (image-size ICNS parser loop): no fixed version upstream, Metro build-time only on the project's own assets, absent from the exported iOS bundle (#256)."
+
+# stream-json 1.9.1 <- jayson 4.3.0 (range ^1.9.1) <- @solana/web3.js
+#   <- @solana/wallet-adapter-base <- @clerk/clerk-js <- @clerk/expo.
+# Fix is 3.5.0: ESM-only, node >=22, entry points moved to ./src/* — jayson does
+# a CJS require('stream-json/streamers/StreamValues'), so an override breaks it.
+[[IgnoredVulns]]
+id = "GHSA-528h-pc64-c93x"
+ignoreUntil = 2026-12-20
+reason = "Unreachable. The flaw is in the pick/ignore/filter/replace filters; jayson requires only StreamValues and Verifier, and only from its SERVER-side lib/utils.js. @solana/web3.js imports just jayson/lib/client/browser, which does not load utils.js. Verified: stream-json, jayson and @solana/web3.js are all absent from the exported iOS bundle (#256). The fixed 3.5.0 is ESM-only and not loadable by jayson's CJS require."
+
+# decode-uri-component 0.2.2 <- query-string 7.1.3 (range ^0.2.2) <- expo-router.
+# NOT a build-time-only entry — read the reason.
+[[IgnoredVulns]]
+id = "GHSA-vcc3-ghjq-m6fr"
+ignoreUntil = 2026-12-20
+reason = "SHIPS IN THE APP (present in the exported iOS bundle): expo-router parses an incoming path's query with query-string, which calls decode-uri-component. Accepted because the only fix, 0.5.0, is ESM-only while query-string 7.1.3 does a CJS require() and calls the export as a function — an override would break deep-link parsing for every user. Exposure is a client-side stall on the device that opens a crafted percent-encoded deep link; no server, no data, no other user. Unblocks when expo-router drops query-string 7 (#256)."
