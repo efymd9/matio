@@ -371,9 +371,13 @@ urgent — it costs one command.
   lose both and every dump is scrap. Restoring by hand:
   [docs/runbooks/db-restore.md](./docs/runbooks/db-restore.md). Neon's PITR
   stays as the fast "oops, deleted the wrong rows" layer, not as the backup —
-  and its window is **6 hours** (free_v3, `history_retention_seconds: 21600`):
-  shorter than the gap between daily dumps, so an incident noticed in the
-  morning is already past PITR. `db-restore-check` has run on schedule from
+  and its window is **6 hours** (`history_retention_seconds: 21600` — still
+  the value after the project moved to the paid **Launch** plan on
+  2026-09-17; the plan allows more, raising it is an owner decision with a
+  storage price): shorter than the gap between daily dumps, so an incident
+  noticed in the morning is already past PITR. The move to Launch was forced:
+  the free plan's monthly compute quota ran out and production answered 500
+  for 3h20m (#257) — on Launch there is no quota to run out, there is a bill. `db-restore-check` has run on schedule from
   2026-09-01; before that its only run was a manual `workflow_dispatch`
   (2026-08-06). `db-backup` runs daily and green; its start drifts hours off
   the nominal 03:40 UTC — normal Actions queueing.
@@ -1218,7 +1222,7 @@ infra/
 - Vercel projects — TWO: **prod** `mad-matttts-projects/matio` (id `prj_bT5c7cdVTRzAIPX7uLGYjQLBF5EI`, `matio.tv`, follows the `production` branch) and **staging** `mad-matttts-projects/matio-staging` (`matio-staging.vercel.app`, follows `main`; whole origin behind Basic Auth via `lib/staging-lock.ts` + `STAGING_LOCK_PASSWORD`, `/api/healthz` open and answering `"environment":"staging"`)
 - Prod URL: `https://matio.tv` (apex is canonical; `www.matio.tv` 307-redirects to apex; legacy Vercel alias `matio-ten.vercel.app` still resolves)
 - Functions pinned to **`fra1`** (Frankfurt) via `vercel.json` so they co-locate with Neon's `aws-eu-central-1`. Without this every DB query was a trans-atlantic round-trip; warm TTFB dropped from ~1s to ~300ms after pinning.
-- Neon project: `little-base-06482402` (org owner account, aws-eu-central-1, Postgres 18, pooled endpoint)
+- Neon project: `little-base-06482402` (org owner account, aws-eu-central-1, Postgres 18, pooled endpoint) — **Launch plan since 2026-09-17** (`subscription_type: launch_v3`; free before that). Compute autoscales 0.25–8 CU and suspends after 5 idle minutes — anything that hits a DB-backed URL every minute (an uptime monitor pointed at `/` instead of `/api/healthz`) keeps it awake 24/7, which is what exhausted the free quota (#257)
 - **Business entity**: UK **limited company** — **DEEP ORDINARY LTD**, company
   no. 17381666, incorporated 2026-08-04, registered office 66 Paul Street,
   London EC2A 4NA (a registered-office service address, safe to publish — it
