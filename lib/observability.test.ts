@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isBlockedBeaconNoise,
+  isInjectedScriptNoise,
   redactEmails,
   resolveRelease,
   resolveStage,
@@ -11,6 +12,8 @@ import {
   sentryPrivacyOptions,
   type SentryEventLike,
   type SentryExceptionValueLike,
+  type SentryHintLike,
+  type SentryStackFrameLike,
 } from "./observability";
 
 // These are not "does the function run" tests. The scrubbers are the only thing
@@ -378,6 +381,267 @@ describe("blocked Mux Data beacons (#265)", () => {
     };
 
     expect(beforeSend(event)).toBe(event);
+  });
+});
+
+// The page the stray script ran on. The browser SDK fills `request.url` from
+// `location.href` before any hook runs (HttpContext's `preprocessEvent`).
+const PAGE_URL = "https://matio.tv/watch/the-scarlet-oath";
+
+const M_ID = "Cannot read properties of undefined (reading 'M_ID')";
+
+/** A frame as `beforeSend` receives it — the filename already normalised. */
+function frame(filename: string, lineno = 1, colno = 1): SentryStackFrameLike {
+  return { filename, lineno, colno };
+}
+
+/** The stack of #271, oldest frame first as Sentry orders it: one file. */
+const EXECUTOR_FRAMES = [
+  frame("app:///executors/200.js", 1, 4410),
+  frame("app:///executors/200.js", 1, 2210),
+  frame("app:///executors/200.js", 1, 1830),
+];
+
+/** An unhandled error the way the browser SDK hands it to `beforeSend`. */
+function thrownFrom(
+  frames: SentryStackFrameLike[],
+  thrown: SentryExceptionValueLike = {},
+): SentryEventLike {
+  return {
+    request: { url: PAGE_URL },
+    exception: {
+      values: [
+        {
+          type: "TypeError",
+          value: M_ID,
+          mechanism: { handled: false },
+          stacktrace: { frames },
+          ...thrown,
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * The hint beside it: the thrown error itself, whose Chromium `stack` still
+ * names every frame's real origin — the part the SDK wrote `app://` over.
+ */
+function thrownAt(...locations: string[]): SentryHintLike {
+  return thrownWithMessage(M_ID, locations);
+}
+
+function thrownWithMessage(message: string, locations: string[]): SentryHintLike {
+  const error = new TypeError(message);
+  error.stack = [`TypeError: ${message}`, ...locations.map((at) => `    at f (${at})`)]
+    .join("\n");
+  return { originalException: error };
+}
+
+/** EXECUTOR_FRAMES' raw locations under one origin, newest first. */
+function executorLocations(origin: string): string[] {
+  return [
+    `${origin}/executors/200.js:1:1830`,
+    `${origin}/executors/200.js:1:2210`,
+    `${origin}/executors/200.js:1:4410`,
+  ];
+}
+
+describe("scripts injected into the page (#271)", () => {
+  // Every case but the drops is a real error that must keep reaching the
+  // tracker: the filter fails open, so each one pins a way it could widen.
+
+  it.each([
+    ["our own origin", "https://matio.tv"],
+    // Chromium reports an extension's origin as `chrome-extension://<id>`, so
+    // the SDK normalises its frames to `app:///…` exactly like ours.
+    ["a Chromium extension", "chrome-extension://abcdefghijklmnop"],
+  ])("drops an unhandled error thrown wholly by a stray script on %s", (_name, origin) => {
+    const { beforeSend } = sentryPrivacyOptions();
+    // The raw stack also holds the SDK's own XHR wrapper (in our chunk), which
+    // the SDK strips from the frames — only the frames' locations are looked up.
+    const hint = thrownAt(
+      ...executorLocations(origin),
+      "https://matio.tv/_next/static/chunks/sentry.js:2:300",
+    );
+
+    expect(beforeSend(thrownFrom(EXECUTOR_FRAMES), hint)).toBeNull();
+  });
+
+  it("keeps it the moment one frame is ours — our code may have called theirs", () => {
+    const { beforeSend } = sentryPrivacyOptions();
+    const event = thrownFrom([
+      ...EXECUTOR_FRAMES,
+      frame("app:///_next/static/chunks/x.js", 1, 900),
+    ]);
+    const hint = thrownAt(
+      ...executorLocations("https://matio.tv"),
+      "https://matio.tv/_next/static/chunks/x.js:1:900",
+    );
+
+    expect(beforeSend(event, hint)).toBe(event);
+  });
+
+  it.each([
+    "chrome-extension://abcdefghijklmnop/content.js",
+    "moz-extension://0f1e2d3c-dummy/content.js",
+    "safari-web-extension://0F1E2D3C-DUMMY/content.js",
+    "safari-extension://com.example.dummy/content.js",
+  ])("drops a stack made only of extension frames: %s", (filename) => {
+    // Firefox and Safari report an extension's origin as `null`, so the scheme
+    // survives normalisation and the frame proves itself — no hint needed.
+    const { beforeSend } = sentryPrivacyOptions();
+
+    expect(beforeSend(thrownFrom([frame(filename), frame(filename, 2, 7)]))).toBeNull();
+  });
+
+  it.each([
+    // posthog-js 1.433 default (`strict_script_versioning: "fallback"`): the
+    // lazy bundles carry the version in the PATH and no `?v=` — session
+    // recording is on, surveys / exception autocapture / web vitals load alike.
+    "ingest/static/1.433.4/lazy-recorder.js",
+    // …and the remote config, a script of its own.
+    "ingest/array/phc_dummy/config.js",
+  ])("keeps PostHog's scripts, served from our own origin through /ingest: %s", (path) => {
+    const { beforeSend } = sentryPrivacyOptions();
+    const event = thrownFrom([frame(`app:///${path}`, 1, 800), frame(`app:///${path}`, 1, 90)]);
+    const hint = thrownAt(
+      `https://matio.tv/${path}:1:90`,
+      `https://matio.tv/${path}:1:800`,
+    );
+
+    expect(beforeSend(event, hint)).toBe(event);
+  });
+
+  it.each([
+    ["a message of 20 000 scheme characters", "a".repeat(20_000)],
+    ["a URL with a 20 000-character host", `https://${"a".repeat(20_000)}`],
+  ])("reads a 50-frame stack in linear time despite %s", (_name, message) => {
+    // The raw stack is scanned once per frame. Without a left boundary on the
+    // scheme every offset of a long letter run restarts the match — tens of
+    // seconds here, synchronously on the page's main thread. The 1 s ceiling
+    // is loose on purpose: it tells linear from quadratic, not fast from slow.
+    const { beforeSend } = sentryPrivacyOptions();
+    const columns = Array.from({ length: 50 }, (_, i) => 10 * i + 1);
+    const event = thrownFrom(columns.map((col) => frame("app:///executors/200.js", 1, col)));
+    const hint = thrownWithMessage(
+      message,
+      columns.map((col) => `https://matio.tv/executors/200.js:1:${col}`),
+    );
+
+    const started = performance.now();
+    const verdict = beforeSend(event, hint);
+    const elapsed = performance.now() - started;
+
+    expect(verdict).toBeNull();
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it("keeps an inline script of the page — its frame is the page, not a .js file", () => {
+    const { beforeSend } = sentryPrivacyOptions();
+    const event = thrownFrom([frame("app:///watch/the-scarlet-oath", 12, 5)]);
+
+    expect(beforeSend(event, thrownAt(`${PAGE_URL}:12:5`))).toBe(event);
+  });
+
+  it("keeps a vendor's script, both as a raw URL and as the SDK really sends it", () => {
+    // Normalisation turns clerk.matio.tv's script into `app:///npm/…` too —
+    // only the raw stack still says it is not ours.
+    const { beforeSend } = sentryPrivacyOptions();
+    const clerk = "https://clerk.matio.tv/npm/@clerk/clerk-js@6/dist/clerk.browser.js";
+    const raw = thrownFrom([frame(clerk, 1, 500)]);
+    const normalised = thrownFrom([
+      frame("app:///npm/@clerk/clerk-js@6/dist/clerk.browser.js", 1, 500),
+    ]);
+
+    expect(beforeSend(raw)).toBe(raw);
+    expect(beforeSend(normalised, thrownAt(`${clerk}:1:500`))).toBe(normalised);
+  });
+
+  it("survives events with no stack to look at", () => {
+    // Shared by Node, edge and the browser: none of these may throw or drop.
+    const { beforeSend } = sentryPrivacyOptions();
+    const shapes: SentryEventLike[] = [
+      {},
+      { message: M_ID },
+      { exception: {} },
+      { exception: { values: [] } },
+      thrownFrom([]),
+      thrownFrom([], { stacktrace: undefined }),
+      thrownFrom([], { stacktrace: {} }),
+    ];
+    const hints: (SentryHintLike | undefined)[] = [
+      undefined,
+      {},
+      { originalException: M_ID },
+      { originalException: null },
+      { originalException: { stack: 42 } },
+    ];
+
+    for (const event of shapes) {
+      for (const hint of hints) {
+        expect(beforeSend(event, hint)).toBe(event);
+      }
+    }
+  });
+
+  it.each([
+    "app:///.next/server/chunks/x.js",
+    "app:///_next/server/chunks/ssr/x.js",
+    "/var/task/node_modules/postgres/src/connection.js",
+    "node:internal/process/task_queues",
+  ])("never matches a server frame: %s", (filename) => {
+    // Node and edge rewrite the dist dir to `app:///_next/…`, and a server
+    // stack names file paths — there is no `scheme://host` to prove anything.
+    const { beforeSend } = sentryPrivacyOptions();
+    const event = thrownFrom([frame(filename)]);
+    const hint = thrownAt(
+      "/var/task/.next/server/chunks/x.js:1:1",
+      "node:internal/process/task_queues:95:5",
+    );
+
+    expect(beforeSend(event)).toBe(event);
+    expect(beforeSend(event, hint)).toBe(event);
+  });
+
+  it("reports an app:/// stack whose origin the raw stack does not confirm", () => {
+    // `app:///x.js` alone is any origin at all: without the thrown error's own
+    // stack, or when that stack does not hold the frame, it is doubt.
+    const { beforeSend } = sentryPrivacyOptions();
+    const event = thrownFrom(EXECUTOR_FRAMES);
+    const noPage: SentryEventLike = { ...thrownFrom(EXECUTOR_FRAMES), request: undefined };
+
+    expect(beforeSend(event)).toBe(event);
+    expect(beforeSend(event, thrownAt("https://matio.tv/executors/200.js:9:9"))).toBe(event);
+    expect(beforeSend(event, thrownAt(...executorLocations("https://bot.example.invalid"))))
+      .toBe(event);
+    // No page URL = no host to call "ours".
+    expect(beforeSend(noPage, thrownAt(...executorLocations("https://matio.tv")))).toBe(noPage);
+  });
+
+  it.each([
+    ["a frame with no filename", { lineno: 1, colno: 1 }],
+    ["an <anonymous> frame", frame("<anonymous>")],
+    ["a native frame", frame("native")],
+  ])("keeps the stray stack when it also holds %s", (_name, doubt) => {
+    const { beforeSend } = sentryPrivacyOptions();
+    const event = thrownFrom([...EXECUTOR_FRAMES, doubt]);
+
+    expect(beforeSend(event, thrownAt(...executorLocations("https://matio.tv")))).toBe(event);
+  });
+
+  it("lets a HANDLED error through — someone reported it on purpose", () => {
+    const hint = thrownAt(...executorLocations("https://matio.tv"));
+
+    expect(
+      isInjectedScriptNoise(
+        thrownFrom(EXECUTOR_FRAMES, { mechanism: { handled: true } }),
+        hint,
+      ),
+    ).toBe(false);
+    expect(
+      isInjectedScriptNoise(thrownFrom(EXECUTOR_FRAMES, { mechanism: undefined }), hint),
+    ).toBe(false);
   });
 });
 
