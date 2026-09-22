@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.2](https://github.com/efymd9/matio/compare/matio-v0.12.1...matio-v0.12.2) (2026-09-22)
+
+
+### Bug fixes
+
+* ошибки, чей стек целиком из внедрённого чужого скрипта, больше не тратят квоту Sentry ([#271](https://github.com/efymd9/matio/issues/271)) ([#274](https://github.com/efymd9/matio/issues/274)) ([89c9172](https://github.com/efymd9/matio/commit/89c9172ac56572f0ba0a30f2c303f780ef918f4e))
+
+
+### Documentation
+
+* /duty — шаг «Sentry за сутки» в стартовом ритуале: каждая нерешённая issue получает решение, квота Developer 5000 ([#257](https://github.com/efymd9/matio/issues/257)) ([#272](https://github.com/efymd9/matio/issues/272)) ([80822d0](https://github.com/efymd9/matio/commit/80822d0d43a2e55946f8118a3cb78757d65ccd2c))
+
 ## [0.12.1](https://github.com/efymd9/matio/compare/matio-v0.12.0...matio-v0.12.1) (2026-09-21)
 
 
