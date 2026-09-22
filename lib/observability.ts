@@ -71,10 +71,22 @@ export interface SentrySpanLike {
   data?: Record<string, unknown>;
 }
 
+export interface SentryStackFrameLike {
+  filename?: string;
+  lineno?: number;
+  colno?: number;
+}
+
 export interface SentryExceptionValueLike {
   type?: string;
   value?: string;
   mechanism?: { handled?: boolean };
+  stacktrace?: { frames?: SentryStackFrameLike[] };
+}
+
+/** What `beforeSend` gets next to the event — the thrown value, as thrown. */
+export interface SentryHintLike {
+  originalException?: unknown;
 }
 
 export interface SentryEventLike {
@@ -252,10 +264,121 @@ export function isBlockedBeaconNoise(event: SentryEventLike): boolean {
   );
 }
 
+/** The schemes a browser extension's own scripts run under. */
+const EXTENSION_SCHEMES = [
+  "chrome-extension",
+  "moz-extension",
+  "safari-web-extension",
+  "safari-extension",
+];
+
+const APP_PREFIX = "app:///";
+
+/** `scheme` and `host` at the head of an absolute URL. */
+const URL_HEAD = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)/i;
+
+function isExtensionScheme(scheme: string | undefined): boolean {
+  return scheme !== undefined && EXTENSION_SCHEMES.includes(scheme.toLowerCase());
+}
+
+function escapeForRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Where an `app:///` frame really came from. The frame cannot say: in the
+ * browser the SDK's frame normalisation (`@sentry/nextjs`,
+ * `clientNormalizationIntegration`) writes `app://` over the origin of EVERY
+ * URL it can parse, and it runs before `beforeSend` — so our own origin, a
+ * vendor's CDN (`clerk.matio.tv`, `js.stripe.com`) and a Chromium extension
+ * (whose origin Chromium reports as `chrome-extension://<id>`) all arrive as
+ * the same `app:///<path>`. The thrown error's own `stack` is the one place no
+ * integration rewrites, so this frame's `path:line:column` is looked up there,
+ * and every place it appears must be the page's host or an extension. Absent,
+ * on another host, or no line and column to look for: not proven.
+ */
+function appFrameIsStray(
+  path: string,
+  frame: SentryStackFrameLike,
+  rawStack: string | undefined,
+  pageHost: string | undefined,
+): boolean {
+  if (!rawStack || frame.lineno === undefined || frame.colno === undefined) {
+    return false;
+  }
+  const location = new RegExp(
+    `([a-z][a-z0-9+.-]*)://([^/\\s()@]*)/${escapeForRegExp(path)}:${frame.lineno}:${frame.colno}(?!\\d)`,
+    "gi",
+  );
+  let seen = false;
+  for (const [, scheme, host] of rawStack.matchAll(location)) {
+    const ours = /^https?$/i.test(scheme) && host.toLowerCase() === pageHost;
+    if (!ours && !isExtensionScheme(scheme)) return false;
+    seen = true;
+  }
+  return seen;
+}
+
+/**
+ * A frame proven to belong to a script the page never served: an extension's
+ * (Firefox and Safari report its origin as `null`, so the scheme survives into
+ * the frame), or a `.js` file on our own origin outside `/_next/` — all of our
+ * JavaScript is `/_next/static/…`, nothing else ships (`public/` has no `.js`).
+ * An inline script's frame names the page URL, which does not end in `.js`;
+ * neither do PostHog's lazy bundles, the one same-origin script outside
+ * `/_next/` we load (`/ingest/static/<name>.js?v=<version>`).
+ */
+function isStrayFrame(
+  frame: SentryStackFrameLike,
+  rawStack: string | undefined,
+  pageHost: string | undefined,
+): boolean {
+  const filename = frame.filename;
+  if (!filename) return false;
+  if (!filename.startsWith(APP_PREFIX)) {
+    return isExtensionScheme(URL_HEAD.exec(filename)?.[1]);
+  }
+  const path = filename.slice(APP_PREFIX.length);
+  if (!path.endsWith(".js") || path.startsWith("_next/")) return false;
+  return appFrameIsStray(path, frame, rawStack, pageHost);
+}
+
+/**
+ * True for an UNHANDLED error whose every stack frame is a script someone else
+ * put into the page — an extension, a bot's injected helper (#271: two page
+ * loads threw 700 `reading 'M_ID'` from `app:///executors/200.js`, a file
+ * matio.tv has never served — a seventh of the plan's 5,000-error quota).
+ *
+ * Every frame must be proven stray, so the rule fails open: one frame under
+ * `_next/`, one frame with no filename, `<anonymous>`, a vendor's host, or no
+ * raw stack to confirm an `app:///` origin — and the event is reported. A
+ * handled error is a report someone asked for, as in `isBlockedBeaconNoise`.
+ * Server frames never match: Node and edge rewrite the dist dir to
+ * `app:///_next/…`, and a server stack names file paths, not `scheme://host`.
+ */
+export function isInjectedScriptNoise(
+  event: SentryEventLike,
+  hint?: SentryHintLike,
+): boolean {
+  const values = event.exception?.values;
+  const thrown = values?.[values.length - 1];
+  if (thrown?.mechanism?.handled !== false) return false;
+  const frames = thrown.stacktrace?.frames;
+  if (!frames || frames.length === 0) return false;
+  const stack = (hint?.originalException as { stack?: unknown } | null | undefined)
+    ?.stack;
+  const rawStack = typeof stack === "string" ? stack : undefined;
+  const pageHost = URL_HEAD.exec(event.request?.url ?? "")?.[2]?.toLowerCase();
+  return frames.every((frame) => isStrayFrame(frame, rawStack, pageHost));
+}
+
 export interface SentryPrivacyOptions {
   sendDefaultPii: false;
   enableLogs: false;
-  beforeSend: <E extends SentryEventLike>(event: E) => E | null;
+  beforeSend: <E extends SentryEventLike>(
+    event: E,
+    hint?: SentryHintLike,
+  ) => E | null;
   beforeSendTransaction: <E extends SentryEventLike>(event: E) => E;
   beforeBreadcrumb: (
     breadcrumb: SentryBreadcrumbLike,
@@ -277,8 +400,10 @@ export function sentryPrivacyOptions(): SentryPrivacyOptions {
   return {
     sendDefaultPii: false,
     enableLogs: false,
-    beforeSend: (event) => {
-      if (isBlockedBeaconNoise(event)) return null;
+    beforeSend: (event, hint) => {
+      if (isBlockedBeaconNoise(event) || isInjectedScriptNoise(event, hint)) {
+        return null;
+      }
       scrubSentryEvent(event);
       return event;
     },
