@@ -274,6 +274,9 @@ const EXTENSION_SCHEMES = [
 
 const APP_PREFIX = "app:///";
 
+/** Same-origin paths our own JavaScript is served from (see `isStrayFrame`). */
+const OWN_SCRIPT_DIRS = ["_next/", "ingest/"];
+
 /** `scheme` and `host` at the head of an absolute URL. */
 const URL_HEAD = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]*)/i;
 
@@ -306,8 +309,11 @@ function appFrameIsStray(
   if (!rawStack || frame.lineno === undefined || frame.colno === undefined) {
     return false;
   }
+  // The left boundary keeps the scan linear: without it a long run of scheme
+  // characters in the message is retried from every offset. Not a lookbehind —
+  // Safari < 16.4 throws on one when the RegExp is compiled.
   const location = new RegExp(
-    `([a-z][a-z0-9+.-]*)://([^/\\s()@]*)/${escapeForRegExp(path)}:${frame.lineno}:${frame.colno}(?!\\d)`,
+    `(?:^|[^a-z0-9+.-])([a-z][a-z0-9+.-]*)://([^/\\s()@]*)/${escapeForRegExp(path)}:${frame.lineno}:${frame.colno}(?!\\d)`,
     "gi",
   );
   let seen = false;
@@ -322,11 +328,13 @@ function appFrameIsStray(
 /**
  * A frame proven to belong to a script the page never served: an extension's
  * (Firefox and Safari report its origin as `null`, so the scheme survives into
- * the frame), or a `.js` file on our own origin outside `/_next/` — all of our
- * JavaScript is `/_next/static/…`, nothing else ships (`public/` has no `.js`).
- * An inline script's frame names the page URL, which does not end in `.js`;
- * neither do PostHog's lazy bundles, the one same-origin script outside
- * `/_next/` we load (`/ingest/static/<name>.js?v=<version>`).
+ * the frame), or a `.js` file on our own origin outside the two places we serve
+ * JavaScript from: `/_next/` (the app — `public/` has no `.js`) and `/ingest/`
+ * (PostHog, proxied to its asset host by `next.config.ts`: lazy bundles at
+ * `/ingest/static/<version>/<name>.js` — session recording, surveys, exception
+ * autocapture, web vitals — and the remote config at
+ * `/ingest/array/<token>/config.js`). An inline script's frame names the page
+ * URL, which does not end in `.js`.
  */
 function isStrayFrame(
   frame: SentryStackFrameLike,
@@ -339,7 +347,9 @@ function isStrayFrame(
     return isExtensionScheme(URL_HEAD.exec(filename)?.[1]);
   }
   const path = filename.slice(APP_PREFIX.length);
-  if (!path.endsWith(".js") || path.startsWith("_next/")) return false;
+  if (!path.endsWith(".js") || OWN_SCRIPT_DIRS.some((dir) => path.startsWith(dir))) {
+    return false;
+  }
   return appFrameIsStray(path, frame, rawStack, pageHost);
 }
 

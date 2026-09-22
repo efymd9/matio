@@ -428,8 +428,12 @@ function thrownFrom(
  * names every frame's real origin — the part the SDK wrote `app://` over.
  */
 function thrownAt(...locations: string[]): SentryHintLike {
-  const error = new TypeError(M_ID);
-  error.stack = [`TypeError: ${M_ID}`, ...locations.map((at) => `    at f (${at})`)]
+  return thrownWithMessage(M_ID, locations);
+}
+
+function thrownWithMessage(message: string, locations: string[]): SentryHintLike {
+  const error = new TypeError(message);
+  error.stack = [`TypeError: ${message}`, ...locations.map((at) => `    at f (${at})`)]
     .join("\n");
   return { originalException: error };
 }
@@ -489,6 +493,48 @@ describe("scripts injected into the page (#271)", () => {
     const { beforeSend } = sentryPrivacyOptions();
 
     expect(beforeSend(thrownFrom([frame(filename), frame(filename, 2, 7)]))).toBeNull();
+  });
+
+  it.each([
+    // posthog-js 1.433 default (`strict_script_versioning: "fallback"`): the
+    // lazy bundles carry the version in the PATH and no `?v=` — session
+    // recording is on, surveys / exception autocapture / web vitals load alike.
+    "ingest/static/1.433.4/lazy-recorder.js",
+    // …and the remote config, a script of its own.
+    "ingest/array/phc_dummy/config.js",
+  ])("keeps PostHog's scripts, served from our own origin through /ingest: %s", (path) => {
+    const { beforeSend } = sentryPrivacyOptions();
+    const event = thrownFrom([frame(`app:///${path}`, 1, 800), frame(`app:///${path}`, 1, 90)]);
+    const hint = thrownAt(
+      `https://matio.tv/${path}:1:90`,
+      `https://matio.tv/${path}:1:800`,
+    );
+
+    expect(beforeSend(event, hint)).toBe(event);
+  });
+
+  it.each([
+    ["a message of 20 000 scheme characters", "a".repeat(20_000)],
+    ["a URL with a 20 000-character host", `https://${"a".repeat(20_000)}`],
+  ])("reads a 50-frame stack in linear time despite %s", (_name, message) => {
+    // The raw stack is scanned once per frame. Without a left boundary on the
+    // scheme every offset of a long letter run restarts the match — tens of
+    // seconds here, synchronously on the page's main thread. The 1 s ceiling
+    // is loose on purpose: it tells linear from quadratic, not fast from slow.
+    const { beforeSend } = sentryPrivacyOptions();
+    const columns = Array.from({ length: 50 }, (_, i) => 10 * i + 1);
+    const event = thrownFrom(columns.map((col) => frame("app:///executors/200.js", 1, col)));
+    const hint = thrownWithMessage(
+      message,
+      columns.map((col) => `https://matio.tv/executors/200.js:1:${col}`),
+    );
+
+    const started = performance.now();
+    const verdict = beforeSend(event, hint);
+    const elapsed = performance.now() - started;
+
+    expect(verdict).toBeNull();
+    expect(elapsed).toBeLessThan(1000);
   });
 
   it("keeps an inline script of the page — its frame is the page, not a .js file", () => {
