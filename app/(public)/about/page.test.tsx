@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { en } from "@/lib/i18n/dictionaries";
-import { TEAM_SIZE } from "@/lib/about-team";
 import { AboutContent } from "@/components/about/about-content";
 
 // The route wrapper is thin — dict/locale/payments resolution and metadata.
@@ -27,7 +26,7 @@ describe("/about page wrapper", () => {
     expect(meta.robots).toMatchObject({ index: true });
   });
 
-  it("renders AboutContent with the resolved dict, mode and full roster", async () => {
+  it("renders AboutContent with the resolved dict and mode", async () => {
     const el = await AboutPage();
     expect(el.type).toBe("main");
     const body = el.props.children;
@@ -35,6 +34,5 @@ describe("/about page wrapper", () => {
     expect(body.props.t).toBe(en);
     expect(body.props.locale).toBe("en");
     expect(body.props.paymentsOn).toBe(false);
-    expect(body.props.team).toHaveLength(TEAM_SIZE);
   });
 });

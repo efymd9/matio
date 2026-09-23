@@ -2,12 +2,11 @@ import type { Metadata } from "next";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { getDict } from "@/lib/i18n/server";
 import { localeAlternates } from "@/lib/seo";
-import { teamForLocale } from "@/lib/about-team";
 import { AboutContent } from "@/components/about/about-content";
 
 // Bilingual studio page («About page v3» design, 2026-08-16): full-bleed 4K
-// hero, mission/vision, the one-principle manifest, values, the team slider
-// and the press hand-off. Doubles as the entity/E-E-A-T surface — the
+// hero, mission/vision, the one-principle manifest, values and the press
+// hand-off. Doubles as the entity/E-E-A-T surface — the
 // press-contact band restates the studio name, entity line and contact,
 // consistent with the legal pages and the Organization JSON-LD.
 export async function generateMetadata(): Promise<Metadata> {
@@ -31,7 +30,6 @@ export default async function AboutPage() {
         t={t}
         locale={locale}
         paymentsOn={paymentsOn}
-        team={teamForLocale(locale)}
       />
     </main>
   );

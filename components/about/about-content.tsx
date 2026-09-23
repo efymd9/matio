@@ -1,13 +1,11 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { Dict, Locale } from "@/lib/i18n/dictionaries";
-import type { TeamMember } from "@/lib/about-team";
-import { TeamSlider } from "./team-slider";
 import { PressContact } from "./press-contact";
 
 // The /about page body («About page v3» mock): 4K hero with the duotone
 // treatment, mission/vision splits, the one-principle manifest, the values
-// grid, the team slider band and the press hand-off banner. Presentational —
+// grid and the press hand-off banner. Presentational —
 // the route wrapper resolves dict/locale/payments and passes them down, so
 // the Lab renders this exactly as production does.
 
@@ -29,12 +27,10 @@ export function AboutContent({
   t,
   locale,
   paymentsOn,
-  team,
 }: {
   t: Dict;
   locale: Locale;
   paymentsOn: boolean;
-  team: TeamMember[];
 }) {
   const principles = paymentsOn
     ? t.about.principlesPaid
@@ -171,28 +167,6 @@ export function AboutContent({
               </p>
             </div>
           ))}
-        </div>
-      </section>
-
-      <section className="mt-20 tablet:mt-24">
-        <div className="mx-auto mb-6 max-w-7xl px-6 sm:px-12">
-          <SectionLabel>{t.about.teamLabel}</SectionLabel>
-        </div>
-        <div className="relative overflow-hidden border-y border-rust/30 bg-espresso-2 px-6 py-10 sm:px-12">
-          <div
-            aria-hidden="true"
-            className="absolute inset-x-0 top-0 h-px bg-linear-to-r from-transparent via-gold/45 to-transparent"
-          />
-          <div className="mx-auto max-w-7xl">
-            <TeamSlider
-              members={team}
-              heading1={t.about.teamHeading1}
-              heading2={t.about.teamHeading2}
-              sub={t.about.teamSub(team.length)}
-              prevLabel={t.about.teamPrev}
-              nextLabel={t.about.teamNext}
-            />
-          </div>
         </div>
       </section>
 

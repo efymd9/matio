@@ -583,7 +583,7 @@ app/
   (public)/                # Public catalog: /, /shows/[slug]
     about/                 # /about — studio page («About page v3» design):
                            #   4K hero, mission/vision, manifest, values,
-                           #   team slider, press hand-off; bilingual, indexed
+                           #   press hand-off; bilingual, indexed
     press/                 # /press — press room: boilerplate, press-kit ZIP
                            #   (public/press/matio-press-kit.zip, static),
                            #   press contact; bilingual, indexed
@@ -695,7 +695,7 @@ app/
 components/
   ui/                      # shadcn primitives (Base UI under the hood)
   about/                   # /about + /press bodies (about-content, press-
-                           #   content, press-contact band, team-slider) —
+                           #   content, press-contact band) —
                            #   presentational, dict/locale via props, each
                            #   with stories
 
@@ -924,10 +924,6 @@ lib/
                            #   YT, X, FB) — single source for the footer row
                            #   (locale-matched TikTok), Organization sameAs,
                            #   and llms.txt; universal, canonical clean URLs
-  about-team.ts            # /about team roster (owner content from the
-                           #   «About page v3» mock): names + localized
-                           #   roles/bios + card gradients; props for the
-                           #   team slider, deliberately NOT in dictionaries
   utm.ts                   # normalizeUtm() — shared UTM canonicalization
                            #   (trim+lowercase+strip; universal, app + PostHog)
   utils.ts                 # cn() from shadcn
@@ -942,10 +938,10 @@ lib/episode-access.ts (isEpisodeLocked), lib/continue-watching.ts,
 lib/branching.ts (branching-video rules — pure, see "Branching video"),
 lib/can-autoplay.ts, lib/checkout-session.ts / -trial.ts / -rate-limit.ts,
 lib/posthog-sessions.ts, lib/staging-lock.ts, lib/use-vertical-layout.ts,
-lib/api/ (types.ts universal + v1.ts server-only), lib/about-team.ts,
+lib/api/ (types.ts universal + v1.ts server-only),
 components/watch/signup-wall.tsx + vertical-chrome.tsx + watch-shell.tsx,
 components/site/visit-beacon.tsx (client half of /api/t),
-components/about/ (about/press bodies + team slider).
+components/about/ (about/press bodies).
 proxy.ts                   # Auth + admin gating (Next 16: was middleware.ts)
 instrumentation.ts         # Sentry register (Node/edge) + the onRequestError
                            #   export — without it App Router route/server-
