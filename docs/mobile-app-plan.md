@@ -629,8 +629,8 @@ board was its Lab.
   The screen is a `FlatList` whose `ListHeaderComponent` is the carousel block passed as an
   ELEMENT (an inline component type would remount the carousel on every render and lose its
   position) and whose footer is the tagline. The old Continue-watching rail left Home — «Up
-  next» is its role (same `useContinueWatching` hook, same refresh-on-save); `ContinueCard`
-  in `ui.tsx` is now unused (registry — `ui.tsx` belongs to #247). No `/v1` change; the two
+  next» is its role (same `useContinueWatching` hook, same refresh-on-save); the unused
+  `ContinueCard` left `ui.tsx` in #288. No `/v1` change; the two
   new app strings are `app.home.upNext` / `app.home.resume`.
 - **Browse** (`(tabs)/browse.tsx`): a glass search field (title, client-side, case- and
   accent-insensitive) AND one chip — All · the genres · Vertical (drawn only when a vertical

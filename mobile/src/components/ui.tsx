@@ -13,7 +13,6 @@ import {
 } from "react-native";
 import { Icon, type IconName } from "@/components/icon";
 import { useT } from "@/i18n/locale";
-import type { ContinueWatchingEntry } from "@/shared/api-types";
 import { body, colors, display, fonts, radius, SCREEN_PAD, space, toneStopsFor } from "@/theme";
 
 // ---------------------------------------------------------------- scrim
@@ -289,45 +288,6 @@ export function PosterCard({
   );
 }
 
-// 16:9 "continue watching" tile — the web rail's shape: hero art (poster as
-// the fallback), a resume bar along the bottom edge, show title + episode
-// under it. `fraction` comes from the server so the bar never disagrees with
-// the position the tap resumes at.
-const CONTINUE_W = 220;
-
-export function ContinueCard({
-  item,
-  onPress,
-}: {
-  item: ContinueWatchingEntry;
-  onPress?: () => void;
-}) {
-  const t = useT();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [{ width: CONTINUE_W }, pressed && { opacity: 0.8 }]}
-    >
-      <View>
-        <Artwork
-          uri={item.show.heroImageUrl ?? item.show.posterImageUrl}
-          toneKey={item.show.slug}
-          style={styles.continueArt}
-        />
-        <View style={styles.continueTrack}>
-          <View style={[styles.continueFill, { width: `${item.fraction * 100}%` }]} />
-        </View>
-      </View>
-      <Text numberOfLines={1} style={styles.posterTitle}>
-        {item.show.title}
-      </Text>
-      <Text numberOfLines={1} style={styles.continueMeta}>
-        {t.home.epShort(item.episodeNumber)} · {item.episodeTitle}
-      </Text>
-    </Pressable>
-  );
-}
-
 // ---------------------------------------------------------------- cards
 
 // The settings-style card group of the Account and Settings tabs (#245):
@@ -548,23 +508,6 @@ const styles = StyleSheet.create({
     marginTop: space(2),
     letterSpacing: 0.3,
   },
-  continueArt: {
-    width: CONTINUE_W,
-    height: (CONTINUE_W * 9) / 16,
-    borderRadius: radius.poster,
-  },
-  continueTrack: {
-    position: "absolute",
-    left: space(2),
-    right: space(2),
-    bottom: space(2),
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: colors.scrimTrack,
-    overflow: "hidden",
-  },
-  continueFill: { height: "100%", backgroundColor: colors.gold },
-  continueMeta: { ...body, color: colors.inkDim, fontSize: 11, marginTop: space(1) },
   groupLabel: {
     ...display,
     color: colors.gold,
