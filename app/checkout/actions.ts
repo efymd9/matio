@@ -11,10 +11,11 @@ import { createGuestCheckoutSession } from "@/app/subscribe/guest-actions";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { parseCheckoutSessionParam } from "@/lib/checkout-return";
-import type {
-  CheckoutSessionResult,
-  CheckoutTargetInput,
-  WalletCheckoutResult,
+import {
+  CheckoutRateLimitedError,
+  type CheckoutSessionResult,
+  type CheckoutTargetInput,
+  type WalletCheckoutResult,
 } from "@/lib/checkout-session";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { CHECKOUT_CLAIM_COOKIE } from "@/lib/guest-checkout";
@@ -28,8 +29,9 @@ import { getStripe } from "@/lib/stripe";
 // landing anonymous visitors back in the Clerk sign-up auth flow).
 //
 // Returns a CheckoutSessionResult: `embedded` (client secret → mount the Stripe
-// iframe in-page), `hosted` (no publishable key → full-navigate to Stripe), or
-// `redirect` (a guard bounce the client performs with router.replace).
+// iframe in-page), `hosted` (no publishable key → full-navigate to Stripe),
+// `redirect` (a guard bounce the client performs with router.replace), or
+// `rate_limited` (the signed-in account is over its hourly budget, #227).
 export async function createCheckoutSession(
   input: CheckoutTargetInput,
 ): Promise<CheckoutSessionResult> {
@@ -39,8 +41,17 @@ export async function createCheckoutSession(
   if (!paymentsEnabled()) return { kind: "redirect", to: "/" };
 
   const { userId } = await auth();
-  if (userId) return createAuthCheckoutSession(input);
-  return createGuestCheckoutSession(input);
+  if (!userId) return createGuestCheckoutSession(input);
+  try {
+    return await createAuthCheckoutSession(input);
+  } catch (err) {
+    // The rate limit becomes a CODE here (#233): a thrown message reaches the
+    // client masked behind a digest in production, so matching on its text
+    // would never work. Only this class — every other failure still rejects
+    // and gets the generic retry card.
+    if (err instanceof CheckoutRateLimitedError) return { kind: "rate_limited" };
+    throw err;
+  }
 }
 
 // Single entry point the paywall's wallet button calls (issue #210). Same

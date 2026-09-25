@@ -24,11 +24,15 @@ export type CheckoutTargetInput = {
 // the graceful fallback (no publishable key configured) that full-navigates to
 // the Stripe-hosted page exactly as before; `redirect` is a guard bounce
 // (already subscribed, rate-limited, flag off) the client performs with
-// router.replace.
+// router.replace; `rate_limited` is the signed-in account over its hourly
+// session budget (#227) — only the /checkout dispatcher produces it, from a
+// CheckoutRateLimitedError (#233), and the client shows the "in an hour" card
+// with no retry button.
 export type CheckoutSessionResult =
   | { kind: "embedded"; clientSecret: string; sessionId: string }
   | { kind: "hosted"; url: string }
-  | { kind: "redirect"; to: string };
+  | { kind: "redirect"; to: string }
+  | { kind: "rate_limited" };
 
 // What the paywall's wallet button gets back (issue #210). Distinct from
 // `embedded` because the client does something different with it: it mounts a
@@ -53,11 +57,14 @@ export type WalletCheckoutResult =
   | { kind: "redirect"; to: string };
 
 // Thrown by createAuthCheckoutSession when the account is over its hourly
-// session-creation budget (#227, lib/checkout-rate-limit.ts). A throw, not a
-// `redirect` result, on purpose: /checkout's client already turns a rejected
-// action into its retry card (`checkout.errorBody` + `retry`), which is the
-// honest answer — "try again later", not "go home". The message carries no
-// data (Next masks it behind a digest in production anyway).
+// session-creation budget (#227, lib/checkout-rate-limit.ts). The /checkout
+// dispatcher (app/checkout/actions.ts) catches exactly this class and answers
+// `{ kind: "rate_limited" }` (#233) — a code, because Next masks a thrown
+// message behind a digest in production, so the client could never tell this
+// apart from any other failure by its text. The client then says "try again in
+// an hour" with no retry button (a retry inside the hour only burns another
+// attempt); every other rejection keeps the generic retry card. The message
+// carries no data.
 export class CheckoutRateLimitedError extends Error {
   constructor() {
     super("checkout rate limited");

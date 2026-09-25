@@ -212,8 +212,10 @@ dead when it comes back into view, exactly like a signed-in buyer's.
   (`lib/checkout-rate-limit.ts:checkoutRateLimited`, same table, key
   `user:` + HMAC of the userId) after the auth guard and before any Stripe
   call, `AUTH_CHECKOUT_RATELIMIT_PER_HOUR` = 10 by default; over it,
-  `/checkout` throws `CheckoutRateLimitedError` (the client's existing retry
-  card) and the wallet answers `unavailable`. Fail-open on a DB error, like
+  the signed-in builder throws `CheckoutRateLimitedError`, which the
+  `/checkout` dispatcher answers as a `rate_limited` code since #233 (an
+  "in an hour" card with no retry button), and the wallet answers
+  `unavailable`. Fail-open on a DB error, like
   the guest brake — the limiter protects Stripe quotas and the funnel, not
   money, so it must never block a real buyer.
 - Revisit if: Stripe's `list` stops being read-your-writes consistent; the

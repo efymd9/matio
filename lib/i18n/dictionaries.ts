@@ -303,6 +303,8 @@ export const es = {
     back: "Volver",
     loading: "Cargando el pago seguro…",
     errorBody: "No pudimos cargar el pago. Inténtalo de nuevo.",
+    rateLimitedBody:
+      "Demasiados intentos de pago. Vuelve a intentarlo dentro de una hora.",
     expiredBody:
       "Este pago caducó porque empezaste otro más reciente — en otra pestaña o desde el reproductor. Inténtalo de nuevo para continuar aquí.",
     walletFailed:
@@ -791,6 +793,7 @@ export const en: Dict = {
     back: "Back",
     loading: "Loading secure checkout…",
     errorBody: "We couldn't load checkout. Please try again.",
+    rateLimitedBody: "Too many checkout attempts. Please try again in an hour.",
     expiredBody:
       "This checkout expired because you started a newer one — in another tab, or from the player. Try again to continue here.",
     walletFailed:

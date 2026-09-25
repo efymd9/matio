@@ -7,6 +7,16 @@ vi.mock("server-only", () => ({}));
 const h = vi.hoisted(() => ({
   authUserId: "user_1" as string | null,
   authCalls: [] as unknown[],
+  // The signed-in /checkout builder — a test swaps its answer or its throw.
+  createAuthCheckoutSession: vi.fn(async (): Promise<unknown> => ({
+    kind: "embedded" as const,
+    clientSecret: "x",
+    sessionId: "cs_test_1",
+  })),
+  createGuestCheckoutSession: vi.fn(async (): Promise<unknown> => ({
+    kind: "redirect" as const,
+    to: "/",
+  })),
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -14,7 +24,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 
 vi.mock("@/app/subscribe/actions", () => ({
-  createAuthCheckoutSession: async () => ({ kind: "embedded" as const, clientSecret: "x" }),
+  createAuthCheckoutSession: h.createAuthCheckoutSession,
   createAuthWalletCheckoutSession: async (
     input: unknown,
     consentAccepted: boolean,
@@ -30,7 +40,7 @@ vi.mock("@/app/subscribe/actions", () => ({
 }));
 
 vi.mock("@/app/subscribe/guest-actions", () => ({
-  createGuestCheckoutSession: async () => ({ kind: "redirect" as const, to: "/" }),
+  createGuestCheckoutSession: h.createGuestCheckoutSession,
 }));
 
 // The refocus probe (#217): its one Stripe call, the users row it binds a
@@ -71,13 +81,27 @@ vi.mock("next/headers", () => ({
 }));
 vi.mock("@/lib/guest-checkout", () => ({ CHECKOUT_CLAIM_COOKIE: "checkout_claim" }));
 
-import { checkoutSessionState, createWalletCheckoutSession } from "./actions";
+import { CheckoutRateLimitedError } from "@/lib/checkout-session";
+import {
+  checkoutSessionState,
+  createCheckoutSession,
+  createWalletCheckoutSession,
+} from "./actions";
 
 const INPUT = { show: "the-scarlet-oath", ep: "ep-3", resume: null };
 
 beforeEach(() => {
   h.authUserId = "user_1";
   h.authCalls = [];
+  h.createAuthCheckoutSession.mockReset().mockResolvedValue({
+    kind: "embedded",
+    clientSecret: "x",
+    sessionId: "cs_test_1",
+  });
+  h.createGuestCheckoutSession.mockReset().mockResolvedValue({
+    kind: "redirect",
+    to: "/",
+  });
   probe.session = { customer: "cus_mine", client_reference_id: null, status: "open" };
   probe.userCustomerId = "cus_mine";
   probe.claimCookie = null;
@@ -172,6 +196,57 @@ describe("checkoutSessionState — the /checkout tab's refocus probe (#217)", ()
 
     expect(await checkoutSessionState("cs_test_1")).toBe("open");
     expect(probe.retrieve).not.toHaveBeenCalled();
+  });
+});
+
+describe("createCheckoutSession — the /checkout dispatcher (#233)", () => {
+  it("answers the rate_limited code when the signed-in builder is over its hourly budget", async () => {
+    // A thrown message reaches the client masked behind a digest in
+    // production, so the rate limit has to travel as a code.
+    h.createAuthCheckoutSession.mockRejectedValue(new CheckoutRateLimitedError());
+
+    expect(await createCheckoutSession(INPUT)).toEqual({ kind: "rate_limited" });
+    expect(h.createAuthCheckoutSession).toHaveBeenCalledWith(INPUT);
+  });
+
+  it("lets every other failure reject as before — the client keeps its retry card for those", async () => {
+    const boom = new Error("stripe down");
+    h.createAuthCheckoutSession.mockRejectedValue(boom);
+
+    await expect(createCheckoutSession(INPUT)).rejects.toBe(boom);
+  });
+
+  it("decides by the error's class, never by its text", async () => {
+    // Same words, different class: not the rate limit.
+    const lookalike = new Error("checkout rate limited");
+    h.createAuthCheckoutSession.mockRejectedValue(lookalike);
+
+    await expect(createCheckoutSession(INPUT)).rejects.toBe(lookalike);
+  });
+
+  it("passes the signed-in builder's session through untouched", async () => {
+    expect(await createCheckoutSession(INPUT)).toEqual({
+      kind: "embedded",
+      clientSecret: "x",
+      sessionId: "cs_test_1",
+    });
+    expect(h.createGuestCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("sends an anonymous buyer to the guest builder and passes its answer through", async () => {
+    h.authUserId = null;
+
+    expect(await createCheckoutSession(INPUT)).toEqual({ kind: "redirect", to: "/" });
+    expect(h.createGuestCheckoutSession).toHaveBeenCalledWith(INPUT);
+    expect(h.createAuthCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("redirects home while payments are off, without calling either builder", async () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "");
+
+    expect(await createCheckoutSession(INPUT)).toEqual({ kind: "redirect", to: "/" });
+    expect(h.createAuthCheckoutSession).not.toHaveBeenCalled();
+    expect(h.createGuestCheckoutSession).not.toHaveBeenCalled();
   });
 });
 

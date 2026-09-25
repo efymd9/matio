@@ -33,9 +33,11 @@ vi.mock("@/lib/stripe-browser", () => stripeBrowser);
 const nav = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => nav }));
 
+// The site locale the card speaks in; English unless a test switches it.
+const i18n = vi.hoisted(() => ({ locale: "en" as "en" | "es" }));
 vi.mock("@/lib/i18n/client", async () => {
-  const { en } = await import("@/lib/i18n/dictionaries");
-  return { useT: () => en };
+  const { dictFor } = await import("@/lib/i18n/dictionaries");
+  return { useT: () => dictFor(i18n.locale) };
 });
 
 import { CheckoutClient } from "./checkout-client";
@@ -87,6 +89,7 @@ async function mountLiveForm() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  i18n.locale = "en";
   actions.createCheckoutSession.mockResolvedValue({
     kind: "embedded",
     clientSecret: "cs_test_1_secret",
@@ -132,6 +135,51 @@ describe("CheckoutClient — mounting", () => {
       expect(screen.getByRole("button", { name: /try again/i })).toBeTruthy(),
     );
     expect(screen.getByText(/couldn't load checkout/i)).toBeTruthy();
+    // A generic failure is not dressed up as the rate limit.
+    expect(screen.queryByText(/too many checkout attempts/i)).toBeNull();
+  });
+});
+
+describe("CheckoutClient — over the hourly checkout budget (#233)", () => {
+  it("says to come back in an hour and offers no retry button", async () => {
+    // A retry inside the hour would only burn another attempt against the
+    // same brake, so the card has nothing to press.
+    actions.createCheckoutSession.mockResolvedValue({
+      kind: "rate_limited",
+    } as never);
+    render(<CheckoutClient {...PROPS} />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Too many checkout attempts. Please try again in an hour.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByText(/couldn't load checkout/i)).toBeNull();
+    expect(screen.queryByTestId("embedded")).toBeNull();
+    expect(nav.replace).not.toHaveBeenCalled();
+    // Nothing gets mounted and nothing is created a second time.
+    expect(stripeBrowser.getStripeBrowser).not.toHaveBeenCalled();
+    expect(actions.createCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("speaks the site's language", async () => {
+    i18n.locale = "es";
+    actions.createCheckoutSession.mockResolvedValue({
+      kind: "rate_limited",
+    } as never);
+    render(<CheckoutClient {...PROPS} />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Demasiados intentos de pago. Vuelve a intentarlo dentro de una hora.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });
 
