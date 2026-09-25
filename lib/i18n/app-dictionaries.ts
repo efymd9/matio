@@ -71,6 +71,12 @@ export const appEs = {
     differentEmail: "Usar otro correo",
     unavailable: "Inicio de sesión no disponible",
     unavailableHint: "Esta versión no tiene configurada la clave de Clerk.",
+    // Clerk's answers, which it only gives in English (#288): the form maps
+    // their codes here and never shows Clerk's own text.
+    codeIncorrect: "El código no es correcto.",
+    codeExpired: "El código ha caducado. Pide uno nuevo.",
+    codeFailed: "Demasiados intentos fallidos. Pide un código nuevo.",
+    tooManyRequests: "Demasiados intentos. Inténtalo de nuevo en un momento.",
   },
   watch: {
     subscribersOnly: "Solo para suscriptores",
@@ -133,6 +139,10 @@ export const appEn: AppDict = {
     differentEmail: "Use a different email",
     unavailable: "Sign-in unavailable",
     unavailableHint: "This build has no Clerk publishable key configured.",
+    codeIncorrect: "Incorrect code.",
+    codeExpired: "This code has expired. Request a new one.",
+    codeFailed: "Too many failed attempts. Request a new code.",
+    tooManyRequests: "Too many requests. Please try again in a moment.",
   },
   watch: {
     subscribersOnly: "Subscribers only",

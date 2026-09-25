@@ -17,6 +17,7 @@ import {
   Scrim,
 } from "@/components/ui";
 import { useT } from "@/i18n/locale";
+import { goBackOrHome } from "@/navigation";
 import type {
   EpisodeSummary,
   PlaybackDenialReason,
@@ -25,7 +26,7 @@ import type {
 import { isEpisodeLockedForApp } from "@/shared/api-types";
 import { genreLabel, normalizeGenreKey } from "@/shared/catalog-filters";
 import { body, colors, display, fonts, radius, SCREEN_PAD, space } from "@/theme";
-import { firstEpisodeLocked } from "@/watch/first-episode";
+import { episodeRoute, firstEpisodeLocked } from "@/watch/first-episode";
 
 // The show page (#245): a screen of the ROOT stack, so the tab bar is never
 // here — the whole height goes to the episode list, and the only chrome is
@@ -47,24 +48,19 @@ export default function ShowScreen() {
   const { isSignedIn } = useOptionalAuth();
   const signedIn = isSignedIn;
   // Subscription state is not yet exposed to the app. It only matters in paid
-  // mode; free/gate mode never consults it. When payments return in the app,
-  // /v1/config should carry it rather than the app guessing (registry).
+  // mode — live since 2026-09-09 — so every signed-in viewer reads as a
+  // non-subscriber here; /v1 should carry it rather than the app guessing
+  // (registry).
   const hasSubscription = false;
 
-  // A locked episode routes to sign-in instead of the player: the wall is the
-  // point of the gate, and bouncing off a 403 would be a wasted round trip.
-  // The player loads the show itself (the feed pages every episode), so only
-  // the slug rides along.
+  // An episode that asks for an account routes to sign-in instead of the
+  // player — carrying the episode, so signing in lands on it. Bouncing off a
+  // 403 would be a wasted round trip. Anything else opens the player, which
+  // loads the show itself (the feed pages every episode), so only the slug
+  // rides along; a subscribers-only episode's page says so there.
   const openEpisode = useCallback(
-    (show: ShowDetail, episode: EpisodeSummary, locked: boolean) => {
-      if (locked) {
-        router.push("/sign-in");
-        return;
-      }
-      router.push({
-        pathname: "/watch/[episodeId]",
-        params: { episodeId: episode.id, showSlug: show.slug },
-      });
+    (show: ShowDetail, episode: EpisodeSummary, lock: false | PlaybackDenialReason) => {
+      router.push(episodeRoute(lock, episode.id, show.slug));
     },
     [router],
   );
@@ -107,7 +103,7 @@ export default function ShowScreen() {
         <Scrim height={insets.top + space(16)} from="top" maxOpacity={0.7} />
 
         <GlassBackButton
-          onPress={() => router.back()}
+          onPress={() => goBackOrHome(router)}
           accessibilityLabel={t.watch.backToShowAria}
           style={[styles.back, { top: insets.top + space(2) }]}
         />
@@ -186,7 +182,7 @@ export default function ShowScreen() {
                   position={i + 1}
                   showSlug={data.slug}
                   locked={locked}
-                  onPress={() => openEpisode(data, ep, locked !== false)}
+                  onPress={() => openEpisode(data, ep, locked)}
                 />
               );
             })

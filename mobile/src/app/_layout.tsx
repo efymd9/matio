@@ -17,6 +17,12 @@ import { colors } from "@/theme";
 // than a marginally longer splash.
 SplashScreen.preventAutoHideAsync();
 
+// The tabs sit under every other screen of the root stack, even when the app
+// starts ON one of them — a cold start from a matio:// link to a show, an
+// episode or sign-in (and push notifications, #98). Without the anchor that
+// screen is the stack's only one: back, «Not now» and the swipe go nowhere.
+export const unstable_settings = { anchor: "(tabs)" };
+
 // Espresso everywhere: the navigator's own background shows during transitions,
 // so it has to be branded too or every push flashes default black.
 const navTheme = {

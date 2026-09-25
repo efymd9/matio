@@ -6,6 +6,7 @@ import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
 import { ErrorState, Loading } from "@/components/ui";
 import { useT } from "@/i18n/locale";
+import { goBackOrHome } from "@/navigation";
 import { useOrientationLock, useOrientationSettled } from "@/orientation";
 import { EpisodeFeed } from "@/watch/episode-feed";
 
@@ -77,7 +78,7 @@ export default function WatchScreen() {
     [showSlug, episodeId, explicitResume],
   );
 
-  const onBack = useCallback(() => router.back(), [router]);
+  const onBack = useCallback(() => goBackOrHome(router), [router]);
   const onSignIn = useCallback(() => router.push("/sign-in"), [router]);
 
   // Before the early returns: hooks — and the lock must also be RELEASED

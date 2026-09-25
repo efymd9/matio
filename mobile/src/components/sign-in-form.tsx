@@ -19,10 +19,28 @@ import { body, colors, display, radius, space } from "@/theme";
 //
 // This uses Clerk's "future" resource API (@clerk/expo 4.x), whose methods
 // RESOLVE with `{ error }` instead of throwing. Wrapping them in try/catch
-// silently succeeds on failure — every call here must check the returned error.
+// alone silently succeeds on failure — every call here must check the
+// returned error; the catch is only for a call that throws anyway.
 
 type Step = "email" | "code";
 type Flow = "signIn" | "signUp";
+
+// The only sign-in answer that means "no account with this address": the one
+// that sends the form on to create the account. Any other failure — a rate
+// limit, a dead network — is shown as itself; falling through on it would
+// tell an existing member their own address «is taken».
+const UNKNOWN_ADDRESS = "form_identifier_not_found";
+
+// The machine code of a Clerk failure. The future API resolves with either
+// a ClerkAPIResponseError — its own `code` is the generic
+// "api_response_error", the real one sits on `errors[0]` — or a
+// ClerkRuntimeError that carries it directly ("network_error").
+function clerkErrorCode(err: unknown): string | undefined {
+  if (typeof err !== "object" || err === null) return undefined;
+  const e = err as { errors?: { code?: unknown }[]; code?: unknown };
+  const code = e.errors?.[0]?.code ?? e.code;
+  return typeof code === "string" ? code : undefined;
+}
 
 type SignInFormProps = {
   // The first step's copy: the modal screen keeps the wall's «Keep watching
@@ -87,16 +105,27 @@ function ClerkSignInForm({
   const { signIn } = useSignIn();
   const { signUp } = useSignUp();
 
-  // Clerk errors carry a user-safe message; anything else gets a generic line
-  // rather than leaking an internal string into the UI.
+  // The failures this form can meet, in the viewer's language. Clerk's own
+  // text is English only and its runtime errors are developer strings
+  // (`Clerk: Network request failed … (code="network_error")`), so no Clerk
+  // message is ever shown: an unmapped code gets the generic line.
   function messageFor(err: unknown): string {
-    if (typeof err === "object" && err !== null) {
-      const e = err as { errors?: { message?: string }[]; message?: string };
-      const first = e.errors?.[0]?.message;
-      if (first) return first;
-      if (e.message) return e.message;
+    switch (clerkErrorCode(err)) {
+      case "form_code_incorrect":
+        return t.app.signIn.codeIncorrect;
+      case "verification_expired":
+        return t.app.signIn.codeExpired;
+      case "verification_failed":
+        return t.app.signIn.codeFailed;
+      case "too_many_requests":
+        return t.app.signIn.tooManyRequests;
+      case "network_error":
+        return t.app.account.stalledBody;
+      case "form_param_format_invalid":
+        return step === "email" ? t.app.signIn.invalidEmail : t.app.signIn.invalidCode;
+      default:
+        return t.seriesEndOverlay.errorGeneric;
     }
-    return t.seriesEndOverlay.errorGeneric;
   }
 
   async function sendCode() {
@@ -120,6 +149,10 @@ function ClerkSignInForm({
         setStep("code");
         return;
       }
+      if (clerkErrorCode(attempt.error) !== UNKNOWN_ADDRESS) {
+        setError(messageFor(attempt.error));
+        return;
+      }
 
       const created = await signUp.create({ emailAddress: address });
       if (created.error) {
@@ -133,6 +166,8 @@ function ClerkSignInForm({
       }
       setFlow("signUp");
       setStep("code");
+    } catch (e) {
+      setError(messageFor(e));
     } finally {
       setBusy(false);
     }
@@ -168,6 +203,8 @@ function ClerkSignInForm({
       }
 
       onDone();
+    } catch (e) {
+      setError(messageFor(e));
     } finally {
       setBusy(false);
     }

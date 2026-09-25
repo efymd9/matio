@@ -54,10 +54,11 @@ import { useSegmentTracker } from "./use-segment-tracker";
 //                one is PRELOAD_LEAD_SECONDS from its end (the web's lead),
 //                and `ended` jumps to it without animation
 //
-// The signup gate is the same one the show page draws its locks from
-// (isEpisodeLockedForApp): a locked episode's page IS the sign-up wall, so
-// an auto-advance or a swipe into it lands on the ask, never on a stalled
-// player — and the token route still enforces the gate underneath.
+// The gate is the same one the show page draws its locks from
+// (isEpisodeLockedForApp): an episode that asks for an account has the
+// sign-up wall as its page, a subscribers-only one the «Subscribers only»
+// state — so an auto-advance or a swipe into it lands on the answer, never on
+// a stalled player — and the token route still enforces the gate underneath.
 
 // How long before the current episode ends the next one's token is fetched
 // and its player mounted (horizontal). Same lead as the web player.
@@ -116,6 +117,7 @@ export function EpisodeFeed({
 }) {
   const { height } = useWindowDimensions();
   const config = useConfig();
+  const t = useT();
   const vertical = show.orientation === "vertical";
   const episodes = show.episodes;
   const listRef = useRef<FlatList<EpisodeSummary>>(null);
@@ -131,8 +133,9 @@ export function EpisodeFeed({
     onCurrentChange?.(current);
   }, [current, onCurrentChange]);
 
-  // Subscription state is not exposed to the app yet — only paid mode reads
-  // it, and paid mode is dormant. Same stance as the show page.
+  // Subscription state is not exposed to the app yet (registry): paid mode is
+  // live, and every signed-in viewer reads as a non-subscriber. Same stance
+  // as the show page.
   const hasSubscription = false;
 
   const lockedAt = useCallback(
@@ -243,8 +246,14 @@ export function EpisodeFeed({
         : index >= current && index <= current + 1;
 
       let content;
-      if (locked) {
+      if (locked === "signup_required") {
         content = <SignupWall onSignIn={onSignIn} onBack={onBack} />;
+      } else if (locked === "subscribe_required") {
+        // Signing in cannot open it, so no wall and no retry: the same
+        // answer the token route's 403 gets inside the page.
+        content = (
+          <ErrorState message={t.app.watch.subscribersOnly} hint={t.app.watch.subscribersOnlyHint} />
+        );
       } else if (!inPool) {
         content = <Placeholder show={show} episode={item} />;
       } else {
@@ -283,6 +292,7 @@ export function EpisodeFeed({
       resumeSeconds,
       show,
       signedIn,
+      t,
       vertical,
     ],
   );
@@ -544,7 +554,8 @@ function FeedPage({
     if (code === "forbidden" && reason === "signup_required") {
       return <SignupWall onSignIn={onSignIn} onBack={onBack} />;
     }
-    // 403 subscribe_required — paid mode only, dormant while payments are off.
+    // 403 subscribe_required — paid mode: the episode (or the legacy 60s
+    // preview) needs a subscription the app cannot sell.
     if (code === "forbidden" && reason === "subscribe_required") {
       return (
         <ErrorState
