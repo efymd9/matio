@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/efymd9/matio/compare/matio-v0.12.2...matio-v0.13.0) (2026-09-23)
+
+
+### Features
+
+* блок «The team» убран со страницы /about ([#280](https://github.com/efymd9/matio/issues/280)) ([#281](https://github.com/efymd9/matio/issues/281)) ([6f44fab](https://github.com/efymd9/matio/commit/6f44fab2bd9ebd88e96588e1b32e9b2a063e8cac))
+
+
+### Documentation
+
+* фирменные письма Clerk (вариант C) сохранены в репозитории, бесплатный брендинг Clerk задокументирован ([#276](https://github.com/efymd9/matio/issues/276)) ([#278](https://github.com/efymd9/matio/issues/278)) ([26b90a4](https://github.com/efymd9/matio/commit/26b90a489989c68d461b256a0542210bd55eeca5))
+
 ## [0.12.2](https://github.com/efymd9/matio/compare/matio-v0.12.1...matio-v0.12.2) (2026-09-22)
 
 
