@@ -8,7 +8,7 @@ Production prod URL: **https://matio.tv**. Stripe webhook URL on prod = `https:/
 
 **Used for**: sessions, sign-in/sign-up UI (hosted Account Portal), `user.created` + `user.deleted` webhooks (mirror in, erase out).
 
-**SDK**: `@clerk/nextjs@7.3.x`. Note Clerk 7 dropped `<SignedIn>` / `<SignedOut>` — use `<Show when="signed-in">` instead (see [gotchas](./gotchas.md#clerk-7-changes)).
+**SDK**: `@clerk/nextjs@7.9.x` (backend `@clerk/backend` 3.18.1). Note Clerk 7 dropped `<SignedIn>` / `<SignedOut>` — use `<Show when="signed-in">` instead (see [gotchas](./gotchas.md#clerk-7-changes)).
 
 **Env vars**:
 | Name | Where to get it |
