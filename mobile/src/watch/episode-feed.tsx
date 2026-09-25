@@ -75,6 +75,13 @@ const REFRESH_BACKOFF_MS = [0, 1_000, 2_000, 4_000];
 // rather than land on the credits.
 const RESUME_TAIL_SECONDS = 10;
 
+// A signed-in viewer answered `signup_required` asked without the session:
+// api/client drops the Authorization header when Clerk's getToken() misses
+// its 3s pre-flight deadline (a cold start, a slow network). It is the token
+// that is late, not the viewer who is signed out — so one quiet retry this
+// long after, before anything is concluded.
+const SIGNED_IN_RETRY_MS = 1_000;
+
 type Playback = {
   playbackId: string;
   token: string;
@@ -375,6 +382,7 @@ function FeedPage({
   const [tokenError, setTokenError] = useState<ApiError | null>(null);
   const [videoFailed, setVideoFailed] = useState(false);
   const [fetchNonce, setFetchNonce] = useState(0);
+  const [authRetried, setAuthRetried] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
   // Read by the vertical chrome only; the native transport draws its own.
   const [position, setPosition] = useState(0);
@@ -383,9 +391,11 @@ function FeedPage({
   const positionRef = useRef(0);
   const durationRef = useRef(0);
   const endedRef = useRef(false);
+  const bufferingRef = useRef(false);
   const nearEndFiredRef = useRef(false);
   const initialSeekDoneRef = useRef(false);
-  // Playhead to restore after a token refresh reloads the source.
+  // Playhead to restore after a token refresh — or a retry — reloads the
+  // source.
   const resumeAfterRefreshRef = useRef<number | null>(null);
 
   // Anonymous flushes are refused outright in paid mode (the preview cohort
@@ -416,6 +426,32 @@ function FeedPage({
     // fetchNonce is the retry trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armed, episode.id, fetchNonce]);
+
+  // Every retry reloads the source from a fresh token. The old playback goes
+  // (a player mounted on the stale token would take the resume below and then
+  // lose it to the new source), and the playhead is remembered, so onLoad
+  // lands where the viewer was rather than at 0:00 — where the next save tick
+  // would overwrite the saved position with the earlier one. A page that
+  // never played keeps its first-load resume instead.
+  const refetch = useCallback(() => {
+    if (positionRef.current > 0) resumeAfterRefreshRef.current = positionRef.current;
+    setTokenError(null);
+    setVideoFailed(false);
+    setPlayback(null);
+    setFetchNonce((n) => n + 1);
+  }, []);
+
+  // The late-session retry (SIGNED_IN_RETRY_MS): once per page.
+  const staleSession =
+    signedIn && tokenError?.code === "forbidden" && tokenError.reason === "signup_required";
+  useEffect(() => {
+    if (!staleSession || authRetried) return;
+    const timer = setTimeout(() => {
+      setAuthRetried(true);
+      refetch();
+    }, SIGNED_IN_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [staleSession, authRetried, refetch]);
 
   // Token lifecycle while this page is current: refresh REFRESH_LEAD_MS
   // before expiry (1s/2s/4s backoff on network/5xx, 4xx is terminal); a
@@ -526,9 +562,39 @@ function FeedPage({
     tracker.onEnded();
     const advanced = onEnded(index);
     // Last episode: our own chrome shows the play glyph again; the native
-    // transport handles its own end state.
-    if (!advanced && vertical) setUserPaused(true);
+    // transport handles its own end state. A page the feed advanced past is
+    // left un-paused — it restarts when it is swiped back to (below).
+    setUserPaused(!advanced && vertical);
   }, [index, onEnded, saver, tracker, vertical]);
+
+  // The player pauses on its own — a lock-screen or Control Center pause, a
+  // call — without the `paused` prop knowing. The current page follows the
+  // player's report, so the chrome shows the truth and the first tap plays
+  // rather than "pausing" what already is. A stall (Android reports it as
+  // not playing), a seek and the end (onEnd owns that) are not the viewer's
+  // pause and are ignored.
+  const onPlaybackStateChanged = useCallback(
+    (e: { isPlaying: boolean; isSeeking: boolean }) => {
+      if (!isCurrent || e.isSeeking || bufferingRef.current || endedRef.current) return;
+      setUserPaused(!e.isPlaying);
+    },
+    [isCurrent],
+  );
+
+  // AirPods out / headphones unplugged: pause, never go on out loud through
+  // the speaker (iOS pauses by itself; Android only reports it).
+  const onAudioBecomingNoisy = useCallback(() => {
+    if (isCurrent) setUserPaused(true);
+  }, [isCurrent]);
+
+  // Swiping back to a page that already ended: start it over, as a tap on its
+  // play glyph would — not a frozen last frame with no glyph on it.
+  useEffect(() => {
+    if (!isCurrent || !endedRef.current) return;
+    endedRef.current = false;
+    videoRef.current?.seek(0);
+    setUserPaused(false);
+  }, [isCurrent]);
 
   const togglePlay = useCallback(() => {
     if (endedRef.current) {
@@ -546,13 +612,18 @@ function FeedPage({
   // --- end states, mirroring the web player's three distinct overlays ----
   if (tokenError) {
     const { code, reason, message } = tokenError;
-    const retry = () => {
-      setTokenError(null);
-      setFetchNonce((n) => n + 1);
-    };
-    // 403 signup_required — the gate, enforced server-side. Not an error; an ask.
+    const retry = refetch;
+    // 403 signup_required — the gate, enforced server-side. Not an error; an
+    // ask — for a viewer who is signed out. Signed in, the answer came from a
+    // request that went out without the session: a spinner while the one
+    // quiet retry runs, then an honest failure, never a wall asking an
+    // account holder to sign in.
     if (code === "forbidden" && reason === "signup_required") {
-      return <SignupWall onSignIn={onSignIn} onBack={onBack} />;
+      if (!signedIn) return <SignupWall onSignIn={onSignIn} onBack={onBack} />;
+      if (!authRetried) return <Loading />;
+      return (
+        <ErrorState message={t.watch.unavailableKicker} hint={t.watch.unavailableTitle} onRetry={retry} />
+      );
     }
     // 403 subscribe_required — paid mode: the episode (or the legacy 60s
     // preview) needs a subscription the app cannot sell.
@@ -577,15 +648,7 @@ function FeedPage({
   // from a token failure and must not be reported as one.
   if (videoFailed) {
     return (
-      <ErrorState
-        message={t.watch.unavailableKicker}
-        hint={t.watch.unavailableTitle}
-        onRetry={() => {
-          setVideoFailed(false);
-          setPlayback(null);
-          setFetchNonce((n) => n + 1);
-        }}
-      />
+      <ErrorState message={t.watch.unavailableKicker} hint={t.watch.unavailableTitle} onRetry={refetch} />
     );
   }
 
@@ -613,6 +676,11 @@ function FeedPage({
           onSeek={tracker.onSeek}
           onEnd={onEnd}
           onError={() => setVideoFailed(true)}
+          onBuffer={(e) => {
+            bufferingRef.current = e.isBuffering;
+          }}
+          onPlaybackStateChanged={onPlaybackStateChanged}
+          onAudioBecomingNoisy={onAudioBecomingNoisy}
           // Picture-in-picture when the viewer leaves the app, audio when
           // the screen locks, now-playing controls on the lock screen —
           // the current page only, never a warming neighbour. The native
@@ -641,7 +709,10 @@ function FeedPage({
           episodeNumber={episode.number}
           positionSeconds={position}
           durationSeconds={duration}
-          paused={!isCurrent || userPaused}
+          // The glyph is the viewer's own pause only: a neighbour page is
+          // paused by the pool, and showing it there flashed the disc on
+          // both pages of every swipe.
+          paused={userPaused}
           muted={muted}
           onTogglePlay={togglePlay}
           onToggleMute={onToggleMute}

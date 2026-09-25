@@ -40,7 +40,24 @@ const h = vi.hoisted(() => ({
   videos: new Map<string, { props: unknown; seek: unknown }>(),
   mounts: [] as string[],
   chrome: new Map<string, { paused: boolean; onTogglePlay: () => void }>(),
+  // The feed list's props: its viewability callback is how a SWIPE changes
+  // the page, and jsdom has no layout to fire it — a case calls it directly.
+  list: null as null | {
+    viewabilityConfigCallbackPairs?: Array<{
+      onViewableItemsChanged: (info: { viewableItems: Array<{ index: number }> }) => void;
+    }>;
+  },
 }));
+
+vi.mock("react-native", async (importOriginal) => {
+  const rn = await importOriginal<typeof import("react-native")>();
+  const React = await import("react");
+  const FlatList = React.forwardRef(function FlatList(props: object, ref) {
+    h.list = props;
+    return React.createElement(rn.FlatList as never, { ...props, ref });
+  });
+  return { ...rn, FlatList };
+});
 
 vi.mock("react-native-video", async () => {
   const React = await import("react");
@@ -285,5 +302,233 @@ describe("EpisodeFeed — which answer a locked page gives (#288 item 1)", () =>
 
     expect(text()).not.toContain(WALL_CTA);
     expect(video("ep1").props.paused).toBe(false);
+  });
+});
+
+const SIGNUP_REQUIRED = () =>
+  new ApiError("forbidden", "Sign in to keep watching.", 403, "signup_required");
+const spinning = () => container.querySelector('[role="progressbar"]') !== null;
+
+describe("EpisodeFeed — a signed-in viewer answered signup_required (#288 item 4)", () => {
+  it("retries once, quietly, and plays when the late session makes it", async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    tokens.answer = async (episodeId) => {
+      n += 1;
+      if (n === 1) throw SIGNUP_REQUIRED();
+      return granted(episodeId, n);
+    };
+    await renderFeed(makeShow("horizontal", ["member"]), { signedIn: true });
+
+    // Not the wall: a spinner while the retry is pending.
+    expect(text()).not.toContain(WALL_CTA);
+    expect(spinning()).toBe(true);
+    expect(tokens.calls).toEqual(["ep1"]);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(tokens.calls).toEqual(["ep1", "ep1"]);
+    expect(video("ep1", 2).props.paused).toBe(false);
+  });
+
+  it("the same answer twice is an honest failure with a retry — never the wall", async () => {
+    vi.useFakeTimers();
+    tokens.answer = async () => {
+      throw SIGNUP_REQUIRED();
+    };
+    await renderFeed(makeShow("horizontal", ["member"]), { signedIn: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(tokens.calls).toEqual(["ep1", "ep1"]);
+    expect(text()).toContain("Playback unavailable");
+    expect(text()).toContain(TRY_AGAIN);
+    expect(text()).not.toContain(WALL_CTA);
+
+    // Once per page: no third request on its own.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(tokens.calls).toEqual(["ep1", "ep1"]);
+  });
+
+  it("a signed-out viewer gets the wall at once, with no retry", async () => {
+    vi.useFakeTimers();
+    // The client thinks the episode is open; the server says otherwise.
+    gate = { mode: "none" };
+    tokens.answer = async () => {
+      throw SIGNUP_REQUIRED();
+    };
+    await renderFeed(makeShow("horizontal", ["member"]));
+
+    expect(text()).toContain(WALL_CTA);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(tokens.calls).toEqual(["ep1"]);
+  });
+});
+
+describe("EpisodeFeed — Try again resumes where the viewer was (#288 item 5)", () => {
+  it("after a playback failure mid-episode", async () => {
+    let n = 0;
+    tokens.answer = async (episodeId) => granted(episodeId, ++n);
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    const first = video("ep1", 1);
+    act(() => first.props.onLoad?.({ duration: 600 }));
+    act(() => first.props.onProgress?.({ currentTime: 300 }));
+    act(() => first.props.onError?.());
+    expect(text()).toContain("Playback unavailable");
+
+    press(TRY_AGAIN);
+    await flush();
+
+    const second = video("ep1", 2);
+    act(() => second.props.onLoad?.({ duration: 600 }));
+    expect(second.seek).toHaveBeenCalledWith(300);
+  });
+
+  it("after a token refresh that gave up mid-episode", async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    tokens.answer = async (episodeId) => {
+      n += 1;
+      if (n === 2) throw new ApiError("rate_limited", "Too many requests.", 429);
+      // 61s tokens: the refresh fires one second in.
+      return { ...granted(episodeId, n), expiresIn: 61 };
+    };
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    const first = video("ep1", 1);
+    act(() => first.props.onLoad?.({ duration: 600 }));
+    act(() => first.props.onProgress?.({ currentTime: 300 }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    expect(text()).toContain("Too many previews");
+
+    press(TRY_AGAIN);
+    await flush();
+
+    const third = video("ep1", 3);
+    act(() => third.props.onLoad?.({ duration: 600 }));
+    expect(third.seek).toHaveBeenCalledWith(300);
+  });
+
+  it("a page that never played keeps its deep-link resume on retry", async () => {
+    let n = 0;
+    tokens.answer = async (episodeId) => {
+      n += 1;
+      if (n === 1) throw new ApiError("server_error", "Request failed (503).", 503);
+      return granted(episodeId, n);
+    };
+    await renderFeed(makeShow("horizontal", ["free"]), { resumeSeconds: 120 });
+
+    press(TRY_AGAIN);
+    await flush();
+
+    const player = video("ep1", 2);
+    act(() => player.props.onLoad?.({ duration: 600 }));
+    expect(player.seek).toHaveBeenCalledWith(120);
+  });
+});
+
+describe("EpisodeFeed — the vertical player's pause follows the player (#288 item 9)", () => {
+  const VERTICAL = () => makeShow("vertical", ["free", "free", "free"]);
+  const chrome = (n: number) => {
+    const c = h.chrome.get(`Episode ${n}`);
+    if (!c) throw new Error(`no chrome for episode ${n}`);
+    return c;
+  };
+  const swipeTo = (index: number) =>
+    act(() =>
+      h.list?.viewabilityConfigCallbackPairs?.[0].onViewableItemsChanged({
+        viewableItems: [{ index }],
+      }),
+    );
+
+  it("an OS pause (lock screen, Control Center, a call) shows as paused, and the first tap plays", async () => {
+    await renderFeed(VERTICAL());
+    expect(chrome(1).paused).toBe(false);
+
+    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: false, isSeeking: false }));
+    expect(chrome(1).paused).toBe(true);
+    expect(video("ep1").props.paused).toBe(true);
+
+    act(() => chrome(1).onTogglePlay());
+    expect(chrome(1).paused).toBe(false);
+    expect(video("ep1").props.paused).toBe(false);
+  });
+
+  it("a play from the lock screen clears the pause as well", async () => {
+    await renderFeed(VERTICAL());
+    act(() => chrome(1).onTogglePlay());
+    expect(chrome(1).paused).toBe(true);
+
+    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: true, isSeeking: false }));
+    expect(chrome(1).paused).toBe(false);
+  });
+
+  it("a stall or a seek is not a pause", async () => {
+    await renderFeed(VERTICAL());
+
+    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: false, isSeeking: true }));
+    expect(chrome(1).paused).toBe(false);
+
+    act(() => video("ep1").props.onBuffer?.({ isBuffering: true }));
+    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: false, isSeeking: false }));
+    expect(chrome(1).paused).toBe(false);
+
+    act(() => video("ep1").props.onBuffer?.({ isBuffering: false }));
+    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: false, isSeeking: false }));
+    expect(chrome(1).paused).toBe(true);
+  });
+
+  it("AirPods out pauses instead of going on through the speaker", async () => {
+    await renderFeed(VERTICAL());
+    act(() => video("ep1").props.onAudioBecomingNoisy?.());
+    expect(chrome(1).paused).toBe(true);
+    expect(video("ep1").props.paused).toBe(true);
+  });
+
+  it("a neighbour page shows no play glyph — only the viewer's own pause does", async () => {
+    await renderFeed(VERTICAL());
+    swipeTo(1);
+
+    // The page swiped away from is paused by the pool…
+    expect(video("ep1").props.paused).toBe(true);
+    // …which is not the viewer's pause: no disc on it mid-swipe.
+    expect(chrome(1).paused).toBe(false);
+  });
+
+  it("swiping back to an episode that ended starts it over, playing", async () => {
+    await renderFeed(VERTICAL());
+    act(() => video("ep1").props.onLoad?.({ duration: 600 }));
+    act(() => video("ep1").props.onEnd?.());
+    // The end pauses the player too — onEnd owns that, not the OS-pause path.
+    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: false, isSeeking: false }));
+    await flush();
+    expect(video("ep1").props.paused).toBe(true);
+    expect(chrome(1).paused).toBe(false);
+
+    swipeTo(0);
+
+    expect(video("ep1").seek).toHaveBeenLastCalledWith(0);
+    expect(video("ep1").props.paused).toBe(false);
+    expect(chrome(1).paused).toBe(false);
+  });
+
+  it("the last episode rests on its play glyph at the end", async () => {
+    await renderFeed(makeShow("vertical", ["free"]));
+    act(() => video("ep1").props.onEnd?.());
+    expect(chrome(1).paused).toBe(true);
+
+    act(() => chrome(1).onTogglePlay());
+    expect(video("ep1").seek).toHaveBeenLastCalledWith(0);
+    expect(chrome(1).paused).toBe(false);
   });
 });
