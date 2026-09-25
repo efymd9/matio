@@ -449,9 +449,9 @@ export async function createAuthCheckoutSession(
 ): Promise<CheckoutSessionResult> {
   const prepared = await prepareAuthCheckout(input);
   if (prepared.kind === "redirect") return prepared;
-  // Over the per-account budget (#227): the /checkout client turns a rejected
-  // action into its existing retry card — the right words for "later", where
-  // a redirect home would read as "you cannot buy".
+  // Over the per-account budget (#227): the /checkout dispatcher maps this
+  // throw to `{ kind: "rate_limited" }` (#233) and the client says "try again
+  // in an hour" — where a redirect home would read as "you cannot buy".
   if (prepared.kind === "rate_limited") throw new CheckoutRateLimitedError();
   const {
     userId,

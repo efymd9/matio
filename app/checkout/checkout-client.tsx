@@ -20,6 +20,9 @@ import { getStripeBrowser } from "@/lib/stripe-browser";
 //   - hosted   → full-navigate to Stripe (publishable key not configured)
 //   - redirect → router.replace (guard bounce: already subscribed, rate-limited,
 //                flag off → /subscribe → Clerk sign-up)
+//   - rate_limited → the signed-in account is over its hourly budget (#227):
+//                say "in an hour" and offer NO retry button (#233) — a retry
+//                inside the hour only burns another attempt
 // After payment Stripe redirects the top frame to the session's return_url
 // (/welcome for guests, the watch path for signed-in buyers), so the existing
 // claim + webhook-mirror machinery is untouched.
@@ -52,8 +55,11 @@ export function CheckoutClient({
   // `load` — the session could not be created or Stripe.js did not come up;
   // `expired` — the session was open when mounted and is not any more (a newer
   // checkout of this buyer closed it, #217). Both end in the same retry card,
-  // with different words.
-  const [failure, setFailure] = useState<"load" | "expired" | null>(null);
+  // with different words. `rate_limited` — the server said the account is over
+  // its hourly budget (#233): the same card, its own words, no retry button.
+  const [failure, setFailure] = useState<
+    "load" | "expired" | "rate_limited" | null
+  >(null);
   // Create the session exactly once. The ref survives StrictMode's
   // mount→cleanup→mount in dev (same instance), so the action isn't called
   // twice — and since #217 a second call would not be a harmless replay: it
@@ -71,6 +77,8 @@ export function CheckoutClient({
       .then(async (res) => {
         if (res.kind === "redirect") {
           router.replace(res.to);
+        } else if (res.kind === "rate_limited") {
+          setFailure("rate_limited");
         } else if (res.kind === "hosted") {
           window.location.assign(res.url);
         } else {
@@ -134,15 +142,19 @@ export function CheckoutClient({
         <p className="text-sm font-medium text-white/75">
           {failure === "expired"
             ? t.checkout.expiredBody
-            : t.checkout.errorBody}
+            : failure === "rate_limited"
+              ? t.checkout.rateLimitedBody
+              : t.checkout.errorBody}
         </p>
-        <button
-          type="button"
-          onClick={() => window.location.reload()}
-          className="mt-5 inline-flex h-11 items-center rounded-md bg-white px-6 text-sm font-bold text-black transition-colors hover:bg-white/90"
-        >
-          {t.checkout.retry}
-        </button>
+        {failure !== "rate_limited" && (
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-5 inline-flex h-11 items-center rounded-md bg-white px-6 text-sm font-bold text-black transition-colors hover:bg-white/90"
+          >
+            {t.checkout.retry}
+          </button>
+        )}
       </div>
     );
   }
