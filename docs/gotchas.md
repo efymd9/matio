@@ -428,6 +428,14 @@ And connecting the store to a project (which is what injects `BLOB_READ_WRITE_TO
 
 ## Mux SDK 14+
 
+### v15 is the rename to `@mux/ts` — `@mux/mux-node` is a v15-only alias
+
+We run `@mux/mux-node` 15 (since #157). v15's one breaking change for us is the package name: the SDK is now `@mux/ts`, and `@mux/mux-node` is published as the same artifact at the same version **for v15 only** (MIGRATION.md in muxinc/mux-ts: "the alias is expected to stop after v15"). Nothing we call changed — `new Mux({ tokenId, tokenSecret })`, `video.uploads.create` (incl. `timeout`), `webhooks.unwrap` (byte-identical verification: `t=…,v1=<HMAC-SHA256>`, 300 s tolerance), `video.playbackIds.retrieve`. The rest of 15's breaking list (`robotsPreview` → `robots`, removed `data.filters` / raw exports listing, moved type declarations) touches no code of ours. Consequence: there will be no `@mux/mux-node` 16, so Dependabot will go quiet on Mux SDK updates rather than propose a major — the move to `@mux/ts` is #289.
+
+`app/api/webhooks/mux/signature.test.ts` runs the webhook route through the REAL SDK with locally signed bodies (valid / tampered / wrong secret / stale / no header / non-episode passthrough) — rerun it on any SDK bump; `route.test.ts` mocks `getMux()` and proves nothing about signatures.
+
+A live check on the shared account (#157, 2026-09-25) is one direct upload with a marker `passthrough` (`sdk15-test-<ms>`, deliberately not a UUID — the webhook's `resolveEpisodeFromPassthrough` answers 200 and touches no row), then `video.assets.delete` of exactly that asset id. Mux has **no delete for direct uploads**: the finished upload record stays in the account as `asset_created`, pointing at the deleted asset id — harmless (the URL is spent), don't go looking for a way to remove it.
+
 ### Free plan caps the whole account at 10 assets — `uploads.create` 400s at the cap
 
 ```
