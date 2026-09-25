@@ -3,6 +3,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import type { ReactNode } from "react";
 import {
   ActivityIndicator,
+  PixelRatio,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +14,7 @@ import {
 } from "react-native";
 import { Icon, type IconName } from "@/components/icon";
 import { useT } from "@/i18n/locale";
+import { optimizedImageUrl } from "@/shared/image-url";
 import { body, colors, display, fonts, radius, SCREEN_PAD, space, toneStopsFor } from "@/theme";
 
 // ---------------------------------------------------------------- scrim
@@ -81,16 +83,26 @@ function withAlpha(hex: string, alpha: number): string {
 
 // Show/episode artwork with the deterministic tone fallback. `toneKey` is the
 // show slug so a missing poster looks the same here as on the web.
+//
+// `displayWidth` (points) is the width the art is drawn at: given it, show
+// artwork comes resized through the site's image optimizer at that width ×
+// the screen's pixel ratio — a WebP of a few dozen KB instead of the 2–15 MB
+// original (#292). A source the optimizer does not take (a signed Mux
+// thumbnail) is fetched as it is.
 export function Artwork({
   uri,
   toneKey,
   style,
+  displayWidth,
 }: {
   uri: string | null;
   toneKey: string;
   style?: ViewStyle;
+  displayWidth?: number;
 }) {
   const [from, to] = toneStopsFor(toneKey);
+  const source =
+    displayWidth !== undefined ? optimizedImageUrl(uri, displayWidth * PixelRatio.get()) : uri;
   return (
     <View style={[{ overflow: "hidden" }, style]}>
       {/* Tone gradient sits underneath so it shows through as the fallback
@@ -101,8 +113,8 @@ export function Artwork({
         end={{ x: 0.83, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      {uri ? (
-        <Image source={{ uri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+      {source ? (
+        <Image source={{ uri: source }} style={StyleSheet.absoluteFill} contentFit="cover" />
       ) : null}
       <Duotone />
     </View>
@@ -183,18 +195,22 @@ export function MetaRow({
 // `disabled` and `busy` are ANNOUNCED, not enforced: the caller's handler
 // guards the tap (a disabled Pressable stops being the responder — see the
 // Play disc in home-feed.tsx), and VoiceOver hears «dimmed» / «busy».
+// The ▶ is for buttons that start playback only (`glyph="play"`); Send code,
+// Sign in, Try again and the rest carry none (#292).
 export function GoldButton({
   label,
   onPress,
   style,
   disabled = false,
   busy = false,
+  glyph = "none",
 }: {
   label: string;
   onPress?: () => void;
   style?: ViewStyle;
   disabled?: boolean;
   busy?: boolean;
+  glyph?: "play" | "none";
 }) {
   return (
     <Pressable
@@ -211,7 +227,7 @@ export function GoldButton({
         end={{ x: 0, y: 1 }}
         style={styles.goldButton}
       >
-        <View style={styles.playGlyph} />
+        {glyph === "play" ? <View testID="play-glyph" style={styles.playGlyph} /> : null}
         <Text style={styles.goldButtonText}>{label}</Text>
       </LinearGradient>
     </Pressable>
@@ -275,6 +291,7 @@ export function PosterCard({
         uri={posterUrl}
         toneKey={slug}
         style={{ width, height: width * 1.5, borderRadius: radius.poster }}
+        displayWidth={width}
       />
       {badge ? (
         <View style={styles.posterBadge}>
@@ -406,9 +423,11 @@ export function Loading() {
   );
 }
 
-// `onBack` adds a «Back» text action under the state — for a state that is a
-// screen of its own with no other way out (a subscribers-only page in the
-// landscape player: status bar hidden, no «‹» mounted).
+// `onBack` adds a «Back» text action under the state (under «Try again» when
+// there is one) — for a state that is a screen of its own with no other way
+// out: an error on a pushed screen (the show page, the player, a feed page —
+// no «‹» mounted over an error), where the iOS edge swipe is the only other
+// exit and testers do not find it (#292).
 export function ErrorState({
   message,
   hint,

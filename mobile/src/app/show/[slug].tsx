@@ -1,6 +1,13 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/api/client";
 import { useConfig } from "@/api/config-context";
@@ -42,6 +49,7 @@ export default function ShowScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const config = useConfig();
   const t = useT();
   const [segment, setSegment] = useState<Segment>("episodes");
@@ -73,6 +81,8 @@ export default function ShowScreen() {
 
   if (show.status === "loading") return <Loading />;
 
+  // A pushed screen: the error has «Back» (next to «Try again» when a retry
+  // can help) — no «‹» is drawn over it.
   if (show.status === "error") {
     const missing = show.error.code === "not_found";
     return (
@@ -80,6 +90,7 @@ export default function ShowScreen() {
         message={missing ? t.showDetail.notFound : t.app.common.showLoadFailed}
         hint={missing ? undefined : errorHint(t, show.error)}
         onRetry={missing ? undefined : show.retry}
+        onBack={() => goBackOrHome(router)}
       />
     );
   }
@@ -99,7 +110,12 @@ export default function ShowScreen() {
       contentContainerStyle={{ paddingBottom: insets.bottom + space(8) }}
     >
       <View style={{ height: HERO_HEIGHT }}>
-        <Artwork uri={data.heroImageUrl} toneKey={data.slug} style={StyleSheet.absoluteFill} />
+        <Artwork
+          uri={data.heroImageUrl}
+          toneKey={data.slug}
+          style={StyleSheet.absoluteFill}
+          displayWidth={width}
+        />
         <Scrim height={HERO_HEIGHT * 0.72} from="bottom" />
         <Scrim height={insets.top + space(16)} from="top" maxOpacity={0.7} />
 
@@ -129,6 +145,7 @@ export default function ShowScreen() {
         {first ? (
           <GoldButton
             label={`${t.showDetail.play} · ${t.home.epShort(1)}`}
+            glyph="play"
             onPress={() => openEpisode(data, first, firstLocked)}
             style={{ alignSelf: "stretch" }}
           />

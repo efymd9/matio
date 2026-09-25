@@ -20,8 +20,10 @@ export const appEs = {
     showLoadFailed: "No pudimos cargar esta serie",
     notNow: "Ahora no",
     pleaseWait: "Un momento…",
-    // Spoken only (VoiceOver): the show page's «‹» (#288).
+    // The show page's «‹» to VoiceOver (#288), and the visible way out of an
+    // error on a pushed screen (#292).
     back: "Volver",
+    cancel: "Cancelar",
   },
   tabs: {
     home: "Inicio",
@@ -52,6 +54,11 @@ export const appEs = {
     // Clerk would not load — a vendor error, no network, an outage (#253).
     stalledTitle: "No se puede iniciar sesión ahora mismo",
     stalledBody: "Revisa tu conexión e inténtalo de nuevo.",
+    // The sign-out confirmation and its failure (#292) — getting back in
+    // costs an email round trip, so one stray tap must not end the session.
+    signOutConfirmTitle: "¿Cerrar sesión?",
+    signOutConfirmBody: "Para volver a entrar te enviaremos un código a tu correo.",
+    signOutFailed: "No se pudo cerrar la sesión",
   },
   settings: {
     langHint: "Sigue el idioma del dispositivo hasta que elijas.",
@@ -63,7 +70,8 @@ export const appEs = {
   update: {
     title: "Actualiza Matio",
     body: "Esta versión ya no puede reproducir. Actualiza la app para seguir viendo.",
-    cta: "Abrir matio.tv",
+    // Opens TestFlight (#292) — the app is not in the App Store yet.
+    cta: "Actualizar",
   },
   signIn: {
     checkEmail: "Revisa tu correo",
@@ -81,6 +89,15 @@ export const appEs = {
     codeExpired: "El código ha caducado. Pide uno nuevo.",
     codeFailed: "Demasiados intentos fallidos. Pide un código nuevo.",
     tooManyRequests: "Demasiados intentos. Inténtalo de nuevo en un momento.",
+    // The code step's resend link and its cooldown (#292).
+    resend: "Reenviar código",
+    resendIn: (seconds: number) => `Reenviar código en ${seconds} s`,
+    // The form after «¿Ya tienes cuenta? Inicia sesión» (#292): the same
+    // email → code flow, worded for a returning member, and the way back.
+    signInHeadline: "Inicia sesión",
+    signInBody: "Te enviaremos un código a tu correo. Sin contraseña.",
+    noAccount: "¿No tienes cuenta?",
+    createAccount: "Crear cuenta",
   },
   watch: {
     subscribersOnly: "Solo para suscriptores",
@@ -98,6 +115,7 @@ export const appEn: AppDict = {
     notNow: "Not now",
     pleaseWait: "Please wait…",
     back: "Back",
+    cancel: "Cancel",
   },
   tabs: {
     home: "Home",
@@ -122,6 +140,9 @@ export const appEn: AppDict = {
     whyBody: "Pick up where you left off — on matio.tv too.",
     stalledTitle: "Sign-in is unavailable right now",
     stalledBody: "Check your connection and try again.",
+    signOutConfirmTitle: "Sign out?",
+    signOutConfirmBody: "To sign back in, we'll email you a code.",
+    signOutFailed: "Couldn't sign out",
   },
   settings: {
     langHint: "Follows your device language until you choose.",
@@ -133,7 +154,7 @@ export const appEn: AppDict = {
   update: {
     title: "Update Matio",
     body: "This version is out of date and can no longer play. Please update to keep watching.",
-    cta: "Open matio.tv",
+    cta: "Update",
   },
   signIn: {
     checkEmail: "Check your email",
@@ -149,6 +170,12 @@ export const appEn: AppDict = {
     codeExpired: "This code has expired. Request a new one.",
     codeFailed: "Too many failed attempts. Request a new code.",
     tooManyRequests: "Too many requests. Please try again in a moment.",
+    resend: "Resend code",
+    resendIn: (seconds: number) => `Resend code in ${seconds}s`,
+    signInHeadline: "Sign in",
+    signInBody: "We'll email you a code. No password needed.",
+    noAccount: "No account yet?",
+    createAccount: "Create account",
   },
   watch: {
     subscribersOnly: "Subscribers only",

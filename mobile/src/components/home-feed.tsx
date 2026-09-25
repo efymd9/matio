@@ -312,7 +312,7 @@ export function HeroCard({
       }}
       style={({ pressed }) => [styles.card, { width, height }, pressed && { opacity: 0.9 }]}
     >
-      <Artwork uri={uri} toneKey={toneKey} style={StyleSheet.absoluteFill} />
+      <Artwork uri={uri} toneKey={toneKey} style={StyleSheet.absoluteFill} displayWidth={width} />
       <Scrim from="bottom" height={Math.round(height * 0.85)} />
 
       <View style={styles.copy}>

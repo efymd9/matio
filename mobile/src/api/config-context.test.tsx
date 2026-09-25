@@ -109,6 +109,56 @@ describe("ConfigProvider (#288)", () => {
     expect(text()).not.toContain("the app");
   });
 
+  // #292 item 3 — the wall's one button leads to the update (TestFlight,
+  // while the app is not in the App Store), never to the website.
+  describe("the update button", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    async function pressUpdate(openURL: (url: string) => Promise<unknown>) {
+      config.answer = async () => ({ ...CONFIG, minSupportedBuild: 7 });
+      await renderProvider();
+      // The module instance the freshly imported provider uses.
+      const { Linking } = await import("react-native");
+      const spy = vi.spyOn(Linking, "openURL").mockImplementation(openURL as never);
+      const node = Array.from(container.querySelectorAll("*")).find(
+        (el) => el.children.length === 0 && el.textContent === "Update",
+      );
+      if (!node) throw new Error("no Update button");
+      await act(async () => {
+        node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      return spy;
+    }
+
+    it("opens the TestFlight app", async () => {
+      const spy = await pressUpdate(async () => true);
+
+      expect(spy.mock.calls).toEqual([["itms-beta://"]]);
+      // A plain CTA, not a play button.
+      expect(container.querySelector('[data-testid="play-glyph"]')).toBeNull();
+    });
+
+    it("falls back to Apple's TestFlight page where the app is not installed — never to matio.tv", async () => {
+      const spy = await pressUpdate(async (url) => {
+        if (url === "itms-beta://") throw new Error("No app handles itms-beta://");
+        return true;
+      });
+
+      expect(spy.mock.calls).toEqual([["itms-beta://"], ["https://testflight.apple.com/"]]);
+    });
+
+    it("reads Spanish to a Spanish viewer", async () => {
+      config.answer = async () => ({ ...CONFIG, minSupportedBuild: 7 });
+      await renderProvider("es");
+
+      expect(text()).toContain("Actualizar");
+      expect(text()).not.toContain("matio.tv");
+    });
+  });
+
   it("an unreachable Matio reads as a connection problem — no English error, no API address", async () => {
     const error = await networkError();
     config.answer = async () => {

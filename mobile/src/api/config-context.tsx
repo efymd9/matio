@@ -45,13 +45,29 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
   // (talking to a removed endpoint, mis-enforcing a gate), and a dismissible
   // nag would leave it doing that.
   if (APP_BUILD < state.data.minSupportedBuild) {
-    return <UpdateRequired webUrl={state.data.urls.web} />;
+    return <UpdateRequired />;
   }
 
   return <ConfigContext value={state.data}>{children}</ConfigContext>;
 }
 
-function UpdateRequired({ webUrl }: { webUrl: string }) {
+// Where an update comes from today: TestFlight (#292) — the app is not in the
+// App Store yet. The TestFlight app by its scheme; where it is not installed
+// openURL rejects, and Apple's TestFlight page (which offers it) opens
+// instead. Once the app is published this becomes its store page (registry).
+export const TESTFLIGHT_APP_URL = "itms-beta://";
+export const TESTFLIGHT_WEB_URL = "https://testflight.apple.com/";
+
+async function openUpdate() {
+  try {
+    await Linking.openURL(TESTFLIGHT_APP_URL);
+  } catch {
+    // A phone with no browser to take it has nothing better to offer.
+    await Linking.openURL(TESTFLIGHT_WEB_URL).catch(() => undefined);
+  }
+}
+
+function UpdateRequired() {
   const t = useT();
   return (
     <View style={styles.container}>
@@ -59,7 +75,7 @@ function UpdateRequired({ webUrl }: { webUrl: string }) {
       <Text style={styles.copy}>{t.app.update.body}</Text>
       <GoldButton
         label={t.app.update.cta}
-        onPress={() => void Linking.openURL(webUrl)}
+        onPress={() => void openUpdate()}
         style={{ marginTop: space(6), alignSelf: "stretch" }}
       />
     </View>

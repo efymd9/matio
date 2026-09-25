@@ -195,7 +195,11 @@ async function press(label: string) {
   });
 }
 
-async function renderForm(locale: "en" | "es" = "en", onDone = vi.fn()) {
+async function renderForm(
+  locale: "en" | "es" = "en",
+  onDone = vi.fn(),
+  extra: { signInHint?: boolean } = {},
+) {
   vi.stubEnv("EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY", "pk_test_dummy");
   const SignInForm = await loadSignInForm();
   const { LocaleProvider } = await import("@/i18n/locale");
@@ -203,7 +207,7 @@ async function renderForm(locale: "en" | "es" = "en", onDone = vi.fn()) {
   act(() =>
     root?.render(
       <LocaleProvider initial={locale}>
-        <SignInForm {...props} onDone={onDone} />
+        <SignInForm {...props} {...extra} onDone={onDone} />
       </LocaleProvider>,
     ),
   );
@@ -370,5 +374,202 @@ describe("SignInForm — the email-code flow (#288)", { timeout: COLD_IMPORT_TIM
 
     expect(text()).toContain("Demasiados intentos. Inténtalo de nuevo en un momento.");
     expect(text()).not.toContain("Too many requests");
+  });
+});
+
+// ------------------------------------------------------- #292 visible polish
+
+function flowSuite(name: string, body: () => void) {
+  describe(name, { timeout: COLD_IMPORT_TIMEOUT_MS }, () => {
+    beforeEach(() => {
+      vi.stubGlobal("__DEV__", false);
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+      useSignIn.mockReset();
+      useSignUp.mockReset();
+      container = document.createElement("div");
+      document.body.appendChild(container);
+    });
+
+    afterEach(() => {
+      act(() => root?.unmount());
+      root = null;
+      container.remove();
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+    });
+
+    body();
+  });
+}
+
+flowSuite("SignInForm — «Already have an account? Sign in» (#292 item 7)", () => {
+  it("turns the headline and the CTA into a sign-in, and «Create account» turns them back", async () => {
+    clerkResources();
+    await renderForm("en", vi.fn(), { signInHint: true });
+    expect(text()).toContain(props.headline);
+    expect(text()).toContain(props.cta);
+
+    await press("Sign in");
+
+    expect(text()).not.toContain(props.headline);
+    expect(text()).not.toContain(props.cta);
+    expect(text()).toContain("Send code");
+    expect(text()).toContain("We'll email you a code. No password needed.");
+    expect(text()).not.toContain("Already have an account?");
+    expect(text()).toContain("No account yet?");
+    // The field is where the viewer is sent, as before.
+    expect(document.activeElement).toBe(container.querySelector("input"));
+
+    await press("Create account");
+
+    expect(text()).toContain(props.headline);
+    expect(text()).toContain(props.cta);
+    expect(text()).toContain("Already have an account?");
+  });
+
+  it("the flow behind the sign-in wording is the same one", async () => {
+    const { signIn, signUp } = clerkResources();
+    await renderForm("en", vi.fn(), { signInHint: true });
+
+    await press("Sign in");
+    typeInto("member@example.com");
+    await press("Send code");
+
+    expect(signIn.emailCode.sendCode).toHaveBeenCalledWith({ emailAddress: "member@example.com" });
+    expect(signUp.create).not.toHaveBeenCalled();
+    expect(text()).toContain("Check your email");
+  });
+
+  it("reads Spanish to a Spanish viewer", async () => {
+    clerkResources();
+    await renderForm("es", vi.fn(), { signInHint: true });
+
+    await press("Inicia sesión");
+
+    expect(text()).toContain("Enviar código");
+    expect(text()).toContain("¿No tienes cuenta?");
+    expect(text()).toContain("Crear cuenta");
+  });
+});
+
+flowSuite("SignInForm — the code step (#292 item 4)", () => {
+  // Seconds of the cooldown, with React's effects flushed in between — each
+  // tick schedules the next.
+  async function tick(seconds: number) {
+    for (let i = 0; i < seconds; i += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+    }
+  }
+
+  const codeInput = () => container.querySelector("input");
+
+  it("focuses the code field the moment the step opens", async () => {
+    clerkResources();
+    await renderForm();
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    expect(text()).toContain("Check your email");
+    expect(codeInput()).not.toBeNull();
+    expect(document.activeElement).toBe(codeInput());
+  });
+
+  it("«Resend code» waits 30 s, then sends a fresh code on the same sign-in and waits again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { signIn, signUp } = clerkResources();
+    await renderForm();
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    expect(text()).toContain("Resend code in 30s");
+    await press("Resend code in 30s");
+    expect(signIn.emailCode.sendCode).toHaveBeenCalledTimes(1);
+
+    await tick(29);
+    expect(text()).toContain("Resend code in 1s");
+    await tick(1);
+    expect(text()).not.toContain("Resend code in");
+
+    await press("Resend code");
+    expect(signIn.emailCode.sendCode).toHaveBeenCalledTimes(2);
+    // The sign-in already exists: a resend carries no address.
+    expect(signIn.emailCode.sendCode).toHaveBeenLastCalledWith();
+    expect(signUp.verifications.sendEmailCode).not.toHaveBeenCalled();
+    expect(text()).toContain("Resend code in 30s");
+  });
+
+  it("a new account's code is resent through the sign-up", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { signIn, signUp } = clerkResources();
+    signIn.emailCode.sendCode.mockResolvedValueOnce({
+      error: apiError("form_identifier_not_found", "Couldn't find your account."),
+    });
+    await renderForm();
+    typeInto("new@example.com");
+    await press(props.cta);
+    expect(signUp.verifications.sendEmailCode).toHaveBeenCalledTimes(1);
+
+    await tick(30);
+    await press("Resend code");
+
+    expect(signUp.verifications.sendEmailCode).toHaveBeenCalledTimes(2);
+    expect(signIn.emailCode.sendCode).toHaveBeenCalledTimes(1);
+  });
+
+  it("a refused resend is told in the viewer's words, and can be tried again at once", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { signIn } = clerkResources();
+    await renderForm();
+    typeInto("member@example.com");
+    await press(props.cta);
+    await tick(30);
+
+    signIn.emailCode.sendCode.mockResolvedValueOnce({
+      error: apiError("too_many_requests", "Too many requests. Please try again in a bit."),
+    });
+    await press("Resend code");
+
+    expect(text()).toContain("Too many requests. Please try again in a moment.");
+    expect(text()).toContain("Resend code");
+    expect(text()).not.toContain("Resend code in");
+  });
+
+  it("«Use a different email» leaves the old code and error behind", async () => {
+    const { signIn } = clerkResources();
+    await renderForm();
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    signIn.emailCode.verifyCode.mockResolvedValueOnce({
+      error: apiError("form_code_incorrect", "is incorrect"),
+    });
+    typeInto("111111");
+    await press("Sign in");
+    expect(text()).toContain("Incorrect code.");
+
+    await press("Use a different email");
+
+    expect(text()).not.toContain("Incorrect code.");
+    expect(text()).toContain(props.headline);
+    typeInto("other@example.com");
+    await press(props.cta);
+    expect(text()).toContain("We sent a code to other@example.com.");
+    expect(codeInput()?.value).toBe("");
+    expect(text()).not.toContain("Incorrect code.");
+  });
+
+  it("none of the form's gold buttons carries the ▶ play glyph", async () => {
+    clerkResources();
+    await renderForm();
+    const glyphs = () => container.querySelectorAll('[data-testid="play-glyph"]').length;
+
+    expect(glyphs()).toBe(0);
+    typeInto("member@example.com");
+    await press(props.cta);
+    expect(text()).toContain("Check your email");
+    expect(glyphs()).toBe(0);
   });
 });

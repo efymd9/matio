@@ -18,7 +18,7 @@ import type {
 // cases — the chrome, reduced to the `paused` it is handed.
 
 type VideoProps = {
-  source: { uri: string };
+  source: { uri: string; metadata?: { imageUri?: string } };
   paused: boolean;
   onLoad?: (e: { duration: number }) => void;
   onProgress?: (e: { currentTime: number }) => void;
@@ -41,7 +41,7 @@ vi.hoisted(() => {
 const h = vi.hoisted(() => ({
   videos: new Map<string, { props: unknown; seek: unknown }>(),
   mounts: [] as string[],
-  chrome: new Map<string, { paused: boolean; onTogglePlay: () => void }>(),
+  chrome: new Map<string, { paused: boolean; buffering?: boolean; onTogglePlay: () => void }>(),
   // The feed list's props: its viewability callback is how a SWIPE changes
   // the page, and jsdom has no layout to fire it — a case calls it directly.
   list: null as null | {
@@ -78,7 +78,12 @@ vi.mock("react-native-video", async () => {
 
 // The vertical chrome, reduced to what the feed decides for it.
 vi.mock("@/components/vertical-chrome", () => ({
-  VerticalChrome: (props: { episodeTitle: string; paused: boolean; onTogglePlay: () => void }) => {
+  VerticalChrome: (props: {
+    episodeTitle: string;
+    paused: boolean;
+    buffering?: boolean;
+    onTogglePlay: () => void;
+  }) => {
     h.chrome.set(props.episodeTitle, props);
     return null;
   },
@@ -675,5 +680,112 @@ describe("EpisodeFeed — the vertical player's pause follows the player (#288 i
     act(() => chrome(1).onTogglePlay());
     expect(video("ep1").seek).toHaveBeenLastCalledWith(0);
     expect(chrome(1).paused).toBe(false);
+  });
+});
+
+describe("EpisodeFeed — every error page has a way back (#292 item 1)", () => {
+  // An error replaces the whole page — the «‹» and the vertical chrome with
+  // it — so «Back» on the error itself is the only visible exit.
+  const backLeads = () => {
+    expect(roleOf("Back")).toBe("link");
+    press("Back");
+    expect(onBack).toHaveBeenCalledTimes(1);
+  };
+
+  it("a token failure, next to its retry", async () => {
+    tokens.answer = async () => {
+      throw new ApiError("server_error", "boom", 500);
+    };
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(text()).toContain(TRY_AGAIN);
+    backLeads();
+  });
+
+  it("the hourly limit", async () => {
+    tokens.answer = async () => {
+      throw new ApiError("rate_limited", "Too many.", 429);
+    };
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(text()).toContain(TRY_AGAIN);
+    backLeads();
+  });
+
+  it("a player that failed to play", async () => {
+    await renderFeed(makeShow("horizontal", ["free"]));
+    act(() => video("ep1").props.onError?.());
+
+    expect(text()).toContain("Playback unavailable");
+    backLeads();
+  });
+
+  it("a signed-in viewer answered signup_required twice", async () => {
+    vi.useFakeTimers();
+    tokens.answer = async () => {
+      throw SIGNUP_REQUIRED();
+    };
+    await renderFeed(makeShow("horizontal", ["member"]), { signedIn: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(text()).toContain("Playback unavailable");
+    backLeads();
+  });
+
+  it("a vertical page too — its chrome goes with the page", async () => {
+    tokens.answer = async () => {
+      throw new ApiError("server_error", "boom", 500);
+    };
+    await renderFeed(makeShow("vertical", ["free"]));
+
+    expect(text()).toContain("Playback unavailable");
+    backLeads();
+  });
+});
+
+describe("EpisodeFeed — a vertical stall is visible (#292 item 5)", () => {
+  const chrome = (n: number) => {
+    const c = h.chrome.get(`Episode ${n}`);
+    if (!c) throw new Error(`no chrome for episode ${n}`);
+    return c;
+  };
+
+  it("the page in view shows the spinner while the player buffers", async () => {
+    await renderFeed(makeShow("vertical", ["free", "free"]));
+    expect(chrome(1).buffering).toBe(false);
+
+    act(() => video("ep1").props.onBuffer?.({ isBuffering: true }));
+    expect(chrome(1).buffering).toBe(true);
+
+    act(() => video("ep1").props.onBuffer?.({ isBuffering: false }));
+    expect(chrome(1).buffering).toBe(false);
+  });
+
+  it("a page kept warm in the pool does not — only the page in view", async () => {
+    await renderFeed(makeShow("vertical", ["free", "free"]));
+    // Swiped on: episode 1 stays mounted, paused, as the previous page.
+    act(() =>
+      h.list?.viewabilityConfigCallbackPairs?.[0].onViewableItemsChanged({
+        viewableItems: [{ index: 1 }],
+      }),
+    );
+    act(() => video("ep1").props.onBuffer?.({ isBuffering: true }));
+
+    expect(chrome(1).buffering).toBe(false);
+  });
+});
+
+describe("EpisodeFeed — the lock-screen artwork is resized (#292 item 10)", () => {
+  it("hands the OS the poster through the image optimizer, not the original", async () => {
+    const poster = "https://waoyoctqyyvecbhm.public.blob.vercel-storage.com/shows/poster-scarlet.png";
+    await renderFeed({ ...makeShow("horizontal", ["free"]), posterImageUrl: poster });
+
+    const imageUri = video("ep1").props.source.metadata?.imageUri;
+    const params = new URL(imageUri ?? "").searchParams;
+    expect(imageUri?.startsWith("https://matio.tv/_next/image?")).toBe(true);
+    expect(params.get("url")).toBe(poster);
+    expect(params.get("w")).toBe("640");
   });
 });
