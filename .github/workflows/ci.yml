@@ -58,7 +58,7 @@ jobs:
       # рассинхрон mobile/package-lock.json ДО облачной сборки — тот самый
       # «Missing … from lock file», который уронил сборку EAS 15.09
       # (docs/runbooks/mobile-builds.md → «Грабли»).
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.npm
           key: npm-mobile-${{ runner.os }}-${{ hashFiles('mobile/package-lock.json') }}
