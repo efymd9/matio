@@ -2,8 +2,8 @@
 // poster 148pt wide, but /api/v1 hands it the ORIGINAL — a 2–3 MB PNG, or a
 // Blob upload of up to 15 MB — because the web resizes through next/image and
 // the wire contract just passes the stored URL on. This builds the same
-// optimizer URL next/image would, so the app fetches a WebP of the width it
-// draws instead.
+// optimizer URL next/image would, so the app fetches the width it draws
+// instead — as WebP when the request says it takes WebP (OPTIMIZER_ACCEPT).
 //
 // UNIVERSAL — imported by the app through Metro (mobile/src/shared/
 // image-url.ts). No `server-only`, no next/*: lib/seo.ts is dependency-free.
@@ -20,6 +20,14 @@ export const OPTIMIZER_WIDTHS = [
 
 // Next 16 allows exactly one quality by default (`qualities: [75]`).
 export const OPTIMIZER_QUALITY = 75;
+
+// The optimizer answers WebP only to a request whose Accept header literally
+// names `image/webp` (getSupportedMimeType in next/dist/server/image-
+// optimizer.js); anything else gets the SOURCE format, resized — a PNG poster
+// stays a PNG. The browser says it for next/image; a native image loader does
+// not (expo-image on iOS sends SDWebImage's `image/*,*/*;q=0.8`), so the app
+// has to send this itself.
+export const OPTIMIZER_ACCEPT = "image/webp,image/*;q=0.8";
 
 // A URL on the Blob store (`https://<storeId>.public.blob.vercel-storage.com/…`)
 // — the remotePattern in next.config.ts, and the only remote host show
@@ -59,4 +67,16 @@ export function optimizedImageUrl(src: string | null, widthPx: number): string |
   if (source === null) return src;
   const params = `url=${encodeURIComponent(source)}&w=${snapImageWidth(widthPx)}&q=${OPTIMIZER_QUALITY}`;
   return `${SITE_URL}/_next/image?${params}`;
+}
+
+// The same, as an image source ({ uri, headers } — expo-image's shape): an
+// optimizer URL carries OPTIMIZER_ACCEPT so it comes back as WebP; a source
+// left as it was (a signed Mux thumbnail) goes out with no extra header.
+export function optimizedImageSource(
+  src: string | null,
+  widthPx: number,
+): { uri: string; headers?: Record<string, string> } | null {
+  const uri = optimizedImageUrl(src, widthPx);
+  if (uri === null) return null;
+  return uri === src ? { uri } : { uri, headers: { Accept: OPTIMIZER_ACCEPT } };
 }

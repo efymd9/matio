@@ -78,7 +78,11 @@ const REFRESH_BACKOFF_MS = [0, 1_000, 2_000, 4_000];
 const RESUME_TAIL_SECONDS = 10;
 
 // The lock-screen / notification artwork, in device pixels — the OS draws it
-// at most a few hundred points wide.
+// at most a few hundred points wide. It arrives resized but in the poster's
+// own format, not WebP: the player fetches it natively (URLSession on iOS,
+// Media3's artwork loader on Android) with no way to set a header, and the
+// optimizer answers WebP only to an Accept that names it. iOS re-encodes it
+// as PNG for the now-playing item regardless.
 const NOW_PLAYING_ART_PX = 640;
 
 // A signed-in viewer answered `signup_required` asked without the session:
@@ -527,7 +531,8 @@ function FeedPage({
         ? {
             uri: muxStreamUrl(playback.playbackId, playback.token),
             // Lock screen / Control Center / Android media notification.
-            // The poster resized (#292): the OS fetches it on every play.
+            // The poster resized (#292; see NOW_PLAYING_ART_PX): the player
+            // fetches it on every play.
             metadata: {
               title: episode.title,
               subtitle: show.title,

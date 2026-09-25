@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { Icon, type IconName } from "@/components/icon";
 import { useT } from "@/i18n/locale";
-import { optimizedImageUrl } from "@/shared/image-url";
+import { optimizedImageSource } from "@/shared/image-url";
 import { body, colors, display, fonts, radius, SCREEN_PAD, space, toneStopsFor } from "@/theme";
 
 // ---------------------------------------------------------------- scrim
@@ -86,9 +86,10 @@ function withAlpha(hex: string, alpha: number): string {
 //
 // `displayWidth` (points) is the width the art is drawn at: given it, show
 // artwork comes resized through the site's image optimizer at that width ×
-// the screen's pixel ratio — a WebP of a few dozen KB instead of the 2–15 MB
+// the screen's pixel ratio, asked for as WebP (the source's Accept header —
+// the loader's own does not name WebP): a few dozen KB instead of the 2–15 MB
 // original (#292). A source the optimizer does not take (a signed Mux
-// thumbnail) is fetched as it is.
+// thumbnail) is fetched as it is, with no extra header.
 export function Artwork({
   uri,
   toneKey,
@@ -102,7 +103,11 @@ export function Artwork({
 }) {
   const [from, to] = toneStopsFor(toneKey);
   const source =
-    displayWidth !== undefined ? optimizedImageUrl(uri, displayWidth * PixelRatio.get()) : uri;
+    displayWidth !== undefined
+      ? optimizedImageSource(uri, displayWidth * PixelRatio.get())
+      : uri
+        ? { uri }
+        : null;
   return (
     <View style={[{ overflow: "hidden" }, style]}>
       {/* Tone gradient sits underneath so it shows through as the fallback
@@ -114,7 +119,7 @@ export function Artwork({
         style={StyleSheet.absoluteFill}
       />
       {source ? (
-        <Image source={{ uri: source }} style={StyleSheet.absoluteFill} contentFit="cover" />
+        <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" />
       ) : null}
       <Duotone />
     </View>

@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 
 import nextConfig from "../../next.config";
 import {
+  OPTIMIZER_ACCEPT,
   OPTIMIZER_QUALITY,
   OPTIMIZER_WIDTHS,
+  optimizedImageSource,
   optimizedImageUrl,
   snapImageWidth,
 } from "./image-url";
@@ -80,6 +82,22 @@ describe("optimizedImageUrl — which sources go through the optimizer", () => {
   });
 });
 
+describe("optimizedImageSource — the optimizer is asked for WebP", () => {
+  it("an optimizer URL carries the Accept header that gets WebP back", () => {
+    expect(optimizedImageSource(BLOB, 786)).toEqual({
+      uri: optimizedImageUrl(BLOB, 786),
+      headers: { Accept: OPTIMIZER_ACCEPT },
+    });
+    expect(optimizedImageSource("/shows/x.png", 100)?.headers).toEqual({ Accept: OPTIMIZER_ACCEPT });
+  });
+
+  it("a source left as it was goes out with no extra header", () => {
+    const mux = "https://image.mux.com/abc/thumbnail.jpg?token=eyJ.dummy.sig";
+    expect(optimizedImageSource(mux, 400)).toEqual({ uri: mux });
+    expect(optimizedImageSource(null, 400)).toBeNull();
+  });
+});
+
 describe("snapImageWidth — only widths the optimizer allows", () => {
   it("rounds UP to the next allowed width, so the image is never drawn upscaled", () => {
     expect(snapImageWidth(1)).toBe(32);
@@ -110,10 +128,10 @@ describe("the width list is the one the deployed optimizer enforces", () => {
   // Next merges the site's images config over its defaults; validateParams
   // is the check /_next/image runs before it fetches anything.
   const merged = { images: { ...imageConfigDefault, ...images } } as never;
-  const validate = (built: string | null) => {
+  const validate = (built: string | null, accept = OPTIMIZER_ACCEPT) => {
     const { source, w, q } = paramsOf(built);
     return ImageOptimizerCache.validateParams(
-      { headers: { accept: "image/webp,*/*" } } as never,
+      { headers: { accept } } as never,
       { url: source ?? undefined, w: w ?? undefined, q: q ?? undefined },
       merged,
       false,
@@ -127,6 +145,14 @@ describe("the width list is the one the deployed optimizer enforces", () => {
         "errorMessage",
       );
     }
+  });
+
+  it("answers WebP to OPTIMIZER_ACCEPT — and the source format to a native loader's own Accept", () => {
+    const built = optimizedImageUrl(BLOB, 786);
+    expect(validate(built)).toMatchObject({ mimeType: "image/webp" });
+    // SDWebImage's default (expo-image on iOS): no `image/webp` in it, so the
+    // optimizer would resize and keep the PNG — why the header is sent.
+    expect(validate(built, "image/*,*/*;q=0.8")).toMatchObject({ mimeType: "" });
   });
 
   it("would refuse what the helper deliberately avoids: an unlisted width, a matio.tv absolute URL", () => {

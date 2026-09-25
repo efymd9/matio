@@ -171,13 +171,25 @@ describe("Artwork — resized through the site's image optimizer (#292 item 10)"
     expect(params(lastUri()).get("url")).toBe("/shows/cartero-mundo-poster.png");
   });
 
-  it("a signed Mux thumbnail, and art with no drawn width given, load as they are", () => {
+  // The optimizer answers WebP only to an Accept that names it; expo-image's
+  // own (SDWebImage: `image/*,*/*;q=0.8`) does not, and would get the PNG
+  // back, resized.
+  it("asks the optimizer for WebP with the request's Accept header", () => {
+    render(<Artwork uri={BLOB} toneKey="the-scarlet-oath" displayWidth={262} />);
+
+    expect(images.sources.at(-1)).toEqual({
+      uri: lastUri(),
+      headers: { Accept: "image/webp,image/*;q=0.8" },
+    });
+  });
+
+  it("a signed Mux thumbnail, and art with no drawn width given, load as they are — no extra header", () => {
     const mux = "https://image.mux.com/pb/thumbnail.jpg?token=eyJ.dummy.sig";
     render(<Artwork uri={mux} toneKey="ep" displayWidth={128} />);
-    expect(lastUri()).toBe(mux);
+    expect(images.sources.at(-1)).toEqual({ uri: mux });
 
     render(<Artwork uri={BLOB} toneKey="the-scarlet-oath" />);
-    expect(lastUri()).toBe(BLOB);
+    expect(images.sources.at(-1)).toEqual({ uri: BLOB });
   });
 
   it("no artwork is the tone fallback — nothing is fetched", () => {
