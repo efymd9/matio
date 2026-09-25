@@ -12,7 +12,7 @@ Production: **https://matio.tv**
 - Postgres on Neon · Drizzle ORM (`postgres-js` driver, pooled endpoint)
 - Clerk 7 (auth, keyless in dev)
 - Stripe 22 (Checkout + Customer Portal + webhooks)
-- Mux 14 (direct upload + RS256-signed playback)
+- Mux 15 (direct upload + RS256-signed playback)
 - Tailwind v4 · shadcn (built on Base UI)
 - Vercel hosting
 
@@ -44,7 +44,7 @@ Read these before changing integrations:
 - [docs/operations.md](./docs/operations.md) — pnpm scripts, migrations,
   deploy commands, end-to-end test recipes
 - [docs/gotchas.md](./docs/gotchas.md) — version-specific traps for
-  Next 16, Clerk 7, Stripe SDK 22 (API 2024+), Mux 14, Tailwind v4 +
+  Next 16, Clerk 7, Stripe SDK 22 (API 2024+), Mux 15, Tailwind v4 +
   shadcn-on-Base-UI, Drizzle 0.45
 
 [`CLAUDE.md`](./CLAUDE.md) summarises the rules and conventions agents

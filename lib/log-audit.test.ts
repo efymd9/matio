@@ -1271,8 +1271,9 @@ describe("log audit · checkout session builder (prepareAuthCheckout, #214)", ()
     expect(err).toBeInstanceOf(CheckoutRateLimitedError);
     for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
       expect(logged()).not.toContain(marker);
-      // The error travels to the client (masked by a digest in production)
-      // and to Sentry by name; it carries no data either way.
+      // The /checkout dispatcher maps it to a rate_limited code (#233), so
+      // it no longer reaches the client or Sentry as a rejection; it
+      // carries no data either way.
       expect(render(err)).not.toContain(marker);
     }
     expect(logged()).toContain("startCheckout: rate limited");
