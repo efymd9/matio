@@ -115,12 +115,17 @@ export function Artwork({
 // Three tones: the burgundy badge (Matio Original), translucent glass (a
 // poster's «Vertical» tag), and the gold membership pill on the Account tab
 // — the same goldHi→goldLo fill as the CTA.
+// `maxFontSizeMultiplier` caps iOS Larger Text for a pill or meta row that
+// sits inside fixed-size chrome (the Home hero card), where unbounded
+// scaling clips it; elsewhere they scale freely.
 export function Pill({
   label,
   tone = "burgundy",
+  maxFontSizeMultiplier,
 }: {
   label: string;
   tone?: "burgundy" | "glass" | "gold";
+  maxFontSizeMultiplier?: number;
 }) {
   if (tone === "gold") {
     return (
@@ -130,7 +135,12 @@ export function Pill({
         end={{ x: 0, y: 1 }}
         style={styles.pill}
       >
-        <Text style={[styles.pillText, { color: colors.goldDeep }]}>{label}</Text>
+        <Text
+          style={[styles.pillText, { color: colors.goldDeep }]}
+          maxFontSizeMultiplier={maxFontSizeMultiplier}
+        >
+          {label}
+        </Text>
       </LinearGradient>
     );
   }
@@ -141,38 +151,58 @@ export function Pill({
         { backgroundColor: tone === "burgundy" ? colors.burgundy : colors.glass },
       ]}
     >
-      <Text style={styles.pillText}>{label}</Text>
+      <Text style={styles.pillText} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+        {label}
+      </Text>
     </View>
   );
 }
 
 // Meta row separated by rust dots, per the 8a spec.
-export function MetaRow({ parts }: { parts: string[] }) {
+export function MetaRow({
+  parts,
+  maxFontSizeMultiplier,
+}: {
+  parts: string[];
+  maxFontSizeMultiplier?: number;
+}) {
   const shown = parts.filter(Boolean);
   return (
     <View style={styles.metaRow}>
       {shown.map((part, i) => (
         <View key={part + i} style={styles.metaItem}>
           {i > 0 ? <View style={styles.metaDot} /> : null}
-          <Text style={styles.metaText}>{part}</Text>
+          <Text style={styles.metaText} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+            {part}
+          </Text>
         </View>
       ))}
     </View>
   );
 }
 
+// `disabled` and `busy` are ANNOUNCED, not enforced: the caller's handler
+// guards the tap (a disabled Pressable stops being the responder — see the
+// Play disc in home-feed.tsx), and VoiceOver hears «dimmed» / «busy».
 export function GoldButton({
   label,
   onPress,
   style,
+  disabled = false,
+  busy = false,
 }: {
   label: string;
   onPress?: () => void;
   style?: ViewStyle;
+  disabled?: boolean;
+  busy?: boolean;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      aria-disabled={disabled}
+      aria-busy={busy}
       style={({ pressed }) => [{ borderRadius: radius.pill }, style, pressed && { opacity: 0.85 }]}
     >
       {/* linear-gradient(180deg, gold-hi, gold-lo) — the spec's CTA fill. */}
@@ -237,7 +267,11 @@ export function PosterCard({
   onPress?: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ width }, pressed && { opacity: 0.8 }]}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [{ width }, pressed && { opacity: 0.8 }]}
+    >
       <Artwork
         uri={posterUrl}
         toneKey={slug}
@@ -374,11 +408,14 @@ export function Row({
   );
   const rowStyle = [styles.row, !first && styles.rowDivider];
   if (!onPress) return <View style={rowStyle}>{content}</View>;
+  // A radio row announces its CHECKED state; «selected» is the vocabulary of
+  // tabs and chips, and made the language rows read wrong.
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole={role}
-      accessibilityState={selected === undefined ? undefined : { selected }}
+      aria-checked={role === "radio" ? selected : undefined}
+      aria-selected={role === "radio" ? undefined : selected}
       style={({ pressed }) => [rowStyle, pressed && { opacity: 0.7 }]}
     >
       {content}

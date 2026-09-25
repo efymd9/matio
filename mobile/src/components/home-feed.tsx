@@ -256,6 +256,15 @@ function ResumeCard({
 // a bottom scrim over 85% of the height, the copy column bottom-left, the
 // glass Play disc bottom-right. Two Pressables: the disc is the deeper
 // responder, so a tap on it never also opens the show page.
+//
+// To VoiceOver the card is ONE element — pill, title and meta as its label,
+// the resume progress as its value — and the disc is its «Play» action (the
+// rotor's Actions), because a nested button inside an accessible card is
+// never reached. Its text is capped at LARGE_TEXT_CAP: the copy column is
+// pinned inside a fixed 16:10 card, and unbounded Larger Text pushed the
+// pill and the title's first line out of its top edge.
+const LARGE_TEXT_CAP = 1.3;
+
 export function HeroCard({
   width,
   uri,
@@ -285,24 +294,37 @@ export function HeroCard({
 }) {
   // 16:10, from the width the list measured — Scrim wants pixels, not %.
   const height = Math.round((width * 10) / 16);
+  const play = () => {
+    if (!playDisabled) onPlay();
+  };
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={title}
+      accessibilityLabel={[pill?.label, title, ...meta].filter(Boolean).join(", ")}
+      aria-valuemin={fraction !== null ? 0 : undefined}
+      aria-valuemax={fraction !== null ? 100 : undefined}
+      aria-valuenow={fraction !== null ? Math.round(fraction * 100) : undefined}
+      accessibilityActions={[{ name: "activate" }, { name: "play", label: playLabel }]}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === "play") play();
+        else if (e.nativeEvent.actionName === "activate") onPress();
+      }}
       style={({ pressed }) => [styles.card, { width, height }, pressed && { opacity: 0.9 }]}
     >
       <Artwork uri={uri} toneKey={toneKey} style={StyleSheet.absoluteFill} />
       <Scrim from="bottom" height={Math.round(height * 0.85)} />
 
       <View style={styles.copy}>
-        {pill ? <Pill label={pill.label} tone={pill.tone} /> : null}
-        <Text style={styles.title} numberOfLines={2}>
+        {pill ? (
+          <Pill label={pill.label} tone={pill.tone} maxFontSizeMultiplier={LARGE_TEXT_CAP} />
+        ) : null}
+        <Text style={styles.title} numberOfLines={2} maxFontSizeMultiplier={LARGE_TEXT_CAP}>
           {title}
         </Text>
-        <MetaRow parts={meta} />
+        <MetaRow parts={meta} maxFontSizeMultiplier={LARGE_TEXT_CAP} />
         {synopsis ? (
-          <Text style={styles.synopsis} numberOfLines={2}>
+          <Text style={styles.synopsis} numberOfLines={2} maxFontSizeMultiplier={LARGE_TEXT_CAP}>
             {synopsis}
           </Text>
         ) : null}
@@ -315,14 +337,12 @@ export function HeroCard({
 
       {/* Never `disabled`: a disabled Pressable does not become the
           responder, so the tap would fall through to the card and open
-          the show page mid-load. The guard lives in the handler instead. */}
+          the show page mid-load. The guard lives in the handler instead.
+          Not an accessibility element of its own: VoiceOver reaches it as
+          the card's «Play» action (above). */}
       <Pressable
-        onPress={() => {
-          if (!playDisabled) onPlay();
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={playLabel}
-        accessibilityState={{ disabled: playDisabled }}
+        onPress={play}
+        accessible={false}
         hitSlop={8}
         style={({ pressed }) => [styles.play, (pressed || playDisabled) && { opacity: 0.7 }]}
       >

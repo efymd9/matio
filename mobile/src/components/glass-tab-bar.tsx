@@ -71,7 +71,10 @@ export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProp
             {focused ? (
               <GoldGlass interactive style={styles.pill}>
                 <Icon name={icon} color={colors.goldDeep} />
-                <Text style={styles.label} numberOfLines={1}>
+                {/* Capped for iOS Larger Text: the pill is 64pt tall and
+                    shares its row with three icons — unbounded, the label
+                    truncates to nothing. */}
+                <Text style={styles.label} numberOfLines={1} maxFontSizeMultiplier={1.3}>
                   {label}
                 </Text>
               </GoldGlass>

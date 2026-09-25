@@ -20,6 +20,8 @@ export const appEs = {
     showLoadFailed: "No pudimos cargar esta serie",
     notNow: "Ahora no",
     pleaseWait: "Un momento…",
+    // Spoken only (VoiceOver): the show page's «‹» (#288).
+    back: "Volver",
   },
   tabs: {
     home: "Inicio",
@@ -31,6 +33,8 @@ export const appEs = {
     all: "Todo",
     vertical: "Vertical",
     noResults: "Ninguna serie coincide.",
+    // Spoken only (VoiceOver): the search field's «×» (#288).
+    clearSearch: "Borrar búsqueda",
   },
   // The Home feed under the carousel (#248): the signed-in «Up next» block and
   // its resume pill. Everything else the feed prints — Just released, Popular
@@ -93,6 +97,7 @@ export const appEn: AppDict = {
     showLoadFailed: "Couldn't load this show",
     notNow: "Not now",
     pleaseWait: "Please wait…",
+    back: "Back",
   },
   tabs: {
     home: "Home",
@@ -104,6 +109,7 @@ export const appEn: AppDict = {
     all: "All",
     vertical: "Vertical",
     noResults: "No shows match.",
+    clearSearch: "Clear search",
   },
   home: {
     upNext: "Up next",

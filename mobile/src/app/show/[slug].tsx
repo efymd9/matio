@@ -105,7 +105,8 @@ export default function ShowScreen() {
 
         <GlassBackButton
           onPress={() => goBackOrHome(router)}
-          accessibilityLabel={t.watch.backToShowAria}
+          // Plain «Back»: this IS the show — «Back to show» was the player's label.
+          accessibilityLabel={t.app.common.back}
           style={[styles.back, { top: insets.top + space(2) }]}
         />
 
@@ -209,9 +210,26 @@ function EpisodeRow({
 }) {
   const t = useT();
   const minutes = durationMinutes(episode.durationSeconds);
+  const lockLabel = locked
+    ? locked === "signup_required"
+      ? t.episodesOverlay.lockedSignup
+      : t.episodesOverlay.lockedSubscribe
+    : null;
+  // What VoiceOver reads for the row: «Ep. 2, Title, 12 min, Create account»
+  // — not «2. Title», and never the lock glyph's «black circle».
+  const spoken = [
+    t.home.epShort(position),
+    episode.title,
+    minutes !== null ? t.showDetail.minutes(minutes) : null,
+    lockLabel,
+  ]
+    .filter(Boolean)
+    .join(", ");
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={spoken}
       style={({ pressed }) => [styles.episodeCard, pressed && { opacity: 0.8 }]}
     >
       <View>
@@ -221,7 +239,7 @@ function EpisodeRow({
           style={[styles.episodeThumb, locked ? { opacity: 0.45 } : null] as never}
         />
         {locked ? (
-          <View style={styles.lockOverlay}>
+          <View style={styles.lockOverlay} aria-hidden>
             <Text style={styles.lockGlyph}>&#9679;</Text>
           </View>
         ) : null}
@@ -239,13 +257,7 @@ function EpisodeRow({
           <Text style={styles.episodeDuration}>
             {minutes !== null ? t.showDetail.minutes(minutes) : ""}
           </Text>
-          {locked ? (
-            <Text style={styles.lockLabel}>
-              {locked === "signup_required"
-                ? t.episodesOverlay.lockedSignup
-                : t.episodesOverlay.lockedSubscribe}
-            </Text>
-          ) : null}
+          {lockLabel ? <Text style={styles.lockLabel}>{lockLabel}</Text> : null}
         </View>
       </View>
     </Pressable>

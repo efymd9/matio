@@ -267,12 +267,16 @@ function ClerkSignInForm({
           if (!ready) return;
           void (step === "email" ? sendCode() : verifyCode());
         }}
+        // Announced as dimmed until Clerk is ready, and busy mid-request.
+        disabled={!ready || busy}
+        busy={busy}
         style={{ alignSelf: "stretch", marginTop: space(5) }}
       />
 
       {secondary ? (
         <Pressable
           onPress={() => (step === "code" ? setStep("email") : onCancel?.())}
+          accessibilityRole="link"
           style={{ marginTop: space(5) }}
           hitSlop={8}
         >
@@ -285,6 +289,7 @@ function ClerkSignInForm({
       {signInHint && step === "email" ? (
         <Pressable
           onPress={() => emailInput.current?.focus()}
+          accessibilityRole="link"
           style={{ marginTop: space(3) }}
           hitSlop={8}
         >

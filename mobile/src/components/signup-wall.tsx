@@ -21,7 +21,7 @@ export function SignupWall({ onSignIn, onBack }: { onSignIn: () => void; onBack:
         onPress={onSignIn}
         style={{ alignSelf: "stretch", marginTop: space(5) }}
       />
-      <Pressable onPress={onBack} style={{ marginTop: space(5) }} hitSlop={8}>
+      <Pressable onPress={onBack} accessibilityRole="link" style={{ marginTop: space(5) }} hitSlop={8}>
         <Text style={styles.wallSecondary}>{t.app.common.notNow}</Text>
       </Pressable>
       <Text style={styles.wallFine}>{t.signupWall.noCardNeeded}</Text>
