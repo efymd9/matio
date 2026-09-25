@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/api/client";
 import { useConfig } from "@/api/config-context";
+import { errorHint } from "@/api/error-hint";
 import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
 import { GlassBackButton } from "@/components/glass";
@@ -77,7 +78,7 @@ export default function ShowScreen() {
     return (
       <ErrorState
         message={missing ? t.showDetail.notFound : t.app.common.showLoadFailed}
-        hint={missing ? undefined : show.error.message}
+        hint={missing ? undefined : errorHint(t, show.error)}
         onRetry={missing ? undefined : show.retry}
       />
     );

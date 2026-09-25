@@ -74,6 +74,8 @@ vi.mock("expo-glass-effect", () => ({
 }));
 vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+// The build number (src/build.ts, via the config provider's floor check).
+vi.mock("expo-constants", () => ({ default: { nativeBuildVersion: "6" } }));
 
 const STALLED_TITLE = "Sign-in is unavailable right now";
 const STALLED_BODY = "Check your connection and try again.";

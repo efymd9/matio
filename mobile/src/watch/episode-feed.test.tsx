@@ -372,6 +372,29 @@ describe("EpisodeFeed — a signed-in viewer answered signup_required (#288 item
   });
 });
 
+describe("EpisodeFeed — a token failure is told in the viewer's words (#288 item 7)", () => {
+  it("a server failure shows the player's own line, never the server's English sentence", async () => {
+    tokens.answer = async () => {
+      throw new ApiError("server_error", "Your preview has ended.", 500);
+    };
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(text()).toContain("Playback unavailable");
+    expect(text()).toContain("We couldn't load this episode.");
+    expect(text()).not.toContain("Your preview has ended.");
+  });
+
+  it("an unreachable server reads as a connection problem", async () => {
+    tokens.answer = async () => {
+      throw new ApiError("network", "The request timed out.", 0);
+    };
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(text()).toContain("Check your connection and try again.");
+    expect(text()).not.toContain("The request timed out.");
+  });
+});
+
 describe("EpisodeFeed — Try again resumes where the viewer was (#288 item 5)", () => {
   it("after a playback failure mid-episode", async () => {
     let n = 0;

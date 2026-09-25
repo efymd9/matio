@@ -16,6 +16,7 @@ import Video, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, ApiError, muxStreamUrl } from "@/api/client";
 import { useConfig } from "@/api/config-context";
+import { errorHint } from "@/api/error-hint";
 import { GlassBackButton } from "@/components/glass";
 import { SignupWall } from "@/components/signup-wall";
 import { Artwork, ErrorState, Loading } from "@/components/ui";
@@ -611,7 +612,7 @@ function FeedPage({
 
   // --- end states, mirroring the web player's three distinct overlays ----
   if (tokenError) {
-    const { code, reason, message } = tokenError;
+    const { code, reason } = tokenError;
     const retry = refetch;
     // 403 signup_required — the gate, enforced server-side. Not an error; an
     // ask — for a viewer who is signed out. Signed in, the answer came from a
@@ -641,7 +642,13 @@ function FeedPage({
         <ErrorState message={t.watch.rateLimitedKicker} hint={t.watch.rateLimitedTitle} onRetry={retry} />
       );
     }
-    return <ErrorState message={t.watch.unavailableKicker} hint={message} onRetry={retry} />;
+    return (
+      <ErrorState
+        message={t.watch.unavailableKicker}
+        hint={errorHint(t, tokenError, t.watch.unavailableTitle)}
+        onRetry={retry}
+      />
+    );
   }
 
   // A decode/network failure inside the video element is a different failure

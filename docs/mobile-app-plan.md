@@ -414,7 +414,8 @@ show, artwork, brand palette).
   `geist`, `geist-mono`. Scrims, the duotone wash, the tone fallbacks and the gold CTA are now
   real gradients; Anton/Geist/Geist Mono are loaded in `_layout.tsx` behind the splash.
 - **`ConfigProvider`** fetches `/v1/config` at launch and hard-blocks when `APP_BUILD`
-  (`src/build.ts`, bump per release) falls below `minSupportedBuild`.
+  (`src/build.ts` — the native build number EAS `autoIncrement` stamps, since #288; a literal
+  `1` before that) falls below `minSupportedBuild`.
 
 Verified against the live API on an iPhone 16 Pro dev build:
 

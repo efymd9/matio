@@ -2,6 +2,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useRef } from "react";
 import { api } from "@/api/client";
+import { errorHint } from "@/api/error-hint";
 import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
 import { ErrorState, Loading } from "@/components/ui";
@@ -107,7 +108,7 @@ export default function WatchScreen() {
     return (
       <ErrorState
         message={missing ? t.showDetail.notFound : t.app.common.showLoadFailed}
-        hint={missing ? undefined : state.error.message}
+        hint={missing ? undefined : errorHint(t, state.error)}
         onRetry={missing ? undefined : state.retry}
       />
     );
