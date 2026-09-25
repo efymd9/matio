@@ -896,7 +896,11 @@ postgres(connectionString, { prepare: false, max: 1 });
 
 ### Empty `dotenv` log noise
 
-`dotenv@17+` prints `◇ injected env (N) from .env.local // tip:…` lines by default in scripts. Not an error — just visual noise. Suppress with `quiet: true` in the config call if it bothers you.
+`dotenv@18` prints `◇ injected env (N) from .env.local` on **stderr** by default in scripts (17.x printed it on stdout with a `// tip:…` suffix; 18 dropped the tips). Not an error — just visual noise, and stdout stays clean for anything a script pipes out. It names a count and the file path only, never keys or values. Suppress with `quiet: true` in the config call or `DOTENV_QUIET=1`.
+
+### `DOTENV_OVERRIDE` turns `.env.local` into a prod override
+
+`dotenv@18` also reads its options from the environment: with `DOTENV_OVERRIDE` or `DOTENV_CONFIG_OVERRIDE` exported, `config({ path: ".env.local" })` **overwrites** variables that are already set. `.env.local` carries the production `DATABASE_URL`, so `DATABASE_URL=<staging> pnpm db:migrate` would silently run against production — the exact thing the migration order forbids. Never export either variable in a shell that runs `drizzle.config.ts` or the `scripts/` that load `.env.local` (none is set today — shell, rc files and `.github` were checked when 18 landed, #284/#285).
 
 ### Vercel `vercel env add` is single-environment
 
