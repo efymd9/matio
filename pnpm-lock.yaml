@@ -25,8 +25,8 @@ importers:
         specifier: ^2.4.57
         version: 2.4.57(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@mux/mux-node':
-        specifier: ^14.1.1
-        version: 14.1.1
+        specifier: ^15.3.0
+        version: 15.3.0
       '@mux/mux-player-react':
         specifier: ^3.13.4
         version: 3.13.4(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -1206,8 +1206,8 @@ packages:
   '@mux/mux-data-google-ima@0.3.17':
     resolution: {integrity: sha512-4wpH6dYybyZhqLn9qGn/+67Z8MZnQRAdqTFEEZw2bx61M9q01uPYYHxd8qwOnYtUGEeafsdTwVHVxKHGD3oc1A==}
 
-  '@mux/mux-node@14.1.1':
-    resolution: {integrity: sha512-Am79fhXU6A15zef1y+2UKfbIQ/UMGiVOjKKV3fOAqR8IS0A4HbL6WLDs0rNlMRHrefvASAftM2NWwLLBU3Peaw==}
+  '@mux/mux-node@15.3.0':
+    resolution: {integrity: sha512-gpsSjyL9aReV1caHoNLap1edyAs1vJJ1/tJuFQuXVVgU8jSwSpj+yha+bB/EsbhWJotVQFL6OS1H9+iZBLxu5A==}
     hasBin: true
 
   '@mux/mux-player-react@3.13.4':
@@ -7076,7 +7076,7 @@ snapshots:
     dependencies:
       mux-embed: 5.18.1
 
-  '@mux/mux-node@14.1.1': {}
+  '@mux/mux-node@15.3.0': {}
 
   '@mux/mux-player-react@3.13.4(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
