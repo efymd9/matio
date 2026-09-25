@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/api/client";
 import { useConfig } from "@/api/config-context";
+import { errorHint } from "@/api/error-hint";
 import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
 import { GlassBackButton } from "@/components/glass";
@@ -17,6 +18,7 @@ import {
   Scrim,
 } from "@/components/ui";
 import { useT } from "@/i18n/locale";
+import { goBackOrHome } from "@/navigation";
 import type {
   EpisodeSummary,
   PlaybackDenialReason,
@@ -25,7 +27,7 @@ import type {
 import { isEpisodeLockedForApp } from "@/shared/api-types";
 import { genreLabel, normalizeGenreKey } from "@/shared/catalog-filters";
 import { body, colors, display, fonts, radius, SCREEN_PAD, space } from "@/theme";
-import { firstEpisodeLocked } from "@/watch/first-episode";
+import { episodeRoute, firstEpisodeLocked } from "@/watch/first-episode";
 
 // The show page (#245): a screen of the ROOT stack, so the tab bar is never
 // here — the whole height goes to the episode list, and the only chrome is
@@ -47,24 +49,19 @@ export default function ShowScreen() {
   const { isSignedIn } = useOptionalAuth();
   const signedIn = isSignedIn;
   // Subscription state is not yet exposed to the app. It only matters in paid
-  // mode; free/gate mode never consults it. When payments return in the app,
-  // /v1/config should carry it rather than the app guessing (registry).
+  // mode — live since 2026-09-09 — so every signed-in viewer reads as a
+  // non-subscriber here; /v1 should carry it rather than the app guessing
+  // (registry).
   const hasSubscription = false;
 
-  // A locked episode routes to sign-in instead of the player: the wall is the
-  // point of the gate, and bouncing off a 403 would be a wasted round trip.
-  // The player loads the show itself (the feed pages every episode), so only
-  // the slug rides along.
+  // An episode that asks for an account routes to sign-in instead of the
+  // player — carrying the episode, so signing in lands on it. Bouncing off a
+  // 403 would be a wasted round trip. Anything else opens the player, which
+  // loads the show itself (the feed pages every episode), so only the slug
+  // rides along; a subscribers-only episode's page says so there.
   const openEpisode = useCallback(
-    (show: ShowDetail, episode: EpisodeSummary, locked: boolean) => {
-      if (locked) {
-        router.push("/sign-in");
-        return;
-      }
-      router.push({
-        pathname: "/watch/[episodeId]",
-        params: { episodeId: episode.id, showSlug: show.slug },
-      });
+    (show: ShowDetail, episode: EpisodeSummary, lock: false | PlaybackDenialReason) => {
+      router.push(episodeRoute(lock, episode.id, show.slug));
     },
     [router],
   );
@@ -81,7 +78,7 @@ export default function ShowScreen() {
     return (
       <ErrorState
         message={missing ? t.showDetail.notFound : t.app.common.showLoadFailed}
-        hint={missing ? undefined : show.error.message}
+        hint={missing ? undefined : errorHint(t, show.error)}
         onRetry={missing ? undefined : show.retry}
       />
     );
@@ -107,8 +104,9 @@ export default function ShowScreen() {
         <Scrim height={insets.top + space(16)} from="top" maxOpacity={0.7} />
 
         <GlassBackButton
-          onPress={() => router.back()}
-          accessibilityLabel={t.watch.backToShowAria}
+          onPress={() => goBackOrHome(router)}
+          // Plain «Back»: this IS the show — «Back to show» was the player's label.
+          accessibilityLabel={t.app.common.back}
           style={[styles.back, { top: insets.top + space(2) }]}
         />
 
@@ -186,7 +184,7 @@ export default function ShowScreen() {
                   position={i + 1}
                   showSlug={data.slug}
                   locked={locked}
-                  onPress={() => openEpisode(data, ep, locked !== false)}
+                  onPress={() => openEpisode(data, ep, locked)}
                 />
               );
             })
@@ -212,9 +210,26 @@ function EpisodeRow({
 }) {
   const t = useT();
   const minutes = durationMinutes(episode.durationSeconds);
+  const lockLabel = locked
+    ? locked === "signup_required"
+      ? t.episodesOverlay.lockedSignup
+      : t.episodesOverlay.lockedSubscribe
+    : null;
+  // What VoiceOver reads for the row: «Ep. 2, Title, 12 min, Create account»
+  // — not «2. Title», and never the lock glyph's «black circle».
+  const spoken = [
+    t.home.epShort(position),
+    episode.title,
+    minutes !== null ? t.showDetail.minutes(minutes) : null,
+    lockLabel,
+  ]
+    .filter(Boolean)
+    .join(", ");
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={spoken}
       style={({ pressed }) => [styles.episodeCard, pressed && { opacity: 0.8 }]}
     >
       <View>
@@ -224,7 +239,7 @@ function EpisodeRow({
           style={[styles.episodeThumb, locked ? { opacity: 0.45 } : null] as never}
         />
         {locked ? (
-          <View style={styles.lockOverlay}>
+          <View style={styles.lockOverlay} aria-hidden>
             <Text style={styles.lockGlyph}>&#9679;</Text>
           </View>
         ) : null}
@@ -242,13 +257,7 @@ function EpisodeRow({
           <Text style={styles.episodeDuration}>
             {minutes !== null ? t.showDetail.minutes(minutes) : ""}
           </Text>
-          {locked ? (
-            <Text style={styles.lockLabel}>
-              {locked === "signup_required"
-                ? t.episodesOverlay.lockedSignup
-                : t.episodesOverlay.lockedSubscribe}
-            </Text>
-          ) : null}
+          {lockLabel ? <Text style={styles.lockLabel}>{lockLabel}</Text> : null}
         </View>
       </View>
     </Pressable>

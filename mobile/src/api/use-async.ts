@@ -43,5 +43,25 @@ export function useAsync<T>(fetcher: () => Promise<T>, deps: readonly unknown[])
 
   useEffect(run, [run]);
 
-  return { ...state, retry: run };
+  // A silent refresh: what is on screen stays, and only a success replaces
+  // it — no spinner, no remounted list, and a failure changes nothing
+  // (`retry` is the loud one: back to loading). Any run() that starts after
+  // it — a retry, new deps — supersedes it, and a first load still in
+  // flight is left to finish on its own.
+  const reload = useCallback(() => {
+    const base = generation.current;
+    fetcher().then(
+      (data) => {
+        if (generation.current !== base) return;
+        setState((prev) => (prev.status === "loading" ? prev : { status: "ready", data, error: null }));
+      },
+      () => {
+        // Keep what the viewer has.
+      },
+    );
+    // Same trigger as run().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  return { ...state, retry: run, reload };
 }

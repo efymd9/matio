@@ -25,7 +25,12 @@ export function AuthStalled({ onRetry, onCancel }: { onRetry: () => void; onCanc
         </Card>
       </View>
       {onCancel ? (
-        <Pressable onPress={onCancel} style={{ marginTop: space(5) }} hitSlop={8}>
+        <Pressable
+          onPress={onCancel}
+          accessibilityRole="link"
+          style={{ marginTop: space(5) }}
+          hitSlop={8}
+        >
           <Text style={styles.cancel}>{t.app.common.notNow}</Text>
         </Pressable>
       ) : null}

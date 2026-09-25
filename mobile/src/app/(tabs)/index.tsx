@@ -17,8 +17,8 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api, API_BASE_URL } from "@/api/client";
-import { useAsync } from "@/api/use-async";
+import { useCatalog } from "@/api/catalog-context";
+import { errorHint } from "@/api/error-hint";
 import { useOptionalAuth } from "@/auth/clerk";
 import { useTabBarClearance } from "@/components/glass-tab-bar";
 import { HomeFeed } from "@/components/home-feed";
@@ -63,7 +63,7 @@ export default function HomeScreen() {
   const { isSignedIn } = useOptionalAuth();
   const clearance = useTabBarClearance();
 
-  const catalog = useAsync(useCallback(() => api.catalog(), []), []);
+  const catalog = useCatalog();
   const resume = useContinueWatching(isSignedIn);
   const { play, busy } = usePlayFirstEpisode();
 
@@ -112,10 +112,9 @@ export default function HomeScreen() {
     return (
       <ErrorState
         message={t.app.common.loadFailed}
-        // The overwhelmingly likely cause in development is the Next dev server
-        // not running, so name the actual base URL rather than a generic
-        // "check your connection".
-        hint={`${catalog.error.message}\n${API_BASE_URL}`}
+        // A dev build also names the base URL — there the likely cause is the
+        // Next dev server not running (api/error-hint.ts).
+        hint={errorHint(t, catalog.error)}
         onRetry={catalog.retry}
       />
     );

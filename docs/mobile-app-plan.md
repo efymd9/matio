@@ -414,7 +414,8 @@ show, artwork, brand palette).
   `geist`, `geist-mono`. Scrims, the duotone wash, the tone fallbacks and the gold CTA are now
   real gradients; Anton/Geist/Geist Mono are loaded in `_layout.tsx` behind the splash.
 - **`ConfigProvider`** fetches `/v1/config` at launch and hard-blocks when `APP_BUILD`
-  (`src/build.ts`, bump per release) falls below `minSupportedBuild`.
+  (`src/build.ts` — the native build number EAS `autoIncrement` stamps, since #288; a literal
+  `1` before that) falls below `minSupportedBuild`.
 
 Verified against the live API on an iPhone 16 Pro dev build:
 
@@ -628,8 +629,8 @@ board was its Lab.
   The screen is a `FlatList` whose `ListHeaderComponent` is the carousel block passed as an
   ELEMENT (an inline component type would remount the carousel on every render and lose its
   position) and whose footer is the tagline. The old Continue-watching rail left Home — «Up
-  next» is its role (same `useContinueWatching` hook, same refresh-on-save); `ContinueCard`
-  in `ui.tsx` is now unused (registry — `ui.tsx` belongs to #247). No `/v1` change; the two
+  next» is its role (same `useContinueWatching` hook, same refresh-on-save); the unused
+  `ContinueCard` left `ui.tsx` in #288. No `/v1` change; the two
   new app strings are `app.home.upNext` / `app.home.resume`.
 - **Browse** (`(tabs)/browse.tsx`): a glass search field (title, client-side, case- and
   accent-insensitive) AND one chip — All · the genres · Vertical (drawn only when a vertical

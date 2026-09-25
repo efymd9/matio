@@ -12,8 +12,8 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api, API_BASE_URL } from "@/api/client";
-import { useAsync } from "@/api/use-async";
+import { useCatalog } from "@/api/catalog-context";
+import { errorHint } from "@/api/error-hint";
 import { GlassSurface } from "@/components/glass";
 import { useTabBarClearance } from "@/components/glass-tab-bar";
 import { Icon } from "@/components/icon";
@@ -40,7 +40,7 @@ export default function BrowseScreen() {
   const t = useT();
   const clearance = useTabBarClearance();
 
-  const catalog = useAsync(useCallback(() => api.catalog(), []), []);
+  const catalog = useCatalog();
   const [query, setQuery] = useState("");
   const [chip, setChip] = useState<ChipSelection>(ALL);
 
@@ -60,7 +60,7 @@ export default function BrowseScreen() {
     return (
       <ErrorState
         message={t.app.common.loadFailed}
-        hint={`${catalog.error.message}\n${API_BASE_URL}`}
+        hint={errorHint(t, catalog.error)}
         onRetry={catalog.retry}
       />
     );
@@ -86,13 +86,16 @@ export default function BrowseScreen() {
             autoCorrect={false}
             autoCapitalize="none"
             returnKeyType="search"
+            // The field is a fixed 44pt pill: capped for iOS Larger Text,
+            // or the query overflows it.
+            maxFontSizeMultiplier={1.3}
           />
           {query ? (
             <Pressable
               onPress={() => setQuery("")}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel={t.episodesOverlay.closeAria}
+              accessibilityLabel={t.app.browse.clearSearch}
             >
               <Text style={styles.clear}>×</Text>
             </Pressable>

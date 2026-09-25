@@ -13,7 +13,6 @@ import {
 } from "react-native";
 import { Icon, type IconName } from "@/components/icon";
 import { useT } from "@/i18n/locale";
-import type { ContinueWatchingEntry } from "@/shared/api-types";
 import { body, colors, display, fonts, radius, SCREEN_PAD, space, toneStopsFor } from "@/theme";
 
 // ---------------------------------------------------------------- scrim
@@ -115,12 +114,17 @@ export function Artwork({
 // Three tones: the burgundy badge (Matio Original), translucent glass (a
 // poster's «Vertical» tag), and the gold membership pill on the Account tab
 // — the same goldHi→goldLo fill as the CTA.
+// `maxFontSizeMultiplier` caps iOS Larger Text for a pill or meta row that
+// sits inside fixed-size chrome (the Home hero card), where unbounded
+// scaling clips it; elsewhere they scale freely.
 export function Pill({
   label,
   tone = "burgundy",
+  maxFontSizeMultiplier,
 }: {
   label: string;
   tone?: "burgundy" | "glass" | "gold";
+  maxFontSizeMultiplier?: number;
 }) {
   if (tone === "gold") {
     return (
@@ -130,7 +134,12 @@ export function Pill({
         end={{ x: 0, y: 1 }}
         style={styles.pill}
       >
-        <Text style={[styles.pillText, { color: colors.goldDeep }]}>{label}</Text>
+        <Text
+          style={[styles.pillText, { color: colors.goldDeep }]}
+          maxFontSizeMultiplier={maxFontSizeMultiplier}
+        >
+          {label}
+        </Text>
       </LinearGradient>
     );
   }
@@ -141,38 +150,58 @@ export function Pill({
         { backgroundColor: tone === "burgundy" ? colors.burgundy : colors.glass },
       ]}
     >
-      <Text style={styles.pillText}>{label}</Text>
+      <Text style={styles.pillText} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+        {label}
+      </Text>
     </View>
   );
 }
 
 // Meta row separated by rust dots, per the 8a spec.
-export function MetaRow({ parts }: { parts: string[] }) {
+export function MetaRow({
+  parts,
+  maxFontSizeMultiplier,
+}: {
+  parts: string[];
+  maxFontSizeMultiplier?: number;
+}) {
   const shown = parts.filter(Boolean);
   return (
     <View style={styles.metaRow}>
       {shown.map((part, i) => (
         <View key={part + i} style={styles.metaItem}>
           {i > 0 ? <View style={styles.metaDot} /> : null}
-          <Text style={styles.metaText}>{part}</Text>
+          <Text style={styles.metaText} maxFontSizeMultiplier={maxFontSizeMultiplier}>
+            {part}
+          </Text>
         </View>
       ))}
     </View>
   );
 }
 
+// `disabled` and `busy` are ANNOUNCED, not enforced: the caller's handler
+// guards the tap (a disabled Pressable stops being the responder — see the
+// Play disc in home-feed.tsx), and VoiceOver hears «dimmed» / «busy».
 export function GoldButton({
   label,
   onPress,
   style,
+  disabled = false,
+  busy = false,
 }: {
   label: string;
   onPress?: () => void;
   style?: ViewStyle;
+  disabled?: boolean;
+  busy?: boolean;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      aria-disabled={disabled}
+      aria-busy={busy}
       style={({ pressed }) => [{ borderRadius: radius.pill }, style, pressed && { opacity: 0.85 }]}
     >
       {/* linear-gradient(180deg, gold-hi, gold-lo) — the spec's CTA fill. */}
@@ -237,7 +266,11 @@ export function PosterCard({
   onPress?: () => void;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [{ width }, pressed && { opacity: 0.8 }]}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [{ width }, pressed && { opacity: 0.8 }]}
+    >
       <Artwork
         uri={posterUrl}
         toneKey={slug}
@@ -250,45 +283,6 @@ export function PosterCard({
       ) : null}
       <Text numberOfLines={2} style={styles.posterTitle}>
         {title}
-      </Text>
-    </Pressable>
-  );
-}
-
-// 16:9 "continue watching" tile — the web rail's shape: hero art (poster as
-// the fallback), a resume bar along the bottom edge, show title + episode
-// under it. `fraction` comes from the server so the bar never disagrees with
-// the position the tap resumes at.
-const CONTINUE_W = 220;
-
-export function ContinueCard({
-  item,
-  onPress,
-}: {
-  item: ContinueWatchingEntry;
-  onPress?: () => void;
-}) {
-  const t = useT();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [{ width: CONTINUE_W }, pressed && { opacity: 0.8 }]}
-    >
-      <View>
-        <Artwork
-          uri={item.show.heroImageUrl ?? item.show.posterImageUrl}
-          toneKey={item.show.slug}
-          style={styles.continueArt}
-        />
-        <View style={styles.continueTrack}>
-          <View style={[styles.continueFill, { width: `${item.fraction * 100}%` }]} />
-        </View>
-      </View>
-      <Text numberOfLines={1} style={styles.posterTitle}>
-        {item.show.title}
-      </Text>
-      <Text numberOfLines={1} style={styles.continueMeta}>
-        {t.home.epShort(item.episodeNumber)} · {item.episodeTitle}
       </Text>
     </Pressable>
   );
@@ -374,11 +368,14 @@ export function Row({
   );
   const rowStyle = [styles.row, !first && styles.rowDivider];
   if (!onPress) return <View style={rowStyle}>{content}</View>;
+  // A radio row announces its CHECKED state; «selected» is the vocabulary of
+  // tabs and chips, and made the language rows read wrong.
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole={role}
-      accessibilityState={selected === undefined ? undefined : { selected }}
+      aria-checked={role === "radio" ? selected : undefined}
+      aria-selected={role === "radio" ? undefined : selected}
       style={({ pressed }) => [rowStyle, pressed && { opacity: 0.7 }]}
     >
       {content}
@@ -409,14 +406,19 @@ export function Loading() {
   );
 }
 
+// `onBack` adds a «Back» text action under the state — for a state that is a
+// screen of its own with no other way out (a subscribers-only page in the
+// landscape player: status bar hidden, no «‹» mounted).
 export function ErrorState({
   message,
   hint,
   onRetry,
+  onBack,
 }: {
   message: string;
   hint?: string;
   onRetry?: () => void;
+  onBack?: () => void;
 }) {
   const t = useT();
   return (
@@ -425,6 +427,16 @@ export function ErrorState({
       {hint ? <Text style={styles.errorHint}>{hint}</Text> : null}
       {onRetry ? (
         <GoldButton label={t.watchError.tryAgain} onPress={onRetry} style={{ marginTop: space(6) }} />
+      ) : null}
+      {onBack ? (
+        <Pressable
+          onPress={onBack}
+          accessibilityRole="link"
+          hitSlop={8}
+          style={{ marginTop: space(onRetry ? 5 : 6) }}
+        >
+          <Text style={styles.errorBack}>{t.app.common.back}</Text>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -511,23 +523,6 @@ const styles = StyleSheet.create({
     marginTop: space(2),
     letterSpacing: 0.3,
   },
-  continueArt: {
-    width: CONTINUE_W,
-    height: (CONTINUE_W * 9) / 16,
-    borderRadius: radius.poster,
-  },
-  continueTrack: {
-    position: "absolute",
-    left: space(2),
-    right: space(2),
-    bottom: space(2),
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: colors.scrimTrack,
-    overflow: "hidden",
-  },
-  continueFill: { height: "100%", backgroundColor: colors.gold },
-  continueMeta: { ...body, color: colors.inkDim, fontSize: 11, marginTop: space(1) },
   groupLabel: {
     ...display,
     color: colors.gold,
@@ -578,4 +573,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: space(2),
   },
+  // The app's secondary text action, as «Not now» on the walls.
+  errorBack: { ...body, color: colors.gold, fontSize: 14, textAlign: "center" },
 });

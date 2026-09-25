@@ -10,12 +10,25 @@ import { ConfigProvider } from "@/api/config-context";
 import { AuthProvider } from "@/auth/clerk";
 import { LocaleProvider, useInitialLocale } from "@/i18n/locale";
 import { lockOrientation, PORTRAIT_LOCK } from "@/orientation";
+import { loadAutoplayNext } from "@/prefs/autoplay";
 import { colors } from "@/theme";
 
 // Hold the splash until the brand faces are ready. Without this the first
 // frame renders in the system font and visibly reflows into Anton — worse
 // than a marginally longer splash.
 SplashScreen.preventAutoHideAsync();
+
+// The «Play next episode automatically» setting, read from the keychain now,
+// alongside the language the splash waits for — so the cache is primed
+// before Settings ever mounts and its switch renders the stored value rather
+// than «on» flipping to «off» on the first open after a launch.
+void loadAutoplayNext();
+
+// The tabs sit under every other screen of the root stack, even when the app
+// starts ON one of them — a cold start from a matio:// link to a show, an
+// episode or sign-in (and push notifications, #98). Without the anchor that
+// screen is the stack's only one: back, «Not now» and the swipe go nowhere.
+export const unstable_settings = { anchor: "(tabs)" };
 
 // Espresso everywhere: the navigator's own background shows during transitions,
 // so it has to be branded too or every push flashes default black.

@@ -5,7 +5,8 @@ import { ErrorState, GoldButton, Loading } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import type { AppConfig } from "@/shared/api-types";
 import { body, colors, display, SCREEN_PAD, space } from "@/theme";
-import { api, API_BASE_URL } from "./client";
+import { api } from "./client";
+import { errorHint } from "./error-hint";
 import { useAsync } from "./use-async";
 
 // AppConfig is fetched once at launch and read everywhere. It carries the
@@ -33,7 +34,7 @@ export function ConfigProvider({ children }: { children: ReactNode }) {
     return (
       <ErrorState
         message={t.app.common.unreachable}
-        hint={`${state.error.message}\n${API_BASE_URL}`}
+        hint={errorHint(t, state.error)}
         onRetry={state.retry}
       />
     );

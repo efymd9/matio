@@ -97,23 +97,31 @@ export function VerticalChrome({
         colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.85)"]}
         style={[styles.bottomBar, { paddingBottom: insets.bottom + space(4) }]}
       >
+        {/* Read-outs over the picture: capped for iOS Larger Text, so the
+            block stays in the band the gradient darkens (READOUT_TEXT_CAP). */}
         <View style={styles.infoBlock} pointerEvents="none">
           <View style={styles.kickerRow}>
             <View style={styles.kickerTick} />
-            <Text style={styles.kicker}>{t.hero.matioOriginal}</Text>
+            <Text style={styles.kicker} maxFontSizeMultiplier={READOUT_TEXT_CAP}>
+              {t.hero.matioOriginal}
+            </Text>
           </View>
-          <Text style={styles.title} numberOfLines={1}>
+          <Text style={styles.title} numberOfLines={1} maxFontSizeMultiplier={READOUT_TEXT_CAP}>
             {showTitle}
           </Text>
-          <Text style={styles.meta} numberOfLines={1}>
+          <Text style={styles.meta} numberOfLines={1} maxFontSizeMultiplier={READOUT_TEXT_CAP}>
             {meta}
           </Text>
           <View style={styles.track}>
             <View style={[styles.fill, { width: `${fraction * 100}%` }]} />
           </View>
           <View style={styles.times}>
-            <Text style={styles.time}>{formatTime(positionSeconds)}</Text>
-            <Text style={styles.time}>{durationSeconds > 0 ? formatTime(durationSeconds) : ""}</Text>
+            <Text style={styles.time} maxFontSizeMultiplier={READOUT_TEXT_CAP}>
+              {formatTime(positionSeconds)}
+            </Text>
+            <Text style={styles.time} maxFontSizeMultiplier={READOUT_TEXT_CAP}>
+              {durationSeconds > 0 ? formatTime(durationSeconds) : ""}
+            </Text>
           </View>
         </View>
 
@@ -144,6 +152,7 @@ function formatTime(total: number): string {
 }
 
 const BUTTON = 40;
+const READOUT_TEXT_CAP = 1.3;
 
 const styles = StyleSheet.create({
   centre: { flex: 1, alignItems: "center", justifyContent: "center" },

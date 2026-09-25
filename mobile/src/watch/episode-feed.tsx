@@ -16,6 +16,7 @@ import Video, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, ApiError, muxStreamUrl } from "@/api/client";
 import { useConfig } from "@/api/config-context";
+import { errorHint } from "@/api/error-hint";
 import { GlassBackButton } from "@/components/glass";
 import { SignupWall } from "@/components/signup-wall";
 import { Artwork, ErrorState, Loading } from "@/components/ui";
@@ -54,10 +55,11 @@ import { useSegmentTracker } from "./use-segment-tracker";
 //                one is PRELOAD_LEAD_SECONDS from its end (the web's lead),
 //                and `ended` jumps to it without animation
 //
-// The signup gate is the same one the show page draws its locks from
-// (isEpisodeLockedForApp): a locked episode's page IS the sign-up wall, so
-// an auto-advance or a swipe into it lands on the ask, never on a stalled
-// player — and the token route still enforces the gate underneath.
+// The gate is the same one the show page draws its locks from
+// (isEpisodeLockedForApp): an episode that asks for an account has the
+// sign-up wall as its page, a subscribers-only one the «Subscribers only»
+// state — so an auto-advance or a swipe into it lands on the answer, never on
+// a stalled player — and the token route still enforces the gate underneath.
 
 // How long before the current episode ends the next one's token is fetched
 // and its player mounted (horizontal). Same lead as the web player.
@@ -73,6 +75,19 @@ const REFRESH_BACKOFF_MS = [0, 1_000, 2_000, 4_000];
 // A resume target inside the last seconds is a finished episode: start over
 // rather than land on the credits.
 const RESUME_TAIL_SECONDS = 10;
+
+// A signed-in viewer answered `signup_required` asked without the session:
+// api/client drops the Authorization header when Clerk's getToken() misses
+// its 3s pre-flight deadline (a cold start, a slow network). It is the token
+// that is late, not the viewer who is signed out — so one quiet retry this
+// long after, before anything is concluded.
+const SIGNED_IN_RETRY_MS = 1_000;
+
+// How long a "not playing" report from the player waits for an explanation
+// (buffering, a reload, a seek, the end) before it counts as a pause — see
+// onPlaybackStateChanged. The explaining events arrive in the same native
+// tick; this only has to outlast the bridge.
+export const PAUSE_REPORT_SETTLE_MS = 300;
 
 type Playback = {
   playbackId: string;
@@ -116,6 +131,7 @@ export function EpisodeFeed({
 }) {
   const { height } = useWindowDimensions();
   const config = useConfig();
+  const t = useT();
   const vertical = show.orientation === "vertical";
   const episodes = show.episodes;
   const listRef = useRef<FlatList<EpisodeSummary>>(null);
@@ -131,8 +147,9 @@ export function EpisodeFeed({
     onCurrentChange?.(current);
   }, [current, onCurrentChange]);
 
-  // Subscription state is not exposed to the app yet — only paid mode reads
-  // it, and paid mode is dormant. Same stance as the show page.
+  // Subscription state is not exposed to the app yet (registry): paid mode is
+  // live, and every signed-in viewer reads as a non-subscriber. Same stance
+  // as the show page.
   const hasSubscription = false;
 
   const lockedAt = useCallback(
@@ -243,8 +260,19 @@ export function EpisodeFeed({
         : index >= current && index <= current + 1;
 
       let content;
-      if (locked) {
+      if (locked === "signup_required") {
         content = <SignupWall onSignIn={onSignIn} onBack={onBack} />;
+      } else if (locked === "subscribe_required") {
+        // Signing in cannot open it, so no wall and no retry: the same
+        // answer the token route's 403 gets inside the page — with a way
+        // back, since in landscape nothing else on screen leads out.
+        content = (
+          <ErrorState
+            message={t.app.watch.subscribersOnly}
+            hint={t.app.watch.subscribersOnlyHint}
+            onBack={onBack}
+          />
+        );
       } else if (!inPool) {
         content = <Placeholder show={show} episode={item} />;
       } else {
@@ -283,6 +311,7 @@ export function EpisodeFeed({
       resumeSeconds,
       show,
       signedIn,
+      t,
       vertical,
     ],
   );
@@ -365,6 +394,7 @@ function FeedPage({
   const [tokenError, setTokenError] = useState<ApiError | null>(null);
   const [videoFailed, setVideoFailed] = useState(false);
   const [fetchNonce, setFetchNonce] = useState(0);
+  const [authRetried, setAuthRetried] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
   // Read by the vertical chrome only; the native transport draws its own.
   const [position, setPosition] = useState(0);
@@ -373,9 +403,13 @@ function FeedPage({
   const positionRef = useRef(0);
   const durationRef = useRef(0);
   const endedRef = useRef(false);
+  const bufferingRef = useRef(false);
+  // Between onLoadStart and onLoad: a source (re)loading, not playing yet.
+  const loadingRef = useRef(false);
   const nearEndFiredRef = useRef(false);
   const initialSeekDoneRef = useRef(false);
-  // Playhead to restore after a token refresh reloads the source.
+  // Playhead to restore after a token refresh — or a retry — reloads the
+  // source.
   const resumeAfterRefreshRef = useRef<number | null>(null);
 
   // Anonymous flushes are refused outright in paid mode (the preview cohort
@@ -406,6 +440,32 @@ function FeedPage({
     // fetchNonce is the retry trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armed, episode.id, fetchNonce]);
+
+  // Every retry reloads the source from a fresh token. The old playback goes
+  // (a player mounted on the stale token would take the resume below and then
+  // lose it to the new source), and the playhead is remembered, so onLoad
+  // lands where the viewer was rather than at 0:00 — where the next save tick
+  // would overwrite the saved position with the earlier one. A page that
+  // never played keeps its first-load resume instead.
+  const refetch = useCallback(() => {
+    if (positionRef.current > 0) resumeAfterRefreshRef.current = positionRef.current;
+    setTokenError(null);
+    setVideoFailed(false);
+    setPlayback(null);
+    setFetchNonce((n) => n + 1);
+  }, []);
+
+  // The late-session retry (SIGNED_IN_RETRY_MS): once per page.
+  const staleSession =
+    signedIn && tokenError?.code === "forbidden" && tokenError.reason === "signup_required";
+  useEffect(() => {
+    if (!staleSession || authRetried) return;
+    const timer = setTimeout(() => {
+      setAuthRetried(true);
+      refetch();
+    }, SIGNED_IN_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [staleSession, authRetried, refetch]);
 
   // Token lifecycle while this page is current: refresh REFRESH_LEAD_MS
   // before expiry (1s/2s/4s backoff on network/5xx, 4xx is terminal); a
@@ -469,8 +529,38 @@ function FeedPage({
     [playback, episode.title, show.title, show.posterImageUrl],
   );
 
+  // A "not playing" report waiting for its explanation (see
+  // onPlaybackStateChanged below), and the one way to drop it.
+  const pendingPauseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPendingPause = useCallback(() => {
+    if (pendingPauseRef.current === null) return;
+    clearTimeout(pendingPauseRef.current);
+    pendingPauseRef.current = null;
+  }, []);
+  // A page that stops being current (or unmounts) drops it too.
+  useEffect(() => cancelPendingPause, [isCurrent, cancelPendingPause]);
+
+  const onLoadStart = useCallback(() => {
+    loadingRef.current = true;
+    cancelPendingPause();
+  }, [cancelPendingPause]);
+
+  const onBuffer = useCallback(
+    (e: { isBuffering: boolean }) => {
+      bufferingRef.current = e.isBuffering;
+      if (e.isBuffering) cancelPendingPause();
+    },
+    [cancelPendingPause],
+  );
+
+  const onSeek = useCallback(() => {
+    cancelPendingPause();
+    tracker.onSeek();
+  }, [cancelPendingPause, tracker]);
+
   const onLoad = useCallback(
     (e: OnLoadData) => {
+      loadingRef.current = false;
       durationRef.current = e.duration;
       setDuration(e.duration);
       // After a token refresh the source reloads; land back where the
@@ -512,13 +602,66 @@ function FeedPage({
 
   const onEnd = useCallback(() => {
     endedRef.current = true;
+    cancelPendingPause();
     saver.onEnded();
     tracker.onEnded();
     const advanced = onEnded(index);
     // Last episode: our own chrome shows the play glyph again; the native
-    // transport handles its own end state.
-    if (!advanced && vertical) setUserPaused(true);
-  }, [index, onEnded, saver, tracker, vertical]);
+    // transport handles its own end state. A page the feed advanced past is
+    // left un-paused — it restarts when it is swiped back to (below).
+    setUserPaused(!advanced && vertical);
+  }, [cancelPendingPause, index, onEnded, saver, tracker, vertical]);
+
+  // The player pauses on its own — a lock-screen or Control Center pause, a
+  // call — without the `paused` prop knowing. On a VERTICAL page, where our
+  // chrome owns play/pause, the current page follows the player's report,
+  // so the chrome shows the truth and the first tap plays rather than
+  // "pausing" what already is. (A landscape page keeps the native transport,
+  // which shows its own state; feeding its scrub-pauses back into `paused`
+  // would fight it.)
+  //
+  // "Playing" is taken at once. "Not playing" is NOT a pause by itself: a
+  // stall, a source reload (the token refresh) and a seek all report it
+  // too, and on Android they report it FIRST — react-native-video sends the
+  // state from ExoPlayer's onIsPlayingChanged but `onBuffer` / `onEnd` only
+  // from the later onEvents pass of the same change. Taking it at face value
+  // set `paused`, i.e. setPlayWhenReady(false), and a rebuffer never resumed.
+  // So the report waits PAUSE_REPORT_SETTLE_MS for an explanation — buffering,
+  // a load start, a seek, the end, or "playing" again — and only an
+  // unexplained one becomes the viewer's pause.
+  const onPlaybackStateChanged = useCallback(
+    (e: { isPlaying: boolean; isSeeking: boolean }) => {
+      if (!vertical || !isCurrent) return;
+      cancelPendingPause();
+      if (e.isPlaying) {
+        setUserPaused(false);
+        return;
+      }
+      if (e.isSeeking) return;
+      pendingPauseRef.current = setTimeout(() => {
+        pendingPauseRef.current = null;
+        if (bufferingRef.current || loadingRef.current || endedRef.current) return;
+        setUserPaused(true);
+      }, PAUSE_REPORT_SETTLE_MS);
+    },
+    [cancelPendingPause, isCurrent, vertical],
+  );
+
+  // AirPods out / headphones unplugged on a vertical page: pause, never go on
+  // out loud through the speaker (iOS pauses by itself; Android only reports
+  // it). An explicit signal, so no settle wait.
+  const onAudioBecomingNoisy = useCallback(() => {
+    if (vertical && isCurrent) setUserPaused(true);
+  }, [isCurrent, vertical]);
+
+  // Swiping back to a page that already ended: start it over, as a tap on its
+  // play glyph would — not a frozen last frame with no glyph on it.
+  useEffect(() => {
+    if (!isCurrent || !endedRef.current) return;
+    endedRef.current = false;
+    videoRef.current?.seek(0);
+    setUserPaused(false);
+  }, [isCurrent]);
 
   const togglePlay = useCallback(() => {
     if (endedRef.current) {
@@ -535,22 +678,29 @@ function FeedPage({
 
   // --- end states, mirroring the web player's three distinct overlays ----
   if (tokenError) {
-    const { code, reason, message } = tokenError;
-    const retry = () => {
-      setTokenError(null);
-      setFetchNonce((n) => n + 1);
-    };
-    // 403 signup_required — the gate, enforced server-side. Not an error; an ask.
+    const { code, reason } = tokenError;
+    const retry = refetch;
+    // 403 signup_required — the gate, enforced server-side. Not an error; an
+    // ask — for a viewer who is signed out. Signed in, the answer came from a
+    // request that went out without the session: a spinner while the one
+    // quiet retry runs, then an honest failure, never a wall asking an
+    // account holder to sign in.
     if (code === "forbidden" && reason === "signup_required") {
-      return <SignupWall onSignIn={onSignIn} onBack={onBack} />;
+      if (!signedIn) return <SignupWall onSignIn={onSignIn} onBack={onBack} />;
+      if (!authRetried) return <Loading />;
+      return (
+        <ErrorState message={t.watch.unavailableKicker} hint={t.watch.unavailableTitle} onRetry={retry} />
+      );
     }
-    // 403 subscribe_required — paid mode only, dormant while payments are off.
+    // 403 subscribe_required — paid mode: the episode (or the legacy 60s
+    // preview) needs a subscription the app cannot sell.
     if (code === "forbidden" && reason === "subscribe_required") {
       return (
         <ErrorState
           message={t.app.watch.subscribersOnly}
           hint={t.app.watch.subscribersOnlyHint}
           onRetry={retry}
+          onBack={onBack}
         />
       );
     }
@@ -559,22 +709,20 @@ function FeedPage({
         <ErrorState message={t.watch.rateLimitedKicker} hint={t.watch.rateLimitedTitle} onRetry={retry} />
       );
     }
-    return <ErrorState message={t.watch.unavailableKicker} hint={message} onRetry={retry} />;
+    return (
+      <ErrorState
+        message={t.watch.unavailableKicker}
+        hint={errorHint(t, tokenError, t.watch.unavailableTitle)}
+        onRetry={retry}
+      />
+    );
   }
 
   // A decode/network failure inside the video element is a different failure
   // from a token failure and must not be reported as one.
   if (videoFailed) {
     return (
-      <ErrorState
-        message={t.watch.unavailableKicker}
-        hint={t.watch.unavailableTitle}
-        onRetry={() => {
-          setVideoFailed(false);
-          setPlayback(null);
-          setFetchNonce((n) => n + 1);
-        }}
-      />
+      <ErrorState message={t.watch.unavailableKicker} hint={t.watch.unavailableTitle} onRetry={refetch} />
     );
   }
 
@@ -597,11 +745,15 @@ function FeedPage({
           // every twenty and a progress bar that moves; the default 250ms
           // would re-render the chrome 4×/s.
           progressUpdateInterval={1000}
+          onLoadStart={onLoadStart}
           onLoad={onLoad}
           onProgress={onProgress}
-          onSeek={tracker.onSeek}
+          onSeek={onSeek}
           onEnd={onEnd}
           onError={() => setVideoFailed(true)}
+          onBuffer={onBuffer}
+          onPlaybackStateChanged={onPlaybackStateChanged}
+          onAudioBecomingNoisy={onAudioBecomingNoisy}
           // Picture-in-picture when the viewer leaves the app, audio when
           // the screen locks, now-playing controls on the lock screen —
           // the current page only, never a warming neighbour. The native
@@ -630,7 +782,10 @@ function FeedPage({
           episodeNumber={episode.number}
           positionSeconds={position}
           durationSeconds={duration}
-          paused={!isCurrent || userPaused}
+          // The glyph is the viewer's own pause only: a neighbour page is
+          // paused by the pool, and showing it there flashed the disc on
+          // both pages of every swipe.
+          paused={userPaused}
           muted={muted}
           onTogglePlay={togglePlay}
           onToggleMute={onToggleMute}

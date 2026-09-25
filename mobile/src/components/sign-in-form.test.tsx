@@ -1,3 +1,6 @@
+/** @vitest-environment jsdom */
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,11 +11,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // at the key. Outside the provider every provider-bound Clerk hook throws, and
 // an uncaught render error is RCTFatal in a release build.
 //
-// These cases pin the order that fixes it: without a key the form renders the
-// «unavailable» state and calls NOT ONE Clerk hook; with a key the form itself
-// renders, through the hooks. Rendered with react-dom/server on
-// react-native-web (the `mobile` vitest project aliases `react-native` to it),
-// so this is the real component tree, not a description of it.
+// The first two cases pin the order that fixes it: without a key the form
+// renders the «unavailable» state and calls NOT ONE Clerk hook; with a key the
+// form itself renders, through the hooks. Rendered on react-native-web (the
+// `mobile` vitest project aliases `react-native` to it), so this is the real
+// component tree, not a description of it.
+//
+// #288 — the flow itself: which Clerk answer sends the form on to create an
+// account (only "no such address"), what the viewer reads for every failure
+// (their language, never Clerk's English or its developer strings), and that
+// a Clerk call that THROWS still ends in a message. Driven through the real
+// form in jsdom with react-dom/client: typed into, pressed, awaited.
 
 // The provider-bound hooks as they behave outside <ClerkProvider>: they throw.
 // The message is @clerk/react's own (useAssertWrappedByClerkProvider), so a
@@ -114,5 +123,252 @@ describe("SignInForm — the Clerk-key gate (#247)", { timeout: COLD_IMPORT_TIME
     expect(html).not.toContain("Sign-in unavailable");
     expect(useSignIn).toHaveBeenCalledTimes(1);
     expect(useSignUp).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------- the flow
+
+type Result = { error: unknown };
+const ok = async (): Promise<Result> => ({ error: null });
+
+// A Clerk API failure as the future API resolves it: ClerkAPIResponseError,
+// whose own code is the generic one and whose real code sits on errors[0]
+// next to Clerk's English text — the text the form must never print.
+function apiError(code: string, message: string) {
+  return {
+    code: "api_response_error",
+    message: `Clerk: ${message}`,
+    errors: [{ code, message, longMessage: message }],
+  };
+}
+// A ClerkRuntimeError: the code on the error itself, the message a developer
+// string.
+const NETWORK_ERROR = {
+  code: "network_error",
+  message: 'Clerk: Network request failed\n\n(code="network_error")',
+};
+
+function clerkResources() {
+  const signIn = {
+    emailCode: {
+      sendCode: vi.fn(ok),
+      verifyCode: vi.fn(ok),
+    },
+    finalize: vi.fn(ok),
+  };
+  const signUp = {
+    create: vi.fn(ok),
+    verifications: { sendEmailCode: vi.fn(ok), verifyEmailCode: vi.fn(ok) },
+    finalize: vi.fn(ok),
+  };
+  useSignIn.mockImplementation(() => ({ signIn }));
+  useSignUp.mockImplementation(() => ({ signUp }));
+  return { signIn, signUp };
+}
+
+let container: HTMLDivElement;
+let root: Root | null = null;
+
+const text = () => container.textContent ?? "";
+
+function typeInto(value: string) {
+  const input = container.querySelector("input");
+  if (!input) throw new Error("no input");
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  act(() => {
+    setValue?.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+// Presses a react-native-web Pressable by its visible text: the click bubbles
+// from the Text up to the Pressable, where RNW's responder fires onPress.
+// Then lets the awaited Clerk calls settle.
+async function press(label: string) {
+  const node = Array.from(container.querySelectorAll("*")).find(
+    (el) => el.children.length === 0 && el.textContent === label,
+  );
+  if (!node) throw new Error(`no element labelled ${label}`);
+  await act(async () => {
+    node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
+async function renderForm(locale: "en" | "es" = "en", onDone = vi.fn()) {
+  vi.stubEnv("EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY", "pk_test_dummy");
+  const SignInForm = await loadSignInForm();
+  const { LocaleProvider } = await import("@/i18n/locale");
+  root = createRoot(container);
+  act(() =>
+    root?.render(
+      <LocaleProvider initial={locale}>
+        <SignInForm {...props} onDone={onDone} />
+      </LocaleProvider>,
+    ),
+  );
+  return onDone;
+}
+
+describe("SignInForm — the email-code flow (#288)", { timeout: COLD_IMPORT_TIMEOUT_MS }, () => {
+  beforeEach(() => {
+    vi.stubGlobal("__DEV__", false);
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    useSignIn.mockReset();
+    useSignUp.mockReset();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    root = null;
+    container.remove();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("an existing member gets the code step by sign-in, with no account created", async () => {
+    const { signIn, signUp } = clerkResources();
+    await renderForm();
+
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    expect(signIn.emailCode.sendCode).toHaveBeenCalledWith({ emailAddress: "member@example.com" });
+    expect(signUp.create).not.toHaveBeenCalled();
+    expect(text()).toContain("Check your email");
+  });
+
+  it("only an unknown address falls through to creating the account", async () => {
+    const { signIn, signUp } = clerkResources();
+    signIn.emailCode.sendCode.mockResolvedValueOnce({
+      error: apiError("form_identifier_not_found", "Couldn't find your account."),
+    });
+    await renderForm();
+
+    typeInto("new@example.com");
+    await press(props.cta);
+
+    expect(signUp.create).toHaveBeenCalledWith({ emailAddress: "new@example.com" });
+    expect(signUp.verifications.sendEmailCode).toHaveBeenCalledTimes(1);
+    expect(text()).toContain("Check your email");
+  });
+
+  it("a rate limit on sign-in is shown as itself — never a sign-up that says the address is taken", async () => {
+    const { signIn, signUp } = clerkResources();
+    signIn.emailCode.sendCode.mockResolvedValueOnce({
+      error: apiError("too_many_requests", "Too many requests. Please try again in a bit."),
+    });
+    // What the old fall-through would have met on an existing address.
+    signUp.create.mockResolvedValue({
+      error: apiError("form_identifier_exists", "That email address is taken. Please try another."),
+    });
+    await renderForm();
+
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    expect(signUp.create).not.toHaveBeenCalled();
+    expect(text()).toContain("Too many requests. Please try again in a moment.");
+    expect(text()).not.toContain("taken");
+    // Still on the email step, ready for another go.
+    expect(text()).toContain(props.cta);
+  });
+
+  it("a dead network reads as the connection hint, never Clerk's developer string", async () => {
+    const { signIn, signUp } = clerkResources();
+    signIn.emailCode.sendCode.mockResolvedValueOnce({ error: NETWORK_ERROR });
+    await renderForm();
+
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    expect(signUp.create).not.toHaveBeenCalled();
+    expect(text()).toContain("Check your connection and try again.");
+    expect(text()).not.toContain("Clerk:");
+    expect(text()).not.toContain("network_error");
+  });
+
+  it("a Clerk call that throws still ends in a message, and the form is usable again", async () => {
+    const { signIn } = clerkResources();
+    signIn.emailCode.sendCode.mockRejectedValueOnce(new Error("undefined is not a function"));
+    await renderForm();
+
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    expect(text()).toContain("Something went wrong. Please try again.");
+    expect(text()).not.toContain("undefined is not a function");
+    // Not stuck on «Please wait…»: the button is back and works.
+    expect(text()).toContain(props.cta);
+    await press(props.cta);
+    expect(signIn.emailCode.sendCode).toHaveBeenCalledTimes(2);
+    expect(text()).toContain("Check your email");
+  });
+
+  it("maps every code the verify step can meet, and an unknown one to the generic line", async () => {
+    const { signIn } = clerkResources();
+    await renderForm();
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    const cases: Array<[unknown, string]> = [
+      [apiError("form_code_incorrect", "is incorrect"), "Incorrect code."],
+      [apiError("verification_expired", "This verification has expired."), "This code has expired. Request a new one."],
+      [apiError("verification_failed", "Too many failed attempts."), "Too many failed attempts. Request a new code."],
+      [apiError("form_param_format_invalid", "must be a number"), "Enter the code from your email."],
+      [apiError("some_future_code", "A brand-new Clerk sentence"), "Something went wrong. Please try again."],
+    ];
+    for (const [error, shown] of cases) {
+      signIn.emailCode.verifyCode.mockResolvedValueOnce({ error });
+      typeInto("123456");
+      await press("Sign in");
+      expect(text()).toContain(shown);
+      expect(text()).not.toContain("is incorrect");
+      expect(text()).not.toContain("A brand-new Clerk sentence");
+    }
+  });
+
+  it("a verify call that throws ends in a message instead of silence", async () => {
+    const { signIn } = clerkResources();
+    const onDone = await renderForm();
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    signIn.emailCode.verifyCode.mockRejectedValueOnce(new Error("boom"));
+    typeInto("123456");
+    await press("Sign in");
+
+    expect(text()).toContain("Something went wrong. Please try again.");
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it("verifies, finalizes and reports success once", async () => {
+    const { signIn } = clerkResources();
+    const onDone = await renderForm();
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    typeInto("123456");
+    await press("Sign in");
+
+    expect(signIn.emailCode.verifyCode).toHaveBeenCalledWith({ code: "123456" });
+    expect(signIn.finalize).toHaveBeenCalledTimes(1);
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("speaks Spanish to a Spanish viewer — Clerk only ever answers in English", async () => {
+    const { signIn } = clerkResources();
+    signIn.emailCode.sendCode.mockResolvedValueOnce({
+      error: apiError("too_many_requests", "Too many requests. Please try again in a bit."),
+    });
+    await renderForm("es");
+
+    typeInto("socia@example.com");
+    await press(props.cta);
+
+    expect(text()).toContain("Demasiados intentos. Inténtalo de nuevo en un momento.");
+    expect(text()).not.toContain("Too many requests");
   });
 });

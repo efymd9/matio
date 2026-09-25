@@ -20,6 +20,8 @@ export const appEs = {
     showLoadFailed: "No pudimos cargar esta serie",
     notNow: "Ahora no",
     pleaseWait: "Un momento…",
+    // Spoken only (VoiceOver): the show page's «‹» (#288).
+    back: "Volver",
   },
   tabs: {
     home: "Inicio",
@@ -31,6 +33,8 @@ export const appEs = {
     all: "Todo",
     vertical: "Vertical",
     noResults: "Ninguna serie coincide.",
+    // Spoken only (VoiceOver): the search field's «×» (#288).
+    clearSearch: "Borrar búsqueda",
   },
   // The Home feed under the carousel (#248): the signed-in «Up next» block and
   // its resume pill. Everything else the feed prints — Just released, Popular
@@ -71,6 +75,12 @@ export const appEs = {
     differentEmail: "Usar otro correo",
     unavailable: "Inicio de sesión no disponible",
     unavailableHint: "Esta versión no tiene configurada la clave de Clerk.",
+    // Clerk's answers, which it only gives in English (#288): the form maps
+    // their codes here and never shows Clerk's own text.
+    codeIncorrect: "El código no es correcto.",
+    codeExpired: "El código ha caducado. Pide uno nuevo.",
+    codeFailed: "Demasiados intentos fallidos. Pide un código nuevo.",
+    tooManyRequests: "Demasiados intentos. Inténtalo de nuevo en un momento.",
   },
   watch: {
     subscribersOnly: "Solo para suscriptores",
@@ -87,6 +97,7 @@ export const appEn: AppDict = {
     showLoadFailed: "Couldn't load this show",
     notNow: "Not now",
     pleaseWait: "Please wait…",
+    back: "Back",
   },
   tabs: {
     home: "Home",
@@ -98,6 +109,7 @@ export const appEn: AppDict = {
     all: "All",
     vertical: "Vertical",
     noResults: "No shows match.",
+    clearSearch: "Clear search",
   },
   home: {
     upNext: "Up next",
@@ -133,6 +145,10 @@ export const appEn: AppDict = {
     differentEmail: "Use a different email",
     unavailable: "Sign-in unavailable",
     unavailableHint: "This build has no Clerk publishable key configured.",
+    codeIncorrect: "Incorrect code.",
+    codeExpired: "This code has expired. Request a new one.",
+    codeFailed: "Too many failed attempts. Request a new code.",
+    tooManyRequests: "Too many requests. Please try again in a moment.",
   },
   watch: {
     subscribersOnly: "Subscribers only",
