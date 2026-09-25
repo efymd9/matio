@@ -100,7 +100,7 @@ stripe login
 **Used for**: direct uploads, transcoding, signed playback, signed thumbnail stills. Webhook types we care about: `video.asset.ready`, `video.asset.errored`.
 
 **SDK**:
-- `@mux/mux-node@14` (server)
+- `@mux/mux-node@15` (server; since v15 the same artifact as `@mux/ts`, the old name is a v15-only alias — see gotchas → «Mux SDK 14+», move tracked in #289)
 - `@mux/upchunk@3` (browser uploader)
 - `@mux/mux-video-react@0.31` (headless video element used for the main player chrome)
 - `media-chrome@4.19` (player chrome primitives — `MediaController`, `MediaPlayButton`, `MediaTimeRange`, etc.; menu primitives live at `media-chrome/react/menu`)
