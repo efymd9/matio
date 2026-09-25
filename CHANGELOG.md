@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.14.0](https://github.com/efymd9/matio/compare/matio-v0.13.0...matio-v0.14.0) (2026-09-25)
+
+
+### Features
+
+* мобильное — полировка, 10 видимых правок ([#292](https://github.com/efymd9/matio/issues/292)) ([#294](https://github.com/efymd9/matio/issues/294)) ([29fe998](https://github.com/efymd9/matio/commit/29fe9983c9956d1be3b83ccf0dceceb8a9576310))
+
+
+### Bug fixes
+
+* /checkout над часовым лимитом говорит «попробуйте через час» без кнопки повтора ([#233](https://github.com/efymd9/matio/issues/233)) ([#290](https://github.com/efymd9/matio/issues/290)) ([cb20cca](https://github.com/efymd9/matio/commit/cb20cca3065a14761d3a12c346d31085f1709eef))
+* мобильное — полировка, 15 исправлений без видимых изменений ([#288](https://github.com/efymd9/matio/issues/288)) ([#293](https://github.com/efymd9/matio/issues/293)) ([ed2b216](https://github.com/efymd9/matio/commit/ed2b21628823fde860442043f57a50633a0f9795))
+
+
+### Documentation
+
+* dotenv 18 пишет в stderr и читает DOTENV_OVERRIDE, версия @clerk/nextjs актуализирована ([#285](https://github.com/efymd9/matio/issues/285)) ([#286](https://github.com/efymd9/matio/issues/286)) ([c479dbb](https://github.com/efymd9/matio/commit/c479dbbaf024cadffcba525bcba5726d8cb4a822))
+
 ## [0.13.0](https://github.com/efymd9/matio/compare/matio-v0.12.2...matio-v0.13.0) (2026-09-23)
 
 
