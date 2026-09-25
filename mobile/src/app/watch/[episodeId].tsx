@@ -103,6 +103,7 @@ export default function WatchScreen() {
 
   if (state.status === "loading") return <Loading />;
 
+  // Errors carry «Back»: the player mounts no «‹» until the feed is up.
   if (state.status === "error") {
     const missing = state.error.code === "not_found";
     return (
@@ -110,6 +111,7 @@ export default function WatchScreen() {
         message={missing ? t.showDetail.notFound : t.app.common.showLoadFailed}
         hint={missing ? undefined : errorHint(t, state.error)}
         onRetry={missing ? undefined : state.retry}
+        onBack={onBack}
       />
     );
   }
@@ -119,7 +121,13 @@ export default function WatchScreen() {
   // The episode left the ready set since the link was made (unpublished,
   // reprocessing) — the same answer the token route would give.
   if (index < 0) {
-    return <ErrorState message={t.watch.unavailableKicker} hint={t.watch.unavailableTitle} />;
+    return (
+      <ErrorState
+        message={t.watch.unavailableKicker}
+        hint={t.watch.unavailableTitle}
+        onBack={onBack}
+      />
+    );
   }
 
   // Landscape is full-bleed: nothing over the picture, from the moment the

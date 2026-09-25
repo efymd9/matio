@@ -1,9 +1,9 @@
 import { useClerk, useUser } from "@clerk/expo";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { openBrowserAsync } from "expo-web-browser";
 import { useCallback } from "react";
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -12,7 +12,6 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useConfig } from "@/api/config-context";
 import { useOptionalAuth } from "@/auth/clerk";
 import { AuthStalled } from "@/components/auth-stalled";
 import { useTabBarClearance } from "@/components/glass-tab-bar";
@@ -36,6 +35,11 @@ import { useContinueWatching } from "@/watch/use-continue-watching";
 // are mid-way through, the way out. Signed out: the sign-up wall's copy as a
 // calm tab — the same two-step email → code form the locked-episode screen
 // uses — and one card on why an account is worth having.
+//
+// No «Manage subscription» row (#292): it opened matio.tv signed out, in a
+// browser with its own cookies, and offered a free member a subscription
+// they do not have. It comes back once /v1 says who is a subscriber
+// (registry); until then cancelling stays on the site.
 
 export default function AccountScreen() {
   const { isLoaded, isSignedIn, stalled, retry } = useOptionalAuth();
@@ -76,7 +80,6 @@ function SignedInAccount() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const clearance = useTabBarClearance();
-  const config = useConfig();
   const { user } = useUser();
   const { signOut } = useClerk();
   const resume = useContinueWatching(true);
@@ -96,6 +99,23 @@ function SignedInAccount() {
       }),
     [router],
   );
+
+  // One stray tap must not end a passwordless session — getting back in is
+  // an email round trip — so the system dialog asks first (#292). A sign-out
+  // that fails (offline) says so instead of doing nothing.
+  const confirmSignOut = useCallback(() => {
+    const signOutOrSay = async () => {
+      try {
+        await signOut();
+      } catch {
+        Alert.alert(t.app.account.signOutFailed, t.app.account.stalledBody);
+      }
+    };
+    Alert.alert(t.app.account.signOutConfirmTitle, t.app.account.signOutConfirmBody, [
+      { text: t.app.common.cancel, style: "cancel" },
+      { text: t.app.account.signOut, style: "destructive", onPress: () => void signOutOrSay() },
+    ]);
+  }, [signOut, t]);
 
   return (
     <ScrollView
@@ -145,23 +165,9 @@ function SignedInAccount() {
         </View>
       ) : null}
 
-      {config.flags.paymentsEnabled ? (
-        <View style={styles.group}>
-          <Card>
-            <Row
-              first
-              label={t.footer.manage}
-              sub={webHost(config.urls.web)}
-              trailing={<Chevron external />}
-              onPress={() => void openBrowserAsync(config.urls.web)}
-            />
-          </Card>
-        </View>
-      ) : null}
-
       <View style={styles.group}>
         <Card>
-          <Row first label={t.app.account.signOut} danger onPress={() => void signOut()} />
+          <Row first label={t.app.account.signOut} danger onPress={confirmSignOut} />
         </Card>
       </View>
     </ScrollView>
@@ -197,6 +203,7 @@ function ContinueRow({
             uri={item.show.heroImageUrl ?? item.show.posterImageUrl}
             toneKey={item.show.slug}
             style={styles.thumb}
+            displayWidth={THUMB_W}
           />
           <View style={styles.thumbTrack}>
             <View style={[styles.thumbFill, { width: `${item.fraction * 100}%` }]} />
@@ -210,11 +217,6 @@ function ContinueRow({
       onPress={onPress}
     />
   );
-}
-
-// «matio.tv» for a row's second line — the host, not the scheme.
-function webHost(url: string): string {
-  return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
 }
 
 const stay = () => {};
@@ -264,6 +266,9 @@ function AnonymousAccount() {
   );
 }
 
+// The continue row's thumb, in points.
+const THUMB_W = 72;
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
   heading: {
@@ -292,7 +297,7 @@ const styles = StyleSheet.create({
   email: { fontFamily: fonts.bodySemi, color: colors.ink, fontSize: 16 },
   section: { marginTop: space(8) },
   group: { paddingHorizontal: SCREEN_PAD, marginTop: space(4) },
-  thumb: { width: 72, height: 42, borderRadius: 8 },
+  thumb: { width: THUMB_W, height: 42, borderRadius: 8 },
   thumbTrack: {
     position: "absolute",
     left: 4,

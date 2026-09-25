@@ -1,5 +1,5 @@
 import { LinearGradient } from "expo-linear-gradient";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useT } from "@/i18n/locale";
 import { body, colors, display, fonts, radius, SCREEN_PAD, space } from "@/theme";
@@ -21,6 +21,7 @@ export function VerticalChrome({
   positionSeconds,
   durationSeconds,
   paused,
+  buffering = false,
   muted,
   onTogglePlay,
   onToggleMute,
@@ -32,6 +33,10 @@ export function VerticalChrome({
   positionSeconds: number;
   durationSeconds: number;
   paused: boolean;
+  // The player is stalled waiting for data (react-native-video's onBuffer).
+  // The native transport — and its spinner — is off here, so without this a
+  // stall is a frozen frame under chrome that looks like it is playing (#292).
+  buffering?: boolean;
   muted: boolean;
   onTogglePlay: () => void;
   onToggleMute: () => void;
@@ -53,13 +58,19 @@ export function VerticalChrome({
   return (
     <>
       {/* Full-surface play/pause. The glyph shows only while paused, so
-          nothing overlays the picture during playback. */}
+          nothing overlays the picture during playback — except a quiet
+          spinner while the stream stalls. */}
       <Pressable
         onPress={onTogglePlay}
         accessibilityRole="button"
         accessibilityLabel={t.player.playPauseAria}
         style={StyleSheet.absoluteFill}
       >
+        {!paused && buffering ? (
+          <View style={styles.centre} pointerEvents="none">
+            <ActivityIndicator color={colors.gold} />
+          </View>
+        ) : null}
         {paused ? (
           <View style={styles.centre} pointerEvents="none">
             <LinearGradient

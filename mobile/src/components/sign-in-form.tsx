@@ -1,5 +1,5 @@
 import { useSignIn, useSignUp } from "@clerk/expo";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { CLERK_PUBLISHABLE_KEY } from "@/auth/clerk";
 import { GlassSurface } from "@/components/glass";
@@ -24,6 +24,15 @@ import { body, colors, display, radius, space } from "@/theme";
 
 type Step = "email" | "code";
 type Flow = "signIn" | "signUp";
+// What the email step SAYS (#292): «create your account», or — after
+// «Already have an account? Sign in» — a returning member's wording. The
+// flow behind both is the same one.
+type Mode = "create" | "signIn";
+
+// How long «Resend code» waits after a code goes out (#292): long enough for
+// a slow email to land, short enough that a code lost to spam is not a dead
+// end.
+export const RESEND_COOLDOWN_SECONDS = 30;
 
 // The only sign-in answer that means "no account with this address": the one
 // that sends the form on to create the account. Any other failure — a rate
@@ -54,8 +63,10 @@ type SignInFormProps = {
   onDone: () => void;
   // «Not now» on the modal screen; the tab has nowhere to go and passes none.
   onCancel?: () => void;
-  // «Already have an account? Sign in» — same field, same flow: the link just
-  // focuses the input. Shown on the tab, where the framing is "create".
+  // «Already have an account? Sign in» — same field, same flow: the link
+  // switches the headline and the CTA to a sign-in's wording, and «Create
+  // account» switches them back. Shown on the tab, where the framing is
+  // "create".
   signInHint?: boolean;
 };
 
@@ -100,7 +111,37 @@ function ClerkSignInForm({
   // Which flow the address resolved to; the code must be verified against the
   // same one that sent it.
   const [flow, setFlow] = useState<Flow>("signIn");
+  const [mode, setMode] = useState<Mode>("create");
+  // Seconds until «Resend code» may be used again; 0 = now.
+  const [cooldown, setCooldown] = useState(0);
   const emailInput = useRef<TextInput>(null);
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  // Each step starts clean: no code or error left over from the last one.
+  function toCodeStep(resolved: Flow) {
+    setFlow(resolved);
+    setCode("");
+    setError(null);
+    setStep("code");
+    setCooldown(RESEND_COOLDOWN_SECONDS);
+  }
+
+  function toEmailStep() {
+    setCode("");
+    setError(null);
+    setStep("email");
+  }
+
+  function switchMode(next: Mode) {
+    setMode(next);
+    setError(null);
+    emailInput.current?.focus();
+  }
 
   const { signIn } = useSignIn();
   const { signUp } = useSignUp();
@@ -145,8 +186,7 @@ function ClerkSignInForm({
       const attempt = await signIn.emailCode.sendCode({ emailAddress: address });
 
       if (!attempt.error) {
-        setFlow("signIn");
-        setStep("code");
+        toCodeStep("signIn");
         return;
       }
       if (clerkErrorCode(attempt.error) !== UNKNOWN_ADDRESS) {
@@ -164,8 +204,31 @@ function ClerkSignInForm({
         setError(messageFor(sent.error));
         return;
       }
-      setFlow("signUp");
-      setStep("code");
+      toCodeStep("signUp");
+    } catch (e) {
+      setError(messageFor(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // A fresh code to the same address, on the flow that sent the first one —
+  // a sign-in that already exists resends with no parameters.
+  async function resendCode() {
+    if (busy || cooldown > 0 || !signIn || !signUp) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const sent =
+        flow === "signIn"
+          ? await signIn.emailCode.sendCode()
+          : await signUp.verifications.sendEmailCode();
+      if (sent.error) {
+        setError(messageFor(sent.error));
+        return;
+      }
+      setCode("");
+      setCooldown(RESEND_COOLDOWN_SECONDS);
     } catch (e) {
       setError(messageFor(e));
     } finally {
@@ -213,21 +276,35 @@ function ClerkSignInForm({
   const ready = Boolean(signIn && signUp);
   const secondary =
     step === "code" ? t.app.signIn.differentEmail : onCancel ? t.app.common.notNow : null;
+  const signingIn = mode === "signIn";
 
   return (
     <View style={styles.form}>
       <View style={{ alignSelf: "flex-start" }}>
         <Pill label={step === "email" ? kicker : t.signupWall.kicker} />
       </View>
-      <Text style={styles.title}>{step === "email" ? headline : t.app.signIn.checkEmail}</Text>
+      <Text style={styles.title}>
+        {step === "code"
+          ? t.app.signIn.checkEmail
+          : signingIn
+            ? t.app.signIn.signInHeadline
+            : headline}
+      </Text>
       <Text style={styles.copy}>
-        {step === "email" ? bodyText : t.app.signIn.codeSent(email.trim())}
+        {step === "code"
+          ? t.app.signIn.codeSent(email.trim())
+          : signingIn
+            ? t.app.signIn.signInBody
+            : bodyText}
       </Text>
 
-      {/* The field is glass, of the same family as the tab bar (board). */}
+      {/* The field is glass, of the same family as the tab bar (board). Keyed
+          per step: two different fields, so the code field MOUNTS when its
+          step opens — autoFocus acts on mount only. */}
       <GlassSurface style={styles.field}>
         {step === "email" ? (
           <TextInput
+            key="email"
             ref={emailInput}
             style={styles.input}
             value={email}
@@ -244,6 +321,7 @@ function ClerkSignInForm({
           />
         ) : (
           <TextInput
+            key="code"
             style={[styles.input, styles.codeInput]}
             value={code}
             onChangeText={setCode}
@@ -252,6 +330,8 @@ function ClerkSignInForm({
             keyboardType="number-pad"
             autoComplete="one-time-code"
             textContentType="oneTimeCode"
+            // The step exists to take this code: the keyboard is up at once.
+            autoFocus
             editable={!busy}
             onSubmitEditing={() => void verifyCode()}
             returnKeyType="go"
@@ -262,7 +342,15 @@ function ClerkSignInForm({
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <GoldButton
-        label={busy ? t.app.common.pleaseWait : step === "email" ? cta : t.app.signIn.verify}
+        label={
+          busy
+            ? t.app.common.pleaseWait
+            : step === "code"
+              ? t.app.signIn.verify
+              : signingIn
+                ? t.app.signIn.sendCode
+                : cta
+        }
         onPress={() => {
           if (!ready) return;
           void (step === "email" ? sendCode() : verifyCode());
@@ -273,9 +361,23 @@ function ClerkSignInForm({
         style={{ alignSelf: "stretch", marginTop: space(5) }}
       />
 
+      {step === "code" ? (
+        <Pressable
+          onPress={() => void resendCode()}
+          accessibilityRole="button"
+          aria-disabled={cooldown > 0}
+          style={{ marginTop: space(5) }}
+          hitSlop={8}
+        >
+          <Text style={[styles.secondary, cooldown > 0 && styles.secondaryWaiting]}>
+            {cooldown > 0 ? t.app.signIn.resendIn(cooldown) : t.app.signIn.resend}
+          </Text>
+        </Pressable>
+      ) : null}
+
       {secondary ? (
         <Pressable
-          onPress={() => (step === "code" ? setStep("email") : onCancel?.())}
+          onPress={() => (step === "code" ? toEmailStep() : onCancel?.())}
           accessibilityRole="link"
           style={{ marginTop: space(5) }}
           hitSlop={8}
@@ -288,14 +390,16 @@ function ClerkSignInForm({
 
       {signInHint && step === "email" ? (
         <Pressable
-          onPress={() => emailInput.current?.focus()}
+          onPress={() => switchMode(signingIn ? "create" : "signIn")}
           accessibilityRole="link"
           style={{ marginTop: space(3) }}
           hitSlop={8}
         >
           <Text style={styles.fine}>
-            {t.signupWall.alreadyMember}{" "}
-            <Text style={{ color: colors.gold }}>{t.signupWall.signInLink}</Text>
+            {signingIn ? t.app.signIn.noAccount : t.signupWall.alreadyMember}{" "}
+            <Text style={{ color: colors.gold }}>
+              {signingIn ? t.app.signIn.createAccount : t.signupWall.signInLink}
+            </Text>
           </Text>
         </Pressable>
       ) : null}
@@ -322,6 +426,7 @@ const styles = StyleSheet.create({
   codeInput: { letterSpacing: 6, textAlign: "center", fontFamily: "GeistMono_400Regular" },
   error: { ...body, color: colors.rust, fontSize: 13, marginTop: space(3) },
   secondary: { ...body, color: colors.gold, fontSize: 14, textAlign: "center" },
+  secondaryWaiting: { color: colors.inkDim },
   fine: {
     ...body,
     color: colors.inkDim,

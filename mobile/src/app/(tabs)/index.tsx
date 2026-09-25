@@ -1,3 +1,4 @@
+import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -17,6 +18,7 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import wordmark from "@/assets/images/matio-wordmark.png";
 import { useCatalog } from "@/api/catalog-context";
 import { errorHint } from "@/api/error-hint";
 import { useOptionalAuth } from "@/auth/clerk";
@@ -132,8 +134,16 @@ export default function HomeScreen() {
   const header = (
     <>
       <View style={[styles.header, { paddingTop: insets.top + space(2) }]}>
-        {/* Stand-in for the gold arched wordmark PNG until the brand asset is wired. */}
-        <Text style={styles.wordmark}>Matio</Text>
+        {/* The brand's gold arched wordmark (#292) — public/brand/matio-
+            wordmark.png downscaled to 1x/2x/3x; to VoiceOver, «Matio». */}
+        <Image
+          source={wordmark}
+          style={styles.wordmark}
+          contentFit="contain"
+          accessible
+          accessibilityRole="header"
+          accessibilityLabel="Matio"
+        />
       </View>
 
       {focused ? (
@@ -177,6 +187,7 @@ export default function HomeScreen() {
             />
             <GoldButton
               label={busy ? t.app.common.pleaseWait : t.showDetail.play}
+              glyph="play"
               onPress={() => play(focused.slug)}
               style={styles.cta}
             />
@@ -228,7 +239,12 @@ function CarouselCard({
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={show.title}>
       <Animated.View style={[styles.card, animated]}>
-        <Artwork uri={show.posterImageUrl} toneKey={show.slug} style={styles.cardArt} />
+        <Artwork
+          uri={show.posterImageUrl}
+          toneKey={show.slug}
+          style={styles.cardArt}
+          displayWidth={CARD_W}
+        />
         {/* A poster carries its own title; the tone fallback does not. */}
         {show.posterImageUrl ? null : (
           <Text style={styles.cardTitle} numberOfLines={3}>
@@ -245,12 +261,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: SCREEN_PAD,
   },
-  wordmark: {
-    ...display,
-    color: colors.gold,
-    fontSize: 20,
-    letterSpacing: 2.4,
-  },
+  // The asset's own 2552×1228 proportions at 110 wide.
+  wordmark: { width: 110, height: 53 },
   carousel: { marginTop: space(6) },
   card: {
     width: CARD_W,

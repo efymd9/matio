@@ -30,6 +30,7 @@ import {
   type PlaybackTokenResponse,
   type ShowDetail,
 } from "@/shared/api-types";
+import { optimizedImageUrl } from "@/shared/image-url";
 import { colors, display, SCREEN_PAD, space } from "@/theme";
 import { useProgressSaver } from "./use-progress-saver";
 import { useSegmentTracker } from "./use-segment-tracker";
@@ -75,6 +76,14 @@ const REFRESH_BACKOFF_MS = [0, 1_000, 2_000, 4_000];
 // A resume target inside the last seconds is a finished episode: start over
 // rather than land on the credits.
 const RESUME_TAIL_SECONDS = 10;
+
+// The lock-screen / notification artwork, in device pixels — the OS draws it
+// at most a few hundred points wide. It arrives resized but in the poster's
+// own format, not WebP: the player fetches it natively (URLSession on iOS,
+// Media3's artwork loader on Android) with no way to set a header, and the
+// optimizer answers WebP only to an Accept that names it. iOS re-encodes it
+// as PNG for the now-playing item regardless.
+const NOW_PLAYING_ART_PX = 640;
 
 // A signed-in viewer answered `signup_required` asked without the session:
 // api/client drops the Authorization header when Clerk's getToken() misses
@@ -342,11 +351,13 @@ export function EpisodeFeed({
 
 // A page outside the pool: artwork, nothing that costs a decoder.
 function Placeholder({ show, episode }: { show: ShowDetail; episode: EpisodeSummary }) {
+  const { width } = useWindowDimensions();
   return (
     <Artwork
       uri={episode.thumbnailUrl ?? show.posterImageUrl}
       toneKey={`${show.slug}-${episode.id}`}
       style={StyleSheet.absoluteFill}
+      displayWidth={width}
     />
   );
 }
@@ -396,7 +407,9 @@ function FeedPage({
   const [fetchNonce, setFetchNonce] = useState(0);
   const [authRetried, setAuthRetried] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
-  // Read by the vertical chrome only; the native transport draws its own.
+  // Read by the vertical chrome only; the native transport draws its own —
+  // its spinner included, which is why only a vertical page tracks this.
+  const [buffering, setBuffering] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
 
@@ -518,11 +531,13 @@ function FeedPage({
         ? {
             uri: muxStreamUrl(playback.playbackId, playback.token),
             // Lock screen / Control Center / Android media notification.
+            // The poster resized (#292; see NOW_PLAYING_ART_PX): the player
+            // fetches it on every play.
             metadata: {
               title: episode.title,
               subtitle: show.title,
               artist: "Matio",
-              imageUri: show.posterImageUrl ?? undefined,
+              imageUri: optimizedImageUrl(show.posterImageUrl, NOW_PLAYING_ART_PX) ?? undefined,
             },
           }
         : null,
@@ -548,9 +563,10 @@ function FeedPage({
   const onBuffer = useCallback(
     (e: { isBuffering: boolean }) => {
       bufferingRef.current = e.isBuffering;
+      if (vertical) setBuffering(e.isBuffering);
       if (e.isBuffering) cancelPendingPause();
     },
-    [cancelPendingPause],
+    [cancelPendingPause, vertical],
   );
 
   const onSeek = useCallback(() => {
@@ -677,6 +693,8 @@ function FeedPage({
   }, []);
 
   // --- end states, mirroring the web player's three distinct overlays ----
+  // Every one carries «Back»: it replaces the whole page, the «‹» and the
+  // vertical chrome with it (#292).
   if (tokenError) {
     const { code, reason } = tokenError;
     const retry = refetch;
@@ -689,7 +707,12 @@ function FeedPage({
       if (!signedIn) return <SignupWall onSignIn={onSignIn} onBack={onBack} />;
       if (!authRetried) return <Loading />;
       return (
-        <ErrorState message={t.watch.unavailableKicker} hint={t.watch.unavailableTitle} onRetry={retry} />
+        <ErrorState
+          message={t.watch.unavailableKicker}
+          hint={t.watch.unavailableTitle}
+          onRetry={retry}
+          onBack={onBack}
+        />
       );
     }
     // 403 subscribe_required — paid mode: the episode (or the legacy 60s
@@ -706,7 +729,12 @@ function FeedPage({
     }
     if (code === "rate_limited") {
       return (
-        <ErrorState message={t.watch.rateLimitedKicker} hint={t.watch.rateLimitedTitle} onRetry={retry} />
+        <ErrorState
+          message={t.watch.rateLimitedKicker}
+          hint={t.watch.rateLimitedTitle}
+          onRetry={retry}
+          onBack={onBack}
+        />
       );
     }
     return (
@@ -714,6 +742,7 @@ function FeedPage({
         message={t.watch.unavailableKicker}
         hint={errorHint(t, tokenError, t.watch.unavailableTitle)}
         onRetry={retry}
+        onBack={onBack}
       />
     );
   }
@@ -722,7 +751,12 @@ function FeedPage({
   // from a token failure and must not be reported as one.
   if (videoFailed) {
     return (
-      <ErrorState message={t.watch.unavailableKicker} hint={t.watch.unavailableTitle} onRetry={refetch} />
+      <ErrorState
+        message={t.watch.unavailableKicker}
+        hint={t.watch.unavailableTitle}
+        onRetry={refetch}
+        onBack={onBack}
+      />
     );
   }
 
@@ -786,6 +820,9 @@ function FeedPage({
           // paused by the pool, and showing it there flashed the disc on
           // both pages of every swipe.
           paused={userPaused}
+          // A stall on the page in view: the spinner, so a frozen frame is
+          // not read as a hang (#292).
+          buffering={isCurrent && buffering}
           muted={muted}
           onTogglePlay={togglePlay}
           onToggleMute={onToggleMute}
