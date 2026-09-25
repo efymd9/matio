@@ -406,14 +406,19 @@ export function Loading() {
   );
 }
 
+// `onBack` adds a «Back» text action under the state — for a state that is a
+// screen of its own with no other way out (a subscribers-only page in the
+// landscape player: status bar hidden, no «‹» mounted).
 export function ErrorState({
   message,
   hint,
   onRetry,
+  onBack,
 }: {
   message: string;
   hint?: string;
   onRetry?: () => void;
+  onBack?: () => void;
 }) {
   const t = useT();
   return (
@@ -422,6 +427,16 @@ export function ErrorState({
       {hint ? <Text style={styles.errorHint}>{hint}</Text> : null}
       {onRetry ? (
         <GoldButton label={t.watchError.tryAgain} onPress={onRetry} style={{ marginTop: space(6) }} />
+      ) : null}
+      {onBack ? (
+        <Pressable
+          onPress={onBack}
+          accessibilityRole="link"
+          hitSlop={8}
+          style={{ marginTop: space(onRetry ? 5 : 6) }}
+        >
+          <Text style={styles.errorBack}>{t.app.common.back}</Text>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -558,4 +573,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: space(2),
   },
+  // The app's secondary text action, as «Not now» on the walls.
+  errorBack: { ...body, color: colors.gold, fontSize: 14, textAlign: "center" },
 });

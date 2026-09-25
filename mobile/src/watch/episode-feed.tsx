@@ -83,6 +83,12 @@ const RESUME_TAIL_SECONDS = 10;
 // long after, before anything is concluded.
 const SIGNED_IN_RETRY_MS = 1_000;
 
+// How long a "not playing" report from the player waits for an explanation
+// (buffering, a reload, a seek, the end) before it counts as a pause — see
+// onPlaybackStateChanged. The explaining events arrive in the same native
+// tick; this only has to outlast the bridge.
+export const PAUSE_REPORT_SETTLE_MS = 300;
+
 type Playback = {
   playbackId: string;
   token: string;
@@ -258,9 +264,14 @@ export function EpisodeFeed({
         content = <SignupWall onSignIn={onSignIn} onBack={onBack} />;
       } else if (locked === "subscribe_required") {
         // Signing in cannot open it, so no wall and no retry: the same
-        // answer the token route's 403 gets inside the page.
+        // answer the token route's 403 gets inside the page — with a way
+        // back, since in landscape nothing else on screen leads out.
         content = (
-          <ErrorState message={t.app.watch.subscribersOnly} hint={t.app.watch.subscribersOnlyHint} />
+          <ErrorState
+            message={t.app.watch.subscribersOnly}
+            hint={t.app.watch.subscribersOnlyHint}
+            onBack={onBack}
+          />
         );
       } else if (!inPool) {
         content = <Placeholder show={show} episode={item} />;
@@ -393,6 +404,8 @@ function FeedPage({
   const durationRef = useRef(0);
   const endedRef = useRef(false);
   const bufferingRef = useRef(false);
+  // Between onLoadStart and onLoad: a source (re)loading, not playing yet.
+  const loadingRef = useRef(false);
   const nearEndFiredRef = useRef(false);
   const initialSeekDoneRef = useRef(false);
   // Playhead to restore after a token refresh — or a retry — reloads the
@@ -516,8 +529,38 @@ function FeedPage({
     [playback, episode.title, show.title, show.posterImageUrl],
   );
 
+  // A "not playing" report waiting for its explanation (see
+  // onPlaybackStateChanged below), and the one way to drop it.
+  const pendingPauseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPendingPause = useCallback(() => {
+    if (pendingPauseRef.current === null) return;
+    clearTimeout(pendingPauseRef.current);
+    pendingPauseRef.current = null;
+  }, []);
+  // A page that stops being current (or unmounts) drops it too.
+  useEffect(() => cancelPendingPause, [isCurrent, cancelPendingPause]);
+
+  const onLoadStart = useCallback(() => {
+    loadingRef.current = true;
+    cancelPendingPause();
+  }, [cancelPendingPause]);
+
+  const onBuffer = useCallback(
+    (e: { isBuffering: boolean }) => {
+      bufferingRef.current = e.isBuffering;
+      if (e.isBuffering) cancelPendingPause();
+    },
+    [cancelPendingPause],
+  );
+
+  const onSeek = useCallback(() => {
+    cancelPendingPause();
+    tracker.onSeek();
+  }, [cancelPendingPause, tracker]);
+
   const onLoad = useCallback(
     (e: OnLoadData) => {
+      loadingRef.current = false;
       durationRef.current = e.duration;
       setDuration(e.duration);
       // After a token refresh the source reloads; land back where the
@@ -559,6 +602,7 @@ function FeedPage({
 
   const onEnd = useCallback(() => {
     endedRef.current = true;
+    cancelPendingPause();
     saver.onEnded();
     tracker.onEnded();
     const advanced = onEnded(index);
@@ -566,27 +610,49 @@ function FeedPage({
     // transport handles its own end state. A page the feed advanced past is
     // left un-paused — it restarts when it is swiped back to (below).
     setUserPaused(!advanced && vertical);
-  }, [index, onEnded, saver, tracker, vertical]);
+  }, [cancelPendingPause, index, onEnded, saver, tracker, vertical]);
 
   // The player pauses on its own — a lock-screen or Control Center pause, a
-  // call — without the `paused` prop knowing. The current page follows the
-  // player's report, so the chrome shows the truth and the first tap plays
-  // rather than "pausing" what already is. A stall (Android reports it as
-  // not playing), a seek and the end (onEnd owns that) are not the viewer's
-  // pause and are ignored.
+  // call — without the `paused` prop knowing. On a VERTICAL page, where our
+  // chrome owns play/pause, the current page follows the player's report,
+  // so the chrome shows the truth and the first tap plays rather than
+  // "pausing" what already is. (A landscape page keeps the native transport,
+  // which shows its own state; feeding its scrub-pauses back into `paused`
+  // would fight it.)
+  //
+  // "Playing" is taken at once. "Not playing" is NOT a pause by itself: a
+  // stall, a source reload (the token refresh) and a seek all report it
+  // too, and on Android they report it FIRST — react-native-video sends the
+  // state from ExoPlayer's onIsPlayingChanged but `onBuffer` / `onEnd` only
+  // from the later onEvents pass of the same change. Taking it at face value
+  // set `paused`, i.e. setPlayWhenReady(false), and a rebuffer never resumed.
+  // So the report waits PAUSE_REPORT_SETTLE_MS for an explanation — buffering,
+  // a load start, a seek, the end, or "playing" again — and only an
+  // unexplained one becomes the viewer's pause.
   const onPlaybackStateChanged = useCallback(
     (e: { isPlaying: boolean; isSeeking: boolean }) => {
-      if (!isCurrent || e.isSeeking || bufferingRef.current || endedRef.current) return;
-      setUserPaused(!e.isPlaying);
+      if (!vertical || !isCurrent) return;
+      cancelPendingPause();
+      if (e.isPlaying) {
+        setUserPaused(false);
+        return;
+      }
+      if (e.isSeeking) return;
+      pendingPauseRef.current = setTimeout(() => {
+        pendingPauseRef.current = null;
+        if (bufferingRef.current || loadingRef.current || endedRef.current) return;
+        setUserPaused(true);
+      }, PAUSE_REPORT_SETTLE_MS);
     },
-    [isCurrent],
+    [cancelPendingPause, isCurrent, vertical],
   );
 
-  // AirPods out / headphones unplugged: pause, never go on out loud through
-  // the speaker (iOS pauses by itself; Android only reports it).
+  // AirPods out / headphones unplugged on a vertical page: pause, never go on
+  // out loud through the speaker (iOS pauses by itself; Android only reports
+  // it). An explicit signal, so no settle wait.
   const onAudioBecomingNoisy = useCallback(() => {
-    if (isCurrent) setUserPaused(true);
-  }, [isCurrent]);
+    if (vertical && isCurrent) setUserPaused(true);
+  }, [isCurrent, vertical]);
 
   // Swiping back to a page that already ended: start it over, as a tap on its
   // play glyph would — not a frozen last frame with no glyph on it.
@@ -634,6 +700,7 @@ function FeedPage({
           message={t.app.watch.subscribersOnly}
           hint={t.app.watch.subscribersOnlyHint}
           onRetry={retry}
+          onBack={onBack}
         />
       );
     }
@@ -678,14 +745,13 @@ function FeedPage({
           // every twenty and a progress bar that moves; the default 250ms
           // would re-render the chrome 4×/s.
           progressUpdateInterval={1000}
+          onLoadStart={onLoadStart}
           onLoad={onLoad}
           onProgress={onProgress}
-          onSeek={tracker.onSeek}
+          onSeek={onSeek}
           onEnd={onEnd}
           onError={() => setVideoFailed(true)}
-          onBuffer={(e) => {
-            bufferingRef.current = e.isBuffering;
-          }}
+          onBuffer={onBuffer}
           onPlaybackStateChanged={onPlaybackStateChanged}
           onAudioBecomingNoisy={onAudioBecomingNoisy}
           // Picture-in-picture when the viewer leaves the app, audio when

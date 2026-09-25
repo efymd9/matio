@@ -25,6 +25,8 @@ type VideoProps = {
   onEnd?: () => void;
   onError?: () => void;
   onBuffer?: (e: { isBuffering: boolean }) => void;
+  onLoadStart?: () => void;
+  onSeek?: () => void;
   onPlaybackStateChanged?: (e: { isPlaying: boolean; isSeeking: boolean }) => void;
   onAudioBecomingNoisy?: () => void;
 };
@@ -128,7 +130,7 @@ vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
 import { ApiError } from "@/api/client";
-import { EpisodeFeed } from "./episode-feed";
+import { EpisodeFeed, PAUSE_REPORT_SETTLE_MS } from "./episode-feed";
 
 function makeShow(
   orientation: ShowOrientation,
@@ -221,15 +223,23 @@ async function renderFeed(show: ShowDetail, { signedIn = false, initialIndex = 0
   await flush();
 }
 
-function press(label: string) {
+function leaf(label: string) {
   const node = Array.from(container.querySelectorAll("*")).find(
     (el) => el.children.length === 0 && el.textContent === label,
   );
   if (!node) throw new Error(`no element labelled ${label}`);
+  return node;
+}
+
+function press(label: string) {
+  const node = leaf(label);
   act(() => {
     node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   });
 }
+
+// The role VoiceOver announces for a visible text: its nearest ancestor with one.
+const roleOf = (label: string) => leaf(label).closest("[role]")?.getAttribute("role") ?? null;
 
 beforeEach(() => {
   vi.stubGlobal("__DEV__", false);
@@ -277,6 +287,30 @@ describe("EpisodeFeed — which answer a locked page gives (#288 item 1)", () =>
     expect(text()).not.toContain("No card needed");
     expect(text()).not.toContain(TRY_AGAIN);
     expect(tokens.calls).not.toContain("ep3");
+  });
+
+  it("a subscribers-only page has a visible way back — in landscape nothing else on screen leads out", async () => {
+    await renderFeed(makeShow("horizontal", ["subscriber"]), { signedIn: true });
+
+    expect(text()).toContain(SUBSCRIBERS_ONLY);
+    expect(roleOf("Back")).toBe("link");
+    press("Back");
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("so does the token route's 403 subscribe_required, next to its retry", async () => {
+    // The client thinks the episode is open; the server says it needs a
+    // subscription (the legacy 60s preview running out, say).
+    gate = { mode: "none" };
+    tokens.answer = async () => {
+      throw new ApiError("forbidden", "Subscribe to keep watching.", 403, "subscribe_required");
+    };
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(text()).toContain(SUBSCRIBERS_ONLY);
+    expect(text()).toContain(TRY_AGAIN);
+    press("Back");
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 
   it("an anonymous viewer on a subscribers-only page is not sent round a sign-up loop", async () => {
@@ -474,11 +508,23 @@ describe("EpisodeFeed — the vertical player's pause follows the player (#288 i
       }),
     );
 
+  // The player's own report, and the settle window a "not playing" waits out.
+  const report = (isPlaying: boolean, isSeeking = false, episodeId = "ep1") =>
+    act(() => video(episodeId).props.onPlaybackStateChanged?.({ isPlaying, isSeeking }));
+  const settle = () =>
+    act(() => {
+      vi.advanceTimersByTime(PAUSE_REPORT_SETTLE_MS);
+    });
+
   it("an OS pause (lock screen, Control Center, a call) shows as paused, and the first tap plays", async () => {
+    vi.useFakeTimers();
     await renderFeed(VERTICAL());
     expect(chrome(1).paused).toBe(false);
 
-    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: false, isSeeking: false }));
+    report(false);
+    // Not yet: the report waits for an explanation first.
+    expect(video("ep1").props.paused).toBe(false);
+    settle();
     expect(chrome(1).paused).toBe(true);
     expect(video("ep1").props.paused).toBe(true);
 
@@ -487,28 +533,104 @@ describe("EpisodeFeed — the vertical player's pause follows the player (#288 i
     expect(video("ep1").props.paused).toBe(false);
   });
 
-  it("a play from the lock screen clears the pause as well", async () => {
+  it("a play from the lock screen clears the pause at once", async () => {
     await renderFeed(VERTICAL());
     act(() => chrome(1).onTogglePlay());
     expect(chrome(1).paused).toBe(true);
 
-    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: true, isSeeking: false }));
+    report(true);
     expect(chrome(1).paused).toBe(false);
   });
 
-  it("a stall or a seek is not a pause", async () => {
+  // react-native-video on Android sends the playing state from ExoPlayer's
+  // onIsPlayingChanged but onBuffer / onEnd from the LATER onEvents pass of
+  // the same change: a stall reads "not playing" FIRST, then "buffering". A
+  // pause taken on the first report set `paused` — setPlayWhenReady(false) —
+  // and the stream never resumed.
+  it("Android order: «not playing» THEN «buffering» is a stall, not a pause — playback is never stopped", async () => {
+    vi.useFakeTimers();
     await renderFeed(VERTICAL());
 
-    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: false, isSeeking: true }));
-    expect(chrome(1).paused).toBe(false);
-
+    report(false);
     act(() => video("ep1").props.onBuffer?.({ isBuffering: true }));
-    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: false, isSeeking: false }));
+    settle();
+    settle();
+
+    expect(video("ep1").props.paused).toBe(false);
     expect(chrome(1).paused).toBe(false);
 
+    // Buffer done, playing again: still nothing paused.
     act(() => video("ep1").props.onBuffer?.({ isBuffering: false }));
-    act(() => video("ep1").props.onPlaybackStateChanged?.({ isPlaying: false, isSeeking: false }));
-    expect(chrome(1).paused).toBe(true);
+    report(true);
+    expect(video("ep1").props.paused).toBe(false);
+  });
+
+  it("a source reload (the hourly token swap) is not a pause either", async () => {
+    vi.useFakeTimers();
+    await renderFeed(VERTICAL());
+
+    report(false);
+    act(() => video("ep1").props.onLoadStart?.());
+    settle();
+    expect(video("ep1").props.paused).toBe(false);
+
+    // Still loading: a later "not playing" is the reload too.
+    report(false);
+    settle();
+    expect(video("ep1").props.paused).toBe(false);
+
+    // Loaded — from here a bare "not playing" is a pause again.
+    act(() => video("ep1").props.onLoad?.({ duration: 600 }));
+    report(false);
+    settle();
+    expect(video("ep1").props.paused).toBe(true);
+  });
+
+  it("a seek — reported by the flag or by onSeek after the fact — is not a pause", async () => {
+    vi.useFakeTimers();
+    await renderFeed(VERTICAL());
+
+    report(false, true);
+    settle();
+    expect(chrome(1).paused).toBe(false);
+
+    report(false);
+    act(() => video("ep1").props.onSeek?.());
+    settle();
+    expect(chrome(1).paused).toBe(false);
+  });
+
+  it("the end is not a pause on a page the feed advances past (Android reports the end second, too)", async () => {
+    vi.useFakeTimers();
+    await renderFeed(VERTICAL());
+
+    report(false);
+    act(() => video("ep1").props.onEnd?.());
+    settle();
+
+    expect(chrome(1).paused).toBe(false);
+  });
+
+  it("«not playing» then «playing» within the window changes nothing", async () => {
+    vi.useFakeTimers();
+    await renderFeed(VERTICAL());
+
+    report(false);
+    report(true);
+    settle();
+
+    expect(video("ep1").props.paused).toBe(false);
+  });
+
+  it("a landscape page leaves play/pause to the native transport", async () => {
+    vi.useFakeTimers();
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    report(false);
+    settle();
+    act(() => video("ep1").props.onAudioBecomingNoisy?.());
+
+    expect(video("ep1").props.paused).toBe(false);
   });
 
   it("AirPods out pauses instead of going on through the speaker", async () => {
