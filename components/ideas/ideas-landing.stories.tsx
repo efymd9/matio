@@ -323,7 +323,15 @@ export const DesktopRail: Story = {
     await expect(rail).toHaveTextContent(TYPED.logline);
     // Chapter 1 is complete; 2 still needs the story, 3 everything.
     await expect(within(rail).getAllByRole("img", { name: en.rail.done })).toHaveLength(1);
-    // No bar on desktop.
+    // No bar on desktop. Focus leaves the field first (as in «Mobile · bar
+    // armed», where the same steps show it): the bar's state is now "shown",
+    // so only the `tablet:hidden` breakpoint keeps it off this screen.
+    await userEvent.tab();
+    const bar = canvas.getByRole("button", { name: en.barNext, hidden: true });
+    await waitFor(() =>
+      expect(bar.closest("[aria-hidden]")).toHaveAttribute("aria-hidden", "false"),
+    );
+    await expect(bar).not.toBeVisible();
     await expect(canvas.queryByRole("button", { name: en.barNext })).toBeNull();
   },
 };

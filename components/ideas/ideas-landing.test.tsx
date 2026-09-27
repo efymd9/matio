@@ -149,6 +149,42 @@ describe("IdeasLanding — validation after the first send", () => {
     expect(submitIdea).not.toHaveBeenCalled();
   });
 
+  it("the first invalid field is focused only once it is marked — aria-invalid and its pill already there", () => {
+    const { field, submit } = setup();
+    const atFocus: { invalid: string | null; describedBy: string | null }[] = [];
+    field.logline.addEventListener("focus", () =>
+      atFocus.push({
+        invalid: field.logline.getAttribute("aria-invalid"),
+        describedBy: field.logline.getAttribute("aria-describedby"),
+      }),
+    );
+
+    submit();
+
+    expect(atFocus).toHaveLength(1);
+    expect(atFocus[0].invalid).toBe("true");
+    const pill = screen.getByText(en.errors.loglineRequired).closest("[id]");
+    expect(pill).not.toBeNull();
+    expect(atFocus[0].describedBy?.split(" ")).toContain(pill!.id);
+  });
+
+  it("a server verdict is committed before its field takes focus", async () => {
+    const { field, submit } = setup(async () => ({
+      ok: false,
+      reason: "invalid",
+      errors: [{ field: "email", code: "email_invalid" }],
+    }));
+    let invalidAtFocus: string | null = null;
+    field.email.addEventListener("focus", () => {
+      invalidAtFocus = field.email.getAttribute("aria-invalid");
+    });
+    fillValid(field);
+    submit();
+
+    await waitFor(() => expect(document.activeElement).toBe(field.email));
+    expect(invalidAtFocus).toBe("true");
+  });
+
   it("a field that becomes valid loses its pill; the others stay", () => {
     const { field, submit } = setup();
     submit();
@@ -176,6 +212,17 @@ describe("IdeasLanding — validation after the first send", () => {
     expect(field.story.placeholder).toBe(en.story.placeholderShow("Morelli"));
     fireEvent.change(field.series, { target: { value: "new" } });
     expect(field.story.placeholder).toBe(en.story.placeholderNew);
+  });
+});
+
+describe("IdeasLanding — a submit that never reaches React", () => {
+  it("is a POST with no named field but the honeypot — nothing typed can land in a URL", () => {
+    setup();
+    const form = screen.getByRole("form", { name: en.formAria });
+
+    expect(form.getAttribute("method")).toBe("post");
+    expect(form.querySelectorAll("[name]:not([name=website])")).toHaveLength(0);
+    expect(form.querySelectorAll("[name=website]")).toHaveLength(1);
   });
 });
 
@@ -287,7 +334,10 @@ describe("IdeasLanding — success", () => {
     expect(screen.queryByRole("textbox", { name: en.chapterLabels[1] })).toBeNull();
     expect(screen.queryByRole("button", { name: en.submit })).toBeNull();
     expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
-    expect(scrollIntoView).toHaveBeenCalled();
+    // The page scrolls to THE CARD, and focus — whose button just unmounted —
+    // lands on its heading instead of falling back to <body>.
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(card);
+    expect(document.activeElement).toBe(within(card).getByRole("heading", { level: 2 }));
   });
 
   it("no opt-in on the stored row → no «on the list» line", async () => {
@@ -328,6 +378,14 @@ describe("IdeasLanding — success", () => {
     }
     // A fresh form shows no stale errors.
     expect(screen.queryByRole("alert")).toBeNull();
+    // Back to the logline: scrolled to its label, focus in the field.
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(
+      screen.getByText(en.chapterLabels[1], { selector: "label" }),
+    );
+    expect(document.activeElement).toBe(logline);
+    // …and the sticky bar is disarmed: out of the field, still no «Next».
+    fireEvent.blur(logline);
+    expect(nextButton()).toBeNull();
   });
 });
 
@@ -475,7 +533,13 @@ describe("IdeasLanding — the hero CTA and the Terms sheet", () => {
   it("«Pitch your story» scrolls to chapter 2 and focuses the select", () => {
     const { field } = setup();
     fireEvent.click(screen.getByRole("button", { name: en.pitchCta }));
-    expect(scrollIntoView).toHaveBeenCalled();
+    // The element scrolled to the top is chapter 2 — its label and select
+    // inside, chapter 3's fields not.
+    const target = scrollIntoView.mock.contexts.at(-1) as Element;
+    expect(scrollIntoView.mock.calls.at(-1)?.[0]).toMatchObject({ block: "start" });
+    expect(target.contains(screen.getByText(en.chapter(2)))).toBe(true);
+    expect(target.contains(field.series)).toBe(true);
+    expect(target.contains(field.name)).toBe(false);
     expect(document.activeElement).toBe(field.series);
   });
 

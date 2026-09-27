@@ -315,6 +315,12 @@ export function IdeasLanding({
     to: "success" | "logline";
     n: number;
   } | null>(null);
+  // A field to scroll to and focus AFTER the commit that marks it invalid —
+  // so it already carries aria-invalid and its pill in aria-describedby when
+  // a screen reader announces it on focus.
+  const [focusRequest, setFocusRequest] = useState<{ field: IdeaField } | null>(
+    null,
+  );
 
   const loglineLabelRef = useRef<HTMLLabelElement>(null);
   const loglineRef = useRef<HTMLTextAreaElement>(null);
@@ -330,27 +336,10 @@ export function IdeasLanding({
   const ch3Ref = useRef<HTMLDivElement>(null);
   const submitRef = useRef<HTMLButtonElement>(null);
   const successRef = useRef<HTMLDivElement>(null);
+  const successTitleRef = useRef<HTMLHeadingElement>(null);
 
   useAutoGrow(loglineRef, draft.logline);
   useAutoGrow(storyRef, draft.story);
-
-  const fieldEl = (field: IdeaField): HTMLElement | null =>
-    ({
-      logline: loglineRef,
-      series: seriesRef,
-      workingTitle: titleRef,
-      story: storyRef,
-      name: nameRef,
-      email: emailRef,
-      age: ageRef,
-      terms: termsRef,
-    })[field].current;
-
-  const goTo = (field: IdeaField) => {
-    const el = fieldEl(field);
-    scrollToEl(el, "center");
-    el?.focus({ preventScroll: true });
-  };
 
   // ── Derived state ───────────────────────────────────────────────────────
   const clientErrors = useMemo(
@@ -469,13 +458,36 @@ export function IdeasLanding({
   }, []);
 
   // Scrolls that need the new tree committed first (success card, reset).
+  // Focus follows: the control that was focused (the send button, «Send
+  // another idea») has just unmounted, and a status region mounted already
+  // filled is often not announced — so focus lands on the card's heading, or
+  // back in the logline for the next idea. Both follow a tap, never a load.
   useEffect(() => {
     if (!scrollRequest) return;
-    scrollToEl(
-      scrollRequest.to === "success" ? successRef.current : loglineLabelRef.current,
-      "center",
-    );
+    if (scrollRequest.to === "success") {
+      scrollToEl(successRef.current, "center");
+      successTitleRef.current?.focus({ preventScroll: true });
+    } else {
+      scrollToEl(loglineLabelRef.current, "center");
+      loglineRef.current?.focus({ preventScroll: true });
+    }
   }, [scrollRequest]);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const el = {
+      logline: loglineRef,
+      series: seriesRef,
+      workingTitle: titleRef,
+      story: storyRef,
+      name: nameRef,
+      email: emailRef,
+      age: ageRef,
+      terms: termsRef,
+    }[focusRequest.field].current;
+    scrollToEl(el, "center");
+    el?.focus({ preventScroll: true });
+  }, [focusRequest]);
 
   // ── Actions ─────────────────────────────────────────────────────────────
   const openTerms = () => setTermsOpen(true);
@@ -487,7 +499,7 @@ export function IdeasLanding({
 
   const onNext = () => {
     const target = NEXT_ORDER.find((f) => invalid.has(f));
-    if (target) goTo(target);
+    if (target) setFocusRequest({ field: target });
     else scrollToEl(submitRef.current, "center");
   };
 
@@ -503,7 +515,7 @@ export function IdeasLanding({
     };
     const errors = validateIdeaInput(input);
     if (errors.length > 0) {
-      goTo(errors[0].field);
+      setFocusRequest({ field: errors[0].field });
       return;
     }
     inFlight.current = true;
@@ -537,7 +549,7 @@ export function IdeasLanding({
       }
       if (res.reason === "invalid") {
         setServerErrors(res.errors);
-        if (res.errors[0]) goTo(res.errors[0].field);
+        if (res.errors[0]) setFocusRequest({ field: res.errors[0].field });
         return;
       }
       setServerPill(res.reason);
@@ -574,7 +586,6 @@ export function IdeasLanding({
         <input
           ref={ref}
           id={id(field)}
-          name={field}
           value={draft[field]}
           onChange={(e) => setField(field, e.target.value)}
           placeholder={copy.placeholder}
@@ -606,7 +617,6 @@ export function IdeasLanding({
           <input
             ref={ref ?? undefined}
             type="checkbox"
-            name={field}
             checked={checked}
             onChange={(e) => onChange(e.target.checked)}
             aria-required={errField ? true : undefined}
@@ -644,7 +654,15 @@ export function IdeasLanding({
 
   return (
     <TermsOpenerProvider value={openTerms}>
+      {/* method="post" and NO `name` on any real field (only the honeypot
+          has one — isTypingField reads it): the draft is controlled state
+          and submitIdea takes an object, so nothing reads the names. A form
+          submitted before hydration (or in a browser where the bundle never
+          runs) would otherwise do a native GET and put the logline, the
+          story, the name and the address into the URL — request logs,
+          history, and the page URL every analytics tag reports. */}
       <form
+        method="post"
         noValidate
         aria-label={t.formAria}
         onSubmit={onSubmit}
@@ -668,7 +686,7 @@ export function IdeasLanding({
         {/* ── Hero · chapter 1 ─────────────────────────────────────────── */}
         <section
           aria-labelledby={id("title")}
-          className="relative isolate flex flex-col justify-end overflow-hidden bg-espresso max-xl:min-h-[88vh] max-xl:supports-[height:1svh]:min-h-[88svh] xl:h-screen xl:max-h-[880px] xl:min-h-[640px]"
+          className="relative isolate flex flex-col justify-end overflow-hidden bg-espresso max-xl:min-h-[88vh] max-xl:supports-[height:1svh]:min-h-[88svh] xl:min-h-[clamp(640px,100vh,880px)]"
         >
           {heroImageUrl ? (
             <Image
@@ -738,7 +756,6 @@ export function IdeasLanding({
                     <textarea
                       ref={loglineRef}
                       id={id("logline")}
-                      name="logline"
                       // Two rows before JS measures: desktop's 78px; the
                       // phone's 103px min-height takes over below xl.
                       rows={2}
@@ -895,7 +912,11 @@ export function IdeasLanding({
                       >
                         <Icon name="check" size={22} />
                       </span>
-                      <h2 className="font-display text-[30px] leading-[1.05] uppercase tracking-[0.01em] text-gold xl:text-[44px] xl:leading-none">
+                      <h2
+                        ref={successTitleRef}
+                        tabIndex={-1}
+                        className="font-display text-[30px] leading-[1.05] uppercase tracking-[0.01em] text-gold outline-none xl:text-[44px] xl:leading-none"
+                      >
                         {t.success.title}
                       </h2>
                       <p className="text-[15px] leading-[1.6] text-cream/75 xl:text-base">
@@ -929,7 +950,7 @@ export function IdeasLanding({
                   {/* Chapter 2 · Your story */}
                   <div
                     ref={ch2Ref}
-                    className="flex flex-col gap-6 pt-16 tablet:pt-[88px] xl:scroll-mt-24 xl:pt-0"
+                    className="flex flex-col gap-6 pt-16 scroll-mt-6 tablet:scroll-mt-0 tablet:pt-[88px] xl:scroll-mt-24 xl:pt-0"
                   >
                     <ChapterHeading label={t.chapter(2)} title={t.headings.story} />
 
@@ -942,7 +963,6 @@ export function IdeasLanding({
                           <select
                             ref={seriesRef}
                             id={id("series")}
-                            name="series"
                             value={draft.series}
                             onChange={(e) => setField("series", e.target.value)}
                             aria-required
@@ -1002,7 +1022,6 @@ export function IdeasLanding({
                         <textarea
                           ref={storyRef}
                           id={id("story")}
-                          name="story"
                           value={draft.story}
                           onChange={(e) => setField("story", e.target.value)}
                           placeholder={storyPlaceholder}
