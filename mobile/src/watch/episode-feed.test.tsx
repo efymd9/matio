@@ -112,6 +112,14 @@ const tokens = vi.hoisted(() => ({
   calls: [] as string[],
   answer: (() => undefined) as unknown as (episodeId: string) => Promise<PlaybackTokenResponse>,
 }));
+// The watch screen around the feed (#302 review): its route params, the show
+// it loads, and whether its orientation has settled (the feed mounts only
+// then; the settle grace re-renders the screen).
+const screen = vi.hoisted(() => ({
+  params: {} as Record<string, string | undefined>,
+  show: null as unknown,
+  settled: true,
+}));
 vi.mock("@/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/client")>();
   return {
@@ -123,9 +131,23 @@ vi.mock("@/api/client", async (importOriginal) => {
       },
       saveProgress: async () => ({ ok: true }),
       saveWatchSegments: async () => ({ ok: true, accepted: 0 }),
+      show: async () => screen.show,
+      continueWatching: async () => ({ items: [] }),
     },
   };
 });
+vi.mock("expo-router", () => ({
+  useRouter: () => ({ push: () => undefined, replace: () => undefined, back: () => undefined }),
+  useLocalSearchParams: () => screen.params,
+}));
+vi.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+vi.mock("@/auth/clerk", () => ({
+  useOptionalAuth: () => ({ isLoaded: true, isSignedIn: false, stalled: false, retry: () => undefined }),
+}));
+vi.mock("@/orientation", () => ({
+  useOrientationLock: () => null,
+  useOrientationSettled: () => screen.settled,
+}));
 
 let gate: SignupGate = { mode: "tiers" };
 vi.mock("@/api/config-context", () => ({
@@ -154,6 +176,7 @@ vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
 import { ApiError } from "@/api/client";
+import WatchScreen from "@/app/watch/[episodeId]";
 import { EpisodeFeed, PAUSE_REPORT_SETTLE_MS } from "./episode-feed";
 
 function makeShow(
@@ -242,7 +265,7 @@ async function renderFeed(
     signedIn?: boolean;
     initialIndex?: number;
     resumeSeconds?: number;
-    onCurrentChange?: (index: number, positionSeconds: number | undefined) => void;
+    onCurrentChange?: (index: number, positionSeconds: number) => void;
   } = {},
 ) {
   act(() =>
@@ -286,6 +309,7 @@ beforeEach(() => {
   h.mounts.length = 0;
   h.chrome.clear();
   h.allPages = false;
+  screen.settled = true;
   tokens.calls.length = 0;
   tokens.answer = async (episodeId) => granted(episodeId);
   gate = { mode: "tiers" };
@@ -1096,10 +1120,15 @@ describe("EpisodeFeed — a page re-created in the pool starts where it was (#30
     expect(again.seek).not.toHaveBeenCalled();
   });
 
-  it("tells the screen the page in view and its playhead", async () => {
+  it("tells the screen the page in view and where it stands", async () => {
     const onCurrentChange = vi.fn();
-    await renderFeed(makeShow("vertical", ["free", "free"]), { onCurrentChange });
-    expect(onCurrentChange).toHaveBeenLastCalledWith(0, undefined);
+    await renderFeed(makeShow("vertical", ["free", "free", "free"]), {
+      onCurrentChange,
+      resumeSeconds: 90,
+    });
+    // Not played yet: where it will start — the position it was opened at,
+    // never "unknown" (the screen reopens there).
+    expect(onCurrentChange).toHaveBeenLastCalledWith(0, 90);
 
     act(() => video("ep1").props.onProgress?.({ currentTime: 42 }));
     expect(onCurrentChange).toHaveBeenLastCalledWith(0, 42);
@@ -1109,8 +1138,102 @@ describe("EpisodeFeed — a page re-created in the pool starts where it was (#30
 
     swipe(1);
     expect(onCurrentChange).toHaveBeenLastCalledWith(1, 7);
+    // The end: 0 for the page that ended, then the feed moves on to a page
+    // that never played, away from the deep link — the start.
     act(() => video("ep2").props.onEnd?.());
-    expect(onCurrentChange).toHaveBeenLastCalledWith(1, 0);
+    expect(onCurrentChange).toHaveBeenCalledWith(1, 0);
+    expect(onCurrentChange).toHaveBeenLastCalledWith(2, 0);
+    // Back on the deep-linked page: its playhead, not the stale resume.
+    swipe(1);
+    swipe(0);
+    expect(onCurrentChange).toHaveBeenLastCalledWith(0, 42);
+  });
+
+  it("a live feed is not re-seeded by a later render of the screen", async () => {
+    await renderFeed(makeShow("horizontal", ["free", "free"]), { resumeSeconds: 300 });
+    // The screen renders again before the stream has loaded — with a
+    // different page and position (its settle grace, a newer report).
+    await renderFeed(makeShow("horizontal", ["free", "free"]), {
+      initialIndex: 1,
+      resumeSeconds: 0,
+    });
+
+    act(() => video("ep1").props.onLoad?.({ duration: 600 }));
+    expect(video("ep1").seek).toHaveBeenCalledWith(300);
+    expect(video("ep1").props.paused).toBe(false);
+  });
+});
+
+// The watch screen and the real feed together: the feed is taken down while
+// a screen covers the player and remounted on its return, and the screen's
+// settle grace re-renders it a second later — before the reopened stream has
+// loaded (#302 review).
+describe("the watch screen reopens the feed at the carried playhead (#302 item 3)", () => {
+  beforeEach(() => {
+    h.allPages = true;
+    countingGrants();
+    screen.show = makeShow("horizontal", ["free", "free", "free"]);
+    // The rail's deep link: episode 1 at 5:00.
+    screen.params = { episodeId: "ep1", showSlug: "the-scarlet-oath", resume: "300" };
+  });
+
+  async function renderScreen() {
+    await act(async () => {
+      root.render(<WatchScreen />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await flush();
+  }
+
+  // A screen pushed over the player and popped, then the grace re-render.
+  async function coverAndReturn() {
+    screen.settled = false;
+    await renderScreen();
+    screen.settled = true;
+    await renderScreen();
+    await renderScreen();
+  }
+
+  it("at 20:00 of episode 3, the reopened page seeks to 20:00 — not to 0:00", async () => {
+    await renderScreen();
+    act(() => video("ep1").props.onLoad?.({ duration: 1800 }));
+    expect(video("ep1").seek).toHaveBeenCalledWith(300);
+    // Autoplay rolls episode 1 into 2, and 2 into 3.
+    act(() => video("ep1").props.onEnd?.());
+    await flush();
+    act(() => video("ep2").props.onEnd?.());
+    await flush();
+    act(() => video("ep3").props.onLoad?.({ duration: 1800 }));
+    act(() => video("ep3").props.onProgress?.({ currentTime: 1200 }));
+
+    await coverAndReturn();
+
+    const reopened = video("ep3", 2);
+    act(() => reopened.props.onLoad?.({ duration: 1800 }));
+    expect(reopened.seek).toHaveBeenCalledWith(1200);
+  });
+
+  it("at 20:00 of the deep-linked episode itself, it seeks to 20:00 — not back to the link's 5:00", async () => {
+    await renderScreen();
+    act(() => video("ep1").props.onLoad?.({ duration: 1800 }));
+    act(() => video("ep1").props.onProgress?.({ currentTime: 1200 }));
+
+    await coverAndReturn();
+
+    const reopened = video("ep1", 2);
+    act(() => reopened.props.onLoad?.({ duration: 1800 }));
+    expect(reopened.seek).toHaveBeenCalledWith(1200);
+    expect(reopened.seek).not.toHaveBeenCalledWith(300);
+  });
+
+  it("a page covered before it ever played keeps the deep link's resume", async () => {
+    await renderScreen();
+
+    await coverAndReturn();
+
+    const reopened = video("ep1", 2);
+    act(() => reopened.props.onLoad?.({ duration: 1800 }));
+    expect(reopened.seek).toHaveBeenCalledWith(300);
   });
 });
 

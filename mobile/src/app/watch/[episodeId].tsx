@@ -94,13 +94,11 @@ export default function WatchScreen() {
   // on the page the viewer left, where they left it — not on the deep-linked
   // one, and not at 0:00 (#302 item 3). Keyed on the episode so a stale page
   // can never survive a change of route params.
-  const pageRef = useRef<{
-    episodeId: string;
-    index: number;
-    positionSeconds: number | undefined;
-  } | null>(null);
+  const pageRef = useRef<{ episodeId: string; index: number; positionSeconds: number } | null>(
+    null,
+  );
   const onCurrentChange = useCallback(
-    (index: number, positionSeconds: number | undefined) => {
+    (index: number, positionSeconds: number) => {
       pageRef.current = { episodeId, index, positionSeconds };
     },
     [episodeId],
@@ -157,11 +155,13 @@ export default function WatchScreen() {
   }
 
   // Back on the page the viewer left, if the feed was up before, at the
-  // playhead it last reported; the deep link's resume applies only while
-  // that is still the deep-linked episode and it has not played since.
+  // position the feed last reported for it (it reports where an unplayed
+  // page would start, too — so the deep link's resume survives only as long
+  // as the feed itself still holds it). The feed reads both once, at mount:
+  // later re-renders of this screen cannot move a live feed.
   const left = pageRef.current?.episodeId === episodeId ? pageRef.current : null;
   const startIndex = left ? left.index : index;
-  const startSeconds = left?.positionSeconds ?? (startIndex === index ? resumeSeconds : 0);
+  const startSeconds = left ? left.positionSeconds : resumeSeconds;
 
   return (
     <>

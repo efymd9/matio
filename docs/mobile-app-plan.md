@@ -771,9 +771,12 @@ unsupported on the simulator; the props are untouched from #97); Android; a phys
 - **Per-episode playheads**: the feed remembers every page's last playhead (0 once it ended);
   a page re-created in the pool (two pages on and back, an iPad rotated mid-episode) starts
   there, and the deep link's resume applies to its own page only until the viewer first leaves
-  it. `onCurrentChange(index, positionSeconds)` carries the current playhead to the watch
-  screen, so the feed remounted after a covering screen comes back at it (closes the #252
-  review's registry row).
+  it. `onCurrentChange(index, positionSeconds)` carries the current page's position to the watch
+  screen — its playhead, or where it will start if it has not played yet, never "unknown" — so
+  the feed remounted after a covering screen comes back at it (closes the #252 review's registry
+  row). The feed reads `initialIndex` / `resumeSeconds` once, at mount: the screen's settle
+  grace re-renders it a second after every focus, before the reopened stream has loaded, and a
+  live feed re-seeded from that sought to 0:00 or the stale deep-link resume (caught in review).
 - **VoiceOver / TalkBack**: only the page in view is reachable — every page wrapper carries
   `aria-hidden={!isCurrent}` (React Native's spelling of `accessibilityElementsHidden` +
   `importantForAccessibility="no-hide-descendants"`); focusing a neighbour's identical controls

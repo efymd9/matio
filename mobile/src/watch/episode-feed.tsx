@@ -133,25 +133,36 @@ function isTransient(err: ApiError): boolean {
 
 export function EpisodeFeed({
   show,
-  initialIndex,
-  resumeSeconds,
+  initialIndex: initialIndexProp,
+  resumeSeconds: resumeSecondsProp,
   signedIn,
   onBack,
   onSignIn,
   onCurrentChange,
 }: {
   show: ShowDetail;
+  // Read once, at mount (below).
   initialIndex: number;
-  // Applies to the initial episode only.
+  // Applies to the initial episode only; read once, at mount.
   resumeSeconds: number;
   signedIn: boolean;
   onBack: () => void;
   onSignIn: () => void;
-  // The current page and its playhead (undefined until that page has
-  // played), every time either changes and once on mount — the watch screen
-  // remembers both across a remount of the feed (#252, #302).
-  onCurrentChange?: (index: number, positionSeconds: number | undefined) => void;
+  // The current page and where it stands — its last playhead, or where it
+  // would start if it has not played yet — every time either changes and
+  // once on mount. The watch screen remembers both across a remount of the
+  // feed (#252, #302).
+  onCurrentChange?: (index: number, positionSeconds: number) => void;
 }) {
+  // The opening page and its resume belong to the mount. The watch screen
+  // re-renders the feed with whatever it now remembers (its settle grace
+  // re-renders it a second after every focus), and a live feed re-seeding
+  // its opening page from that would seek a page that has not loaded yet to
+  // a newer or an older position than the one it opened for (#302 review).
+  const [{ initialIndex, resumeSeconds }] = useState(() => ({
+    initialIndex: initialIndexProp,
+    resumeSeconds: resumeSecondsProp,
+  }));
   const { height } = useWindowDimensions();
   const config = useConfig();
   const t = useT();
@@ -177,9 +188,21 @@ export function EpisodeFeed({
   const resumeUsedRef = useRef(false);
   if (current !== initialIndex) resumeUsedRef.current = true;
 
+  // Where a page (re)starts: its last playhead, else the deep link's resume
+  // on its own page until the viewer first leaves it, else the beginning.
+  const seedFor = useCallback(
+    (index: number) =>
+      playheadsRef.current.get(episodes[index].id) ??
+      (index === initialIndex && !resumeUsedRef.current ? resumeSeconds : 0),
+    [episodes, initialIndex, resumeSeconds],
+  );
+
+  // A page that has not played yet reports where it will start — on mount,
+  // the position the feed was opened at — never "unknown": the screen keeps
+  // this as the position to reopen at.
   useEffect(() => {
-    onCurrentChange?.(current, playheadsRef.current.get(episodes[current].id));
-  }, [current, episodes, onCurrentChange]);
+    onCurrentChange?.(current, seedFor(current));
+  }, [current, onCurrentChange, seedFor]);
 
   const onPlayhead = useCallback(
     (episodeId: string, seconds: number) => {
@@ -331,10 +354,7 @@ export function EpisodeFeed({
             muted={muted}
             onToggleMute={() => setMuted((m) => !m)}
             signedIn={signedIn}
-            resumeSeconds={
-              playheadsRef.current.get(item.id) ??
-              (index === initialIndex && !resumeUsedRef.current ? resumeSeconds : 0)
-            }
+            resumeSeconds={seedFor(index)}
             onPlayhead={onPlayhead}
             onEnded={onEnded}
             onNearEnd={onNearEnd}
@@ -360,7 +380,6 @@ export function EpisodeFeed({
       armedIndex,
       current,
       height,
-      initialIndex,
       lockedAt,
       muted,
       onBack,
@@ -368,7 +387,7 @@ export function EpisodeFeed({
       onNearEnd,
       onPlayhead,
       onSignIn,
-      resumeSeconds,
+      seedFor,
       show,
       signedIn,
       t,

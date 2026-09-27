@@ -53,7 +53,7 @@ vi.mock("@/auth/clerk", () => ({
 type FeedProps = {
   initialIndex: number;
   resumeSeconds: number;
-  onCurrentChange: (index: number, positionSeconds: number | undefined) => void;
+  onCurrentChange: (index: number, positionSeconds: number) => void;
 };
 const feed = vi.hoisted(() => ({ settled: false, props: null as null | FeedProps }));
 vi.mock("@/orientation", () => ({
@@ -285,12 +285,10 @@ describe("the player screen brings the feed back where the viewer was (#302 item
     expect(await coverAndReturn()).toMatchObject({ initialIndex: 0, resumeSeconds: 400 });
   });
 
-  it("a page that has not played yet: the deep link's resume on its own page, the start on any other", async () => {
+  it("an episode that ended (0) reopens at the start — 0 is a position, not a gap for the deep link to fill", async () => {
     await render(<WatchScreen />);
-    mounted().onCurrentChange(0, undefined);
-    expect(await coverAndReturn()).toMatchObject({ initialIndex: 0, resumeSeconds: 120 });
+    mounted().onCurrentChange(0, 0);
 
-    mounted().onCurrentChange(1, undefined);
-    expect(await coverAndReturn()).toMatchObject({ initialIndex: 1, resumeSeconds: 0 });
+    expect(await coverAndReturn()).toMatchObject({ initialIndex: 0, resumeSeconds: 0 });
   });
 });
