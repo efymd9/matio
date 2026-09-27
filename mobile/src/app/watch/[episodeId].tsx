@@ -197,3 +197,9 @@ export default function WatchScreen() {
     </>
   );
 }
+
+// A render crash here is this screen's, not the app's (#308): Back / Try
+// again instead of RCTFatal. The boundary unmounts the crashed tree, and
+// with it the lock above hands portrait back — the fallback and the screen
+// Back returns to are upright. See components/route-error.tsx.
+export { RouteErrorBoundary as ErrorBoundary } from "@/components/route-error";

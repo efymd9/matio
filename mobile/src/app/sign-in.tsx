@@ -86,3 +86,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: SCREEN_PAD,
   },
 });
+
+// A render crash here is this screen's, not the app's (#308): Back / Try
+// again instead of RCTFatal. See components/route-error.tsx.
+export { RouteErrorBoundary as ErrorBoundary } from "@/components/route-error";
