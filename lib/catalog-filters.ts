@@ -72,6 +72,24 @@ export type ChipSelection =
   | { kind: "vertical" }
   | { kind: "genre"; key: string };
 
+const ALL_SHOWS: ChipSelection = { kind: "all" };
+
+// The chip that is actually in force (#304 item 9). A catalog refresh can
+// take away the chip the viewer picked — a genre renamed or dropped, the last
+// vertical show unpublished — and a selection pointing at a chip that is no
+// longer drawn would keep the grid filtered to «No shows match.» with nothing
+// highlighted. Such a selection falls back to All; one that still has its
+// chip comes back as the same object, so a memo keyed on it holds.
+export function resolveChip(
+  selection: ChipSelection,
+  chips: readonly GenreChip[],
+  hasVertical: boolean,
+): ChipSelection {
+  if (selection.kind === "genre" && !chips.some((c) => c.key === selection.key)) return ALL_SHOWS;
+  if (selection.kind === "vertical" && !hasVertical) return ALL_SHOWS;
+  return selection;
+}
+
 // The Browse result set: the chip AND the query. Generic over the row so the
 // app passes its ShowSummary DTOs straight through and gets them back typed.
 export function filterShows<

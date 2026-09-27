@@ -20,7 +20,12 @@ import { Icon } from "@/components/icon";
 import { ErrorState, Loading, PosterCard } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import type { ShowSummary } from "@/shared/api-types";
-import { filterShows, genreChips, type ChipSelection } from "@/shared/catalog-filters";
+import {
+  filterShows,
+  genreChips,
+  resolveChip,
+  type ChipSelection,
+} from "@/shared/catalog-filters";
 import { body, colors, display, fonts, radius, SCREEN_PAD, space } from "@/theme";
 
 // Browse (#245): the whole catalog as a two-column poster grid, narrowed by a
@@ -32,6 +37,19 @@ const ALL: ChipSelection = { kind: "all" };
 const VERTICAL: ChipSelection = { kind: "vertical" };
 const GRID_GAP = 12;
 const EMPTY: ShowSummary[] = [];
+
+// Touch targets (#304 item 8). A chip is drawn ~34pt tall (9 + 9 padding
+// around a 12pt Geist line of 15.6pt); its Pressable carries CHIP_TOUCH_PAD of
+// invisible padding above and below — ≥44pt to the finger — and the row's top
+// margin and the grid's top padding each give the same amount back, so not
+// one pixel moves. The pad, not a bare minHeight, because a minHeight's
+// overhang depends on the font's line height and could not be given back
+// exactly; minHeight stays as the floor. The «×» grows by hitSlop instead,
+// to the pill's own edges: 11 above and below its 22pt line in the 44pt pill,
+// 16 = the pill's right padding, 12 to the left.
+const TOUCH_TARGET = 44;
+const CHIP_TOUCH_PAD = 6;
+const CLEAR_HIT_SLOP = { top: 11, bottom: 11, left: 12, right: 16 };
 
 export default function BrowseScreen() {
   const router = useRouter();
@@ -47,7 +65,11 @@ export default function BrowseScreen() {
   const shows = catalog.status === "ready" ? catalog.data.shows : EMPTY;
   const chips = useMemo(() => genreChips(shows), [shows]);
   const hasVertical = useMemo(() => shows.some((s) => s.orientation === "vertical"), [shows]);
-  const results = useMemo(() => filterShows(shows, chip, query), [shows, chip, query]);
+  // The chip in force: the viewer's pick, or All once a catalog refresh has
+  // taken that chip away (#304 item 9). The grid and the highlight both read
+  // it, so they can never disagree.
+  const active = resolveChip(chip, chips, hasVertical);
+  const results = useMemo(() => filterShows(shows, active, query), [shows, active, query]);
 
   const openShow = useCallback(
     (slug: string) => router.push({ pathname: "/show/[slug]", params: { slug } }),
@@ -71,7 +93,9 @@ export default function BrowseScreen() {
   return (
     <View style={styles.screen}>
       <View style={{ paddingTop: insets.top + space(4) }}>
-        <Text style={styles.heading}>{t.header.browse}</Text>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t.header.browse}
+        </Text>
 
         {/* The search field is glass of the same family as the bar. */}
         <GlassSurface style={styles.search}>
@@ -93,7 +117,7 @@ export default function BrowseScreen() {
           {query ? (
             <Pressable
               onPress={() => setQuery("")}
-              hitSlop={8}
+              hitSlop={CLEAR_HIT_SLOP}
               accessibilityRole="button"
               accessibilityLabel={t.app.browse.clearSearch}
             >
@@ -108,19 +132,23 @@ export default function BrowseScreen() {
           contentContainerStyle={styles.chips}
           keyboardShouldPersistTaps="handled"
         >
-          <Chip label={t.app.browse.all} active={chip.kind === "all"} onPress={() => setChip(ALL)} />
+          <Chip
+            label={t.app.browse.all}
+            active={active.kind === "all"}
+            onPress={() => setChip(ALL)}
+          />
           {chips.map((genre) => (
             <Chip
               key={genre.key}
               label={genre.label}
-              active={chip.kind === "genre" && chip.key === genre.key}
+              active={active.kind === "genre" && active.key === genre.key}
               onPress={() => setChip({ kind: "genre", key: genre.key })}
             />
           ))}
           {hasVertical ? (
             <Chip
               label={t.app.browse.vertical}
-              active={chip.kind === "vertical"}
+              active={active.kind === "vertical"}
               onPress={() => setChip(VERTICAL)}
               mark
             />
@@ -135,7 +163,7 @@ export default function BrowseScreen() {
         columnWrapperStyle={{ gap: GRID_GAP }}
         contentContainerStyle={{
           paddingHorizontal: SCREEN_PAD,
-          paddingTop: space(4),
+          paddingTop: space(4) - CHIP_TOUCH_PAD,
           paddingBottom: clearance + space(4),
           gap: space(3.5),
         }}
@@ -188,7 +216,7 @@ function Chip({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      style={({ pressed }) => [{ borderRadius: radius.pill }, pressed && { opacity: 0.8 }]}
+      style={({ pressed }) => [styles.chipTarget, pressed && { opacity: 0.8 }]}
     >
       {active ? (
         <LinearGradient
@@ -237,7 +265,13 @@ const styles = StyleSheet.create({
   chips: {
     paddingHorizontal: SCREEN_PAD,
     gap: space(2),
-    marginTop: space(3.5),
+    marginTop: space(3.5) - CHIP_TOUCH_PAD,
+  },
+  chipTarget: {
+    borderRadius: radius.pill,
+    paddingVertical: CHIP_TOUCH_PAD,
+    minHeight: TOUCH_TARGET,
+    justifyContent: "center",
   },
   chip: {
     flexDirection: "row",
