@@ -97,6 +97,8 @@ export interface SentryEventLike {
   spans?: SentrySpanLike[];
   user?: { id?: string | number };
   exception?: { values?: SentryExceptionValueLike[] };
+  /** Only the one bag that is walked — see `scrubSentryEvent`. */
+  contexts?: { trace?: { data?: Record<string, unknown> } };
 }
 
 /**
@@ -112,20 +114,25 @@ const ALLOWED_REQUEST_HEADERS = new Set([
 ]);
 
 /**
- * Keys inside a breadcrumb's / span's `data` bag whose value is a URL. These are
- * where the SDK records fetch targets and route transitions — i.e. the second
- * place (after `request.url`) a query string can reach the tracker.
+ * Keys inside a breadcrumb's / span's / root span's `data` bag whose value is a
+ * URL or a path. These are where the SDK records fetch targets and route
+ * transitions — i.e. the second place (after `request.url`) a query string can
+ * reach the tracker. `url.full` is the full href browser fetch/XHR spans and
+ * Node's undici spans carry (#346); `http.target` is the raw request path WITH
+ * its query that Next puts on the server's root span — for `/unsubscribe` that
+ * query is the base64 address and its HMAC (#346).
  */
-const URL_DATA_KEYS = ["url", "http.url", "to", "from"];
+const URL_DATA_KEYS = ["url", "http.url", "url.full", "http.target", "to", "from"];
 
 /**
  * Keys that hold a URL's query string or fragment ON THEIR OWN, split off next
- * to an already-sanitised `url`: @sentry/core's fetch spans and Node's
- * outgoing-request breadcrumbs, and sentry-cocoa's network breadcrumbs, which
- * reach an app event through the React Native SDK's native device context
- * (#317). Deleted, not scrubbed — the value IS the part `scrubUrl` cuts.
+ * to an already-sanitised `url`: @sentry/core's fetch spans (`url.query` /
+ * `url.fragment` too, #346) and Node's outgoing-request breadcrumbs, and
+ * sentry-cocoa's network breadcrumbs, which reach an app event through the
+ * React Native SDK's native device context (#317, #343). Deleted, not
+ * scrubbed — the value IS the part `scrubUrl` cuts.
  */
-const URL_PART_DATA_KEYS = ["http.query", "http.fragment"];
+const URL_PART_DATA_KEYS = ["http.query", "http.fragment", "url.query", "url.fragment"];
 
 // Conservative: local part, @, dotted host. Deliberately not RFC-complete —
 // this is a net under the "no user text in errors" rule, not a validator.
@@ -202,8 +209,11 @@ export function scrubSentryBreadcrumb(
  * Scrub an event in place — errors and transactions alike (both carry
  * `request`, both can carry URLs in span data).
  *
- * `contexts` is deliberately NOT walked: the HTTP data that matters is on
- * `request` and on the spans, and a blind recursive walk over an arbitrary
+ * `contexts` is NOT walked, with one named exception: `contexts.trace.data`,
+ * the root span's attributes — a flat bag of the same keys a span's `data`
+ * holds, where Next records `http.target` with the query (#346). The rest of
+ * `contexts` stays untouched: the HTTP data that matters is on `request`, the
+ * spans and that one bag, and a blind recursive walk over an arbitrary
  * context bag is the kind of clever code that mangles stack frames.
  */
 export function scrubSentryEvent(event: SentryEventLike): void {
@@ -223,6 +233,7 @@ export function scrubSentryEvent(event: SentryEventLike): void {
       .filter((crumb): crumb is SentryBreadcrumbLike => crumb !== null);
   }
   for (const span of event.spans ?? []) scrubDataUrls(span.data);
+  scrubDataUrls(event.contexts?.trace?.data);
   // Whatever else was attached to the user, only the id survives. Nothing in
   // the app calls `Sentry.setUser`, and this is what keeps that true.
   if (event.user) event.user = { id: event.user.id };

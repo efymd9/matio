@@ -342,7 +342,9 @@ Session Replay, no feedback widget, and `beforeSend` / `beforeSendTransaction` /
 `beforeBreadcrumb` that strip query strings and URL credentials, delete
 cookies / request bodies / parsed query params, reduce request headers to an
 allowlist, reduce the user to an id, redact email-shaped strings from messages,
-and drop console breadcrumbs wholesale. Proven by `lib/observability.test.ts`
+and drop console breadcrumbs wholesale. URL keys are cleaned in breadcrumb and
+span data AND in the root span's `contexts.trace.data`, where Next records
+`http.target` with its query (#346). Proven by `lib/observability.test.ts`
 and by the log audit in `lib/log-audit.test.ts`.
 
 **No tunnel route**: Sentry events go straight to Sentry. We already proxy
@@ -393,7 +395,9 @@ cases in `mobile/src/route-errors.test.tsx`.
 
 **What reports**: a render crash caught by a route's error boundary (#308 —
 `CrashScreen` → `captureCrash`, once per crash), unhandled JS exceptions and
-promise rejections, native crashes and (iOS) app hangs.
+promise rejections, native crashes and (iOS) app hangs. No release-health
+sessions (`enableAutoSessionTracking: false` — they would send the installation
+id from every launch of every device), so the app has no crash-free rate.
 
 **Readiness**: `/api/readyz` (`select 1` against Neon, 2s ceiling, 503 when the
 database is unreachable) is the companion to the DB-free `/api/healthz`. See the

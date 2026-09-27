@@ -108,6 +108,11 @@ export function buildSentryOptions(
     attachScreenshot: false,
     attachViewHierarchy: false,
     enableAutoPerformanceTracing: false,
+    // No release-health sessions. On by default natively: a session envelope,
+    // keyed on the SDK's persistent installation id, on every cold start and
+    // every return to the foreground — from every device, crash or no crash.
+    // #317 is crash and error reporting; those are untouched by this.
+    enableAutoSessionTracking: false,
     integrations: (defaults) =>
       defaults.filter((integration) => !EXCLUDED_INTEGRATIONS.has(integration.name)),
     ...NATIVE_ONLY_OPTIONS,

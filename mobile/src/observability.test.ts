@@ -108,6 +108,9 @@ describe("with a DSN", () => {
     expect(options).not.toHaveProperty("tracesSampleRate");
     expect(options).not.toHaveProperty("tracesSampler");
     expect(options.enableAutoPerformanceTracing).toBe(false);
+    // No release-health sessions: they would send the installation id from
+    // every launch of every device, not only from the ones that crash.
+    expect(options.enableAutoSessionTracking).toBe(false);
     // Session Replay is configured by its sample rates; there are none.
     expect(options).not.toHaveProperty("replaysSessionSampleRate");
     expect(options).not.toHaveProperty("replaysOnErrorSampleRate");
