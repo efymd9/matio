@@ -305,9 +305,11 @@ Leave all three blank to keep PostHog entirely off — both the client provider 
 ## Sentry (error tracking)
 
 **Used for**: server, edge and browser exceptions, plus a modest slice of
-performance traces. One project for the whole web app (a second one arrives with
-the Expo app). **Organisation region: EU** — chosen at organisation creation and
-changeable only by recreating the organisation.
+performance traces — and, since #317, the Expo app's errors and crashes (no
+traces). One project for both, `javascript-nextjs`; the app's events are the
+ones with release `matio-app@<version>+<build>` (see "The app" below).
+**Organisation region: EU** — chosen at organisation creation and changeable
+only by recreating the organisation.
 
 **SDK**: `@sentry/nextjs@10`, wired **by hand** rather than by the setup wizard
 (the wizard rewrites `next.config.ts` and adds Session Replay + the feedback
@@ -346,6 +348,53 @@ and by the log audit in `lib/log-audit.test.ts`.
 **No tunnel route**: Sentry events go straight to Sentry. We already proxy
 PostHog through `/ingest`; a blocked error report is our loss, not the viewer's.
 
+### The app (`mobile/`, #317)
+
+**SDK**: `@sentry/react-native` (~7.11, the version `npx expo install` picks
+for Expo SDK 57; approved by the owner 27.09) + its config plugin
+`@sentry/react-native/expo` in `mobile/app.json` — with **no** org, project or
+auth token committed.
+
+| Name | Where | Notes |
+|---|---|---|
+| `EXPO_PUBLIC_SENTRY_DSN` | **EAS env**, environment `production` (not Vercel) | The on/off switch, like the web's: unset → no `Sentry.init`, and the SDK's JavaScript is never even evaluated (`mobile/src/observability.ts` `require`s it only with a DSN). Inlined into the JS bundle **at build time** — it takes effect from the next EAS build, never on an installed binary (the app has no OTA updates). Not a secret. **Not set yet** (registry). |
+| `EXPO_PUBLIC_APP_ENV` | EAS env, optional | Sentry's `environment`. Unset → `production` for an EAS build, `development` for a Metro bundle. Set it (e.g. `preview`) only on an EAS environment that also gets the DSN. |
+| `SENTRY_DISABLE_AUTO_UPLOAD` | `mobile/eas.json`, both build profiles, `"true"` | Keeps source-map and dSYM upload off, as on the web. Without it the plugin's build phases try to upload with no token and **fail the EAS build**. |
+
+To turn it on (an owner / main-session decision — agents do not run `eas`):
+
+```bash
+cd mobile
+npx eas-cli@latest env:create --environment production \
+  --name EXPO_PUBLIC_SENTRY_DSN --value "<DSN of javascript-nextjs>" \
+  --visibility plaintext --scope project --non-interactive
+npx eas-cli@latest env:list --environment production   # check
+```
+
+(eas-cli 24.8 marks `env:create` deprecated in favour of `env:set` — same
+flags, `npx eas-cli@latest env:set --environment production --name … --value …
+--visibility plaintext` — both work.) The value is the same DSN as
+`NEXT_PUBLIC_SENTRY_DSN` in the prod Vercel project (Sentry → Settings →
+Projects → javascript-nextjs → Client Keys); a separate client key in the same
+project is an option if the app ever needs its own rate limit. Then the next
+`eas build` reports; verify with a crash on that build (below, registry row).
+
+**Privacy**: the same `beforeSend` / `beforeBreadcrumb` from
+`lib/observability.ts` (re-exported by `mobile/src/shared/observability.ts`),
+`sendDefaultPii: false`, `enableLogs: false`, no Session Replay, no feedback
+widget, no screenshots or view hierarchy, no tracing, no `Sentry.wrap` (it
+would add touch breadcrumbs and the feedback widget's provider). The app sets
+no user; native events carry the SDK's own random installation id. A NATIVE
+crash is sent by the native SDK and never passes the JavaScript hooks, so the
+native network breadcrumbs (which carry query strings) are switched off at the
+source (`enableNetworkBreadcrumbs: false`); JavaScript breadcrumbs reach native
+already scrubbed. Proven by `mobile/src/observability.test.ts` and the tracker
+cases in `mobile/src/route-errors.test.tsx`.
+
+**What reports**: a render crash caught by a route's error boundary (#308 —
+`CrashScreen` → `captureCrash`, once per crash), unhandled JS exceptions and
+promise rejections, native crashes and (iOS) app hangs.
+
 **Readiness**: `/api/readyz` (`select 1` against Neon, 2s ceiling, 503 when the
 database is unreachable) is the companion to the DB-free `/api/healthz`. See the
 `/devops` skill for the honest limits of both.
@@ -364,4 +413,4 @@ database is unreachable) is the companion to the DB-free `/api/healthz`. See the
 | Meta | `lib/meta-pixel-events.ts`, `lib/meta-capi.ts`, `lib/capi-identity.ts`, `components/site/meta-pixel.tsx`, `components/site/view-content-pixel.tsx`, `components/site/complete-registration-pixel.tsx`, `app/subscribe/{actions.ts,submit-button.tsx,page.tsx}`, `app/api/webhooks/stripe/route.ts`, `proxy.ts` |
 | PostHog | `components/site/posthog-provider.tsx`, `lib/posthog-events.ts`, `lib/posthog-server.ts`, `app/api/webhooks/stripe/route.ts`, `next.config.ts` (rewrite), `proxy.ts` (matcher exclusion) |
 | Google Analytics | `components/site/google-analytics.tsx`, `lib/ga-events.ts`, `app/layout.tsx` (mount) |
-| Sentry | `instrumentation.ts`, `instrumentation-client.ts`, `sentry-client-init.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`, `lib/observability.ts`, `next.config.ts` (`withSentryConfig`, DSN-gated) |
+| Sentry | `instrumentation.ts`, `instrumentation-client.ts`, `sentry-client-init.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`, `lib/observability.ts`, `next.config.ts` (`withSentryConfig`, DSN-gated); the app: `mobile/src/observability.ts`, `mobile/src/observability-env.ts`, `mobile/src/shared/observability.ts`, `mobile/src/components/route-error.tsx`, `mobile/app.json` (plugin), `mobile/eas.json` (`SENTRY_DISABLE_AUTO_UPLOAD`) |

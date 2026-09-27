@@ -132,6 +132,27 @@ describe("scrubSentryBreadcrumb", () => {
     expect(crumb?.message).toBe("reminder queued for [redacted-email]");
   });
 
+  it("drops the query and fragment the SDK splits off next to a clean URL", () => {
+    // sentry-cocoa's network breadcrumb (merged into an app event, #317) and
+    // Node's outgoing-request breadcrumb carry the query in a key of its own.
+    const crumb = scrubSentryBreadcrumb({
+      category: "http",
+      data: {
+        url: "https://image.mux.com/abc/thumbnail.webp",
+        "http.query": "token=secret&email=viewer@example.invalid",
+        "http.fragment": "t=10",
+        method: "GET",
+        status_code: 200,
+      },
+    });
+
+    expect(crumb?.data).toEqual({
+      url: "https://image.mux.com/abc/thumbnail.webp",
+      method: "GET",
+      status_code: 200,
+    });
+  });
+
   it("strips both ends of a navigation breadcrumb", () => {
     const crumb = scrubSentryBreadcrumb({
       category: "navigation",
@@ -165,7 +186,14 @@ function seededEvent(): SentryEventLike {
       { category: "console", message: "viewer@example.invalid" },
       { category: "fetch", data: { url: "/api/t?aid=abc" } },
     ],
-    spans: [{ data: { "http.url": "https://api.stripe.com/v1/x?key=sk-test-1" } }],
+    spans: [
+      {
+        data: {
+          "http.url": "https://api.stripe.com/v1/x?key=sk-test-1",
+          "http.query": "?key=sk-test-1",
+        },
+      },
+    ],
     exception: {
       values: [{ value: "no reminder row for viewer@example.invalid" }],
     },

@@ -15,7 +15,9 @@ Netflix-inspired UX. 60-second anonymous trial per (browser session, show).
 - Meta Pixel + Conversions API (advertising measurement — consent-gated, no SDK)
 - Vercel (hosting) + Vercel Blob (admin-uploaded show artwork — poster/hero)
 - Sentry (`@sentry/nextjs` — errors + light tracing; `NEXT_PUBLIC_SENTRY_DSN`
-  unset = the SDK never initialises, EU region, no Session Replay)
+  unset = the SDK never initialises, EU region, no Session Replay; the Expo
+  app: `@sentry/react-native`, same project, no tracing, its own gate
+  `EXPO_PUBLIC_SENTRY_DSN` in EAS env — #317)
 
 ## Deeper docs
 
@@ -407,7 +409,9 @@ urgent — it costs one command.
 - **Sentry is DSN-optional by construction.** `NEXT_PUBLIC_SENTRY_DSN` unset =
   no `Sentry.init` on any runtime, no `withSentryConfig` wrapper around
   `next.config.ts`, and not one byte of the browser SDK downloaded — the same
-  degradation contract as `RESEND_API_KEY`. `NEXT_PUBLIC_*` is inlined at
+  degradation contract as `RESEND_API_KEY`. The Expo app has its own DSN-gated
+  init with the same `sentryPrivacyOptions()` — `mobile/src/observability.ts`,
+  `EXPO_PUBLIC_SENTRY_DSN` in EAS env, the SDK `require`d only with a DSN (#317). `NEXT_PUBLIC_*` is inlined at
   **build** time (the server bundle too), so the variable has to land in Vercel
   *before* the deploy that should report.
 - **The privacy configuration is the whole point of wiring it by hand.** No

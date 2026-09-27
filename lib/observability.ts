@@ -118,6 +118,15 @@ const ALLOWED_REQUEST_HEADERS = new Set([
  */
 const URL_DATA_KEYS = ["url", "http.url", "to", "from"];
 
+/**
+ * Keys that hold a URL's query string or fragment ON THEIR OWN, split off next
+ * to an already-sanitised `url`: @sentry/core's fetch spans and Node's
+ * outgoing-request breadcrumbs, and sentry-cocoa's network breadcrumbs, which
+ * reach an app event through the React Native SDK's native device context
+ * (#317). Deleted, not scrubbed — the value IS the part `scrubUrl` cuts.
+ */
+const URL_PART_DATA_KEYS = ["http.query", "http.fragment"];
+
 // Conservative: local part, @, dotted host. Deliberately not RFC-complete —
 // this is a net under the "no user text in errors" rule, not a validator.
 const EMAIL_PATTERN = /[^\s"'<>@,;:]+@[^\s"'<>@,;:]+\.[a-z]{2,}/gi;
@@ -150,6 +159,7 @@ function scrubDataUrls(data: Record<string, unknown> | undefined): void {
     const value = data[key];
     if (typeof value === "string") data[key] = scrubUrl(value);
   }
+  for (const key of URL_PART_DATA_KEYS) delete data[key];
 }
 
 function scrubRequest(request: SentryRequestLike): void {
