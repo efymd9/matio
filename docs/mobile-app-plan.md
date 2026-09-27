@@ -723,7 +723,8 @@ edges — `app.json`'s `orientation: "portrait"` pinned the whole app, the fulls
   `UISupportedInterfaceOrientations~ipad` already listed all four orientations — a multitasking
   iPad ignores `supportedInterfaceOrientations`, so the iPad rotated freely before this and still
   does; making it follow the phone's policy means `ios.requireFullScreen: true`, an owner decision
-  outside the spec. **Android**: `lockAsync` sets the activity's requested orientation, and the
+  outside the spec. (Superseded 27.09, #307: `ios.supportsTablet: false` — iPad runs the iPhone
+  build in compatibility mode; a real iPad version is a registry row.) **Android**: `lockAsync` sets the activity's requested orientation, and the
   template's `configChanges` includes `orientation|screenSize`, so a rotation does not restart
   the activity — not verified on a device or emulator in the session. Two deferred tails in
   `docs/registry.md`: the sign-up wall / error pages render in landscape when reached inside the

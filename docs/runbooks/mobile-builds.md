@@ -14,9 +14,9 @@
 
 ## Профили (`mobile/eas.json`)
 
-- `development` — dev client, internal, API на `http://localhost:3100` (ad-hoc, нужна регистрация UDID: `eas device:create`).
+- Профиля `development` нет (#307): ему нужен `expo-dev-client` — новая зависимость, не установлена. Отладочная сборка — локально, `cd mobile && npx expo run:ios` на симуляторе (API по умолчанию `http://localhost:3100` в `__DEV__`, `mobile/src/api/client.ts`); на телефоне — `npx expo run:ios --device` с `EXPO_PUBLIC_API_BASE_URL=http://<LAN-IP Mac>:3100` (localhost Mac'а телефону недоступен). Строка в `docs/registry.md`.
 - `preview` — internal/ad-hoc сборка релизного бандла, API по умолчанию `https://matio.tv` (`mobile/src/api/client.ts`; стенд за Basic Auth приложению недоступен).
-- `production` — store-дистрибуция, `autoIncrement` номера сборки, версия из удалённого источника (`appVersionSource: remote`) — `version` в `app.json` не трогать руками.
+- `production` — store-дистрибуция, `autoIncrement` номера сборки. `appVersionSource: remote` ведёт на сервере EAS **только номер сборки** (`buildNumber` / `versionCode`); версия для стора — `expo.version` в `app.json`, и её **поднимают руками** перед любой сборкой, которая должна стать новой версией в App Store (#307). Иначе после одобрения 0.1.0 каждая следующая загрузка отклоняется: «train version 0.1.0 is closed». release-please её не трогает (строка в `docs/registry.md`).
 
 ## Первая сборка → TestFlight (владелец, интерактивно)
 
@@ -62,6 +62,8 @@ cd mobile && npm ci && EAS_BUILD_NO_EXPO_GO_WARNING=true npx eas-cli@latest buil
 - **Лок мобильного обязан быть согласован для ЛЮБОГО npm, не только для локального.** Сборка 15.09 (build 2) упала в `Install dependencies`: `npm ci` на билдере EAS сказал «Missing: typescript@5.9.3 from lock file» — `typescript ~7` в `mobile/package.json` не удовлетворял peer `^5` у `@solana/codecs-*` (транзитивно из `@clerk/clerk-js`), и npm билдера хотел вложенную 5.9.3, которой в локе нет; локальный npm 11 это прощает. TypeScript мобильного держим на `~5.9` (штатный для Expo SDK 57). Проверка перед сборкой и при любом Dependabot-PR в `mobile/`: `cd mobile && npm ci && npm ls typescript` — ноль строк `invalid`.
 
 - `ios.infoPlist.ITSAppUsesNonExemptEncryption: false` стоит в `app.json` нарочно: без него App Store Connect требует ручной ответ про экспорт шифрования перед КАЖДЫМ тестом сборки (приложение использует только HTTPS — исключение по правилам Apple).
+
+- **Иконка iOS — без альфа-канала**, иначе App Store отклоняет загрузку. `mobile/assets/images/icon.png` (1024, #307) сделана из веба: `sips -z 1024 1024 public/icon-512.png` (это `app/icon.png`, залитая чёрным, — пиксель в пиксель; холст `sips -j` всегда пишет альфу, поэтому из самого `app/icon.png` непрозрачный PNG без потерь не получить). Проверка после любой замены: `sips -g hasAlpha mobile/assets/images/icon.png` → `no`. Слои Android и заставка — прозрачная M, вырезанная из того же `app/icon.png` скриптом `sips -j` (текст в PR #307). Родной мастер 1024 от дизайнера — строка в `docs/registry.md`.
 
 - Первая сборка требует живой сессии Apple ID; агенту её не отдавать —
   пароль и 2FA вводит владелец через `! …` в основной сессии.
