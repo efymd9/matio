@@ -57,6 +57,15 @@ vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 vi.mock("expo-web-browser", () => ({ openBrowserAsync: async () => ({}) }));
+// The sign-in form's Terms / Privacy line (#312) reads the legal URLs.
+vi.mock("@/api/config-context", () => ({
+  useConfig: () => ({
+    urls: {
+      terms: "https://matio.tv/terms?embed=app",
+      privacy: "https://matio.tv/privacy?embed=app",
+    },
+  }),
+}));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: async () => null,
   setItemAsync: async () => undefined,

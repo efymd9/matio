@@ -110,6 +110,14 @@ export const appEs = {
     signInBody: "Te enviaremos un código a tu correo. Sin contraseña.",
     noAccount: "¿No tienes cuenta?",
     createAccount: "Crear cuenta",
+    // The line under the email step's CTA (#312, App Store 5.1.1(i)): split
+    // around its two links, which open /terms and /privacy as Settings does.
+    // Legal copy: merged only on the owner's approval in #312's PR thread;
+    // counsel review pending together with /terms and /privacy (#168).
+    consentBefore: "Al continuar, aceptas los ",
+    consentTerms: "Términos",
+    consentMiddle: " y reconoces haber leído la ",
+    consentPrivacy: "Política de privacidad",
   },
   watch: {
     subscribersOnly: "Solo para suscriptores",
@@ -203,6 +211,10 @@ export const appEn: AppDict = {
     signInBody: "We'll email you a code. No password needed.",
     noAccount: "No account yet?",
     createAccount: "Create account",
+    consentBefore: "By continuing you agree to the ",
+    consentTerms: "Terms",
+    consentMiddle: " and acknowledge the ",
+    consentPrivacy: "Privacy Policy",
   },
   watch: {
     subscribersOnly: "Subscribers only",
