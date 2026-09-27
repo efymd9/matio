@@ -403,12 +403,16 @@ export function Row({
       {leading}
       {icon ? <Icon name={icon} size={22} color={colors.gold} /> : null}
       {!icon && iconSpacer ? <View style={{ width: 22 }} /> : null}
+      {/* A danger row's label is cream like any other — rust text on the card
+          is 3.0:1, under AA's 4.5 (#314); the rust is this tick, the section
+          header's. */}
+      {danger ? <View testID="danger-tick" style={styles.sectionTick} /> : null}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text
           style={[
             styles.rowLabel,
             titleCase && styles.rowTitle,
-            danger && { color: colors.rust, fontFamily: fonts.bodySemi },
+            danger && { fontFamily: fonts.bodySemi },
           ]}
           numberOfLines={titleCase ? 1 : undefined}
         >

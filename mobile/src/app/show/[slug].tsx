@@ -381,7 +381,8 @@ const styles = StyleSheet.create({
   },
   episodeTitle: { ...display, color: colors.ink, fontSize: 13, letterSpacing: 0.3 },
   episodeDescription: { ...body, color: colors.inkDim, fontSize: 12, lineHeight: 17 },
-  episodeDuration: { fontFamily: fonts.mono, color: colors.rust, fontSize: 11, marginTop: space(0.5) },
+  // inkDim, not rust: rust on the card is 3.0:1, under AA's 4.5 for 11pt (#314).
+  episodeDuration: { fontFamily: fonts.mono, color: colors.inkDim, fontSize: 11, marginTop: space(0.5) },
 });
 
 // A render crash here is this screen's, not the app's (#308): Back / Try

@@ -110,6 +110,8 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
 import AccountScreen from "@/app/(tabs)/account";
 import { LocaleProvider } from "@/i18n/locale";
+import { AA_TEXT, contrastRatio, paintedBackground, parseColor } from "@/testing/contrast";
+import { colors } from "@/theme";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -376,5 +378,37 @@ describe("Account tab — «Delete account» (#309)", () => {
       "Cancelar",
       "Eliminar definitivamente",
     ]);
+  });
+});
+
+// #314 — a danger row's label was rust: 3.0:1 on the card, under AA's 4.5.
+// It is cream now; the rust moved to a tick in front of it, so the two rows
+// still stand apart from the rest of the tab.
+describe("Account tab — the danger rows read at AA contrast (#314)", () => {
+  it("«Sign out» and «Delete account» are cream on their card, each behind a rust tick", () => {
+    render();
+
+    for (const label of ["Sign out", "Delete account"]) {
+      const node = Array.from(container.querySelectorAll("*")).find(
+        (el) => el.children.length === 0 && el.textContent === label,
+      );
+      if (!node) throw new Error(`no element labelled ${label}`);
+      const { color } = getComputedStyle(node);
+      expect(parseColor(color)).toEqual(parseColor(colors.ink));
+      const card = paintedBackground(node);
+      expect(card).not.toBeNull();
+      expect(parseColor(card as string)).toEqual(parseColor(colors.card));
+      expect(contrastRatio(color, card as string)).toBeGreaterThanOrEqual(AA_TEXT);
+
+      // The non-text cue, inside the same row.
+      const row = node.closest('[role="button"]');
+      const tick = row?.querySelector('[data-testid="danger-tick"]');
+      expect(tick).not.toBeNull();
+      expect(parseColor(getComputedStyle(tick as Element).backgroundColor)).toEqual(
+        parseColor(colors.rust),
+      );
+    }
+    // Only the danger rows carry it.
+    expect(container.querySelectorAll('[data-testid="danger-tick"]')).toHaveLength(2);
   });
 });
