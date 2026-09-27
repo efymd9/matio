@@ -1,14 +1,17 @@
 /** @vitest-environment jsdom */
-import { act, createElement, forwardRef, type ReactNode } from "react";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { act, createElement, forwardRef, type ReactElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { StyleSheet, type StyleProp, type ViewStyle } from "react-native";
+import { StyleSheet, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ShowSummary } from "@/shared/api-types";
 
 // #304 — the Browse tab, rendered for real in jsdom on react-native-web; the
 // catalog, the router and native modules are faked.
-//   item 8: the chips and the search field's «×» are ≥44pt targets, and not
-//           one pixel moved to make them so;
+//   item 8: the chips and the search field's «×» are ≥44pt targets, grown by
+//           hitSlop alone — not one layout value moved — and only where
+//           iOS actually delivers a touch: inside the parent's own box;
 //   item 9: a chip a catalog refresh takes away (a genre renamed, the last
 //           vertical show unpublished) gives the grid back to All — never an
 //           empty «No shows match.» with nothing highlighted.
@@ -27,9 +30,14 @@ const rec = vi.hoisted(() => ({
   pressables: [] as Props[],
   scrollViews: [] as Props[],
   lists: [] as Props[],
+  texts: [] as Props[],
 }));
 vi.mock("react-native", async (importOriginal) => {
   const rn = await importOriginal<typeof import("react-native")>();
+  const Text = forwardRef(function Text(props: Props, ref) {
+    rec.texts.push(props);
+    return createElement(rn.Text as never, { ...props, ref });
+  });
   const Pressable = forwardRef(function Pressable(props: Props, ref) {
     rec.pressables.push(props);
     const selected = (props.accessibilityState as { selected?: boolean } | undefined)?.selected;
@@ -43,7 +51,7 @@ vi.mock("react-native", async (importOriginal) => {
     rec.lists.push(props);
     return createElement(rn.FlatList as never, { ...props, ref });
   });
-  return { ...rn, Pressable, ScrollView, FlatList };
+  return { ...rn, Text, Pressable, ScrollView, FlatList };
 });
 
 // The catalog as the provider currently holds it; a case swaps it to play a
@@ -132,6 +140,7 @@ beforeEach(() => {
   rec.pressables.length = 0;
   rec.scrollViews.length = 0;
   rec.lists.length = 0;
+  rec.texts.length = 0;
   catalog.shows = [];
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -200,41 +209,82 @@ describe("Browse — a chip the catalog took away falls back to All (#304 item 9
   });
 });
 
-describe("Browse — 44pt targets, no pixel moved (#304 item 8)", () => {
-  const flat = (style: unknown): ViewStyle => StyleSheet.flatten(style as StyleProp<ViewStyle>);
-  // The chips' Pressables, as last rendered: the ones carrying a selected state.
-  const chipTargets = () =>
-    rec.pressables
-      .filter((p) => p.accessibilityState !== undefined)
-      .map((p) => flat((p.style as (s: { pressed: boolean }) => unknown)({ pressed: false })));
+// The natural line height iOS gives a font with no lineHeight set:
+// (hhea ascender − descender + lineGap) / unitsPerEm, read from the TTF the
+// app bundles — so «≥44pt» below rests on the real font, not on a guess.
+function lineHeightEm(fontFile: string): number {
+  const ttf = readFileSync(fontFile);
+  const tableCount = ttf.readUInt16BE(4);
+  const offsetOf = (tag: string) => {
+    for (let i = 0; i < tableCount; i += 1) {
+      const at = 12 + 16 * i;
+      if (ttf.toString("latin1", at, at + 4) === tag) return ttf.readUInt32BE(at + 8);
+    }
+    throw new Error(`no ${tag} table`);
+  };
+  const hhea = offsetOf("hhea");
+  const unitsPerEm = ttf.readUInt16BE(offsetOf("head") + 18);
+  const [ascender, descender, lineGap] = [4, 6, 8].map((o) => ttf.readInt16BE(hhea + o));
+  return (ascender - descender + lineGap) / unitsPerEm;
+}
+// (A path, not `import.meta.url`: under jsdom that URL is not a file: one.)
+const GEIST_SEMIBOLD = path.join(
+  import.meta.dirname,
+  "../node_modules/@expo-google-fonts/geist/600SemiBold/Geist_600SemiBold.ttf",
+);
+// iOS's smallest Larger Text step (xSmall) against the default (Large): the
+// body style's 14pt against 17pt.
+const XSMALL_FONT_SCALE = 14 / 17;
 
-  it("every chip is at least 44pt to the finger, and gives its padding back to the row and the grid", () => {
+describe("Browse — 44pt targets by hitSlop, no layout moved (#304 item 8)", () => {
+  const flat = (style: unknown): ViewStyle & TextStyle =>
+    StyleSheet.flatten(style as StyleProp<ViewStyle & TextStyle>);
+  type Slop = { top: number; bottom: number; left: number; right: number };
+
+  it("every chip reaches ≥44pt through slop that stays inside the row — and no layout value moved", () => {
     catalog.shows = [
       show("fallen", "Fallen", ["Drama"]),
       show("morelli", "Morelli", ["Sci-Fi"], true),
     ];
     renderBrowse();
 
-    const targets = chipTargets();
-    // All, Drama, Sci-fi, Vertical.
-    expect(targets.length).toBeGreaterThanOrEqual(4);
-    for (const style of targets) {
-      expect(style.minHeight).toBeGreaterThanOrEqual(44);
-      expect(style.justifyContent).toBe("center");
-    }
-    const pad = targets[0].paddingVertical as number;
-    expect(pad).toBeGreaterThan(0);
-    expect(targets.every((s) => s.paddingVertical === pad)).toBe(true);
-
-    // The visible chip still starts space(3.5) under the search field…
+    // The chips' Pressables: the ones carrying a selected state (All, Drama,
+    // Sci-fi, Vertical).
+    const chips = rec.pressables.filter((p) => p.accessibilityState !== undefined);
+    expect(chips.length).toBeGreaterThanOrEqual(4);
     const row = flat(rec.scrollViews.at(-1)?.contentContainerStyle);
-    expect((row.marginTop as number) + pad).toBe(space(3.5));
-    // …and the grid still starts space(4) under the visible chip.
-    const grid = flat(rec.lists.at(-1)?.contentContainerStyle);
-    expect((grid.paddingTop as number) + pad).toBe(space(4));
+    const slop = chips[0].hitSlop as Slop;
+    for (const chip of chips) {
+      // Upward only: the gap above is empty; sideways would take a
+      // neighbour's taps, and below is the grid.
+      expect(chip.hitSlop).toEqual({ top: row.paddingTop, bottom: 0, left: 0, right: 0 });
+      // The Pressable itself adds no size: no padding, margin or minimum.
+      const style = flat((chip.style as (s: { pressed: boolean }) => unknown)({ pressed: false }));
+      expect(Object.keys(style)).toEqual(["borderRadius"]);
+    }
+
+    // What a finger gets: the drawn chip — its padding around one line of
+    // the label's font — plus the slop.
+    const drawnBox = flat((chips.at(-1)?.children as ReactElement<{ style: unknown }>).props.style);
+    const label = flat(rec.texts.filter((t) => t.children === "Drama").at(-1)?.style);
+    expect(label.fontFamily).toBe("Geist_600SemiBold");
+    const drawn = (scale: number) =>
+      2 * (drawnBox.paddingVertical as number) +
+      (label.fontSize as number) * scale * lineHeightEm(GEIST_SEMIBOLD);
+    expect(drawn(1) + slop.top).toBeGreaterThanOrEqual(44);
+    expect(drawn(XSMALL_FONT_SCALE) + slop.top).toBeGreaterThanOrEqual(44);
+
+    // The slop lives in the row's own top PADDING — the gap under the search
+    // field, as wide as it always was — because iOS hands a child a touch
+    // only inside its parent's box. No margin left outside it.
+    expect(row.marginTop).toBeUndefined();
+    expect(row.paddingTop).toBe(space(3.5));
+    expect(slop.top).toBeLessThanOrEqual(row.paddingTop as number);
+    // And the grid starts where it did.
+    expect(flat(rec.lists.at(-1)?.contentContainerStyle).paddingTop).toBe(space(4));
   });
 
-  it("the search field's «×» reaches the 44pt pill's top and bottom edges", () => {
+  it("the search field's «×» reaches the 44pt pill's edges and stays out of the text field", () => {
     catalog.shows = [show("fallen", "Fallen", ["Drama"])];
     renderBrowse();
     const input = container.querySelector("input");
@@ -246,7 +296,14 @@ describe("Browse — 44pt targets, no pixel moved (#304 item 8)", () => {
     });
 
     const clear = rec.pressables.filter((p) => p.accessibilityLabel === "Clear search").at(-1);
-    // 11 + a 22pt line + 11 = the pill's 44; 16 = the pill's right padding.
-    expect(clear?.hitSlop).toEqual({ top: 11, bottom: 11, left: 12, right: 16 });
+    const slop = clear?.hitSlop as Slop;
+    const glyph = flat(rec.texts.filter((t) => t.children === "×").at(-1)?.style);
+    // 11 + the glyph's 22pt line + 11 = the pill's 44pt height, not beyond.
+    expect(slop.top + (glyph.lineHeight as number) + slop.bottom).toBe(44);
+    // 16 = the pill's right padding; to the left no further than the
+    // space(2.5) gap before the text field.
+    expect(slop.right).toBe(16);
+    expect(slop.left).toBeLessThanOrEqual(space(2.5));
+    expect(slop).toEqual({ top: 11, bottom: 11, left: 10, right: 16 });
   });
 });

@@ -132,13 +132,18 @@ function ClerkSignInForm({
     return () => clearTimeout(timer);
   }, [now, resendAt]);
 
-  // The failure line used to appear in silence — say it (#304 item 1).
-  // Queued: it waits for what VoiceOver is already saying (the button just
-  // pressed) instead of cutting it off. The line itself is also a polite
-  // live region, TalkBack's own way to hear it.
-  useEffect(() => {
-    if (error) AccessibilityInfo.announceForAccessibilityWithOptions(error, { queue: true });
-  }, [error]);
+  // A failure: shown, and said (#304 item 1) — the line used to appear in
+  // silence. Said HERE, once per failure, not from an effect on the text: a
+  // second wrong address or code is the same words, and React commits
+  // «clear, then set the same message» inside one handler as no change at
+  // all, so an effect would never fire for it. Queued: it waits for what
+  // VoiceOver is already saying (the button just pressed) instead of cutting
+  // it off. The line itself is also a polite live region, TalkBack's own way
+  // to hear it.
+  function fail(message: string) {
+    setError(message);
+    AccessibilityInfo.announceForAccessibilityWithOptions(message, { queue: true });
+  }
 
   function startCooldown() {
     const started = Date.now();
@@ -197,7 +202,7 @@ function ClerkSignInForm({
     if (busy || !signIn || !signUp) return;
     const address = email.trim();
     if (!address.includes("@")) {
-      setError(t.app.signIn.invalidEmail);
+      fail(t.app.signIn.invalidEmail);
       return;
     }
 
@@ -214,7 +219,7 @@ function ClerkSignInForm({
         return;
       }
       if (clerkErrorCode(attempt.error) !== UNKNOWN_ADDRESS) {
-        setError(messageFor(attempt.error));
+        fail(messageFor(attempt.error));
         return;
       }
 
@@ -223,17 +228,17 @@ function ClerkSignInForm({
       // instance's default language.
       const created = await signUp.create({ emailAddress: address, locale });
       if (created.error) {
-        setError(messageFor(created.error));
+        fail(messageFor(created.error));
         return;
       }
       const sent = await signUp.verifications.sendEmailCode();
       if (sent.error) {
-        setError(messageFor(sent.error));
+        fail(messageFor(sent.error));
         return;
       }
       toCodeStep("signUp");
     } catch (e) {
-      setError(messageFor(e));
+      fail(messageFor(e));
     } finally {
       setBusy(false);
     }
@@ -252,13 +257,13 @@ function ClerkSignInForm({
           ? await signIn.emailCode.sendCode()
           : await signUp.verifications.sendEmailCode();
       if (sent.error) {
-        setError(messageFor(sent.error));
+        fail(messageFor(sent.error));
         return;
       }
       setCode("");
       startCooldown();
     } catch (e) {
-      setError(messageFor(e));
+      fail(messageFor(e));
     } finally {
       setBusy(false);
     }
@@ -268,7 +273,7 @@ function ClerkSignInForm({
     if (busy || !signIn || !signUp) return;
     const value = code.trim();
     if (value.length < 4) {
-      setError(t.app.signIn.invalidCode);
+      fail(t.app.signIn.invalidCode);
       return;
     }
 
@@ -281,7 +286,7 @@ function ClerkSignInForm({
           : await signUp.verifications.verifyEmailCode({ code: value });
 
       if (verified.error) {
-        setError(messageFor(verified.error));
+        fail(messageFor(verified.error));
         return;
       }
 
@@ -289,13 +294,13 @@ function ClerkSignInForm({
       // but nobody is signed in.
       const finalized = flow === "signIn" ? await signIn.finalize() : await signUp.finalize();
       if (finalized.error) {
-        setError(messageFor(finalized.error));
+        fail(messageFor(finalized.error));
         return;
       }
 
       onDone();
     } catch (e) {
-      setError(messageFor(e));
+      fail(messageFor(e));
     } finally {
       setBusy(false);
     }

@@ -38,18 +38,21 @@ const VERTICAL: ChipSelection = { kind: "vertical" };
 const GRID_GAP = 12;
 const EMPTY: ShowSummary[] = [];
 
-// Touch targets (#304 item 8). A chip is drawn ~34pt tall (9 + 9 padding
-// around a 12pt Geist line of 15.6pt); its Pressable carries CHIP_TOUCH_PAD of
-// invisible padding above and below — ≥44pt to the finger — and the row's top
-// margin and the grid's top padding each give the same amount back, so not
-// one pixel moves. The pad, not a bare minHeight, because a minHeight's
-// overhang depends on the font's line height and could not be given back
-// exactly; minHeight stays as the floor. The «×» grows by hitSlop instead,
-// to the pill's own edges: 11 above and below its 22pt line in the 44pt pill,
-// 16 = the pill's right padding, 12 to the left.
-const TOUCH_TARGET = 44;
-const CHIP_TOUCH_PAD = 6;
-const CLEAR_HIT_SLOP = { top: 11, bottom: 11, left: 12, right: 16 };
+// Touch targets (#304 item 8), grown by hitSlop alone — no layout moves. A
+// chip is drawn ~34pt tall (9 + 9 padding around a 12pt Geist line of
+// 15.6pt); its target also takes the whole empty gap above it, up to the
+// search field's edge: ~48pt, and still ≥44 at the smallest iOS text size.
+// Upward only, and the gap is the row's PADDING, not a margin: iOS delivers a
+// touch to a child only inside its parent's bounds (Fabric's hit test treats
+// a parent whose children do not overflow its layout as clipping), so slop
+// outside the row's own box — into a margin, or down onto the grid — would
+// exist on paper and never under a finger. None sideways: neighbouring
+// chips stay each other's. The «×» grows to the 44pt pill's edges: 11 above
+// and below its 22pt line, 16 = the pill's right padding, and 10 to the
+// left — the gap before the text field, not into it.
+const CHIP_ROW_GAP = space(3.5);
+const CHIP_HIT_SLOP = { top: CHIP_ROW_GAP, bottom: 0, left: 0, right: 0 };
+const CLEAR_HIT_SLOP = { top: 11, bottom: 11, left: 10, right: 16 };
 
 export default function BrowseScreen() {
   const router = useRouter();
@@ -163,7 +166,7 @@ export default function BrowseScreen() {
         columnWrapperStyle={{ gap: GRID_GAP }}
         contentContainerStyle={{
           paddingHorizontal: SCREEN_PAD,
-          paddingTop: space(4) - CHIP_TOUCH_PAD,
+          paddingTop: space(4),
           paddingBottom: clearance + space(4),
           gap: space(3.5),
         }}
@@ -216,7 +219,8 @@ function Chip({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      style={({ pressed }) => [styles.chipTarget, pressed && { opacity: 0.8 }]}
+      hitSlop={CHIP_HIT_SLOP}
+      style={({ pressed }) => [{ borderRadius: radius.pill }, pressed && { opacity: 0.8 }]}
     >
       {active ? (
         <LinearGradient
@@ -262,16 +266,13 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   clear: { color: colors.inkDim, fontSize: 20, lineHeight: 22 },
+  // The gap under the search field is the row's top PADDING (was a margin —
+  // the same pixels): inside the row's box, so the chips' upward hitSlop
+  // lands there on a device.
   chips: {
     paddingHorizontal: SCREEN_PAD,
     gap: space(2),
-    marginTop: space(3.5) - CHIP_TOUCH_PAD,
-  },
-  chipTarget: {
-    borderRadius: radius.pill,
-    paddingVertical: CHIP_TOUCH_PAD,
-    minHeight: TOUCH_TARGET,
-    justifyContent: "center",
+    paddingTop: CHIP_ROW_GAP,
   },
   chip: {
     flexDirection: "row",

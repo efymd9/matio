@@ -680,6 +680,26 @@ flowSuite("SignInForm — the code step (#292 item 4)", () => {
     expect(a11y.announce).toHaveBeenCalledTimes(2);
   });
 
+  it("the same bad input twice is said twice — an address with no «@», then a short code (#304 item 1)", async () => {
+    a11y.announce.mockClear();
+    clerkResources();
+    await renderForm();
+
+    typeInto("not-an-address");
+    await press(props.cta);
+    await press(props.cta);
+    expect(a11y.announce).toHaveBeenCalledTimes(2);
+    expect(a11y.announce).toHaveBeenNthCalledWith(2, "Enter a valid email address.", { queue: true });
+
+    typeInto("member@example.com");
+    await press(props.cta);
+    typeInto("12");
+    await press("Sign in");
+    await press("Sign in");
+    expect(a11y.announce).toHaveBeenCalledTimes(4);
+    expect(a11y.announce).toHaveBeenLastCalledWith("Enter the code from your email.", { queue: true });
+  });
+
   it("none of the form's gold buttons carries the ▶ play glyph", async () => {
     clerkResources();
     await renderForm();
