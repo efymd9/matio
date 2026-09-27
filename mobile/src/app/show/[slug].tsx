@@ -44,6 +44,10 @@ import { episodeRoute, firstEpisodeLocked } from "@/watch/first-episode";
 // place (#311 — the SEO fallback promised free viewing in paid mode), and no
 // About tab either: the synopsis is all that tab holds.
 const HERO_HEIGHT = 330;
+// The hero's copy sits in that fixed 330pt: unbounded iOS Larger Text grew
+// «QUEDATE CONMIGO» past its top edge at AX5 (#304 item 7). Capped like the
+// Home hero card's copy, and at most three lines of title.
+const HERO_TEXT_CAP = 1.3;
 
 type Segment = "episodes" | "about";
 
@@ -135,14 +139,25 @@ export default function ShowScreen() {
           style={[styles.back, { top: insets.top + space(2) }]}
         />
 
-        <View style={styles.heroContent}>
-          <Pill label={t.hero.matioOriginal} />
-          <Text style={styles.title}>{data.title}</Text>
+        {/* Nothing in here is tappable, so none of it takes a touch: where
+            a long title reaches up to the «‹», the tap is the button's. */}
+        <View style={styles.heroContent} pointerEvents="none">
+          <Pill label={t.hero.matioOriginal} maxFontSizeMultiplier={HERO_TEXT_CAP} />
+          <Text
+            style={styles.title}
+            accessibilityRole="header"
+            numberOfLines={3}
+            maxFontSizeMultiplier={HERO_TEXT_CAP}
+          >
+            {data.title}
+          </Text>
           {chips.length > 0 ? (
             <View style={styles.genres}>
               {chips.map((c) => (
                 <View key={c.key} testID="genre-chip" style={styles.genreChip}>
-                  <Text style={styles.genreText}>{c.label}</Text>
+                  <Text style={styles.genreText} maxFontSizeMultiplier={HERO_TEXT_CAP}>
+                    {c.label}
+                  </Text>
                 </View>
               ))}
             </View>
@@ -166,7 +181,8 @@ export default function ShowScreen() {
         ) : null}
       </View>
 
-      <View style={styles.segments}>
+      {/* The segments' container: VoiceOver reads «Episodes, tab, 1 of 2». */}
+      <View style={styles.segments} accessibilityRole="tabbar">
         {segments.map((key) => {
           const active = view === key;
           return (

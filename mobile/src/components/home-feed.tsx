@@ -1,4 +1,5 @@
-import type { ReactElement } from "react";
+import { useScrollToTop } from "expo-router";
+import { useRef, type ReactElement } from "react";
 import {
   FlatList,
   Pressable,
@@ -67,6 +68,11 @@ type Handlers = {
 // iOS-only, and Android draws a Material disc from `colors` on
 // `progressBackgroundColor` (default: stock colours on white) — gold on the
 // card surface there.
+//
+// Back to the top (#304 item 10): a tap on the Home tab while Home is showing
+// scrolls the feed up (useScrollToTop), and so does a tap on the iOS status
+// bar — which only works when this is the ONE scroll view on screen that
+// allows it, so the carousel and the Popular now rail opt out.
 export function HomeFeed({
   items,
   header,
@@ -93,9 +99,12 @@ export function HomeFeed({
   const insets = useSafeAreaInsets();
   const cardWidth = width - 2 * SCREEN_PAD;
   const last = items[items.length - 1];
+  const list = useRef<FlatList<HomeFeedItem>>(null);
+  useScrollToTop(list);
 
   return (
     <FlatList
+      ref={list}
       data={items}
       keyExtractor={(item) => item.id}
       style={styles.list}
