@@ -82,7 +82,7 @@ function SignedInAccount() {
   const clearance = useTabBarClearance();
   const { user } = useUser();
   const { signOut } = useClerk();
-  const resume = useContinueWatching(true);
+  const { items: resume } = useContinueWatching(true);
 
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
   const initial = email.charAt(0).toUpperCase();
