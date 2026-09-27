@@ -359,7 +359,7 @@ auth token committed.
 
 | Name | Where | Notes |
 |---|---|---|
-| `EXPO_PUBLIC_SENTRY_DSN` | **EAS env**, environment `production` (not Vercel) | The on/off switch, like the web's: unset → no `Sentry.init`, and the SDK's JavaScript is never even evaluated (`mobile/src/observability.ts` `require`s it only with a DSN). Inlined into the JS bundle **at build time** — it takes effect from the next EAS build, never on an installed binary (the app has no OTA updates). Not a secret. **Not set yet** (registry). |
+| `EXPO_PUBLIC_SENTRY_DSN` | **EAS env**, environment `production` (not Vercel) | The on/off switch, like the web's: unset → no `Sentry.init`, and the SDK's JavaScript is never even evaluated (`mobile/src/observability.ts` `require`s it only with a DSN). Inlined into the JS bundle **at build time** — it takes effect from the next EAS build, never on an installed binary (the app has no OTA updates). Not a secret. **Set on 28.09.2026** in EAS `production` (the same DSN as the web's `NEXT_PUBLIC_SENTRY_DSN`, project `javascript-nextjs`); the first build carrying it is TestFlight 0.1.0 (7). |
 | `EXPO_PUBLIC_APP_ENV` | EAS env, optional | Sentry's `environment`. Unset → `production` for an EAS build, `development` for a Metro bundle. Set it (e.g. `preview`) only on an EAS environment that also gets the DSN. |
 | `SENTRY_DISABLE_AUTO_UPLOAD` | `mobile/eas.json`, both build profiles, `"true"` | Keeps source-map and dSYM upload off, as on the web. Without it the plugin's build phases try to upload with no token and **fail the EAS build**. |
 
