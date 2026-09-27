@@ -257,7 +257,11 @@ would add license-server complexity and cost for no benefit here.
 
 ## 11. Store compliance checklist
 
-- [ ] **In-app account deletion** (5.1.1(v)) — Clerk `user.delete()`. Not present on web either.
+- [x] **In-app account deletion** (5.1.1(v)) — shipped in #309: Account tab → «Delete account»
+      (two confirmations) → `POST /v1/account/delete`, which runs `lib/erase-user.ts:eraseUser`
+      inline and then deletes the Clerk user (server-side, not a client `user.delete()` — no
+      dependency on the `user.deleted` webhook or the dashboard toggle). Still no web page for it
+      (`docs/registry.md`).
 - [ ] **Sign in with Apple** is required **only if** any third-party social login is offered.
       Clerk email-code only → exempt. Adding "Continue with Google" for mobile convenience
       would drag SIWA in with it. Decide before building the auth screen.

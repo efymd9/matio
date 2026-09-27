@@ -186,7 +186,11 @@ describe("Artwork — resized through the site's image optimizer (#292 item 10)"
   it("a signed Mux thumbnail, and art with no drawn width given, load as they are — no extra header", () => {
     const mux = "https://image.mux.com/pb/thumbnail.jpg?token=eyJ.dummy.sig";
     render(<Artwork uri={mux} toneKey="ep" displayWidth={128} />);
-    expect(images.sources.at(-1)).toEqual({ uri: mux });
+    // Fetched as it is; cached without its token (#304 item 11).
+    expect(images.sources.at(-1)).toEqual({
+      uri: mux,
+      cacheKey: "https://image.mux.com/pb/thumbnail.jpg",
+    });
 
     render(<Artwork uri={BLOB} toneKey="the-scarlet-oath" />);
     expect(images.sources.at(-1)).toEqual({ uri: BLOB });
@@ -195,6 +199,53 @@ describe("Artwork — resized through the site's image optimizer (#292 item 10)"
   it("no artwork is the tone fallback — nothing is fetched", () => {
     render(<Artwork uri={null} toneKey="the-scarlet-oath" displayWidth={262} />);
     expect(images.sources).toEqual([]);
+  });
+});
+
+// #304 item 11 — /v1 signs every Mux still afresh, so the same frame comes
+// back under a new URL on each visit. expo-image keys its disk cache on the
+// URL unless told otherwise; told the URL minus the token, a second visit is
+// a cache hit instead of a second download.
+describe("Artwork — a signed Mux still is cached by what it shows, not by its token (#304 item 11)", () => {
+  // The shape lib/mux-token.ts:muxThumbnailUrl builds, token in the middle.
+  const still = (token: string) =>
+    `https://image.mux.com/pb1/thumbnail.jpg?width=256&token=${token}&time=5`;
+  const keyOf = (uri: string) => {
+    render(<Artwork uri={uri} toneKey="ep" />);
+    return (images.sources.at(-1) as { uri: string; cacheKey?: string }).cacheKey;
+  };
+
+  it("two mints of the same still share one cache key, and each still goes out with its own token", () => {
+    const firstKey = keyOf(still("eyJ.first.sig"));
+    const secondKey = keyOf(still("eyJ.second.sig"));
+
+    expect(firstKey).toBe("https://image.mux.com/pb1/thumbnail.jpg?width=256&time=5");
+    expect(secondKey).toBe(firstKey);
+    // The token is only left out of the KEY: the request is the signed URL.
+    expect((images.sources.at(-1) as { uri: string }).uri).toBe(still("eyJ.second.sig"));
+  });
+
+  it("another frame, width or asset keeps a key of its own — only the token is dropped", () => {
+    const signed = (asset: string, width: number, time: number) =>
+      `https://image.mux.com/${asset}/thumbnail.jpg?width=${width}&token=eyJ.a.sig&time=${time}`;
+    const base = keyOf(signed("pb1", 256, 5));
+
+    expect(keyOf(signed("pb1", 256, 9))).not.toBe(base);
+    expect(keyOf(signed("pb1", 640, 5))).not.toBe(base);
+    expect(keyOf(signed("pb2", 256, 5))).not.toBe(base);
+  });
+
+  it("a public still with no token is keyed by its URL as it is", () => {
+    const open = "https://image.mux.com/pb1/thumbnail.jpg?width=256&fit_mode=smartcrop";
+    expect(keyOf(open)).toBe(open);
+  });
+
+  it("artwork that is not a Mux still carries no cache key of ours", () => {
+    render(<Artwork uri={BLOB} toneKey="the-scarlet-oath" displayWidth={262} />);
+    expect(images.sources.at(-1)).not.toHaveProperty("cacheKey");
+
+    render(<Artwork uri="https://example.com/still.jpg?token=abc" toneKey="x" />);
+    expect(images.sources.at(-1)).toEqual({ uri: "https://example.com/still.jpg?token=abc" });
   });
 });
 

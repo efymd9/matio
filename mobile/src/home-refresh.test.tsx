@@ -12,6 +12,10 @@ import type { CatalogResponse, ContinueResponse, ShowSummary } from "@/shared/ap
 // keeps what is on screen and still clears the spinner; an anonymous viewer's
 // pull asks for the catalog only. (Not under app/ — a test file there would
 // become an expo-router route.)
+//
+// #304 item 10 — the same list is where «back to the top» lands: a tap on
+// the Home tab while Home shows, and the iOS status-bar tap, which works
+// only when exactly one scroll view on screen allows it.
 
 vi.hoisted(() => {
   (globalThis as { __DEV__?: boolean }).__DEV__ = false;
@@ -30,21 +34,40 @@ type RefreshProps = {
   children?: ReactNode;
 };
 const refresh = vi.hoisted(() => ({ props: null as RefreshProps | null }));
+// #304 item 10 — the scroll views Home draws, as they were handed their
+// props: the carousel (reanimated's FlatList) and every ScrollView the app
+// imports (the Popular now rail). react-native-web drops `scrollsToTop`.
+type ScrollProps = { scrollsToTop?: boolean; horizontal?: boolean | null };
+const scroll = vi.hoisted(() => ({
+  carousel: null as ScrollProps | null,
+  views: [] as ScrollProps[],
+  toTop: [] as Array<{ current: unknown }>,
+}));
 vi.mock("react-native", async (importOriginal) => {
   const rn = await importOriginal<typeof import("react-native")>();
+  const React = await import("react");
   function RefreshControl(props: RefreshProps) {
     refresh.props = props;
     return createElement(rn.RefreshControl as never, props);
   }
-  return { ...rn, RefreshControl };
+  const ScrollView = React.forwardRef(function ScrollView(props: ScrollProps, ref) {
+    scroll.views.push(props);
+    return createElement(rn.ScrollView as never, { ...props, ref });
+  });
+  return { ...rn, RefreshControl, ScrollView };
 });
 
 // The carousel's UI-thread animation has no web runtime here; a plain
 // FlatList and inert shared values are all Home needs to render.
 vi.mock("react-native-reanimated", async () => {
   const rn = await import("react-native");
+  const React = await import("react");
+  const FlatList = React.forwardRef(function CarouselList(props: ScrollProps, ref) {
+    scroll.carousel = props;
+    return createElement(rn.FlatList as never, { ...props, ref });
+  });
   return {
-    default: { FlatList: rn.FlatList, View: rn.View },
+    default: { FlatList, View: rn.View },
     interpolate: () => 1,
     useAnimatedScrollHandler: () => undefined,
     useAnimatedStyle: () => ({}),
@@ -52,13 +75,18 @@ vi.mock("react-native-reanimated", async () => {
   };
 });
 
-// Home is the focused tab for the whole suite.
+// Home is the focused tab for the whole suite. useScrollToTop is the
+// navigator's (it listens for a press on the tab already showing); here it
+// only records the list it was handed.
 vi.mock("expo-router", async () => {
   const React = await import("react");
   return {
     useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
     useFocusEffect(effect: () => undefined | (() => void)) {
       React.useEffect(() => effect(), [effect]);
+    },
+    useScrollToTop: (ref: { current: unknown }) => {
+      scroll.toTop.push(ref);
     },
   };
 });
@@ -204,6 +232,9 @@ const spinning = () => refresh.props?.refreshing;
 beforeEach(() => {
   auth.signedIn = true;
   refresh.props = null;
+  scroll.carousel = null;
+  scroll.views.length = 0;
+  scroll.toTop.length = 0;
   net.catalog.length = 0;
   net.resume.length = 0;
   container = document.createElement("div");
@@ -300,5 +331,51 @@ describe("Home pull-to-refresh (#313)", () => {
 
     expect(spinning()).toBe(false);
     expect(text()).toContain("New Show");
+  });
+});
+
+describe("Home back to the top (#304 item 10)", () => {
+  // Home with a Popular now rail — a horizontal ScrollView inside the feed.
+  async function mountWithRail() {
+    act(() =>
+      root.render(
+        <CatalogProvider>
+          <HomeScreen />
+        </CatalogProvider>,
+      ),
+    );
+    await settle();
+    net.catalog[0].resolve(
+      catalogOf(show("fallen", "Fallen"), show("morelli", "Morelli"), {
+        ...show("second-hand", "Second Hand"),
+        popularNow: true,
+      }),
+    );
+    net.resume[0].resolve({ items: [] });
+    await settle();
+  }
+
+  it("a tap on the Home tab scrolls the feed itself — the list with the pull-to-refresh", async () => {
+    await mountWithRail();
+
+    const list = scroll.toTop.at(-1)?.current as
+      | { props: { horizontal?: boolean; refreshControl?: unknown }; scrollToOffset?: unknown }
+      | null
+      | undefined;
+    expect(list).toBeTruthy();
+    expect(list?.props.horizontal).toBeFalsy();
+    expect(list?.props.refreshControl).toBeDefined();
+    // What useScrollToTop calls on a FlatList.
+    expect(list?.scrollToOffset).toBeTypeOf("function");
+  });
+
+  it("the carousel and the Popular now rail leave the status-bar tap to the feed", async () => {
+    await mountWithRail();
+
+    expect(scroll.carousel?.horizontal).toBe(true);
+    expect(scroll.carousel?.scrollsToTop).toBe(false);
+    const rails = scroll.views.filter((p) => p.horizontal);
+    expect(rails.length).toBeGreaterThan(0);
+    expect(rails.every((p) => p.scrollsToTop === false)).toBe(true);
   });
 });

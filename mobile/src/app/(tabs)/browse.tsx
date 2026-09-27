@@ -20,7 +20,12 @@ import { Icon } from "@/components/icon";
 import { ErrorState, Loading, PosterCard } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import type { ShowSummary } from "@/shared/api-types";
-import { filterShows, genreChips, type ChipSelection } from "@/shared/catalog-filters";
+import {
+  filterShows,
+  genreChips,
+  resolveChip,
+  type ChipSelection,
+} from "@/shared/catalog-filters";
 import { body, colors, display, fonts, radius, SCREEN_PAD, space } from "@/theme";
 
 // Browse (#245): the whole catalog as a two-column poster grid, narrowed by a
@@ -32,6 +37,22 @@ const ALL: ChipSelection = { kind: "all" };
 const VERTICAL: ChipSelection = { kind: "vertical" };
 const GRID_GAP = 12;
 const EMPTY: ShowSummary[] = [];
+
+// Touch targets (#304 item 8), grown by hitSlop alone — no layout moves. A
+// chip is drawn ~34pt tall (9 + 9 padding around a 12pt Geist line of
+// 15.6pt); its target also takes the whole empty gap above it, up to the
+// search field's edge: ~48pt, and still ≥44 at the smallest iOS text size.
+// Upward only, and the gap is the row's PADDING, not a margin: iOS delivers a
+// touch to a child only inside its parent's bounds (Fabric's hit test treats
+// a parent whose children do not overflow its layout as clipping), so slop
+// outside the row's own box — into a margin, or down onto the grid — would
+// exist on paper and never under a finger. None sideways: neighbouring
+// chips stay each other's. The «×» grows to the 44pt pill's edges: 11 above
+// and below its 22pt line, 16 = the pill's right padding, and 10 to the
+// left — the gap before the text field, not into it.
+const CHIP_ROW_GAP = space(3.5);
+const CHIP_HIT_SLOP = { top: CHIP_ROW_GAP, bottom: 0, left: 0, right: 0 };
+const CLEAR_HIT_SLOP = { top: 11, bottom: 11, left: 10, right: 16 };
 
 export default function BrowseScreen() {
   const router = useRouter();
@@ -47,7 +68,11 @@ export default function BrowseScreen() {
   const shows = catalog.status === "ready" ? catalog.data.shows : EMPTY;
   const chips = useMemo(() => genreChips(shows), [shows]);
   const hasVertical = useMemo(() => shows.some((s) => s.orientation === "vertical"), [shows]);
-  const results = useMemo(() => filterShows(shows, chip, query), [shows, chip, query]);
+  // The chip in force: the viewer's pick, or All once a catalog refresh has
+  // taken that chip away (#304 item 9). The grid and the highlight both read
+  // it, so they can never disagree.
+  const active = resolveChip(chip, chips, hasVertical);
+  const results = useMemo(() => filterShows(shows, active, query), [shows, active, query]);
 
   const openShow = useCallback(
     (slug: string) => router.push({ pathname: "/show/[slug]", params: { slug } }),
@@ -71,7 +96,9 @@ export default function BrowseScreen() {
   return (
     <View style={styles.screen}>
       <View style={{ paddingTop: insets.top + space(4) }}>
-        <Text style={styles.heading}>{t.header.browse}</Text>
+        <Text style={styles.heading} accessibilityRole="header">
+          {t.header.browse}
+        </Text>
 
         {/* The search field is glass of the same family as the bar. */}
         <GlassSurface style={styles.search}>
@@ -93,7 +120,7 @@ export default function BrowseScreen() {
           {query ? (
             <Pressable
               onPress={() => setQuery("")}
-              hitSlop={8}
+              hitSlop={CLEAR_HIT_SLOP}
               accessibilityRole="button"
               accessibilityLabel={t.app.browse.clearSearch}
             >
@@ -108,19 +135,23 @@ export default function BrowseScreen() {
           contentContainerStyle={styles.chips}
           keyboardShouldPersistTaps="handled"
         >
-          <Chip label={t.app.browse.all} active={chip.kind === "all"} onPress={() => setChip(ALL)} />
+          <Chip
+            label={t.app.browse.all}
+            active={active.kind === "all"}
+            onPress={() => setChip(ALL)}
+          />
           {chips.map((genre) => (
             <Chip
               key={genre.key}
               label={genre.label}
-              active={chip.kind === "genre" && chip.key === genre.key}
+              active={active.kind === "genre" && active.key === genre.key}
               onPress={() => setChip({ kind: "genre", key: genre.key })}
             />
           ))}
           {hasVertical ? (
             <Chip
               label={t.app.browse.vertical}
-              active={chip.kind === "vertical"}
+              active={active.kind === "vertical"}
               onPress={() => setChip(VERTICAL)}
               mark
             />
@@ -188,6 +219,7 @@ function Chip({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
+      hitSlop={CHIP_HIT_SLOP}
       style={({ pressed }) => [{ borderRadius: radius.pill }, pressed && { opacity: 0.8 }]}
     >
       {active ? (
@@ -234,10 +266,13 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   clear: { color: colors.inkDim, fontSize: 20, lineHeight: 22 },
+  // The gap under the search field is the row's top PADDING (was a margin —
+  // the same pixels): inside the row's box, so the chips' upward hitSlop
+  // lands there on a device.
   chips: {
     paddingHorizontal: SCREEN_PAD,
     gap: space(2),
-    marginTop: space(3.5),
+    paddingTop: CHIP_ROW_GAP,
   },
   chip: {
     flexDirection: "row",

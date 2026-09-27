@@ -90,6 +90,13 @@ function withAlpha(hex: string, alpha: number): string {
 // the loader's own does not name WebP): a few dozen KB instead of the 2–15 MB
 // original (#292). A source the optimizer does not take (a signed Mux
 // thumbnail) is fetched as it is, with no extra header.
+//
+// A signed Mux still is a new URL on every visit — /v1 mints a fresh `token`
+// per response — and expo-image keys its disk cache on the URL, so the same
+// frame was downloaded again each time and piled up as duplicates (#304
+// item 11). It is cached under its URL minus that one parameter: the
+// playback id, width, time and crop still tell stills apart. The server's
+// tokens stay as they are.
 export function Artwork({
   uri,
   toneKey,
@@ -108,6 +115,7 @@ export function Artwork({
       : uri
         ? { uri }
         : null;
+  const cacheKey = source ? muxStillCacheKey(source.uri) : null;
   return (
     <View style={[{ overflow: "hidden" }, style]}>
       {/* Tone gradient sits underneath so it shows through as the fallback
@@ -119,11 +127,30 @@ export function Artwork({
         style={StyleSheet.absoluteFill}
       />
       {source ? (
-        <Image source={source} style={StyleSheet.absoluteFill} contentFit="cover" />
+        <Image
+          source={cacheKey ? { ...source, cacheKey } : source}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+        />
       ) : null}
       <Duotone />
     </View>
   );
+}
+
+const MUX_IMAGE = "https://image.mux.com/";
+
+// A Mux still's URL without its `token` parameter; null for any other URL.
+// Plain string rules, like lib/api/image-url.ts — no URL polyfill needed.
+function muxStillCacheKey(uri: string): string | null {
+  if (!uri.startsWith(MUX_IMAGE)) return null;
+  const q = uri.indexOf("?");
+  if (q === -1) return uri;
+  const kept = uri
+    .slice(q + 1)
+    .split("&")
+    .filter((param) => param.split("=")[0] !== "token");
+  return kept.length > 0 ? `${uri.slice(0, q)}?${kept.join("&")}` : uri.slice(0, q);
 }
 
 // ---------------------------------------------------------------- text bits
@@ -243,7 +270,9 @@ export function SectionHeader({ label }: { label: string }) {
   return (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionTick} />
-      <Text style={styles.sectionLabel}>{label}</Text>
+      <Text style={styles.sectionLabel} accessibilityRole="header">
+        {label}
+      </Text>
     </View>
   );
 }
@@ -254,9 +283,13 @@ export function Rail({ label, children }: { label: string; children: ReactNode }
   return (
     <View style={{ marginBottom: space(9) }}>
       <SectionHeader label={label} />
+      {/* Not a status-bar-tap target (#304 item 10): iOS scrolls to the top
+          only when exactly ONE scroll view on screen says it may, and on
+          Home that is the feed around this rail. */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        scrollsToTop={false}
         contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, gap: space(3) }}
       >
         {children}
@@ -315,7 +348,11 @@ export function PosterCard({
 // The settings-style card group of the Account and Settings tabs (#245):
 // an Anton kicker over an espresso card of rows separated by hairlines.
 export function GroupLabel({ label }: { label: string }) {
-  return <Text style={styles.groupLabel}>{label}</Text>;
+  return (
+    <Text style={styles.groupLabel} accessibilityRole="header">
+      {label}
+    </Text>
+  );
 }
 
 export function Card({ children }: { children: ReactNode }) {
@@ -341,6 +378,7 @@ export function Row({
   first = false,
   role = "button",
   selected,
+  accessibilityLabel,
 }: {
   icon?: IconName;
   iconSpacer?: boolean;
@@ -357,6 +395,8 @@ export function Row({
   first?: boolean;
   role?: AccessibilityRole;
   selected?: boolean;
+  // What VoiceOver / TalkBack say for a pressable row; without it, the text.
+  accessibilityLabel?: string;
 }) {
   const content = (
     <>
@@ -396,6 +436,7 @@ export function Row({
     <Pressable
       onPress={onPress}
       accessibilityRole={role}
+      accessibilityLabel={accessibilityLabel}
       aria-checked={role === "radio" ? selected : undefined}
       aria-selected={role === "radio" ? undefined : selected}
       style={({ pressed }) => [rowStyle, pressed && { opacity: 0.7 }]}
@@ -414,8 +455,18 @@ export function Radio({ selected }: { selected: boolean }) {
 }
 
 // A row's trailing glyph: «›» for a push, «↗» for a link that leaves the app.
+// Decoration, hidden from VoiceOver and TalkBack (#304 item 5): the row's
+// role already says «link» or «button», and read aloud the glyph was «north
+// east arrow» after «Terms». `aria-hidden` is React Native's one spelling of
+// both switches — Text turns it into accessibilityElementsHidden (iOS, which
+// also keeps it out of the row's composed label) and importantForAccessibility
+// (Android) — and the one react-native-web honours.
 export function Chevron({ external = false }: { external?: boolean }) {
-  return <Text style={[styles.chevron, external && styles.chevronExternal]}>{external ? "↗" : "›"}</Text>;
+  return (
+    <Text style={[styles.chevron, external && styles.chevronExternal]} aria-hidden>
+      {external ? "↗" : "›"}
+    </Text>
+  );
 }
 
 // ---------------------------------------------------------------- states

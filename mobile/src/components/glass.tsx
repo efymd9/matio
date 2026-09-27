@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type AccessibilityRole,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
@@ -41,15 +42,31 @@ type SurfaceProps = {
 
 // The clear surface. `style` carries geometry only — GlassView ignores a
 // backgroundColor laid over the effect, and the fallback supplies its own.
-export function GlassSurface({ style, interactive = false, children }: SurfaceProps) {
+// `accessibilityRole` is the surface's own, on either branch — the tab bar
+// is a «tabbar», so VoiceOver reads its tabs as «tab, 2 of 4» (#304 item 6).
+export function GlassSurface({
+  style,
+  interactive = false,
+  accessibilityRole,
+  children,
+}: SurfaceProps & { accessibilityRole?: AccessibilityRole }) {
   if (LIQUID_GLASS) {
     return (
-      <GlassView glassEffectStyle="regular" isInteractive={interactive} style={style}>
+      <GlassView
+        glassEffectStyle="regular"
+        isInteractive={interactive}
+        accessibilityRole={accessibilityRole}
+        style={style}
+      >
         {children}
       </GlassView>
     );
   }
-  return <View style={[style, styles.fallback]}>{children}</View>;
+  return (
+    <View style={[style, styles.fallback]} accessibilityRole={accessibilityRole}>
+      {children}
+    </View>
+  );
 }
 
 // The gold surface — the active tab's pill. Gold-tinted glass where there is
