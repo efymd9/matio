@@ -630,13 +630,22 @@ function FeedPage({
       playback
         ? {
             uri: muxStreamUrl(playback.playbackId, playback.token),
-            // Lock screen / Control Center / Android media notification.
+            // Lock screen / Control Center / Android media notification:
+            // the episode, then the SHOW — a bare «Capítulo 3» names nothing
+            // (#315). Which field lands where (react-native-video 6.19):
+            // iOS now-playing takes title + artist only
+            // (NowPlayingInfoCenterManager.swift); the landscape native
+            // transport shows title + subtitle; Android 13+ media controls
+            // read title + artist from the session; Android ≤12's own
+            // notification is title + DESCRIPTION (VideoPlaybackService.kt)
+            // — so the show goes in all three, and no brand in any of them.
             // The poster resized (#292; see NOW_PLAYING_ART_PX): the player
             // fetches it on every play.
             metadata: {
               title: episode.title,
               subtitle: show.title,
-              artist: "Matio",
+              artist: show.title,
+              description: show.title,
               imageUri: optimizedImageUrl(show.posterImageUrl, NOW_PLAYING_ART_PX) ?? undefined,
             },
           }
