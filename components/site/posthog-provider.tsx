@@ -118,6 +118,12 @@ export function PostHogProvider({
           autocapture: false,
           capture_pageview: false, // fired manually below for App-Router routes
           capture_pageleave: true,
+          // The project has zero feature flags and surveys are off, yet /flags
+          // would still go out on every identify()/reset() carrying distinct_id,
+          // $anon_distinct_id and person properties (#295). NOT
+          // advanced_disable_flags: that one also kills remote config, and with
+          // it session replay + heatmaps.
+          advanced_disable_feature_flags: true,
           enable_heatmaps: true,
           // Recording is ON (masked). false is posthog-js's default — stated
           // explicitly to document the deliberate choice (double-negative name).
