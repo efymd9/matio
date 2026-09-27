@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act } from "react";
+import { act, useEffect, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "@/shared/api-types";
@@ -14,10 +14,21 @@ import type { AppConfig } from "@/shared/api-types";
 const native = vi.hoisted(() => ({ nativeBuildVersion: "6" as string | null }));
 vi.mock("expo-constants", () => ({ default: native }));
 
-const config = vi.hoisted(() => ({ answer: null as null | (() => Promise<unknown>) }));
+const config = vi.hoisted(() => ({
+  answer: null as null | (() => Promise<unknown>),
+  requests: 0,
+}));
 vi.mock("@/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/client")>();
-  return { ...actual, api: { config: () => config.answer?.() } };
+  return {
+    ...actual,
+    api: {
+      config: () => {
+        config.requests += 1;
+        return config.answer?.();
+      },
+    },
+  };
 });
 
 vi.mock("expo-secure-store", () => ({
@@ -54,21 +65,42 @@ let container: HTMLDivElement;
 let root: Root | null = null;
 const text = () => container.textContent ?? "";
 
-async function renderProvider(locale: "en" | "es" = "en") {
+type ConfigModule = typeof import("@/api/config-context");
+
+// The AppState "change" listener the provider installed (null once removed)
+// and how many times one was removed.
+let onAppState: ((state: string) => void) | null = null;
+let listenersRemoved = 0;
+
+async function renderProvider(
+  locale: "en" | "es" = "en",
+  body: (mod: ConfigModule) => ReactNode = () => <span>the app</span>,
+) {
   vi.resetModules();
-  const { ConfigProvider } = await import("@/api/config-context");
+  // The module instance the freshly imported provider will use.
+  const { AppState } = await import("react-native");
+  vi.spyOn(AppState, "addEventListener").mockImplementation((_type, handler) => {
+    const listener = handler as (state: string) => void;
+    onAppState = listener;
+    return {
+      remove: () => {
+        listenersRemoved += 1;
+        if (onAppState === listener) onAppState = null;
+      },
+    } as ReturnType<typeof AppState.addEventListener>;
+  });
+  const mod = await import("@/api/config-context");
   const { LocaleProvider } = await import("@/i18n/locale");
   root = createRoot(container);
   await act(async () => {
     root?.render(
       <LocaleProvider initial={locale}>
-        <ConfigProvider>
-          <span>the app</span>
-        </ConfigProvider>
+        <mod.ConfigProvider>{body(mod)}</mod.ConfigProvider>
       </LocaleProvider>,
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
+  return mod;
 }
 
 async function networkError() {
@@ -82,6 +114,9 @@ describe("ConfigProvider (#288)", () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     native.nativeBuildVersion = "6";
     config.answer = async () => CONFIG;
+    config.requests = 0;
+    onAppState = null;
+    listenersRemoved = 0;
     container = document.createElement("div");
     document.body.appendChild(container);
   });
@@ -91,6 +126,7 @@ describe("ConfigProvider (#288)", () => {
     root = null;
     container.remove();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("lets build 6 through a floor of 2 — the floor retires OLDER builds, not every build", async () => {
@@ -198,5 +234,205 @@ describe("ConfigProvider (#288)", () => {
     expect(text()).toContain("Check your connection and try again.");
     expect(text()).toContain("Couldn't reach Matio.");
     expect(text()).toContain(API_BASE_URL);
+  });
+
+  // #301 — the config while the app stays in memory. It used to be fetched
+  // once per process: a raised floor never retired a running build, flipped
+  // kill-switches went stale, and a launch that failed stayed failed until
+  // Retry. A return to the foreground now refreshes a config older than five
+  // minutes (or one that never arrived) SILENTLY, one request at a time, and
+  // an unchanged answer keeps the object every screen already holds.
+  describe("refresh on a return to the app (#301)", () => {
+    // Every config the app's screens were handed, and how many times they
+    // mounted: a spinner or an error screen in between unmounts them.
+    let seen: AppConfig[] = [];
+    let mounts = 0;
+
+    function probe({ useConfig }: ConfigModule) {
+      function Probe() {
+        const current = useConfig();
+        seen.push(current);
+        useEffect(() => {
+          mounts += 1;
+        }, []);
+        return <span>{`the app · payments ${current.flags.paymentsEnabled ? "on" : "off"}`}</span>;
+      }
+      return <Probe />;
+    }
+
+    async function settle() {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+
+    async function foregroundAfter(ms: number) {
+      vi.setSystemTime(Date.now() + ms);
+      act(() => onAppState?.("background"));
+      act(() => onAppState?.("active"));
+      await settle();
+    }
+
+    // An answer that lands only when the test says so.
+    function deferAnswer() {
+      const answer: { land: (value: AppConfig) => void } = { land: () => undefined };
+      config.answer = () =>
+        new Promise<AppConfig>((resolve) => {
+          answer.land = resolve;
+        });
+      return answer;
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      seen = [];
+      mounts = 0;
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("a floor raised while the app was away walls this build at the next return", async () => {
+      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      expect(text()).toContain("the app");
+
+      config.answer = async () => ({ ...CONFIG, minSupportedBuild: 7 });
+      await foregroundAfter(CONFIG_STALE_MS);
+
+      expect(config.requests).toBe(2);
+      expect(text()).toContain("Update Matio");
+      expect(text()).not.toContain("the app");
+    });
+
+    it("a quick return does not refetch; the first return past five minutes does", async () => {
+      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      expect(CONFIG_STALE_MS).toBe(5 * 60_000);
+
+      await foregroundAfter(CONFIG_STALE_MS - 1_000);
+      expect(config.requests).toBe(1);
+
+      await foregroundAfter(1_000);
+      expect(config.requests).toBe(2);
+    });
+
+    it("a launch that could not reach Matio recovers on the next return, without Retry", async () => {
+      const error = await networkError();
+      config.answer = async () => {
+        throw error;
+      };
+      await renderProvider("en", probe);
+      expect(text()).toContain("Couldn't reach Matio");
+
+      config.answer = async () => CONFIG;
+      await foregroundAfter(1_000);
+
+      expect(config.requests).toBe(2);
+      expect(text()).toContain("the app · payments on");
+      expect(text()).not.toContain("Couldn't reach Matio");
+    });
+
+    it("an unchanged config keeps its object, and still restarts the five minutes", async () => {
+      // A fresh object per answer, as JSON.parse hands one back.
+      config.answer = async () => structuredClone(CONFIG);
+      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+
+      await foregroundAfter(CONFIG_STALE_MS);
+      expect(config.requests).toBe(2);
+      // The five minutes count from that unchanged answer.
+      await foregroundAfter(CONFIG_STALE_MS - 1_000);
+      expect(config.requests).toBe(2);
+
+      // One object throughout, so no memo that reads it (config.signupGate
+      // in the lock rules) recomputes.
+      expect(seen.length).toBeGreaterThan(0);
+      expect(new Set(seen).size).toBe(1);
+    });
+
+    it("a refresh never drops the app back to a spinner, and a new answer swaps in", async () => {
+      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      expect(text()).toContain("payments on");
+
+      const answer = deferAnswer();
+      await foregroundAfter(CONFIG_STALE_MS);
+      // In flight: the app stays exactly as it was.
+      expect(config.requests).toBe(2);
+      expect(text()).toContain("the app · payments on");
+
+      await act(async () => {
+        answer.land({ ...CONFIG, flags: { ...CONFIG.flags, paymentsEnabled: false } });
+      });
+      await settle();
+
+      expect(text()).toContain("the app · payments off");
+      expect(mounts).toBe(1);
+    });
+
+    it("a refresh that fails keeps the app — never the unreachable screen over a working app", async () => {
+      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      const error = await networkError();
+      config.answer = async () => {
+        throw error;
+      };
+
+      await foregroundAfter(CONFIG_STALE_MS);
+
+      expect(config.requests).toBe(2);
+      expect(text()).toContain("the app · payments on");
+      expect(text()).not.toContain("Couldn't reach Matio");
+      expect(mounts).toBe(1);
+    });
+
+    it("one request at a time: a return during the launch request, or two quick returns, share it", async () => {
+      // A return while the launch request is still out does not send a second.
+      const launch = deferAnswer();
+      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      await foregroundAfter(CONFIG_STALE_MS);
+      expect(config.requests).toBe(1);
+      await act(async () => {
+        launch.land(CONFIG);
+      });
+      await settle();
+      expect(text()).toContain("the app · payments on");
+
+      // Two quick returns: one request in flight, not two answers racing
+      // into the state in whatever order the network hands them back.
+      const refresh = deferAnswer();
+      await foregroundAfter(CONFIG_STALE_MS);
+      await foregroundAfter(1_000);
+      expect(config.requests).toBe(2);
+      await act(async () => {
+        refresh.land({ ...CONFIG, minSupportedBuild: 7 });
+      });
+      await settle();
+      expect(text()).toContain("Update Matio");
+
+      // Settled, so the guard is released: a floor lowered again lets the
+      // build back in at the next stale return.
+      config.answer = async () => CONFIG;
+      await foregroundAfter(CONFIG_STALE_MS);
+      expect(config.requests).toBe(3);
+      expect(text()).toContain("the app");
+    });
+
+    it("unmounting removes the listener, and an answer still in flight lands nowhere", async () => {
+      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      const answer = deferAnswer();
+      await foregroundAfter(CONFIG_STALE_MS);
+      expect(config.requests).toBe(2);
+
+      const errors = vi.spyOn(console, "error");
+      act(() => root?.unmount());
+      root = null;
+      // Once, at unmount: the listener was not re-subscribed along the way.
+      expect(listenersRemoved).toBe(1);
+
+      await act(async () => {
+        answer.land(CONFIG);
+      });
+      await settle();
+      expect(errors).not.toHaveBeenCalled();
+      expect(onAppState).toBeNull();
+    });
   });
 });

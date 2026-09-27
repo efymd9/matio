@@ -32,7 +32,7 @@ import type {
   ShowDetail,
 } from "@/shared/api-types";
 import { isEpisodeLockedForApp } from "@/shared/api-types";
-import { genreLabel, normalizeGenreKey } from "@/shared/catalog-filters";
+import { genreChips } from "@/shared/catalog-filters";
 import { body, colors, display, fonts, radius, SCREEN_PAD, space } from "@/theme";
 import { episodeRoute, firstEpisodeLocked } from "@/watch/first-episode";
 
@@ -40,7 +40,9 @@ import { episodeRoute, firstEpisodeLocked } from "@/watch/first-episode";
 // here — the whole height goes to the episode list, and the only chrome is
 // the glass «‹». Hero 330 with the title and genre chips, a wide «Play ·
 // Ep. 1», the synopsis (two lines under Episodes, in full under About), and
-// the episode cards.
+// the episode cards. A show without a synopsis gets no generated line in its
+// place (#311 — the SEO fallback promised free viewing in paid mode), and no
+// About tab either: the synopsis is all that tab holds.
 const HERO_HEIGHT = 330;
 
 type Segment = "episodes" | "about";
@@ -101,8 +103,13 @@ export default function ShowScreen() {
   // Home carousel's Play (watch/first-episode.ts).
   const first = data.episodes[0];
   const firstLocked = firstEpisodeLocked(data, config.signupGate, signedIn);
-  const synopsis =
-    data.synopsis ?? t.showDetail.synopsisFallbackFree(data.title, data.genre);
+  // The admin's text or nothing, like the web show page and the Home feed.
+  const synopsis = data.synopsis || null;
+  const segments: readonly Segment[] = synopsis ? ["episodes", "about"] : ["episodes"];
+  const view: Segment = synopsis ? segment : "episodes";
+  // The same chip rule as Browse: one chip per normalised genre, blanks
+  // dropped — «Drama» and «drama» are one chip here too.
+  const chips = genreChips([data]);
 
   return (
     <ScrollView
@@ -110,8 +117,10 @@ export default function ShowScreen() {
       contentContainerStyle={{ paddingBottom: insets.bottom + space(8) }}
     >
       <View style={{ height: HERO_HEIGHT }}>
+        {/* No hero image → the poster, as on Home and the web show page;
+            the tone gradient only when there is neither. */}
         <Artwork
-          uri={data.heroImageUrl}
+          uri={data.heroImageUrl ?? data.posterImageUrl}
           toneKey={data.slug}
           style={StyleSheet.absoluteFill}
           displayWidth={width}
@@ -129,11 +138,11 @@ export default function ShowScreen() {
         <View style={styles.heroContent}>
           <Pill label={t.hero.matioOriginal} />
           <Text style={styles.title}>{data.title}</Text>
-          {data.genre.length > 0 ? (
+          {chips.length > 0 ? (
             <View style={styles.genres}>
-              {data.genre.map((raw) => (
-                <View key={raw} style={styles.genreChip}>
-                  <Text style={styles.genreText}>{genreLabel(normalizeGenreKey(raw))}</Text>
+              {chips.map((c) => (
+                <View key={c.key} testID="genre-chip" style={styles.genreChip}>
+                  <Text style={styles.genreText}>{c.label}</Text>
                 </View>
               ))}
             </View>
@@ -150,7 +159,7 @@ export default function ShowScreen() {
             style={{ alignSelf: "stretch" }}
           />
         ) : null}
-        {segment === "episodes" ? (
+        {synopsis && view === "episodes" ? (
           <Text style={styles.synopsis} numberOfLines={2}>
             {synopsis}
           </Text>
@@ -158,8 +167,8 @@ export default function ShowScreen() {
       </View>
 
       <View style={styles.segments}>
-        {(["episodes", "about"] as const).map((key) => {
-          const active = segment === key;
+        {segments.map((key) => {
+          const active = view === key;
           return (
             <Pressable
               key={key}
@@ -177,7 +186,7 @@ export default function ShowScreen() {
         })}
       </View>
 
-      {segment === "about" ? (
+      {view === "about" ? (
         <View style={{ paddingHorizontal: SCREEN_PAD, marginTop: space(5) }}>
           <Text style={styles.synopsis}>{synopsis}</Text>
         </View>
@@ -227,10 +236,14 @@ function EpisodeRow({
 }) {
   const t = useT();
   const minutes = durationMinutes(episode.durationSeconds);
+  // A subscriber-only episode says what it is, never what to buy: the app
+  // sells nothing, and «Subscribe» on a row reads as a purchase call to
+  // action (App Store 3.1.1 — #311). The same neutral line as the player's
+  // locked page; the web's «Subscribe» (episodesOverlay) stays the web's.
   const lockLabel = locked
     ? locked === "signup_required"
       ? t.episodesOverlay.lockedSignup
-      : t.episodesOverlay.lockedSubscribe
+      : t.app.watch.subscribersOnly
     : null;
   // What VoiceOver reads for the row: «Ep. 2, Title, 12 min, Create account»
   // — not «2. Title», and never the lock glyph's «black circle».
