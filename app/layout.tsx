@@ -13,6 +13,7 @@ import { GoogleAnalytics } from "@/components/site/google-analytics";
 import { OpenAIPixel } from "@/components/site/openai-pixel";
 import { VisitBeacon } from "@/components/site/visit-beacon";
 import { UserMenu } from "@/components/site/user-menu";
+import { isAppEmbed } from "@/lib/app-embed-server";
 import { CONSENT_COOKIE, parseConsent } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { LocaleProvider } from "@/lib/i18n/client";
@@ -137,6 +138,10 @@ export default async function RootLayout({
   // passed down: header/footer hide their Subscribe links when it's off.
   // The billing-portal links stay — legacy subscribers still cancel there.
   const paymentsOn = paymentsEnabled();
+  // A legal document in the app's in-app browser (#310, lib/app-embed.ts): the
+  // page and nothing else — no header (its Subscribe link is a purchase
+  // outside the App Store), footer, banner, tracker loaders or visit beacon.
+  const embed = await isAppEmbed();
   return (
     <ClerkProvider
       localization={CLERK_LOCALIZATIONS[locale]}
@@ -182,42 +187,48 @@ export default async function RootLayout({
             dangerouslySetInnerHTML={{ __html: jsonLdScript(websiteJsonLd()) }}
           />
           <LocaleProvider locale={locale}>
-            <a
-              href="#main-content"
-              className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-gold focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-gold-deep focus:shadow-lg"
-            >
-              Skip to content
-            </a>
-            <SiteHeader authSlot={<UserMenu />} paymentsEnabled={paymentsOn} />
-            <div id="main-content">
-              {children}
-            </div>
-            <SiteFooter paymentsEnabled={paymentsOn} />
-            <CookieBanner initialConsent={initialConsent} />
-            {/* Consent-gated Meta Pixel — only injects fbevents.js after the
-                visitor accepts marketing cookies. Shares the same
-                initialConsent the banner uses so it can fire on first paint
-                for already-consented visitors. */}
-            <MetaPixel initialConsent={initialConsent} />
-            {/* Consent-gated PostHog — dynamically loads posthog-js only after
-                the visitor accepts marketing cookies. Same initialConsent as
-                the banner + Meta Pixel for first-paint tracking of returning
-                consented visitors. */}
-            <PostHogProvider initialConsent={initialConsent} />
-            {/* Consent-gated Google Analytics 4 — only injects gtag.js after
-                the visitor accepts marketing cookies. Same initialConsent as
-                the other trackers; blank NEXT_PUBLIC_GA_MEASUREMENT_ID → off. */}
-            <GoogleAnalytics initialConsent={initialConsent} />
-            {/* Consent-gated ChatGPT Ads pixel (OpenAI oaiq) — only injects
-                the SDK after the visitor accepts marketing cookies. Same
-                initialConsent as the other trackers; blank
-                NEXT_PUBLIC_OPENAI_PIXEL_ID → off. */}
-            <OpenAIPixel initialConsent={initialConsent} />
-            {/* First-party visit beacon — consent-EXEMPT audience
-                measurement (strictly first-party, documented on /cookies).
-                Deliberately outside the consent gate the trackers above
-                live behind; skips /admin paths itself. */}
-            <VisitBeacon />
+            {embed ? (
+              <div id="main-content">{children}</div>
+            ) : (
+              <>
+                <a
+                  href="#main-content"
+                  className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-gold focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-gold-deep focus:shadow-lg"
+                >
+                  Skip to content
+                </a>
+                <SiteHeader authSlot={<UserMenu />} paymentsEnabled={paymentsOn} />
+                <div id="main-content">
+                  {children}
+                </div>
+                <SiteFooter paymentsEnabled={paymentsOn} />
+                <CookieBanner initialConsent={initialConsent} />
+                {/* Consent-gated Meta Pixel — only injects fbevents.js after the
+                    visitor accepts marketing cookies. Shares the same
+                    initialConsent the banner uses so it can fire on first paint
+                    for already-consented visitors. */}
+                <MetaPixel initialConsent={initialConsent} />
+                {/* Consent-gated PostHog — dynamically loads posthog-js only after
+                    the visitor accepts marketing cookies. Same initialConsent as
+                    the banner + Meta Pixel for first-paint tracking of returning
+                    consented visitors. */}
+                <PostHogProvider initialConsent={initialConsent} />
+                {/* Consent-gated Google Analytics 4 — only injects gtag.js after
+                    the visitor accepts marketing cookies. Same initialConsent as
+                    the other trackers; blank NEXT_PUBLIC_GA_MEASUREMENT_ID → off. */}
+                <GoogleAnalytics initialConsent={initialConsent} />
+                {/* Consent-gated ChatGPT Ads pixel (OpenAI oaiq) — only injects
+                    the SDK after the visitor accepts marketing cookies. Same
+                    initialConsent as the other trackers; blank
+                    NEXT_PUBLIC_OPENAI_PIXEL_ID → off. */}
+                <OpenAIPixel initialConsent={initialConsent} />
+                {/* First-party visit beacon — consent-EXEMPT audience
+                    measurement (strictly first-party, documented on /cookies).
+                    Deliberately outside the consent gate the trackers above
+                    live behind; skips /admin paths itself. */}
+                <VisitBeacon />
+              </>
+            )}
           </LocaleProvider>
         </body>
       </html>
