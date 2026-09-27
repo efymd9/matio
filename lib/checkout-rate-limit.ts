@@ -38,8 +38,10 @@ const HOUR_MS = 60 * 60 * 1000;
 //
 // The key is whatever the caller hashes its identity into: the guest flow's
 // HMAC of the client IP, the signed-in flow's `user:` + HMAC of the userId
-// (#227). Only hashes reach the table — the column keeps its historical name
-// `ip_hash` (renaming it is a migration, and nothing reads the name back).
+// (#227), the story-idea form's `idea:` + HMAC of the client IP (#297 —
+// app/(public)/ideas/actions.ts, IDEA_RATELIMIT_PER_HOUR). Only hashes reach
+// the table — the column keeps its historical name `ip_hash` (renaming it is
+// a migration, and nothing reads the name back).
 export async function checkoutRateLimited(
   bucketKey: string,
   limit: number,

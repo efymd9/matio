@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import type {
+  IdeaSubmission,
   ShowReminder,
   Subscription,
   TrialSession,
@@ -22,7 +23,7 @@ import type {
 // tsx script imports the module, and nothing in the app imports this one.
 //
 // Two rules the shape encodes:
-//   * the eight tables that can be tied to a person are ALWAYS present as
+//   * the nine tables that can be tied to a person are ALWAYS present as
 //     keys, even with zero rows — the subject sees what was looked at, not
 //     only what was found; `stripe_events` is deliberately not one of them
 //     (raw vendor webhooks carrying other people's fields);
@@ -46,6 +47,7 @@ export const EXPORT_TABLES = [
   "visitors",
   "visitor_days",
   "show_reminders",
+  "idea_submissions",
 ] as const;
 
 export type ExportTable = (typeof EXPORT_TABLES)[number];
@@ -59,6 +61,7 @@ export type UserExportRows = {
   visitors: Visitor[];
   visitor_days: VisitorDay[];
   show_reminders: ShowReminder[];
+  idea_submissions: IdeaSubmission[];
 };
 
 // ── Vendor clients: the minimum surface each call needs ─────────────────
@@ -509,6 +512,7 @@ export async function assembleUserExport(
       visitors: rows.visitors,
       visitor_days: rows.visitor_days,
       show_reminders: rows.show_reminders,
+      idea_submissions: rows.idea_submissions,
     },
     processors: { clerk, stripe, posthog },
     notes,

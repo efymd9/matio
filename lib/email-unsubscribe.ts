@@ -2,7 +2,7 @@ import "server-only";
 import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { showReminders } from "@/db/schema";
+import { ideaSubmissions, showReminders } from "@/db/schema";
 
 // Unsubscribe links for reminder emails. Every outgoing email carries two
 // token-authenticated URLs for the same address:
@@ -71,10 +71,25 @@ export function decodeUnsubscribeParams(
 // shows. "Stop emailing me" means the ledger forgets the address entirely
 // (data minimisation); an explicit later re-submit is fresh consent and
 // simply creates new rows.
+//
+// It also withdraws the marketing consent a story idea (#297) carried —
+// tick 3 on /ideas, "email me about new episodes and future story calls":
+// `marketing_opt_in` goes false on every idea from the address. The ideas
+// themselves STAY — unsubscribing from emails does not withdraw a pitch (its
+// licence and the studio's review of it are another matter, handled by
+// writing to contact@). Nothing sends those emails yet; the flag is reset
+// now so the day a sender exists it starts from the right answer. Idea
+// addresses are stored lowercased, like reminder addresses. Returns the
+// deleted reminder count, as before — the ideas update is not counted.
 export async function unsubscribeEmail(email: string): Promise<number> {
+  const address = email.toLowerCase();
   const deleted = await db
     .delete(showReminders)
-    .where(eq(showReminders.email, email.toLowerCase()))
+    .where(eq(showReminders.email, address))
     .returning({ id: showReminders.id });
+  await db
+    .update(ideaSubmissions)
+    .set({ marketingOptIn: false })
+    .where(eq(ideaSubmissions.email, address));
   return deleted.length;
 }

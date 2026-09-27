@@ -4,6 +4,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/db/schema";
 import {
   erasedCustomers,
+  ideaSubmissions,
   marketingLinks,
   showReminders,
   subscriptions,
@@ -34,7 +35,7 @@ import { isSubjectId } from "@/lib/user-export";
 // dashboard, or our own hand-run erasure request) is the trigger; the
 // script repeats the effect, it does not replace the trigger.
 //
-// Order, unchanged since #161/#179 and pinned by the tests:
+// Order, since #161/#179 (step 4 since #297) and pinned by the tests:
 //   1. a live Stripe subscription is set to cancel at period end
 //      (best-effort — the erasure never waits for Stripe);
 //   2. EVERY Stripe customer the account can be reached through is
@@ -45,12 +46,17 @@ import { isSubjectId } from "@/lib/user-export";
 //      claimGuestCheckout (a failure of the INSERT throws — the tombstone
 //      is what makes the erasure stick);
 //   3. DELETE show_reminders by the account's address and by user_id
-//      (the one PII table keyed on the address rather than the account);
-//   4. DELETE users — the FK actions declared in db/schema/* take the rest
+//      (a PII table keyed on the address rather than the account);
+//   4. DELETE idea_submissions by the account's address alone (#297) — the
+//      story ideas sent through /ideas carry no user_id and no FK on
+//      `users` at all, on purpose (an idea needs no account), so the FK map
+//      route.test.ts pins cannot take them: only this explicit step does,
+//      and it has to run while the address is still readable;
+//   5. DELETE users — the FK actions declared in db/schema/* take the rest
 //      (route.test.ts pins the map): CASCADE — subscriptions,
 //      watch_progress, watch_days; SET NULL — trial_sessions, visitors
 //      (visit history stays, de-identified), marketing_links.created_by;
-//   5. the PostHog person behind the Clerk id, with its events
+//   6. the PostHog person behind the Clerk id, with its events
 //      (best-effort, #180) — after the local rows, keyed by the id alone,
 //      and ALSO when the local row was already gone: a redelivery or a
 //      script re-run is how a processor step that failed gets retried.
@@ -114,6 +120,8 @@ export type EraseUserResult =
   | {
       status: "erased";
       reminderRows: number;
+      /** Story ideas (/ideas) sent from the account's address — a count, nothing else. */
+      ideaSubmissionRows: number;
       stripeCustomer: boolean;
       liveSubscription: boolean;
       cancelRequested: boolean;
@@ -302,6 +310,16 @@ function reminderRowsWhere(userId: string, email: string) {
   );
 }
 
+/**
+ * Story ideas the account's address sent (#297): by the address ALONE —
+ * the table has no user_id. Idea addresses are stored lowercased
+ * (app/(public)/ideas/actions.ts), `users.email` is mirrored from Clerk as
+ * typed, so the account's side is lowercased here.
+ */
+function ideaSubmissionRowsWhere(email: string) {
+  return eq(ideaSubmissions.email, email.toLowerCase());
+}
+
 export async function eraseUser(
   userId: string,
   deps: EraseUserDeps,
@@ -423,12 +441,14 @@ export async function eraseUser(
       .onConflictDoNothing({ target: erasedCustomers.stripeCustomerId });
   }
 
-  // No transaction around the two DELETEs — on purpose: the only partial
-  // state a crash between them can leave is "reminders gone, users row still
-  // here", i.e. too much erased, never a surviving address; the 500 makes
-  // Clerk retry and the retry converges (reminders already gone, users found
-  // and deleted). The order matters: reminders first, or SET NULL would cut
-  // the user_id link before the explicit delete can use it.
+  // No transaction around the three DELETEs — on purpose: the only partial
+  // states a crash between them can leave are "reminders (and ideas) gone,
+  // users row still here", i.e. too much erased, never a surviving address;
+  // the 500 makes Clerk retry and the retry converges (reminders and ideas
+  // already gone, users found and deleted). The order matters: reminders
+  // first, or SET NULL would cut the user_id link before the explicit delete
+  // can use it; ideas before users, because the users row is the only place
+  // the address is read from.
 
   // "Delete my account" erases the reminder requests too: every row for the
   // account's address (the same reach as unsubscribeEmail — the address IS
@@ -440,6 +460,15 @@ export async function eraseUser(
     .where(reminderRowsWhere(userId, user.email))
     .returning({ id: showReminders.id });
 
+  // "Delete my account" erases the story ideas sent from the account's
+  // address too (#297) — including an idea whose licence the fan granted;
+  // v1 has no exception for it (registry). No FK does this: the table has
+  // no user_id, so this explicit step is the whole mechanism.
+  const ideas = await db
+    .delete(ideaSubmissions)
+    .where(ideaSubmissionRowsWhere(user.email))
+    .returning({ id: ideaSubmissions.id });
+
   await db.delete(users).where(eq(users.id, userId));
 
   const posthog = await erasePosthogAndReport(userId, deps.posthog);
@@ -447,6 +476,7 @@ export async function eraseUser(
   console.info("erase user: local data erased", {
     userId,
     reminderRows: reminders.length,
+    ideaSubmissionRows: ideas.length,
     stripeCustomer: user.stripeCustomerId !== null,
     liveSubscription: liveSub !== undefined,
     cancelRequested,
@@ -459,6 +489,7 @@ export async function eraseUser(
   return {
     status: "erased",
     reminderRows: reminders.length,
+    ideaSubmissionRows: ideas.length,
     stripeCustomer: user.stripeCustomerId !== null,
     liveSubscription: liveSub !== undefined,
     cancelRequested,
@@ -514,6 +545,8 @@ export type ErasePreview = {
   deleted: {
     users: number;
     show_reminders: number;
+    /** By the account's address only — 0 without a users row (no address to match). */
+    idea_submissions: number;
     subscriptions: number;
     watch_progress: number;
     watch_days: number;
@@ -552,6 +585,7 @@ export async function previewErasure(
     table:
       | typeof users
       | typeof showReminders
+      | typeof ideaSubmissions
       | typeof subscriptions
       | typeof watchProgress
       | typeof watchDays
@@ -570,7 +604,7 @@ export async function previewErasure(
     .where(eq(users.id, userId))
     .limit(1);
 
-  const [reminders, subs, progress, days, trials, visits, links, live] =
+  const [reminders, ideas, subs, progress, days, trials, visits, links, live] =
     await Promise.all([
       total(
         user
@@ -578,6 +612,12 @@ export async function previewErasure(
           : eq(showReminders.userId, userId),
         showReminders,
       ),
+      // By address only, like the erasure: without a users row there is no
+      // address to match, and nothing else links an idea to the account —
+      // such rows go by the runbook's by-address path (§2), not this script.
+      user
+        ? total(ideaSubmissionRowsWhere(user.email), ideaSubmissions)
+        : Promise.resolve(0),
       total(eq(subscriptions.userId, userId), subscriptions),
       total(eq(watchProgress.userId, userId), watchProgress),
       total(eq(watchDays.userId, userId), watchDays),
@@ -598,6 +638,7 @@ export async function previewErasure(
     deleted: {
       users: user ? 1 : 0,
       show_reminders: reminders,
+      idea_submissions: ideas,
       subscriptions: subs,
       watch_progress: progress,
       watch_days: days,
@@ -663,7 +704,7 @@ export function summarizeEraseResult(
   }
   return [
     `subject: ${userId}`,
-    `local: erased (show_reminders=${r.reminderRows}, users=1 + cascades)`,
+    `local: erased (show_reminders=${r.reminderRows}, idea_submissions=${r.ideaSubmissionRows}, users=1 + cascades)`,
     `stripe: customer=${r.stripeCustomer ? "tombstoned" : "none"} live_subscription=${r.liveSubscription ? (r.cancelRequested ? "cancel at period end requested" : "NOT cancelled — cancel by hand") : "no"} search=${r.stripeSearch} tombstoned ${customersSummary(r.stripeCustomersTombstoned)}`,
     posthog,
   ].join("\n");
