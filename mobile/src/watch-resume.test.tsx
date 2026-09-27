@@ -31,7 +31,7 @@ const NEVER = () => new Promise<never>(() => {});
 const fake = vi.hoisted(() => ({
   signedIn: true,
   episodeProgress: null as unknown as Mock<(episodeId: string) => Promise<EpisodeProgressResponse>>,
-  continueWatching: null as unknown as () => Promise<ContinueResponse>,
+  continueWatching: null as unknown as Mock<() => Promise<ContinueResponse>>,
 }));
 vi.mock("@/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/client")>();
@@ -85,6 +85,7 @@ vi.mock("expo-glass-effect", () => ({
 vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
+import { ApiError } from "@/api/client";
 import WatchScreen from "@/app/watch/[episodeId]";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -162,7 +163,7 @@ const mounted = () => {
 beforeEach(() => {
   params = { episodeId: "ep3", showSlug: SHOW.slug };
   fake.signedIn = true;
-  fake.continueWatching = async () => RAIL;
+  fake.continueWatching = vi.fn(async () => RAIL);
   fake.episodeProgress = vi.fn(
     async (id: string): Promise<EpisodeProgressResponse> => ({ positionSeconds: SAVED[id] ?? 0 }),
   );
@@ -214,7 +215,7 @@ describe("the player screen does not wait on the lookup (#303 item 3)", () => {
   it("a lookup that never answers holds the player 2.5s at most, then it opens at 0:00", async () => {
     vi.useFakeTimers();
     fake.episodeProgress.mockImplementation(NEVER);
-    fake.continueWatching = NEVER;
+    fake.continueWatching.mockImplementation(NEVER);
 
     await act(async () => {
       root.render(<WatchScreen />);
@@ -228,5 +229,65 @@ describe("the player screen does not wait on the lookup (#303 item 3)", () => {
       await vi.advanceTimersByTimeAsync(1);
     });
     expect(mounted()).toMatchObject({ initialIndex: 2, resumeSeconds: 0 });
+  });
+
+  it("the 2.5s ceiling covers the fallback too: a 405 at once, then a rail that never answers", async () => {
+    vi.useFakeTimers();
+    fake.episodeProgress.mockRejectedValue(new ApiError("server_error", "Request failed (405).", 405));
+    fake.continueWatching.mockImplementation(NEVER);
+
+    await act(async () => {
+      root.render(<WatchScreen />);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_499);
+    });
+    expect(fake.continueWatching).toHaveBeenCalledTimes(1);
+    expect(feed.props).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(mounted()).toMatchObject({ initialIndex: 2, resumeSeconds: 0 });
+  });
+});
+
+// Review of #333: production answers 405 on GET /v1/progress until the
+// release that ships it, and a TestFlight build cut from main before that
+// would open every episode at 0:00 — then its first save overwrites the
+// stored place. Such a server gets the pre-#303 lookup: the rail's row for
+// THIS episode.
+describe("a server that does not serve the per-episode read yet (#333 review)", () => {
+  it.each([405, 404])("a %i falls back to the continue rail's row for this episode", async (status) => {
+    params = { episodeId: "ep4", showSlug: SHOW.slug };
+    fake.episodeProgress.mockRejectedValue(
+      new ApiError("server_error", `Request failed (${status}).`, status),
+    );
+    await render(<WatchScreen />);
+
+    expect(fake.continueWatching).toHaveBeenCalledTimes(1);
+    expect(mounted()).toMatchObject({ initialIndex: 3, resumeSeconds: 100 });
+  });
+
+  it("an episode the rail does not carry opens at 0:00 there, as before #303", async () => {
+    fake.episodeProgress.mockRejectedValue(new ApiError("server_error", "Request failed (405).", 405));
+    await render(<WatchScreen />);
+
+    expect(mounted()).toMatchObject({ initialIndex: 2, resumeSeconds: 0 });
+  });
+
+  it("any other failure is not a missing route: no fallback, the episode opens at 0:00", async () => {
+    params = { episodeId: "ep4", showSlug: SHOW.slug };
+    for (const err of [
+      new ApiError("network", "The request timed out.", 0),
+      new ApiError("unauthorized", "Sign in to resume where you left off.", 401),
+      new ApiError("server_error", "Request failed (500).", 500),
+    ]) {
+      fake.episodeProgress.mockRejectedValueOnce(err);
+      feed.props = null;
+      await render(<WatchScreen key={err.status} />);
+      expect(mounted(), String(err.status)).toMatchObject({ initialIndex: 3, resumeSeconds: 0 });
+    }
+    expect(fake.continueWatching).not.toHaveBeenCalled();
   });
 });

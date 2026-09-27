@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useRef } from "react";
-import { api, settleOrNull } from "@/api/client";
+import { api, ApiError, settleOrNull } from "@/api/client";
 import { errorHint } from "@/api/error-hint";
 import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
@@ -44,9 +44,10 @@ const RESUME_LOOKUP_TIMEOUT_MS = 2_500;
 // The position to open at. An explicit `resume` param (the rail's tap) wins;
 // otherwise a signed-in viewer's own row for this very episode is read —
 // every partly watched episode resumes, not only the one per show the
-// continue rail carries (#303 item 2). In parallel with the show, bounded,
-// and a failed lookup is 0. The feed never seeks inside the credits
-// (RESUME_TAIL_SECONDS), so a finished episode's end reopens at the start.
+// continue rail carries (#303 item 2). In parallel with the show, bounded
+// as a whole (fallback included), and a failed lookup is 0. The feed never
+// seeks inside the credits (RESUME_TAIL_SECONDS), so a finished episode's
+// end reopens at the start.
 async function resolveResume(
   episodeId: string,
   explicit: number | null,
@@ -54,8 +55,23 @@ async function resolveResume(
 ): Promise<number> {
   if (explicit !== null) return explicit;
   if (!signedIn) return 0;
-  const progress = await settleOrNull(api.episodeProgress(episodeId), RESUME_LOOKUP_TIMEOUT_MS);
-  return progress?.positionSeconds ?? 0;
+  const position = await settleOrNull(lookupResume(episodeId), RESUME_LOOKUP_TIMEOUT_MS);
+  return position ?? 0;
+}
+
+// GET /v1/progress for the episode — or, from a server that does not serve
+// it yet (405/404: a build cut from main before the release that ships the
+// route), the continue rail's row for it, as before #303. Without the
+// fallback such a build opens every episode at 0:00 and its first save
+// overwrites the stored place.
+async function lookupResume(episodeId: string): Promise<number> {
+  try {
+    return (await api.episodeProgress(episodeId)).positionSeconds;
+  } catch (err) {
+    if (!(err instanceof ApiError) || (err.status !== 405 && err.status !== 404)) throw err;
+  }
+  const { items } = await api.continueWatching();
+  return items.find((item) => item.episodeId === episodeId)?.positionSeconds ?? 0;
 }
 
 export default function WatchScreen() {
