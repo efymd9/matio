@@ -250,7 +250,7 @@ The admin form has two artwork fields — **drag-and-drop upload** (client-direc
 **File format / size**
 - JPG, PNG, WebP, or AVIF. WebP/AVIF give the smallest files at the same visual quality.
 - Target weight: posters under ~150 KB, heroes under ~400 KB. All artwork goes through `next/image` (responsive `srcset` + WebP conversion at the edge) — see `next.config.ts` `images.remotePatterns`. To allow a new source host, add it there; without an entry `next/image` refuses the URL.
-- Hosting: **drop the file on the field** — it uploads client-direct to Vercel Blob (`*.public.blob.vercel-storage.com`, already in `remotePatterns`) and fills the URL itself. Same-origin files committed under `public/shows/` also work (legacy shows use these). An arbitrary external URL (e.g. an Unsplash hotlink) previews fine in the admin form (raw `<img>`) but **throws in `next/image` on the public hero/detail pages** — only allowlisted hosts render. Add the host to `remotePatterns` first if you genuinely need an external source.
+- Hosting: **drop the file on the field** — it uploads client-direct to Vercel Blob (our store's `/shows/` folder, already in `remotePatterns` — `lib/blob-artwork.ts`) and fills the URL itself. Same-origin files committed under `public/shows/` also work (legacy shows use these). An arbitrary external URL (e.g. an Unsplash hotlink) — **including a Mux thumbnail URL, since #306** — previews fine in the admin form (raw `<img>`) but **throws in `next/image` on the public hero/detail pages** — only allowlisted hosts render. Add the host to `remotePatterns` first if you genuinely need an external source.
 
 ### Trial flow (incognito, anon visitor)
 

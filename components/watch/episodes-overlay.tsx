@@ -163,11 +163,14 @@ export function EpisodesOverlay({
                             }
                           >
                             {ep.thumbnailUrl ? (
+                              // Unoptimized: a signed Mux still — a new URL
+                              // on every render, nothing to cache (#306).
                               <Image
                                 src={ep.thumbnailUrl}
                                 alt=""
                                 aria-hidden
                                 fill
+                                unoptimized
                                 sizes="(max-width: 640px) 128px, 160px"
                                 className="object-cover"
                               />

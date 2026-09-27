@@ -197,6 +197,7 @@ Can't pass multiple environments in one call. For preview, you also need a git b
 1. Vercel dashboard → **Storage → Create → Blob** → name it, pick Frankfurt, Public access.
 2. **Connect** the store to the `matio` project — this injects `BLOB_READ_WRITE_TOKEN` into Production/Preview/Development automatically.
 3. Locally: `vercel env pull` (or copy just the `BLOB_READ_WRITE_TOKEN` line into `.env.local`).
+4. Add the store's host (`vercel blob get-store <id>` → «Base URL») to `ARTWORK_BLOB_HOSTS` in `lib/blob-artwork.ts` — until then its images 400 at `/_next/image` (see **next/image** below).
 
 CLI equivalent for step 1: `vercel blob create-store <name>` (note: `create-store`, not `store add`).
 
@@ -205,7 +206,7 @@ CLI equivalent for step 1: `vercel blob create-store <name>` (note: `create-stor
 
 **Flow**: drag-and-drop in the show form → `upload()` from `@vercel/blob/client` streams the file **browser → Blob** (bytes never touch our functions); our route only issues a short-lived token scoped to image content-types, ≤15 MB, and `shows/(poster|hero)-*` pathnames with `addRandomSuffix`. The resulting `https://<storeId>.public.blob.vercel-storage.com/shows/…` URL is saved in `shows.poster_image_url` / `hero_image_url` like any other URL. `updateShow` best-effort-deletes the old Blob object when artwork is replaced or cleared (only if the old URL is on the Blob host).
 
-**next/image**: `*.public.blob.vercel-storage.com` is allowlisted in `next.config.ts` `images.remotePatterns` — a single-level wildcard covers any store id.
+**next/image**: `next.config.ts` `images.remotePatterns` allowlists exactly our store's host under the upload folders — `/shows/**` and `/actors/**` (the prefixes `UPLOAD_PATH` allows), with no query string — built from `lib/blob-artwork.ts`, which the app's `lib/api/image-url.ts` also reads (#306). It used to be a `*.public.blob.vercel-storage.com` wildcard, which let anyone run ANY Blob store's images through `matio.tv/_next/image` on our bill. `matio-blob` is the only public store (`vercel blob list-stores`; `matio-backups` is private); the staging project has no store of its own and renders the same URLs.
 
 ## Resend (email)
 
