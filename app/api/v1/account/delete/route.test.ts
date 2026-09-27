@@ -292,6 +292,33 @@ describe("POST /api/v1/account/delete — failures a retry finishes", () => {
     expect(h.writes).toEqual([`clerk deleteUser ${USER_ID}`]);
   });
 
+  it("a Clerk 503 still runs the sweep before the 500 — if the delete committed anyway, no retry would ever come for a healed row", async () => {
+    // During the erasure's vendor window a /v1/progress heal (#303) put the
+    // row back; then Clerk answers 503 — which does not prove it kept the
+    // account.
+    h.clerkDelete.mockImplementationOnce(async () => {
+      h.userRow = { email: EMAIL, stripeCustomerId: null };
+      throw clerkError(503);
+    });
+
+    const res = await POST(deleteRequest());
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).error.code).toBe("server_error");
+    expect(h.userRow).toBeUndefined();
+    expect(h.writes).toEqual([
+      "delete show_reminders",
+      "delete users",
+      `clerk deleteUser ${USER_ID}`,
+      "delete show_reminders",
+      "delete users",
+    ]);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Clerk account could NOT be deleted"),
+      expect.objectContaining({ userId: USER_ID, httpStatus: 503, sweep: "erased_again" }),
+    );
+  });
+
   it("a Clerk client that cannot even be built (no key) is the same 500, not an unhandled throw", async () => {
     h.clerkClientFails = true;
 

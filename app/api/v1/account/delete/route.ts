@@ -34,7 +34,9 @@ import { getStripe } from "@/lib/stripe";
 //      there first. Any other failure is 500 with our side already erased; the
 //      session still works, and a retry runs eraseUser again (its not-found
 //      path writes nothing locally and repeats only the PostHog step) and then
-//      Clerk.
+//      Clerk. That 500 runs step 3 first: a timeout or a 5xx does not prove
+//      Clerk kept the account — if the delete committed, the session is dead,
+//      no retry will come, and nothing else would erase a healed row.
 //   3. The sweep: one more look at `users`. Between steps 1 and 2 the account
 //      still existed at Clerk, and /v1/progress heals a missing mirror row
 //      FROM Clerk (#303, getOrSyncCurrentUser) — a save landing in that
@@ -43,8 +45,10 @@ import { getStripe } from "@/lib/stripe";
 //      found now is erased again by the same eraseUser. A sweep that fails
 //      does not undo the deletion the viewer asked for — it is shouted by id
 //      for the operator (`pnpm erase-user <id> --apply`, runbook §4). What
-//      is left: a heal that read Clerk before step 2 and inserts after this
-//      look — a gap of milliseconds, closed by the webhook where subscribed.
+//      is left — a heal that read Clerk before step 2 and inserts after this
+//      look (milliseconds), a late `user.created` redelivery, a Stripe cancel
+//      that failed under an `ok`, a client timeout after the server finished —
+//      is tracked in #336.
 //   4. Where Clerk's `user.deleted` webhook is subscribed, it arrives after
 //      step 2 and takes eraseUser's same not-found path: a 200 no-op.
 //
@@ -104,9 +108,11 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const httpStatus = clerkHttpStatus(err);
     if (httpStatus !== 404) {
+      // Step 3 even here — see the comment at the top.
+      const sweep = await sweepHealedRow(userId);
       console.error(
         "account delete: our data is erased but the Clerk account could NOT be deleted — a retry finishes it",
-        { userId, erase, httpStatus, error: describeError(err) },
+        { userId, erase, httpStatus, sweep, error: describeError(err) },
       );
       Sentry.captureMessage(
         "account delete: Clerk account NOT deleted after the erasure",
@@ -117,32 +123,37 @@ export async function POST(req: NextRequest) {
     clerk = "already_gone";
   }
 
-  let sweep: "clean" | "erased_again" | "failed" = "clean";
+  const sweep = await sweepHealedRow(userId);
+  console.info("account delete: done", { userId, erase, clerk, sweep });
+  const body: DeleteAccountResponse = { ok: true };
+  return apiOk(body);
+}
+
+// Step 3: one more look at `users`; a row found is erased again by the same
+// eraseUser. Never throws — its failure is the operator's (log + Sentry by id).
+async function sweepHealedRow(
+  userId: string,
+): Promise<"clean" | "erased_again" | "failed"> {
   try {
     const [back] = await db
       .select({ id: users.id })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
-    if (back) {
-      await eraseUser(userId, { db, getStripe, posthog: getPosthogQueryConfig() });
-      sweep = "erased_again";
-    }
+    if (!back) return "clean";
+    await eraseUser(userId, { db, getStripe, posthog: getPosthogQueryConfig() });
+    return "erased_again";
   } catch (err) {
-    sweep = "failed";
     console.error(
-      "account delete: the Clerk account is gone but the sweep for a healed users row FAILED — run pnpm erase-user <id> --apply (docs/runbooks/gdpr-requests.md §4)",
+      "account delete: the sweep for a healed users row FAILED — run pnpm erase-user <id> --apply (docs/runbooks/gdpr-requests.md §4)",
       { userId, error: describeError(err) },
     );
     Sentry.captureMessage("account delete: post-Clerk sweep failed — erase by hand", {
       level: "error",
       tags: { userId, step: "sweep" },
     });
+    return "failed";
   }
-
-  console.info("account delete: done", { userId, erase, clerk, sweep });
-  const body: DeleteAccountResponse = { ok: true };
-  return apiOk(body);
 }
 
 // Clerk's Backend API errors (ClerkAPIResponseError, thrown by @clerk/backend's
