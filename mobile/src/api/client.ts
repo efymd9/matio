@@ -4,6 +4,7 @@ import type {
   AppConfig,
   CatalogResponse,
   ContinueResponse,
+  EpisodeProgressResponse,
   PlaybackTokenResponse,
   SaveProgressRequest,
   SaveProgressResponse,
@@ -214,6 +215,15 @@ export const api = {
   // rather than sending it anonymously into that 401.
   saveProgress: (body: SaveProgressRequest) =>
     request<SaveProgressResponse>("/api/v1/progress", { method: "POST", body, auth: "required" }),
+  // The signed-in viewer's own resume point for one episode (0 without a
+  // row) — what the player opens at (#303). "required" for the same reason
+  // as the save: the answer exists only for the Bearer's owner, so a token
+  // that does not arrive fails fast instead of going out into a certain 401.
+  episodeProgress: (episodeId: string) =>
+    request<EpisodeProgressResponse>(
+      `/api/v1/progress?episodeId=${encodeURIComponent(episodeId)}`,
+      { method: "GET", auth: "required" },
+    ),
   continueWatching: () => request<ContinueResponse>("/api/v1/continue"),
   // Retention buckets. Signed-in or device-keyed; the server bounds them to
   // the episode and the positional gate. Goes through the offline queue in
