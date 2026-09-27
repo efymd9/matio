@@ -74,10 +74,13 @@ export function SignupWall({
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-espresso sm:aspect-video sm:h-auto">
       {backdropThumbnailUrl ? (
+        // Unoptimized: a signed Mux still — a new URL on every render, so
+        // /_next/image would have nothing to cache (#306).
         <Image
           src={backdropThumbnailUrl}
           alt=""
           fill
+          unoptimized
           sizes="100vw"
           className="object-cover"
           style={{ objectPosition: "40% 50%" }}
