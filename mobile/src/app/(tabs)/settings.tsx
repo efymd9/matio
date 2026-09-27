@@ -8,7 +8,7 @@ import { APP_BUILD } from "@/build";
 import { useTabBarClearance } from "@/components/glass-tab-bar";
 import { Card, Chevron, GroupLabel, Radio, Row } from "@/components/ui";
 import { useLocale, useSetLocale, useT } from "@/i18n/locale";
-import { localizedUrl } from "@/i18n/localized-url";
+import { legalUrl } from "@/i18n/localized-url";
 import { useAutoplayNext } from "@/prefs/autoplay";
 import { body, colors, display, SCREEN_PAD, space } from "@/theme";
 
@@ -86,23 +86,24 @@ export default function SettingsScreen() {
 
       <Group label={t.footer.about}>
         <Row first label={t.app.settings.version} value={version} mono />
-        {/* In the language chosen above, not the phone's (the /es twin). */}
+        {/* In the language chosen above, not the phone's (the /es twin), and
+            as the bare embed page — no site header or trackers (#310). */}
         <Row
           label={t.footer.terms}
           trailing={<Chevron external />}
-          onPress={() => void openBrowserAsync(localizedUrl(config.urls.terms, locale))}
+          onPress={() => void openBrowserAsync(legalUrl(config.urls.terms, locale))}
           role="link"
         />
         <Row
           label={t.footer.privacy}
           trailing={<Chevron external />}
-          onPress={() => void openBrowserAsync(localizedUrl(config.urls.privacy, locale))}
+          onPress={() => void openBrowserAsync(legalUrl(config.urls.privacy, locale))}
           role="link"
         />
         <Row
           label={t.footer.cookies}
           trailing={<Chevron external />}
-          onPress={() => void openBrowserAsync(localizedUrl(config.urls.cookies, locale))}
+          onPress={() => void openBrowserAsync(legalUrl(config.urls.cookies, locale))}
           role="link"
         />
         <Row

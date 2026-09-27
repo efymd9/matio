@@ -14,6 +14,11 @@ import {
   serializeAttribution,
 } from "@/lib/attribution";
 import {
+  APP_EMBED_HEADER,
+  APP_EMBED_VALUE,
+  isAppEmbedRequest,
+} from "@/lib/app-embed";
+import {
   authorizedPartiesForRequest,
   NATIVE_API_PREFIX,
   resolveAuthorizedParties,
@@ -38,6 +43,7 @@ import {
   isLocalizablePath,
   LEGACY_ALIAS_HOST,
   localizedPath,
+  type SeoLocale,
   SITE_URL,
   stripLocalePrefix,
 } from "@/lib/seo";
@@ -244,6 +250,41 @@ function applyLocalizedRewrite(req: NextRequest, basePath: string): NextResponse
   return applyVisitorCookie(req, res) ?? res;
 }
 
+// The language a visitor prefers on a bare (English) URL: the switcher's sticky
+// cookie when there is one, Accept-Language otherwise. One rule for the /es
+// redirect below and for the app's bare embed URLs, so the two cannot drift.
+function preferredLocale(req: NextRequest): SeoLocale {
+  const cookieLocale = req.cookies.get(LOCALE_COOKIE_NAME)?.value;
+  if (cookieLocale) return cookieLocale === "es" ? "es" : "en";
+  return negotiateLocale(req.headers.get("accept-language"));
+}
+
+// A legal document in the app's in-app browser (`?embed=app`, #310 — the rule
+// is lib/app-embed.ts). The request is stamped so the layout renders the page
+// alone. /es is authoritative and rewritten like any /es page; a bare URL gets
+// the language the normal page would redirect to (preferredLocale) — builds
+// from before #288 open /v1/config's bare URL as is, and a Spanish phone must
+// still read Spanish — rendered in place, without the 307, so the embed stays.
+// Nothing is written back — no consent default, no attribution or _fbc, no
+// matio_aid, no sticky locale: the page loads no tracker and no beacon that
+// could use them, and the app's own browser is no audience to measure.
+function applyAppEmbed(
+  req: NextRequest,
+  basePath: string,
+  urlLocale: SeoLocale,
+): NextResponse {
+  const headers = new Headers(req.headers);
+  headers.set(APP_EMBED_HEADER, APP_EMBED_VALUE);
+  if (urlLocale === "en") {
+    headers.set(URL_LOCALE_HEADER, preferredLocale(req));
+    return NextResponse.next({ request: { headers } });
+  }
+  headers.set(URL_LOCALE_HEADER, "es");
+  const url = req.nextUrl.clone();
+  url.pathname = basePath;
+  return NextResponse.rewrite(url, { request: { headers } });
+}
+
 // Mints the first-party audience-measurement cookie (matio_aid) when the
 // visitor doesn't have one yet. Consent-exempt first-party analytics — the
 // cookie itself is just a random UUID; all data lives server-side and is
@@ -320,6 +361,11 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
   // through and 404s rather than bypassing the gates below.
   {
     const { locale, path } = stripLocalePrefix(req.nextUrl.pathname);
+    // A legal document opened by the app (#310) — ahead of the /es rewrite
+    // and the language redirect below, both of which it replaces.
+    if (isAppEmbedRequest(path, req.nextUrl.searchParams)) {
+      return applyAppEmbed(req, path, locale);
+    }
     if (locale === "es" && isLocalizablePath(path)) {
       return applyLocalizedRewrite(req, path);
     }
@@ -367,12 +413,7 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
     isLocalizablePath(req.nextUrl.pathname) &&
     !userAgent({ headers: req.headers }).isBot
   ) {
-    const cookieLocale = req.cookies.get(LOCALE_COOKIE_NAME)?.value;
-    const wantsEs =
-      cookieLocale === "es" ||
-      (!cookieLocale &&
-        negotiateLocale(req.headers.get("accept-language")) === "es");
-    if (wantsEs) {
+    if (preferredLocale(req) === "es") {
       const url = req.nextUrl.clone();
       url.pathname = localizedPath(req.nextUrl.pathname, "es");
       // 307 preserves method + query, so ?utm_*/?fbclid ride along to the /es
