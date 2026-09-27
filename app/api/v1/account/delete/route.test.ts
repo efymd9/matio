@@ -200,6 +200,7 @@ describe("POST /api/v1/account/delete — the deletion", () => {
     expect(res.headers.get("Cache-Control")).toBe("private, no-store");
     expect(h.writes).toEqual([
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
       `clerk deleteUser ${USER_ID}`,
     ]);
@@ -226,6 +227,7 @@ describe("POST /api/v1/account/delete — the deletion", () => {
       "stripe cancel_at_period_end",
       "insert erased_customers",
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
       `clerk deleteUser ${USER_ID}`,
     ]);
@@ -265,6 +267,7 @@ describe("POST /api/v1/account/delete — failures a retry finishes", () => {
     expect(retry.status).toBe(200);
     expect(h.writes).toEqual([
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
       `clerk deleteUser ${USER_ID}`,
     ]);
@@ -308,9 +311,11 @@ describe("POST /api/v1/account/delete — failures a retry finishes", () => {
     expect(h.userRow).toBeUndefined();
     expect(h.writes).toEqual([
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
       `clerk deleteUser ${USER_ID}`,
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
     ]);
     expect(console.error).toHaveBeenCalledWith(
@@ -345,9 +350,11 @@ describe("POST /api/v1/account/delete — the sweep after Clerk (step 3)", () =>
     expect(h.userRow).toBeUndefined();
     expect(h.writes).toEqual([
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
       `clerk deleteUser ${USER_ID}`,
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
     ]);
     expect(console.info).toHaveBeenCalledWith(

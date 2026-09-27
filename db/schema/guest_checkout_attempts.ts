@@ -16,6 +16,12 @@ import { integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-co
 // guest's IP OR `user:<hmac>` of the account (same salt, lib/trial.ts
 // hashClientIp) — never a raw IP, a Clerk id or an address. `ip_hash` keeps
 // its name: renaming a primary-key column is a migration for nothing.
+//
+// Since #297 a third key prefix brakes the public story-idea form
+// (app/(public)/ideas/actions.ts:submitIdea): `idea:` + HMAC of the client IP
+// — of its /64 for an IPv6 client — (same salt), so an idea submission never
+// shares a bucket with a checkout.
+// Still hashes only; comment-only change, no migration.
 export const guestCheckoutAttempts = pgTable(
   "guest_checkout_attempts",
   {

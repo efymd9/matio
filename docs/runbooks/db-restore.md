@@ -150,6 +150,16 @@ psql "$RESTORE_URL" -tAc "select count(*) from users"
   которого в Clerk больше нет (Dashboard → Users → поиск по id, или Backend
   API `GET /v1/users/<id>` → 404), стирается той же командой
   `pnpm erase-user <id> --apply`. Скрипта для сверки нет — `docs/registry.md`;
+- **`idea_submissions`** (идеи с `/ideas`, #297): удалить заново по id из
+  строк реестра заявок (`docs/runbooks/gdpr-requests.md` §6, колонка «Id
+  строк») со статусом `erased`, исполненных позже даты дампа — карточкой
+  `/admin/ideas/<id>` или в SQL-редакторе Neon на восстановленной базе:
+  `DELETE FROM idea_submissions WHERE id IN ('…', '…');`. `pnpm erase-user`
+  такие строки не находит, если аккаунта не было: идея хранит только адрес,
+  без `user_id`. Идеи аккаунта, стёртые вместе с ним, `erase-user --apply`
+  выше удаляет сам (по адресу из вернувшейся строки `users`); отписки,
+  сделанные позже дампа, вернули идеям `marketing_opt_in = true` — их
+  исполнить повторно, как у напоминаний ниже;
 - **письма-напоминания**: строки `show_reminders` вернулись в состояние на
   момент дампа — отписки, сделанные позже, придётся исполнить повторно
   (`lib/email-unsubscribe.ts`);

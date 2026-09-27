@@ -264,6 +264,46 @@ describe("scrubSentryEvent", () => {
     expect(event.request).not.toHaveProperty("data");
   });
 
+  it("drops a server action's body — the /ideas pitch arrives as a JSON array carrying the whole story (#297)", () => {
+    // A server action POSTs its arguments as a serialised array; for
+    // submitIdea that is the fan's name, address and up to 10,000
+    // characters of story. None of it may reach the tracker, whatever the
+    // shape the SDK hands over.
+    const MARKER_STORY = "Storymarker: the banished postman delivers his last letter";
+    const pitch = {
+      series: "new",
+      workingTitle: "",
+      logline: "What if a banished postman had one last letter to deliver?",
+      story: MARKER_STORY,
+      name: "Leak Marker",
+      email: "leak.marker@example.invalid",
+      ageConfirmed: true,
+      termsAccepted: true,
+      marketingOptIn: false,
+      website: "",
+    };
+    for (const data of [JSON.stringify([pitch]), [pitch]]) {
+      const event: SentryEventLike = {
+        transaction: "POST /ideas",
+        request: {
+          url: "https://matio.tv/ideas",
+          headers: { "Content-Type": "text/plain;charset=UTF-8" },
+          data,
+        },
+      };
+
+      scrubSentryEvent(event);
+
+      expect(event.request).not.toHaveProperty("data");
+      const sent = JSON.stringify(event);
+      expect(sent).not.toContain(MARKER_STORY);
+      expect(sent).not.toContain("Leak Marker");
+      expect(sent).not.toContain("leak.marker@example.invalid");
+      // The request itself stays diagnosable.
+      expect(event.request?.url).toBe("https://matio.tv/ideas");
+    }
+  });
+
   it("keeps only allowlisted headers, case-insensitively", () => {
     const event = seededEvent();
 

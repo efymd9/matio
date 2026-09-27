@@ -1,3 +1,5 @@
+import { getTableName } from "drizzle-orm";
+import type { PgTable } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sentryPrivacyOptions, type SentryEventLike } from "./observability";
@@ -20,6 +22,9 @@ const MARKER_EMAIL = "leak.marker@example.invalid";
 const MARKER_NAME = "Leak Marker";
 const MARKER_SECRET = "dummy-db-password";
 const MARKER_DATABASE_URL = `postgres://matio:${MARKER_SECRET}@db.example.invalid/matio`;
+// Free text a fan wrote (the /ideas story, #297) — the one marker that is
+// not an identifier but a person's own words.
+const MARKER_STORY = "Storymarker: the banished postman delivers his last letter";
 
 const {
   execute,
@@ -273,7 +278,12 @@ import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
 import { POST as appPlaybackToken } from "@/app/api/v1/playback-token/route";
 import { GET as webPlaybackToken } from "@/app/api/playback-token/route";
-import { eraseUser, summarizeEraseResult } from "@/lib/erase-user";
+import {
+  eraseUser,
+  previewErasure,
+  summarizeErasePreview,
+  summarizeEraseResult,
+} from "@/lib/erase-user";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
 import { assembleUserExport, summarizeExport } from "@/lib/user-export";
 import {
@@ -283,6 +293,8 @@ import {
 import { createGuestCheckoutSession } from "@/app/subscribe/guest-actions";
 import { CheckoutRateLimitedError } from "@/lib/checkout-session";
 import { CONSENT_VERSION, serializeConsent } from "@/lib/cookie-consent";
+import { submitIdea } from "@/app/(public)/ideas/actions";
+import type { IdeaSubmissionInput } from "@/lib/idea-submission";
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -797,6 +809,94 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     expect(summary).toContain(`subject: ${USER_ID}`);
     expect(summary).toContain("posthog: failed persons=1 http=400");
     expect(logged()).not.toContain(MARKER_EMAIL);
+  });
+
+  // Story ideas (#297) go by the account's address in the same erasure. The
+  // deleted rows are seeded with the fan's own words: only a COUNT may come
+  // out — of the info line, the apply summary and the dry run alike.
+  function ideasDeleteSeeded() {
+    del.mockImplementation((table: PgTable) =>
+      getTableName(table) === "idea_submissions"
+        ? deleteChain([
+            {
+              id: "idea_marker",
+              authorName: MARKER_NAME,
+              email: MARKER_EMAIL,
+              story: MARKER_STORY,
+            },
+          ])
+        : deleteChain([{ id: "rem_1" }]),
+    );
+  }
+
+  it("erases the story ideas sent from the address (#297) and logs how many — never who wrote them or what", async () => {
+    const req = deletedWithLiveSubscription();
+    ideasDeleteSeeded();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    expect(del.mock.calls.map(([table]) => getTableName(table as PgTable))).toEqual([
+      "show_reminders",
+      "idea_submissions",
+      "users",
+    ]);
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STORY]) {
+      expect(logged()).not.toContain(marker);
+    }
+    // What it DOES say: the count, on the erasure's info line.
+    expect(logged()).toContain("erase user: local data erased");
+    expect(logged()).toContain('"ideaSubmissionRows":1');
+    const sentry = sentryMessage.mock.calls.map(render).join("\n");
+    expect(sentry).not.toContain(MARKER_STORY);
+    expect(sentry).not.toContain(MARKER_NAME);
+  });
+
+  it("the script's apply summary and dry run count the story ideas (#297) — idea_submissions=N, nothing else", async () => {
+    deletedWithLiveSubscription();
+    ideasDeleteSeeded();
+    const { db } = await import("@/db");
+    const { getStripe } = await import("@/lib/stripe");
+    const logged = captureConsole();
+
+    const result = await eraseUser(USER_ID, { db, getStripe, posthog: null });
+    const applied = summarizeEraseResult(USER_ID, result);
+
+    // The dry run reads counts; the count row is seeded with the markers
+    // too, so a summary that copied a row instead of `n` would show them.
+    select.mockReset().mockImplementation(() => {
+      let table = "";
+      const chain = {
+        from: (t: PgTable) => {
+          table = getTableName(t);
+          return chain;
+        },
+        where: () => chain,
+        limit: async () =>
+          table === "users" ? [{ email: MARKER_EMAIL, stripeCustomerId: null }] : [],
+        then: (
+          resolve: (rows: unknown[]) => unknown,
+          reject?: (err: unknown) => unknown,
+        ) =>
+          Promise.resolve(
+            table === "idea_submissions"
+              ? [{ n: 1, authorName: MARKER_NAME, email: MARKER_EMAIL, story: MARKER_STORY }]
+              : [{ n: 0 }],
+          ).then(resolve, reject),
+      };
+      return chain;
+    });
+    const preview = await previewErasure(USER_ID, { db, getStripe, posthog: null });
+    const dryRun = summarizeErasePreview(USER_ID, preview);
+
+    expect(applied).toContain("idea_submissions=1");
+    expect(dryRun).toContain("idea_submissions=1");
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STORY]) {
+      expect(applied).not.toContain(marker);
+      expect(dryRun).not.toContain(marker);
+      expect(logged()).not.toContain(marker);
+    }
   });
 
   it("the script's apply summary lists the customers tombstoned by id, never by the address they carry (#223)", async () => {
@@ -1453,6 +1553,17 @@ describe("log audit · subject-access export summary (scripts/export-user-data.t
       visitors: [],
       visitor_days: [],
       show_reminders: [{ id: "rem_marker", email: MARKER_EMAIL }],
+      // A story idea (#297): the author, the address and the story itself.
+      idea_submissions: [
+        {
+          id: "idea_marker",
+          kind: "new_series",
+          authorName: MARKER_NAME,
+          email: MARKER_EMAIL,
+          logline: "What if a banished postman had one last letter to deliver?",
+          story: MARKER_STORY,
+        },
+      ],
     } as unknown as Parameters<typeof assembleUserExport>[0]["rows"];
   }
 
@@ -1512,6 +1623,26 @@ describe("log audit · subject-access export summary (scripts/export-user-data.t
     expect(summary).toContain(USER_ID);
     expect(summary).toContain("show_reminders=1");
     expect(summary).toContain("stripe=received (invoices=1)");
+  });
+
+  it("counts the story ideas (#297) in the summary — idea_submissions=1, never the author, the address or the story", async () => {
+    const result = await assembleUserExport({
+      userId: USER_ID,
+      rows: seededRows(),
+      clients: {},
+    });
+    // The file carries the idea — it is the person's data by definition.
+    const document = JSON.stringify(result.database.idea_submissions);
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STORY]) {
+      expect(document).toContain(marker);
+    }
+
+    const summary = summarizeExport(result);
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STORY, "postman"]) {
+      expect(summary).not.toContain(marker);
+    }
+    expect(summary).toContain("idea_submissions=1");
   });
 
   it("keeps a vendor's error text out of the notes and the summary", async () => {
@@ -1898,5 +2029,172 @@ describe("log audit · Clerk webhook signature failure", () => {
     expect(res.status).toBe(400);
     expect(logged()).not.toContain(MARKER_EMAIL);
     expect(logged()).toContain("WebhookVerificationError");
+  });
+});
+
+describe("log audit · idea submission (/ideas, #297)", () => {
+  // A fan's pitch is the freest text the site takes: a name, an address and
+  // up to 10,000 characters of story, from an anonymous form. The action may
+  // log a reason line or `{ name, code }` and nothing else — and it must
+  // RESOLVE, because an unhandled throw would carry the driver's text to
+  // Sentry through onRequestError. The worst cases seed the markers INTO the
+  // thrown text, the way the driver quotes a statement's parameters.
+  const MARKER_SERIES = "leak-marker-series";
+  const MARKERS = [MARKER_NAME, MARKER_EMAIL, MARKER_STORY, MARKER_SERIES];
+
+  function pitch(over: Partial<IdeaSubmissionInput> = {}): IdeaSubmissionInput {
+    return {
+      series: "new",
+      workingTitle: "",
+      logline: "What if a banished postman had one last letter to deliver?",
+      story: MARKER_STORY,
+      name: MARKER_NAME,
+      email: MARKER_EMAIL,
+      ageConfirmed: true,
+      termsAccepted: true,
+      marketingOptIn: true,
+      website: "",
+      ...over,
+    };
+  }
+
+  /** Markers found in what would leave the process: the console, every Sentry call (tags included), the answer. */
+  function leaked(logged: () => string, result: unknown): string[] {
+    const outputs = [
+      logged(),
+      sentryMessage.mock.calls.map(render).join("\n"),
+      render(result),
+    ];
+    return MARKERS.filter((marker) => outputs.some((out) => out.includes(marker)));
+  }
+
+  /** What Drizzle 0.44+ throws: its own wrapper quoting the query, the PostgresError on `.cause`. */
+  function driverError(statement: string, code: string) {
+    const cause = Object.assign(new Error(`${statement} — violates constraint`), {
+      name: "PostgresError",
+      code,
+    });
+    return Object.assign(new Error(`Failed query: ${statement}`), {
+      name: "DrizzleQueryError",
+      cause,
+    });
+  }
+
+  /** The hourly brake's key per call — typed loosely: the spy is shared with the checkout cases. */
+  const brakeKeys = () =>
+    (walletAudit.rateLimited.mock.calls as unknown as [string, number][]).map(
+      ([key]) => key,
+    );
+
+  beforeEach(() => {
+    walletAudit.rateLimited.mockClear();
+  });
+
+  it("honeypot: a filled trap is swallowed with a success and one bare line — nothing written, the brake untouched", async () => {
+    const logged = captureConsole();
+
+    const result = await submitIdea(pitch({ website: "https://bot.example.invalid" }));
+
+    expect(result).toEqual({ ok: true, onList: false });
+    expect(logged()).toBe("submitIdea: honeypot");
+    expect(leaked(logged, result)).toEqual([]);
+    expect(insert).not.toHaveBeenCalled();
+    expect(walletAudit.rateLimited).not.toHaveBeenCalled();
+  });
+
+  it("a validation refusal answers field + code pairs only and logs nothing", async () => {
+    const logged = captureConsole();
+
+    const result = await submitIdea(
+      pitch({
+        story: MARKER_STORY.repeat(300),
+        name: `${MARKER_NAME} `.repeat(20),
+        ageConfirmed: false,
+      }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid",
+      errors: [
+        { field: "story", code: "story_too_long" },
+        { field: "name", code: "name_too_long" },
+        { field: "age", code: "age_required" },
+      ],
+    });
+    expect(logged()).toBe("");
+    expect(leaked(logged, result)).toEqual([]);
+    expect(walletAudit.rateLimited).not.toHaveBeenCalled();
+  });
+
+  it("a rate-limited submit answers a bare reason; the brake's key is `idea:` + a hash, never the address or an IP", async () => {
+    walletAudit.rateLimited.mockResolvedValueOnce(true);
+    const logged = captureConsole();
+
+    const result = await submitIdea(pitch());
+
+    expect(result).toEqual({ ok: false, reason: "rate_limited" });
+    expect(insert).not.toHaveBeenCalled();
+    const [key] = brakeKeys();
+    expect(key).toMatch(/^idea:[0-9a-f]{64}$/);
+    expect(leaked(logged, [result, key])).toEqual([]);
+  });
+
+  it("an insert failure whose driver error quotes the row resolves to server_error and reports class + SQLSTATE only", async () => {
+    insert.mockImplementation(() => ({
+      values: () => ({
+        onConflictDoNothing: () => ({
+          returning: async () => {
+            throw driverError(
+              `insert into idea_submissions (author_name, email, story) values ('${MARKER_NAME}', '${MARKER_EMAIL}', '${MARKER_STORY}')`,
+              "23514",
+            );
+          },
+        }),
+      }),
+    }));
+    const logged = captureConsole();
+
+    const pending = submitIdea(pitch());
+
+    await expect(pending).resolves.toEqual({ ok: false, reason: "server_error" });
+    const result = await pending;
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(leaked(logged, result)).toEqual([]);
+    // What it DOES say: the class of the thrown error and the SQLSTATE from
+    // its `.cause` — the same pair in the log and in the Sentry tags.
+    expect(logged()).toBe('submitIdea: failed {"name":"DrizzleQueryError","code":"23514"}');
+    expect(sentryMessage).toHaveBeenCalledTimes(1);
+    expect(sentryMessage.mock.calls[0]).toEqual([
+      "submitIdea: failed",
+      { level: "error", tags: { code: "23514", name: "DrizzleQueryError" } },
+    ]);
+  });
+
+  it("a failed show lookup whose error quotes the client-sent series resolves to server_error, series and all kept out", async () => {
+    select.mockImplementation(() => {
+      const chain = {
+        from: () => chain,
+        where: () => chain,
+        limit: async () => {
+          throw driverError(
+            `select "id" from "shows" where ("shows"."slug" = '${MARKER_SERIES}' and "shows"."status" = 'published')`,
+            "57014",
+          );
+        },
+      };
+      return chain;
+    });
+    const logged = captureConsole();
+
+    const pending = submitIdea(pitch({ series: MARKER_SERIES }));
+
+    await expect(pending).resolves.toEqual({ ok: false, reason: "server_error" });
+    const result = await pending;
+    expect(select).toHaveBeenCalledTimes(1);
+    expect(insert).not.toHaveBeenCalled();
+    expect(leaked(logged, result)).toEqual([]);
+    expect(logged()).toBe('submitIdea: failed {"name":"DrizzleQueryError","code":"57014"}');
+    expect(render(sentryMessage.mock.calls)).toContain('"code":"57014"');
   });
 });

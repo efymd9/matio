@@ -4,7 +4,13 @@ import { and, isNotNull, isNull, lt, sql, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 
 import { db } from "@/db";
-import { showReminders, trialSessions, visitors, watchDays } from "@/db/schema";
+import {
+  ideaSubmissions,
+  showReminders,
+  trialSessions,
+  visitors,
+  watchDays,
+} from "@/db/schema";
 
 // Data retention — the code behind /privacy §6 "How long we keep it".
 //
@@ -59,7 +65,8 @@ export type RetentionTable =
   | "trial_sessions"
   | "visitors"
   | "watch_days"
-  | "show_reminders";
+  | "show_reminders"
+  | "idea_submissions";
 
 export interface RetentionPolicy {
   /** Real table name — what the log line and the response name. */
@@ -159,6 +166,22 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     promise:
       "§6 uses 30 days as its shortest window (trial sessions; request and security logs) — the reminder request itself is not named there yet",
   },
+  {
+    name: "idea_submissions",
+    table: ideaSubmissions,
+    keyColumns: [ideaSubmissions.id],
+    column: ideaSubmissions.createdAt,
+    grain: "instant",
+    window: { months: 24 },
+    // Every row, with no `extra` on purpose: v1 has no exception for an idea
+    // the studio picked ("longer only if we develop your idea with you" has
+    // no column behind it yet — a `selected_at` + `extra` here is the day it
+    // does; registry row, #297). Most authors have no account at all; an
+    // account's erasure takes its address's rows whenever it happens
+    // (lib/erase-user.ts) — this window holds for every row either way.
+    promise:
+      "§6 Story ideas: up to 24 months from submission, or longer only if we develop your idea with you",
+  },
 ];
 
 /** The moment before which a row is older than the window. */
@@ -226,7 +249,7 @@ export function deleteBatchSql(
 /**
  * The order tables are visited on a given day. Rotates daily so a table with
  * a backlog that eats the whole time budget cannot starve the ones behind it
- * night after night — each table is first once every four days.
+ * night after night — each table is first once every five days.
  */
 export function policyOrder(now: Date): readonly RetentionPolicy[] {
   const n = RETENTION_POLICIES.length;
@@ -301,6 +324,7 @@ export async function runRetention(
     visitors: 0,
     watch_days: 0,
     show_reminders: 0,
+    idea_submissions: 0,
   } satisfies Record<RetentionTable, number>;
   const failed: RetentionTable[] = [];
   const truncated: Partial<Record<RetentionTable, true>> = {};

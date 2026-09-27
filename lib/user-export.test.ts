@@ -58,6 +58,7 @@ function emptyRows(over: Partial<UserExportRows> = {}): UserExportRows {
     visitors: [],
     visitor_days: [],
     show_reminders: [],
+    idea_submissions: [],
     ...over,
   };
 }
@@ -65,7 +66,7 @@ function emptyRows(over: Partial<UserExportRows> = {}): UserExportRows {
 // ── (а) the document ────────────────────────────────────────────────────
 
 describe("assembleUserExport · shape", () => {
-  it("lists all eight tables as keys even with zero rows, and nothing else", async () => {
+  it("lists all nine tables as keys even with zero rows, and nothing else", async () => {
     const result = await assembleUserExport({
       userId: USER_ID,
       rows: emptyRows(),
@@ -73,6 +74,9 @@ describe("assembleUserExport · shape", () => {
       now: NOW,
     });
 
+    expect(EXPORT_TABLES).toHaveLength(9);
+    // The ninth (#297): story ideas sent through /ideas from the address.
+    expect(EXPORT_TABLES).toContain("idea_submissions");
     expect(Object.keys(result.database)).toEqual([...EXPORT_TABLES]);
     for (const table of EXPORT_TABLES) expect(result.database[table]).toEqual([]);
     expect("stripe_events" in result.database).toBe(false);
@@ -135,8 +139,12 @@ describe("assembleUserExport · shape", () => {
 /**
  * A `db.select().from(t).where(c)` recorder: renders every clause through
  * the real Postgres dialect so the assertion reads the SQL that would run.
+ * A table answers with fixed rows, or with rows chosen by the bound params
+ * (to play a stored value that only an exact `=` finds).
  */
-function recorderDb(rowsByTable: Record<string, unknown[]>) {
+function recorderDb(
+  rowsByTable: Record<string, unknown[] | ((params: unknown[]) => unknown[])>,
+) {
   const dialect = new PgDialect();
   const calls: { table: string; sql: string; params: unknown[] }[] = [];
   const db = {
@@ -146,7 +154,8 @@ function recorderDb(rowsByTable: Record<string, unknown[]>) {
           const name = getTableName(table);
           const q = clause ? dialect.sqlToQuery(clause) : { sql: "", params: [] };
           calls.push({ table: name, sql: q.sql, params: q.params });
-          return rowsByTable[name] ?? [];
+          const answer = rowsByTable[name] ?? [];
+          return typeof answer === "function" ? answer(q.params) : answer;
         },
       }),
     }),
@@ -155,11 +164,12 @@ function recorderDb(rowsByTable: Record<string, unknown[]>) {
 }
 
 describe("loadUserExportRows · every table by its own key", () => {
-  it("reads the six user-keyed tables by user_id, visitor_days by the visitors found, show_reminders by user_id OR email", async () => {
+  it("reads the six user-keyed tables by user_id, visitor_days by the visitors found, show_reminders by user_id OR email, idea_submissions by the email alone", async () => {
     const { db, calls } = recorderDb({
       users: [account],
       visitors: [{ aid: "aid-1" }, { aid: "aid-2" }],
       show_reminders: [{ id: "rem_1" }],
+      idea_submissions: [{ id: "idea_1" }],
     });
 
     const rows = await loadUserExportRows(db, USER_ID);
@@ -180,13 +190,41 @@ describe("loadUserExportRows · every table by its own key", () => {
       sql: '("show_reminders"."user_id" = $1 or "show_reminders"."email" = $2)',
       params: [USER_ID, account.email],
     });
-    // Exactly the eight tables, each once.
+    // Story ideas (#297): no user_id on the table — the address alone, the
+    // same predicate as the erasure.
+    expect(byTable.idea_submissions).toMatchObject({
+      sql: '"idea_submissions"."email" = $1',
+      params: [account.email],
+    });
+    // Exactly the nine tables, each once.
     expect(calls.map((c) => c.table).sort()).toEqual([...EXPORT_TABLES].sort());
     expect(rows.users).toEqual([account]);
     expect(rows.show_reminders).toEqual([{ id: "rem_1" }]);
+    expect(rows.idea_submissions).toEqual([{ id: "idea_1" }]);
   });
 
-  it("skips visitor_days when no visitor row is linked, and keys reminders by user_id alone without an account row", async () => {
+  it("finds the story idea of an account whose Clerk address is mixed-case — idea rows are stored lowercased (#297)", async () => {
+    // users.email is Clerk's address as typed; submitIdea lowercases. The
+    // erasure compares lowercased, so the export must too, or a row would
+    // be erased without ever having been exported.
+    const mixed = { ...account, email: "Subject@Example.INVALID" };
+    const { db, calls } = recorderDb({
+      users: [mixed],
+      // The stored row: its address is lowercase, and `=` on text is exact.
+      idea_submissions: (params) =>
+        params[0] === "subject@example.invalid" ? [{ id: "idea_1" }] : [],
+    });
+
+    const rows = await loadUserExportRows(db, USER_ID);
+
+    expect(calls.find((c) => c.table === "idea_submissions")).toMatchObject({
+      sql: '"idea_submissions"."email" = $1',
+      params: ["subject@example.invalid"],
+    });
+    expect(rows.idea_submissions).toEqual([{ id: "idea_1" }]);
+  });
+
+  it("skips visitor_days when no visitor row is linked, keys reminders by user_id alone and reads no story ideas without an account row", async () => {
     const { db, calls } = recorderDb({});
 
     const rows = await loadUserExportRows(db, USER_ID);
@@ -194,6 +232,9 @@ describe("loadUserExportRows · every table by its own key", () => {
     const tables = calls.map((c) => c.table);
     expect(tables).not.toContain("visitor_days");
     expect(rows.visitor_days).toEqual([]);
+    // No address, no key: idea rows are tied to nothing else (#297).
+    expect(tables).not.toContain("idea_submissions");
+    expect(rows.idea_submissions).toEqual([]);
     const reminders = calls.find((c) => c.table === "show_reminders");
     expect(reminders).toMatchObject({
       sql: '"show_reminders"."user_id" = $1',
@@ -549,7 +590,7 @@ describe("summarizeExport", () => {
 
     expect(summary).toContain(`subject: ${USER_ID}`);
     expect(summary).toContain(
-      "database rows: users=1 subscriptions=0 watch_progress=0 watch_days=0 trial_sessions=0 visitors=0 visitor_days=0 show_reminders=2",
+      "database rows: users=1 subscriptions=0 watch_progress=0 watch_days=0 trial_sessions=0 visitors=0 visitor_days=0 show_reminders=2 idea_submissions=0",
     );
     expect(summary).toContain("processors: clerk=received stripe=received (invoices=2) posthog=received (events=1)");
     expect(summary).toContain("notes (1):");

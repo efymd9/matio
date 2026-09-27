@@ -5,6 +5,16 @@
 данные, = новая строка здесь ТЕМ ЖЕ PR + строка в `docs/registry.md`, пока
 статус DPA не подтверждён.
 
+**27.09.2026 (#297, страница идей `/ideas`): код новых процессоров не
+добавляет.** Идеи хранятся в Neon и проходят через Vercel (оба уже в
+таблице), события `idea_submitted` / `SubmitApplication` уходят PostHog и
+Meta (оба уже в таблице), писем нет (Resend идей не видит). Исправлена
+неточность: ящик `contact@matio.tv`, через который студия отвечает авторам и
+принимает запросы субъектов, — **Namecheap PrivateEmail** (`dig MX matio.tv`
+→ `mx1/mx2.privateemail.com`, SPF `include:spf.privateemail.com`), он видит
+входящую переписку — отдельная строка ниже; раньше Namecheap значился как
+«не видит данных».
+
 Легенда «DPA»: *авто* — DPA инкорпорирован в условия сервиса самим фактом
 использования; *подписать* — требует отдельного действия в аккаунте
 (сгенерировать/принять); *проверить* — механизм есть, но факт принятия для
@@ -19,10 +29,11 @@
 | **Mux Inc.** | видео: ассеты (контент), CDN-логи доставки (IP/UA зрителя), Mux Data (по согласию) | США | авто (ToS §11: DPA «incorporated herein» когда Mux обрабатывает персональные данные от нашего имени) | DPF (EU-US + UK Extension + Swiss-US) | https://www.mux.com/terms и https://www.mux.com/privacy — 19.03.2026; DPA PDF — https://www.mux.com/dpa (01.04.2025) |
 | **Resend Inc.** | письма: адрес, тема, тело; логи доставки | США; отправка из AWS eu-west-1; 21 субпроцессор, все US | авто (DPA «binding upon Customer entering into the Agreement») | SCC модуль 2 + UK Addendum; DPF (EU-US + UK Extension) | https://resend.com/legal/dpa и https://resend.com/legal/subprocessors — 27.08.2026; логи 30 дней (https://resend.com/security/gdpr) |
 | **PostHog Inc.** | продуктовая аналитика: события, `email` персоны, session replay (маска) | PostHog Cloud **EU** — Франкфурт | **подписать**: DPA действителен только сгенерированный и контрподписанный в приложении (app.posthog.com/legal) — факт подписи для нашего проекта проверить | DPF (EU-US, UK Extension, Swiss-US) + SCC | https://posthog.com/dpa; регион: https://posthog.com/docs/privacy/gdpr-compliance |
-| **Meta Platforms Ireland Ltd** (+ Meta Platforms, Inc.) | реклама: Pixel (браузер), CAPI (SHA-256 email/id, `_fbp`/`_fbc`, IP, UA, `Purchase`) | Ирландия / США | авто через Business Tools Terms + Data Processing Terms (Meta — процессор лишь для части операций; для остального — самостоятельный/совместный контролёр — **вопрос юристу**) | European Data Transfer Addendum; Meta Platforms, Inc. сертифицирована по DPF (страница DPF Meta из агента не читается — сверено по вторичным источникам, открыть руками: https://www.facebook.com/privacy/policies/data_privacy_framework/) | https://www.facebook.com/legal/terms/dataprocessing — в силе с 23.08.2025 |
-| **Google Ireland Ltd** / Google LLC | GA4: page_view, события, client id | Ирландия / США | **проверить**: Google Ads Data Processing Terms применяются только к сервисам, для которых приняты — в GA4 Admin принять «Data Processing Terms» | DPF для Ads Services с 01.09.2023; SCC там, где DPF не принят | https://business.safety.google/adsprocessorterms/ (v8.0, 30.05.2024), https://business.safety.google/adsdatatransfers/ |
+| **Meta Platforms Ireland Ltd** (+ Meta Platforms, Inc.) | реклама: Pixel (браузер; с #297 и `SubmitApplication` на `/ideas`), CAPI (SHA-256 email/id, `_fbp`/`_fbc`, IP, UA, `Purchase`). **Automatic Advanced Matching: не сверено** ни для одного ID из `NEXT_PUBLIC_META_PIXEL_ID` + `NEXT_PUBLIC_META_PIXEL_IDS` — `meta-pixel.tsx` делает голый `fbq('init', id)`, и включённый AAM сам хеширует поля email/имени со страницы (`/ideas`, форма напоминаний) в обход гейтов кода. Сверяет владелец (Events Manager → пиксель → Settings → Automatic advanced matching = off), агент записывает ответ с датой; до того — `docs/registry.md` (строка AAM / GA4, #297) → #341, реклама на `/ideas` заблокирована | Ирландия / США | авто через Business Tools Terms + Data Processing Terms (Meta — процессор лишь для части операций; для остального — самостоятельный/совместный контролёр — **вопрос юристу**) | European Data Transfer Addendum; Meta Platforms, Inc. сертифицирована по DPF (страница DPF Meta из агента не читается — сверено по вторичным источникам, открыть руками: https://www.facebook.com/privacy/policies/data_privacy_framework/) | https://www.facebook.com/legal/terms/dataprocessing — в силе с 23.08.2025 |
+| **Google Ireland Ltd** / Google LLC | GA4: page_view, события, client id. **«User-provided data collection → automatic detection»: не сверено** — если включено, gtag сам ищет email на странице (`/ideas`, форма напоминаний). Сверяет владелец (GA4 Admin → Data collection → автоопределение = off); до того — `docs/registry.md` (строка AAM / GA4, #297) → #341 | Ирландия / США | **проверить**: Google Ads Data Processing Terms применяются только к сервисам, для которых приняты — в GA4 Admin принять «Data Processing Terms» | DPF для Ads Services с 01.09.2023; SCC там, где DPF не принят | https://business.safety.google/adsprocessorterms/ (v8.0, 30.05.2024), https://business.safety.google/adsdatatransfers/ |
 | **OpenAI Ireland Ltd** | ChatGPT Ads pixel: `page_viewed`, конверсии с `event_id` = `signup:<Clerk id>` / sub id, `__oppref` | Ирландия / США | авто: Ad Tools DPA — часть Advertising Terms («effective upon incorporation by reference»); **стороны — независимые контролёры**, не процессор (кроме «Restricted Processing») — учесть в политике; страница отдаёт 403 из агента — сверено по вторичным источникам, открыть руками | SCC + UK Addendum; **записи в DPF у OpenAI нет** | https://openai.com/policies/ad-tools-dpa/ , https://openai.com/policies/advertising-terms/ , https://openai.com/policies/eu-privacy-policy/ |
 | **Functional Software, Inc.** (Sentry) | ошибки/трейсы: `user.id`, URL без query, UA; **приложение** (#317, тот же проект, только в сборке с `EXPO_PUBLIC_SENTRY_DSN`): JS-ошибки после тех же скрабберов + нативные крэши (стек, контекст устройства, случайный installation id SDK — не Clerk id); без сессий release health | организация в **EU-регионе** (данные в ЕС); компания US | **проверить**: DPA v5.1.0 «amends the Agreement», требует отдельного принятия («enter into our DPA») в настройках организации | DPF → SCC при инвалидации; UK Addendum | https://sentry.io/legal/dpa/ — 29.05.2024; ретеншен: https://docs.sentry.io/security-legal-pii/security/data-retention-periods/ |
+| **Namecheap, Inc.** (PrivateEmail) | почтовый ящик `contact@matio.tv`: входящая и исходящая переписка — запросы субъектов (доступ, копия, удаление), ответы авторам идей (#297), любые письма зрителей; адрес отправителя и всё, что он написал | не сверено | **не сверено** → `docs/registry.md` (строка Namecheap PrivateEmail, #297) | не сверено | MX сверены 27.09.2026 (`dig MX matio.tv` → `mx1/mx2.privateemail.com`); условия и DPA — не сверены |
 | **GitHub, Inc.** (Microsoft) | CI: раннеры `db-backup` (дамп в открытом виде до шифрования) и `db-restore-check` (полное восстановление на время джобы); секреты `BACKUP_*` | США | авто (DPA «forms part of the GitHub Customer Agreement») | DPF (EU-US, UK Extension, Swiss-US) + SCC модули 1–3 + UK Addendum | https://github.com/customer-terms/github-data-protection-agreement — октябрь 2025 |
 
 ## Не процессоры (для ясности)
@@ -30,8 +41,10 @@
 - **Anthropic / Claude Code** — инструмент разработки; по дизайну персональные
   данные в контекст агентов не попадают (правило в SKILL.md). Станет
   процессором в тот день, когда первый LLM-вызов увидит данные пользователей.
-- **Namecheap** (домен/DNS), **Expo/EAS** (сборки приложения) — не видят
-  данных пользователей. Пуши (#98) добавят Expo push service / FCM / APNs —
+- **Namecheap** как регистратор домена и DNS, **Expo/EAS** (сборки
+  приложения) — не видят данных пользователей. Но почта `contact@matio.tv` —
+  Namecheap **PrivateEmail**, и она видит переписку: это процессор, строка в
+  таблице выше (#297). Пуши (#98) добавят Expo push service / FCM / APNs —
   строка здесь ДО первого пуша.
 - **Cloudflare**, **AWS** — субпроцессоры Clerk/Resend/Neon, не наши
   контрагенты; числятся в их списках.
@@ -49,6 +62,11 @@
    юристу.
 7. План Vercel (Hobby/Pro) — от него зависит ретеншен логов, обещанный в
    `/privacy` как 30 дней.
+8. Namecheap PrivateEmail — найти условия и DPA для ящика `contact@`, записать
+   регион и механизм трансфера (#297; строка в `docs/registry.md`).
+9. Meta AAM и автоопределение GA4 — выключены ли (для каждого пикселя и для
+   свойства GA4); ответ с датой — в строки Meta и Google выше (#297, #341). Блокирует
+   рекламу на `/ideas` наравне с ревью юриста.
 
-Все семь — вопросы владельца/юриста, не кода; открыть как issue после решения
+Все девять — вопросы владельца/юриста, не кода; открыть как issue после решения
 владельца (label `needs:owner`).

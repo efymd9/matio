@@ -88,7 +88,11 @@ function makeDb(): EraseDb {
         h.writes.push(`delete ${name}`);
         return Object.assign(Promise.resolve(undefined), {
           returning: async () =>
-            name === "show_reminders" ? [{ id: "rem_1" }, { id: "rem_2" }] : [],
+            name === "show_reminders"
+              ? [{ id: "rem_1" }, { id: "rem_2" }]
+              : name === "idea_submissions"
+                ? [{ id: "idea_1" }]
+                : [],
         });
       },
     }),
@@ -158,7 +162,7 @@ afterEach(() => {
 });
 
 describe("eraseUser · the local erasure through an injected client", () => {
-  it("tombstones the customer, deletes the reminders, then the users row — and says what it did", async () => {
+  it("tombstones the customer, deletes the reminders and the story ideas, then the users row — and says what it did", async () => {
     h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
 
     const result = await eraseUser(USER_ID, deps());
@@ -166,6 +170,7 @@ describe("eraseUser · the local erasure through an injected client", () => {
     expect(h.writes).toEqual([
       "insert erased_customers",
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
     ]);
     expect(h.inserts).toEqual([
@@ -177,12 +182,17 @@ describe("eraseUser · the local erasure through an injected client", () => {
     );
     expect(reminders.params).toEqual(["someone@example.invalid", USER_ID]);
     expect(render(h.deletes[1].where)).toMatchObject({
+      sql: '"idea_submissions"."email" = $1',
+      params: ["someone@example.invalid"],
+    });
+    expect(render(h.deletes[2].where)).toMatchObject({
       sql: '"users"."id" = $1',
       params: [USER_ID],
     });
     expect(result).toEqual({
       status: "erased",
       reminderRows: 2,
+      ideaSubmissionRows: 1,
       stripeCustomer: true,
       liveSubscription: false,
       cancelRequested: false,
@@ -197,7 +207,44 @@ describe("eraseUser · the local erasure through an injected client", () => {
   it("writes no tombstone for an account without a Stripe customer", async () => {
     await eraseUser(USER_ID, deps());
 
-    expect(h.writes).toEqual(["delete show_reminders", "delete users"]);
+    expect(h.writes).toEqual([
+      "delete show_reminders",
+      "delete idea_submissions",
+      "delete users",
+    ]);
+  });
+
+  it("deletes the story ideas (#297) by the account's address ALONE, lowercased, while the users row still holds it — and logs only a count", async () => {
+    // idea_submissions has no user_id and no FK on users: the FK map in
+    // route.test.ts cannot see a missed step, so this pins it. The address
+    // is Clerk's as typed; idea rows store it lowercased.
+    h.userRow = { email: "Fan.Writer@Example.INVALID", stripeCustomerId: null };
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const result = await eraseUser(USER_ID, deps());
+
+    const ideas = h.deletes.find((d) => d.table === "idea_submissions");
+    expect(render(ideas?.where)).toMatchObject({
+      sql: '"idea_submissions"."email" = $1',
+      params: ["fan.writer@example.invalid"],
+    });
+    // Before the users row goes — after it, nothing knows the address.
+    expect(h.writes.indexOf("delete idea_submissions")).toBeLessThan(
+      h.writes.indexOf("delete users"),
+    );
+    expect(result).toMatchObject({ status: "erased", ideaSubmissionRows: 1 });
+    const line = info.mock.calls.find(([m]) => m === "erase user: local data erased");
+    expect(line?.[1]).toMatchObject({ userId: USER_ID, ideaSubmissionRows: 1 });
+    expect(JSON.stringify(line)).not.toContain("example.invalid");
+  });
+
+  it("an erased account (no users row) deletes no story ideas — there is no address left to match (#297)", async () => {
+    h.userRow = undefined;
+
+    const result = await eraseUser(USER_ID, deps());
+
+    expect(result.status).toBe("not_found");
+    expect(h.deletes).toEqual([]);
   });
 
   it("holds the erasure back when the tombstone cannot be written — nothing deleted, the error propagates", async () => {
@@ -246,7 +293,11 @@ describe("eraseUser · the local erasure through an injected client", () => {
       liveSubscription: true,
       cancelRequested: false,
     });
-    expect(h.deletes.map((d) => d.table)).toEqual(["show_reminders", "users"]);
+    expect(h.deletes.map((d) => d.table)).toEqual([
+      "show_reminders",
+      "idea_submissions",
+      "users",
+    ]);
     expect(error).toHaveBeenCalledTimes(1);
     expect(error.mock.calls[0][0]).toContain("cancel it at Stripe by hand");
     expect(error.mock.calls[0][1]).toEqual({
@@ -291,6 +342,7 @@ describe("eraseUser · the customers behind the address (#223)", () => {
     expect(h.writes).toEqual([
       "insert erased_customers",
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
     ]);
     expect(h.inserts).toEqual([
@@ -345,7 +397,11 @@ describe("eraseUser · the customers behind the address (#223)", () => {
     const result = await eraseUser(USER_ID, deps());
 
     expect(stripeSearch).not.toHaveBeenCalled();
-    expect(h.writes).toEqual(["delete show_reminders", "delete users"]);
+    expect(h.writes).toEqual([
+      "delete show_reminders",
+      "delete idea_submissions",
+      "delete users",
+    ]);
     expect(result).toMatchObject({
       status: "erased",
       stripeSearch: "skipped_no_stripe_footprint",
@@ -413,6 +469,7 @@ describe("eraseUser · the customers behind the address (#223)", () => {
     expect(h.writes).toEqual([
       "insert erased_customers",
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
     ]);
     expect(h.inserts).toEqual([
@@ -517,6 +574,7 @@ describe("eraseUser · PostHog (#180)", () => {
 
     expect(h.writes).toEqual([
       "delete show_reminders",
+      "delete idea_submissions",
       "delete users",
       "posthog GET",
       "posthog DELETE",
@@ -613,6 +671,7 @@ describe("previewErasure (the dry run)", () => {
     h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
     h.counts = {
       show_reminders: 3,
+      idea_submissions: 2,
       subscriptions: 1,
       watch_progress: 12,
       watch_days: 5,
@@ -641,6 +700,7 @@ describe("previewErasure (the dry run)", () => {
       deleted: {
         users: 1,
         show_reminders: 3,
+        idea_submissions: 2,
         subscriptions: 1,
         watch_progress: 12,
         watch_days: 5,
@@ -677,6 +737,11 @@ describe("previewErasure (the dry run)", () => {
       sql: '("show_reminders"."email" = $1 or "show_reminders"."user_id" = $2)',
       params: ["someone@example.invalid", USER_ID],
     });
+    // Story ideas: the erasure's own predicate — the address alone.
+    expect(byTable["idea_submissions#count"]).toMatchObject({
+      sql: '"idea_submissions"."email" = $1',
+      params: ["someone@example.invalid"],
+    });
     expect(byTable["watch_progress#count"]).toMatchObject({
       sql: '"watch_progress"."user_id" = $1',
     });
@@ -698,8 +763,11 @@ describe("previewErasure (the dry run)", () => {
     ]);
   });
 
-  it("without a users row keys reminders by user_id alone, skips the tombstone read and the Stripe search, and reports found=false", async () => {
+  it("without a users row keys reminders by user_id alone, counts no story ideas (no address), skips the tombstone read and the Stripe search, and reports found=false", async () => {
     h.userRow = undefined;
+    // Rows that would answer a count — the preview must not ask: without
+    // the address nothing links an idea to the account (#297).
+    h.counts = { idea_submissions: 7 };
 
     const preview = await previewErasure(USER_ID, {
       db: makeDb(),
@@ -709,7 +777,7 @@ describe("previewErasure (the dry run)", () => {
 
     expect(preview).toMatchObject({
       found: false,
-      deleted: { users: 0 },
+      deleted: { users: 0, idea_submissions: 0 },
       stripeCustomer: false,
       tombstoned: false,
       liveSubscription: false,
@@ -719,6 +787,7 @@ describe("previewErasure (the dry run)", () => {
     const reminders = h.selects.find((s) => s.table === "show_reminders");
     expect(render(reminders?.where).sql).toBe('"show_reminders"."user_id" = $1');
     expect(h.selects.some((s) => s.table === "erased_customers")).toBe(false);
+    expect(h.selects.some((s) => s.table === "idea_submissions")).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(stripeSearch).not.toHaveBeenCalled();
   });
@@ -792,7 +861,14 @@ describe("previewErasure (the dry run)", () => {
 describe("the script's stdout", () => {
   const preview: ErasePreview = {
     found: true,
-    deleted: { users: 1, show_reminders: 3, subscriptions: 1, watch_progress: 12, watch_days: 5 },
+    deleted: {
+      users: 1,
+      show_reminders: 3,
+      idea_submissions: 4,
+      subscriptions: 1,
+      watch_progress: 12,
+      watch_days: 5,
+    },
     deidentified: { trial_sessions: 2, visitors: 1, marketing_links: 0 },
     stripeCustomer: true,
     tombstoned: false,
@@ -810,7 +886,7 @@ describe("the script's stdout", () => {
     expect(summarizeErasePreview(USER_ID, preview)).toBe(
       [
         "subject: user_2abc",
-        "would delete: users=1 show_reminders=3 subscriptions=1 watch_progress=12 watch_days=5",
+        "would delete: users=1 show_reminders=3 idea_submissions=4 subscriptions=1 watch_progress=12 watch_days=5",
         "would de-identify (user_id → NULL): trial_sessions=2 visitors=1 marketing_links=0",
         "stripe: customer=yes live_subscription=yes (would be set to cancel at period end) search=ok customers=2 (ids cus_dummy, cus_older)",
         "posthog: skipped_forbidden http=403",
@@ -891,6 +967,7 @@ describe("the script's stdout", () => {
     const erased: EraseUserResult = {
       status: "erased",
       reminderRows: 2,
+      ideaSubmissionRows: 1,
       stripeCustomer: true,
       liveSubscription: true,
       cancelRequested: false,
@@ -901,7 +978,7 @@ describe("the script's stdout", () => {
     expect(summarizeEraseResult(USER_ID, erased)).toBe(
       [
         "subject: user_2abc",
-        "local: erased (show_reminders=2, users=1 + cascades)",
+        "local: erased (show_reminders=2, idea_submissions=1, users=1 + cascades)",
         "stripe: customer=tombstoned live_subscription=NOT cancelled — cancel by hand search=ok tombstoned customers=2 (ids cus_dummy, cus_older)",
         "posthog: failed persons=1 error=TimeoutError",
       ].join("\n"),

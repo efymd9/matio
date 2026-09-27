@@ -51,6 +51,14 @@ describe("isLocalizablePath", () => {
     expect(isLocalizablePath("/shows/x")).toBe(true);
     expect(isLocalizablePath("/actors/y")).toBe(true);
     expect(isLocalizablePath("/terms")).toBe(true);
+    // The story-idea landing (#297) — an exact path, not a prefix.
+    expect(isLocalizablePath("/ideas")).toBe(true);
+  });
+
+  it("matches /ideas exactly, never as a prefix", () => {
+    expect(isLocalizablePath("/ideas/x")).toBe(false);
+    expect(isLocalizablePath("/ideasx")).toBe(false);
+    expect(isLocalizablePath(stripLocalePrefix("/es/ideas").path)).toBe(true);
   });
 
   it("excludes gated, noindex and single-URL surfaces", () => {

@@ -76,6 +76,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly",
       priority: 0.3,
     }),
+    // The story-idea landing (#297) — indexed on purpose: it is where the
+    // fan campaigns land.
+    ...localizedEntries("/ideas", {
+      changeFrequency: "monthly",
+      priority: 0.5,
+    }),
     ...published.flatMap((s) =>
       localizedEntries(`/shows/${s.slug}`, {
         lastModified: s.updatedAt ?? catalogLastMod,

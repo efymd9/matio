@@ -2,6 +2,7 @@ import { eq, inArray, or } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "@/db/schema";
 import {
+  ideaSubmissions,
   showReminders,
   subscriptions,
   trialSessions,
@@ -26,6 +27,10 @@ import type { UserExportRows } from "@/lib/user-export";
 //   visitors         user_id  → visitor_days by the visitors found (aid)
 //   show_reminders   user_id OR email — the two can disagree: the row is
 //                    keyed by address, user_id is a coalesce-backfill
+//   idea_submissions email ALONE, lowercased (#297) — the table has no
+//                    user_id; ideas are stored lowercased while users.email
+//                    is Clerk's address as typed, so the account's side is
+//                    lowercased (the erasure uses the same predicate)
 //
 // Not here on purpose: watch_segments (an aggregate without a user key),
 // stripe_events (raw webhook ids), guest_checkout_sessions (an HMAC of a
@@ -83,6 +88,16 @@ export async function loadUserExportRows(
         : eq(showReminders.userId, userId),
     );
 
+  // Story ideas sent from the account's address. `.toLowerCase()` is
+  // load-bearing: without it a mixed-case Clerk address would be ERASED
+  // (lib/erase-user.ts lowercases) but not EXPORTED.
+  const ideaRows = email
+    ? await db
+        .select()
+        .from(ideaSubmissions)
+        .where(eq(ideaSubmissions.email, email.toLowerCase()))
+    : [];
+
   return {
     users: userRows,
     subscriptions: subscriptionRows,
@@ -92,5 +107,6 @@ export async function loadUserExportRows(
     visitors: visitorRows,
     visitor_days: visitorDayRows,
     show_reminders: reminderRows,
+    idea_submissions: ideaRows,
   };
 }
