@@ -39,7 +39,10 @@ export default function SettingsScreen() {
       style={styles.screen}
       contentContainerStyle={{ paddingBottom: clearance + space(4) }}
     >
-      <Text style={[styles.heading, { marginTop: insets.top + space(4) }]}>
+      <Text
+        style={[styles.heading, { marginTop: insets.top + space(4) }]}
+        accessibilityRole="header"
+      >
         {t.app.tabs.settings}
       </Text>
 

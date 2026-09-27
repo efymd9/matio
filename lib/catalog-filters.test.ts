@@ -6,6 +6,7 @@ import {
   genreLabel,
   matchesQuery,
   normalizeGenreKey,
+  resolveChip,
 } from "./catalog-filters";
 
 // The production catalog's genre strings as of 2026-09-19 (#245): nine
@@ -124,5 +125,40 @@ describe("filterShows", () => {
       "Fallen",
     ]);
     expect(filterShows(CATALOG, { kind: "vertical" }, "fallen")).toEqual([]);
+  });
+});
+
+describe("resolveChip (#304 item 9)", () => {
+  const chips = genreChips(CATALOG);
+
+  it("keeps a selection whose chip is still drawn — the very same object", () => {
+    const drama = { kind: "genre", key: "drama" } as const;
+    const vertical = { kind: "vertical" } as const;
+    const all = { kind: "all" } as const;
+    expect(resolveChip(drama, chips, true)).toBe(drama);
+    expect(resolveChip(vertical, chips, true)).toBe(vertical);
+    expect(resolveChip(all, chips, false)).toBe(all);
+  });
+
+  it("a genre that left the catalog falls back to All — and the grid is the whole catalog again", () => {
+    // «Drama» renamed to «Drama romántico» by the admin: the old key has no chip.
+    const renamed = CATALOG.map((show) => ({
+      ...show,
+      genre: show.genre.map((g) => (normalizeGenreKey(g) === "drama" ? "Drama romántico" : g)),
+    }));
+    const active = resolveChip({ kind: "genre", key: "drama" }, genreChips(renamed), true);
+
+    expect(active).toEqual({ kind: "all" });
+    expect(filterShows(renamed, active, "")).toHaveLength(4);
+  });
+
+  it("the Vertical chip falls back to All once no vertical show is left", () => {
+    expect(resolveChip({ kind: "vertical" }, chips, false)).toEqual({ kind: "all" });
+  });
+
+  it("the fallback is one stable object, so a memo on the active chip does not churn", () => {
+    const first = resolveChip({ kind: "genre", key: "gone" }, chips, true);
+    const second = resolveChip({ kind: "vertical" }, chips, false);
+    expect(second).toBe(first);
   });
 });

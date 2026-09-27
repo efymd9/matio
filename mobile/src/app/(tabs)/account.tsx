@@ -65,7 +65,7 @@ function StalledAccount({ onRetry }: { onRetry: () => void }) {
       style={styles.screen}
       contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, paddingBottom: clearance + space(4) }}
     >
-      <Text style={[styles.heading, { marginTop: insets.top + space(4), paddingHorizontal: 0 }]}>
+      <Text style={[styles.heading, { marginTop: insets.top + space(4), paddingHorizontal: 0 }]} accessibilityRole="header">
         {t.app.tabs.account}
       </Text>
       <View style={{ marginTop: space(6) }}>
@@ -167,7 +167,7 @@ function SignedInAccount() {
       style={styles.screen}
       contentContainerStyle={{ paddingBottom: clearance + space(4) }}
     >
-      <Text style={[styles.heading, { marginTop: insets.top + space(4) }]}>
+      <Text style={[styles.heading, { marginTop: insets.top + space(4) }]} accessibilityRole="header">
         {t.app.tabs.account}
       </Text>
 
@@ -292,7 +292,7 @@ function AnonymousAccount() {
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={[styles.heading, { marginTop: insets.top + space(4), paddingHorizontal: 0 }]}>
+        <Text style={[styles.heading, { marginTop: insets.top + space(4), paddingHorizontal: 0 }]} accessibilityRole="header">
           {t.app.tabs.account}
         </Text>
 

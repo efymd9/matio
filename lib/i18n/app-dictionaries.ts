@@ -115,6 +115,12 @@ export const appEs = {
     subscribersOnly: "Solo para suscriptores",
     subscribersOnlyHint: "Este episodio requiere una suscripción activa.",
   },
+  // Spoken only (VoiceOver): the vertical player's play/pause state — its
+  // value, read after «Reproducir / Pausar» (#304).
+  player: {
+    playing: "Reproduciendo",
+    paused: "En pausa",
+  },
 };
 
 export type AppDict = typeof appEs;
@@ -201,6 +207,10 @@ export const appEn: AppDict = {
   watch: {
     subscribersOnly: "Subscribers only",
     subscribersOnlyHint: "This episode needs an active subscription.",
+  },
+  player: {
+    playing: "Playing",
+    paused: "Paused",
   },
 };
 

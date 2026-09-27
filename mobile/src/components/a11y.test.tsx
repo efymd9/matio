@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { act, createElement, forwardRef, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { View } from "react-native";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig, ShowDetail, ShowSummary } from "@/shared/api-types";
 
@@ -16,7 +17,7 @@ vi.hoisted(() => {
   (globalThis as { __DEV__?: boolean }).__DEV__ = false;
 });
 
-type Recorded = { text: string; cap: number | undefined };
+type Recorded = { text: string; cap: number | undefined; lines: number | undefined };
 const rec = vi.hoisted(() => ({
   texts: [] as Recorded[],
   inputs: [] as Array<{ placeholder?: string; cap: number | undefined }>,
@@ -39,7 +40,11 @@ vi.mock("react-native", async (importOriginal) => {
   const rn = await importOriginal<typeof import("react-native")>();
   type AnyProps = Record<string, unknown> & { children?: ReactNode };
   const Text = forwardRef(function Text(props: AnyProps, ref) {
-    rec.texts.push({ text: flatten(props.children), cap: props.maxFontSizeMultiplier as number | undefined });
+    rec.texts.push({
+      text: flatten(props.children),
+      cap: props.maxFontSizeMultiplier as number | undefined,
+      lines: props.numberOfLines as number | undefined,
+    });
     return createElement(rn.Text as never, { ...props, ref });
   });
   const TextInput = forwardRef(function TextInput(props: AnyProps, ref) {
@@ -74,7 +79,7 @@ const SHOW: ShowDetail = {
   slug: "the-scarlet-oath",
   title: "The Scarlet Oath",
   synopsis: null,
-  genre: [],
+  genre: ["Drama"],
   orientation: "horizontal",
   posterImageUrl: null,
   heroImageUrl: null,
@@ -102,7 +107,21 @@ vi.mock("@/api/client", async (importOriginal) => {
   return { ...actual, api: { show: async () => SHOW } };
 });
 vi.mock("@/api/config-context", () => ({
-  useConfig: (): Partial<AppConfig> => ({ signupGate: { mode: "tiers" } }),
+  useConfig: (): Partial<AppConfig> => ({
+    signupGate: { mode: "tiers" },
+    // Settings' About group.
+    urls: {
+      web: "https://matio.tv",
+      terms: "https://matio.tv/terms",
+      privacy: "https://matio.tv/privacy",
+      cookies: "https://matio.tv/cookies",
+      support: "mailto:contact@matio.tv",
+    },
+  }),
+}));
+vi.mock("expo-web-browser", () => ({ openBrowserAsync: async () => undefined }));
+vi.mock("expo-constants", () => ({
+  default: { expoConfig: { version: "0.1.0" }, nativeBuildVersion: "6" },
 }));
 vi.mock("@/api/catalog-context", () => ({
   useCatalog: () => ({
@@ -143,14 +162,16 @@ vi.mock("expo-glass-effect", () => ({
 vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
+import AccountScreen from "@/app/(tabs)/account";
 import BrowseScreen from "@/app/(tabs)/browse";
+import SettingsScreen from "@/app/(tabs)/settings";
 import ShowScreen from "@/app/show/[slug]";
 import { AuthStalled } from "@/components/auth-stalled";
 import { GlassTabBar } from "@/components/glass-tab-bar";
 import { HeroCard } from "@/components/home-feed";
 import { SignInForm } from "@/components/sign-in-form";
 import { SignupWall } from "@/components/signup-wall";
-import { GoldButton, PosterCard, Row } from "@/components/ui";
+import { Chevron, GoldButton, GroupLabel, PosterCard, Row, SectionHeader } from "@/components/ui";
 import { VerticalChrome } from "@/components/vertical-chrome";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -179,6 +200,17 @@ function roleOf(label: string): string | null {
 
 const byLabel = (label: string) => container.querySelector(`[aria-label="${label}"]`);
 const capOf = (text: string) => rec.texts.filter((r) => r.text === text).map((r) => r.cap);
+
+// The DOM element that renders a visible text.
+function leaf(label: string): Element | undefined {
+  return Array.from(container.querySelectorAll("*")).find(
+    (el) => el.children.length === 0 && el.textContent === label,
+  );
+}
+
+// react-native-web renders accessibilityRole="header" as a heading element.
+const isHeading = (label: string) =>
+  leaf(label)?.closest('h1, h2, h3, h4, h5, h6, [role="heading"]') != null;
 
 beforeEach(() => {
   rec.texts.length = 0;
@@ -414,6 +446,157 @@ describe("fixed-height chrome caps Larger Text (#288 item 13)", () => {
 
     for (const text of ["Matio Original", "The Scarlet Oath", "Ep. 3 · Third oath · 10 min", "1:05", "10:00"]) {
       expect(capOf(text), text).toEqual([1.3]);
+    }
+  });
+
+  it("the show page's hero copy in its fixed 330pt — and none of it takes the «‹»'s tap (#304 item 7)", async () => {
+    render(<ShowScreen />);
+    await settle();
+
+    // The pill, the title (at most three lines of it) and the genre chip.
+    for (const text of ["Matio Original", "The Scarlet Oath", "Drama"]) {
+      expect(capOf(text).length, text).toBeGreaterThan(0);
+      expect(capOf(text).every((cap) => cap === 1.3), text).toBe(true);
+    }
+    const title = rec.texts.filter((r) => r.text === "The Scarlet Oath");
+    expect(title.every((r) => r.lines === 3)).toBe(true);
+
+    // The copy block is transparent to touches, so where a long title
+    // reaches up to the «‹» the tap still lands on the button.
+    // react-native-web writes pointerEvents as an atomic class — learnt from
+    // a probe, so only "none" counts (not "box-none" or "auto").
+    const probe = document.createElement("div");
+    const probeRoot = createRoot(probe);
+    act(() => probeRoot.render(<View pointerEvents="none" />));
+    const none = Array.from(probe.firstElementChild?.classList ?? []).find((c) =>
+      c.startsWith("r-pointerEvents-"),
+    );
+    act(() => probeRoot.unmount());
+    expect(none).toBeDefined();
+    expect(leaf("The Scarlet Oath")?.closest(`.${none}`)).toBeTruthy();
+  });
+});
+
+describe("the vertical player's play/pause says its state; Magic Tap toggles it (#304 item 4)", () => {
+  const chrome = (paused: boolean, onTogglePlay = vi.fn()) => {
+    render(
+      <VerticalChrome
+        showTitle="The Scarlet Oath"
+        episodeTitle="Third oath"
+        episodeNumber={3}
+        positionSeconds={65}
+        durationSeconds={600}
+        paused={paused}
+        muted={false}
+        onTogglePlay={onTogglePlay}
+        onToggleMute={() => undefined}
+        onBack={() => undefined}
+      />,
+    );
+    return onTogglePlay;
+  };
+
+  it("reads «Play/Pause» with the state as its value", () => {
+    chrome(false);
+    expect(byLabel("Play/Pause")?.getAttribute("aria-valuetext")).toBe("Playing");
+
+    chrome(true);
+    expect(byLabel("Play/Pause")?.getAttribute("aria-valuetext")).toBe("Paused");
+  });
+
+  it("the two-finger double tap toggles playback, like a tap on the picture", () => {
+    const onTogglePlay = chrome(false);
+    const surface = rec.pressables.filter((p) => p.accessibilityLabel === "Play/Pause").at(-1);
+
+    expect(surface?.onMagicTap).toBeTypeOf("function");
+    act(() => (surface?.onMagicTap as () => void)());
+    expect(onTogglePlay).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("headings and tab bars (#304 item 6)", () => {
+  it("each tab screen's title is a heading", async () => {
+    render(<BrowseScreen />);
+    expect(isHeading("Browse")).toBe(true);
+
+    render(<SettingsScreen />);
+    expect(isHeading("Settings")).toBe(true);
+
+    render(<AccountScreen />);
+    expect(isHeading("Account")).toBe(true);
+
+    render(<ShowScreen />);
+    await settle();
+    expect(isHeading("The Scarlet Oath")).toBe(true);
+  });
+
+  it("section headers and the settings groups' labels are headings", () => {
+    render(
+      <>
+        <SectionHeader label="Up next" />
+        <GroupLabel label="Playback" />
+      </>,
+    );
+    expect(isHeading("Up next")).toBe(true);
+    expect(isHeading("Playback")).toBe(true);
+  });
+
+  it("the bar holds its tabs as a tab bar, so each reads «tab, n of 4»", () => {
+    const routes = [
+      { key: "index-1", name: "index" },
+      { key: "browse-1", name: "browse" },
+    ];
+    render(
+      <GlassTabBar
+        {...({
+          state: { index: 0, routes },
+          descriptors: {
+            "index-1": { options: { title: "Home" } },
+            "browse-1": { options: { title: "Browse" } },
+          },
+          navigation: { emit: () => ({ defaultPrevented: false }), navigate: () => undefined },
+        } as unknown as Parameters<typeof GlassTabBar>[0])}
+      />,
+    );
+    const bar = container.querySelector('[role="tabbar"]');
+
+    expect(bar).toBeTruthy();
+    expect(bar?.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  });
+
+  it("the show page's Episodes / About segments sit in a tab bar", async () => {
+    render(<ShowScreen />);
+    await settle();
+
+    expect(leaf("Episodes")?.closest('[role="tab"]')?.closest('[role="tabbar"]')).toBeTruthy();
+  });
+});
+
+describe("a row's trailing glyph is decoration (#304 item 5)", () => {
+  const hidden = (glyph: string) => leaf(glyph)?.closest('[aria-hidden="true"]') != null;
+
+  it("«↗» and «›» are hidden from VoiceOver", () => {
+    render(
+      <>
+        <Chevron external />
+        <Chevron />
+      </>,
+    );
+    expect(hidden("↗")).toBe(true);
+    expect(hidden("›")).toBe(true);
+  });
+
+  it("the Settings legal rows read «Terms of Service, link» — not «…, north east arrow, link»", () => {
+    render(<SettingsScreen />);
+
+    for (const label of ["Terms of Service", "Privacy Policy", "Cookie Policy"]) {
+      const row = leaf(label)?.closest('[role="link"]');
+      expect(row, label).toBeTruthy();
+      const arrow = Array.from(row?.querySelectorAll("*") ?? []).find(
+        (el) => el.children.length === 0 && el.textContent === "↗",
+      );
+      expect(arrow, label).toBeTruthy();
+      expect(arrow?.closest('[aria-hidden="true"]'), label).toBeTruthy();
     }
   });
 });

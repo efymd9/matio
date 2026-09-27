@@ -166,6 +166,8 @@ export default function HomeScreen() {
             keyExtractor={(show) => show.id}
             horizontal
             showsHorizontalScrollIndicator={false}
+            // The status-bar tap belongs to the feed (home-feed.tsx).
+            scrollsToTop={false}
             snapToInterval={STEP}
             snapToAlignment="start"
             disableIntervalMomentum
