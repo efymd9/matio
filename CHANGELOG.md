@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.15.0](https://github.com/efymd9/matio/compare/matio-v0.14.0...matio-v0.15.0) (2026-09-27)
+
+
+### Features
+
+* мобильное — «потяни для обновления» на главной, золотой спиннер ([#313](https://github.com/efymd9/matio/issues/313)) ([#331](https://github.com/efymd9/matio/issues/331)) ([c1dbaa2](https://github.com/efymd9/matio/commit/c1dbaa2d08b54843ce415f9d6ef9463972130f85))
+* мобильное — Sentry в приложении, DSN-опционально, скрабберы веба ([#317](https://github.com/efymd9/matio/issues/317)) ([#344](https://github.com/efymd9/matio/issues/344)) ([ba040c4](https://github.com/efymd9/matio/commit/ba040c4deaabc0ab5fe6c4699289f74f91989134))
+* мобильное — удаление аккаунта в приложении, App Store 5.1.1(v) ([#309](https://github.com/efymd9/matio/issues/309)) ([#335](https://github.com/efymd9/matio/issues/335)) ([29eaddf](https://github.com/efymd9/matio/commit/29eaddf740bb949a0448c22142f8d7eeba8b0c80))
+
+
+### Bug fixes
+
+* playback-token больше не пишет в лог параметры упавшего запроса — только id шоу и эпизода ([#305](https://github.com/efymd9/matio/issues/305)) ([#327](https://github.com/efymd9/matio/issues/327)) ([d9aa9f2](https://github.com/efymd9/matio/commit/d9aa9f20e510579e5f7aae8179c2e200a0574a33))
+* картинки — подписанные Mux-кадры мимо оптимизатора, remotePatterns только наш Blob-стор ([#306](https://github.com/efymd9/matio/issues/306)) ([#332](https://github.com/efymd9/matio/issues/332)) ([f44908d](https://github.com/efymd9/matio/commit/f44908dc85a655ebe1f30db10b6091072300ac6f))
+* мобильное — «Продолжить просмотр» без чужой истории после смены аккаунта, с повтором и обновлением при возврате ([#298](https://github.com/efymd9/matio/issues/298)) ([#318](https://github.com/efymd9/matio/issues/318)) ([f9c5490](https://github.com/efymd9/matio/commit/f9c549021e597a83fe6fbe7692d779d8cd16f1e0))
+* мобильное — /v1/config обновляется при возврате в приложение ([#301](https://github.com/efymd9/matio/issues/301)) ([#325](https://github.com/efymd9/matio/issues/325)) ([29e7347](https://github.com/efymd9/matio/commit/29e734749d9f39fee5b70b2740591c8d7b170a30))
+* мобильное — /v1/progress чинит отсутствующую строку users, у каждого эпизода своя позиция, плеер не ждёт поиска позиции ([#303](https://github.com/efymd9/matio/issues/303)) ([#333](https://github.com/efymd9/matio/issues/333)) ([286709c](https://github.com/efymd9/matio/commit/286709c09ce847e42923dc0dce84a897590d1375))
+* мобильное — ErrorBoundary на маршрутах, падение рендера не закрывает приложение ([#308](https://github.com/efymd9/matio/issues/308)) ([#337](https://github.com/efymd9/matio/issues/337)) ([9fe73e0](https://github.com/efymd9/matio/commit/9fe73e0a2b8ac66db0748e32a8be55778d4316cf))
+* мобильное — иконка и заставка Matio, испанская локализация бандла, только iPhone, typecheck приложения в CI ([#307](https://github.com/efymd9/matio/issues/307)) ([#330](https://github.com/efymd9/matio/issues/330)) ([5c1480c](https://github.com/efymd9/matio/commit/5c1480c77c4d9a6385048c6bd4d4aebb9eb851c6))
+* мобильное — клиент API и токен Clerk: публичные чтения без Clerk, запись трекинга не уходит анонимно, keychain за блокировкой ([#299](https://github.com/efymd9/matio/issues/299)) ([#320](https://github.com/efymd9/matio/issues/320)) ([61e745f](https://github.com/efymd9/matio/commit/61e745ff5793ad65ea8fbbc64aafb1fa14f818dc))
+* мобильное — пачка доступности [#304](https://github.com/efymd9/matio/issues/304): VoiceOver, 44pt, откат чипа, наверх на главной, кэш кадров Mux ([#338](https://github.com/efymd9/matio/issues/338)) ([6202c88](https://github.com/efymd9/matio/commit/6202c88af8fcbf48f0060ddabb04bb065b537a7b))
+* мобильное — плеер: ретрай предзагрузки, фон и PiP, позиция каждого эпизода, VoiceOver соседних страниц ([#302](https://github.com/efymd9/matio/issues/302)) ([#322](https://github.com/efymd9/matio/issues/322)) ([5559591](https://github.com/efymd9/matio/commit/55595913204792440782d4de05dde81d687978f2))
+* мобильное — подписчик смотрит subscriber-эпизоды, решение за маршрутом токена ([#316](https://github.com/efymd9/matio/issues/316)) ([#334](https://github.com/efymd9/matio/issues/334)) ([505d6b9](https://github.com/efymd9/matio/commit/505d6b978c096514742b07a8d945a53c94c5900f))
+* мобильное — страница сериала: «Только для подписчиков» вместо «Subscribe», без сгенерированного синопсиса, постер вместо пустого hero, жанры как в Browse ([#311](https://github.com/efymd9/matio/issues/311)) ([#324](https://github.com/efymd9/matio/issues/324)) ([bae59ec](https://github.com/efymd9/matio/commit/bae59ece027e3989853fe14bce927ae7e7003f2c))
+* мобильное — трекинг переживает обрывы сети: сохранение прогресса и офлайн-очередь сегментов ([#300](https://github.com/efymd9/matio/issues/300)) ([#329](https://github.com/efymd9/matio/issues/329)) ([23c41e7](https://github.com/efymd9/matio/commit/23c41e7aee314c69c5d7f978e12ea55727971756))
+* мобильное — три текста цвета rust проходят контраст AA ([#314](https://github.com/efymd9/matio/issues/314)) ([#345](https://github.com/efymd9/matio/issues/345)) ([5962eac](https://github.com/efymd9/matio/commit/5962eac55dceacbfa890d9003c8a46c1126e4ab1))
+* мобильное — экран блокировки называет сериал, а не «Matio» ([#315](https://github.com/efymd9/matio/issues/315)) ([#328](https://github.com/efymd9/matio/issues/328)) ([ea96275](https://github.com/efymd9/matio/commit/ea962758871d2e807e0c38de0d17c7d9304a5890))
+* приложение в /privacy (DRAFT) и строка об Условиях и Политике в форме входа ([#312](https://github.com/efymd9/matio/issues/312)) ([#348](https://github.com/efymd9/matio/issues/348)) ([2d95f4e](https://github.com/efymd9/matio/commit/2d95f4e4fce6ea6a3a9510588aa345d6e8fe7ee5))
+* юр. страницы в приложении — только текст документа, без шапки сайта и трекеров (?embed=app) ([#310](https://github.com/efymd9/matio/issues/310)) ([#323](https://github.com/efymd9/matio/issues/323)) ([4d7ff8b](https://github.com/efymd9/matio/commit/4d7ff8b1e2adfad056aee599c6d96d4c9a7763a7))
+
 ## [0.14.0](https://github.com/efymd9/matio/compare/matio-v0.13.0...matio-v0.14.0) (2026-09-27)
 
 
