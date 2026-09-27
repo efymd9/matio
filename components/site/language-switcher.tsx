@@ -74,6 +74,62 @@ export function AlternateLanguageLink({ className }: { className?: string }) {
   );
 }
 
+// The /ideas header's switcher (#297): both languages inline, "EN · ES", no
+// dropdown — the landing's trimmed header has room for nothing else. Real
+// <a href> to the page's twin, so it is crawlable in the SSR HTML (no portal),
+// with the same cookie-first click handler as the menu rows.
+export function InlineLanguageToggle() {
+  const locale = useLocale();
+  const t = useT();
+  const pathname = usePathname();
+  const { path: basePath } = stripLocalePrefix(pathname ?? "");
+  const hrefFor = (opt: Locale) =>
+    isLocalizablePath(basePath) ? localizedPath(basePath, opt) : pathname;
+  return (
+    <div
+      role="group"
+      aria-label={t.language.label}
+      className="flex items-center gap-0.5 text-[13px] leading-none"
+    >
+      <InlineLocaleLink option="en" href={hrefFor("en")} active={locale === "en"} />
+      <span aria-hidden className="text-cream/55">
+        ·
+      </span>
+      <InlineLocaleLink option="es" href={hrefFor("es")} active={locale === "es"} />
+    </div>
+  );
+}
+
+// One row per locale so the click-handler hook is never called in a loop.
+function InlineLocaleLink({
+  option,
+  href,
+  active,
+}: {
+  option: Locale;
+  href: string;
+  active: boolean;
+}) {
+  const onClick = useLocaleLinkHandler(option);
+  return (
+    <a
+      href={href}
+      hrefLang={option}
+      aria-current={active ? "true" : undefined}
+      onClick={onClick}
+      className={cn(
+        // A 44px-tall hit area around 13px text.
+        "inline-flex min-h-11 items-center rounded-sm px-1 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold/60",
+        active
+          ? "font-semibold text-cream"
+          : "font-medium text-cream/70 hover:text-cream",
+      )}
+    >
+      {option.toUpperCase()}
+    </a>
+  );
+}
+
 function LocaleMenuRow({
   option,
   href,

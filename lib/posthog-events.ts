@@ -75,7 +75,12 @@ export type FunnelEvent =
   // saved conversion funnel keeps its meaning even though the underlying
   // Checkout Session was created a step earlier (when the consent box was
   // ticked). Properties are ids only.
-  | "wallet_checkout_confirmed";
+  | "wallet_checkout_confirmed"
+  // A fan sent a story idea from /ideas (#297), fired on the server's
+  // `{ ok: true }` only. Properties are enums and ids — idea_kind
+  // ("continuation" | "new_series") and, for a continuation, show_slug.
+  // Never the name, the address, the text or its length.
+  | "idea_submitted";
 
 // Minimal surface we use. The provider assigns the real posthog-js instance
 // (which is structurally compatible) to window.posthog after init.

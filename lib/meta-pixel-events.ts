@@ -49,7 +49,11 @@ export type StandardEvent =
   | "InitiateCheckout"
   | "CompleteRegistration"
   | "Subscribe"
-  | "Purchase";
+  | "Purchase"
+  // A story idea sent from /ideas (#297): browser-only, no CAPI, and only
+  // `{ content_category: "story_idea" }` — nothing the fan typed. Not `Lead`,
+  // which means "finished a first episode".
+  | "SubmitApplication";
 
 // Membership price for top-of-funnel browser value signals. The authoritative
 // amount for the server-side Purchase event is read from Stripe; this is only

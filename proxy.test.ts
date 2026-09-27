@@ -407,3 +407,23 @@ describe("proxy — the app's embed of the legal documents", () => {
     expect(res?.status).toBe(401);
   });
 });
+
+// #297 — /ideas joined the localized set through lib/seo.ts alone; proxy.ts
+// was not touched. What is proved here is that the wiring picks it up: a
+// Spanish-preferring person landing on the bare URL from an ad is sent to
+// the /es twin with the campaign parameters intact.
+describe("proxy — the /ideas landing is a localized page", () => {
+  it("307s a Spanish browser from /ideas to /es/ideas, keeping ?utm_*", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(
+      request("/ideas?utm_source=x", { "accept-language": "es-MX,es;q=0.9" }),
+      event,
+    );
+
+    expect(res?.status).toBe(307);
+    const location = new URL(res!.headers.get("location")!);
+    expect(location.pathname).toBe("/es/ideas");
+    expect(location.searchParams.get("utm_source")).toBe("x");
+  });
+});

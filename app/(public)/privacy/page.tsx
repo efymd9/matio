@@ -3,7 +3,10 @@
 // ORDINARY LTD, company no. 17381666, UK). No DPO appointed (not required
 // under Art. 37). Supervisory authorities named inline: AEPD (ES) / ICO (UK).
 // PostHog disclosure added 2026-05-30. Google Analytics (GA4) disclosure
-// added 2026-06-24.
+// added 2026-06-24. Story ideas (/ideas, #297) added 2026-09-27 in §2/§3/§4/
+// §6/§7/§8 — same DRAFT status (counsel questions: #168). matio.tv/ideas is
+// plain text on purpose: every internal link here must survive ?embed=app
+// (app/(public)/legal-embed.test.tsx).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalLink } from "@/components/site/legal-link";
@@ -21,8 +24,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED_ES = "24 de junio de 2026";
-const LAST_UPDATED_EN = "June 24, 2026";
+const LAST_UPDATED_ES = "27 de septiembre de 2026";
+const LAST_UPDATED_EN = "September 27, 2026";
 
 export default async function PrivacyPage() {
   const { locale, t } = await getDict();
@@ -133,6 +136,20 @@ function PrivacyEn() {
             conversations, and transactional email such as the new-episode
             notifications you ask for.
           </li>
+          <li id="ideas" className="scroll-mt-24">
+            <strong>Story ideas</strong> — if you send us an idea through
+            matio.tv/ideas, we keep the idea itself (the series it continues
+            or that it is a new one, the working title, the logline and the
+            story), the name or pen name you give us and your email address;
+            whether you asked for emails about new episodes and story calls,
+            the version of the Idea Submission Terms you accepted, and the
+            site language; and the campaign that brought you, only while
+            marketing cookies are on — in the EU/EEA, the UK and Switzerland
+            after you accept them in the banner; elsewhere they are on by
+            default and you can switch them off under &ldquo;Cookie
+            preferences&rdquo; in the footer. You don&rsquo;t need an account
+            to send an idea, and we don&rsquo;t store your IP address with it.
+          </li>
           <li>
             <strong>Technical data</strong> — IP address, browser user-agent,
             request logs needed to operate, secure and debug the service.
@@ -162,6 +179,14 @@ function PrivacyEn() {
             <strong>To improve the service</strong> (aggregate analytics,
             playback-quality monitoring via Mux Data). Lawful basis:{" "}
             <em>legitimate interests</em>.
+          </li>
+          <li>
+            <strong>To review a story idea you send us</strong>, contact you
+            about it and keep a record of the licence you grant. Lawful basis:{" "}
+            <em>performance of a contract</em> — the Idea Submission Terms you
+            accept when you send it. <strong>Emails about new episodes and
+            story calls</strong>: lawful basis <em>consent</em>, only if you
+            tick the box; we don&rsquo;t send them yet.
           </li>
           <li>
             <strong>Marketing and advertising measurement</strong> via the{" "}
@@ -245,6 +270,14 @@ function PrivacyEn() {
             data (page views, approximate location from IP, browser/device
             details) so we can measure site traffic. US transfers covered by SCCs.
           </li>
+          <li>
+            <strong>Production partners</strong> — only for an idea we develop
+            with you, and only what the production needs.
+          </li>
+          <li>
+            <strong>Namecheap, Inc.</strong> (PrivateEmail) — our mailbox at
+            contact@matio.tv, for correspondence with you.
+          </li>
         </ul>
         <p>
           We do not sell your personal data. We may disclose information when
@@ -287,6 +320,10 @@ function PrivacyEn() {
             up to 25 months, then deleted or fully anonymised.
           </li>
           <li>
+            <strong>Story ideas</strong>: up to 24 months from submission, or
+            longer only if we develop your idea with you.
+          </li>
+          <li>
             <strong>Request and security logs</strong>: 30 days.
           </li>
         </ul>
@@ -299,6 +336,11 @@ function PrivacyEn() {
           consent you have given (e.g. by clearing marketing cookies in the
           cookie banner). To exercise these rights, contact us at{" "}
           <strong>contact@matio.tv</strong>. We will respond within 30 days.
+        </p>
+        <p>
+          You can withdraw your consent to emails about new episodes and story
+          calls at any time by writing to <strong>contact@matio.tv</strong> or
+          through the &ldquo;unsubscribe&rdquo; link in any email we send you.
         </p>
         <p>
           If you believe we have not handled your data correctly, you can lodge
@@ -320,7 +362,8 @@ function PrivacyEn() {
         <p>
           The service is intended for users aged 16 and over. We do not
           knowingly collect personal data from children below that age. If we
-          learn we have, we will delete it.
+          learn we have, we will delete it. Story ideas may only be sent by
+          people aged 18 or over.
         </p>
       </Section>
 
@@ -438,6 +481,21 @@ function PrivacyEs() {
             conversaciones de soporte y correos transaccionales, como los
             avisos de nuevos episodios que solicitas.
           </li>
+          <li id="ideas" className="scroll-mt-24">
+            <strong>Ideas de historias</strong>: si nos envías una idea a
+            través de matio.tv/ideas, guardamos la idea en sí (la serie que
+            continúa o que se trata de una nueva, el título provisional, la
+            premisa y la historia), el nombre o seudónimo que nos indicas y tu
+            dirección de correo electrónico; si pediste recibir correos sobre
+            nuevos episodios y convocatorias de historias, la versión de las
+            Condiciones de envío de ideas que aceptaste y el idioma del sitio;
+            y la campaña que te trajo, solo mientras las cookies de marketing
+            estén activadas: en la UE/EEE, el Reino Unido y Suiza, después de
+            que las aceptes en el banner; en el resto del mundo están activadas
+            por defecto y puedes desactivarlas en «Preferencias de cookies», en
+            el pie de página. No necesitas una cuenta para enviar una idea y no
+            guardamos tu dirección IP junto con ella.
+          </li>
           <li>
             <strong>Datos técnicos</strong>: dirección IP, agente del navegador
             y registros de petición necesarios para operar, asegurar y depurar
@@ -468,6 +526,15 @@ function PrivacyEs() {
             <strong>Para mejorar el servicio</strong> (analítica agregada,
             monitorización de calidad de reproducción con Mux Data). Base
             jurídica: <em>interés legítimo</em>.
+          </li>
+          <li>
+            <strong>Para revisar una idea de historia que nos envías</strong>,
+            contactarte sobre ella y conservar constancia de la licencia que
+            nos concedes. Base jurídica: <em>ejecución de un contrato</em>: las
+            Condiciones de envío de ideas que aceptas al enviarla.{" "}
+            <strong>Correos sobre nuevos episodios y convocatorias de
+            historias</strong>: base jurídica <em>consentimiento</em>, solo si
+            marcas la casilla; todavía no los enviamos.
           </li>
           <li>
             <strong>Marketing y medición publicitaria</strong> mediante las
@@ -560,6 +627,14 @@ function PrivacyEs() {
             ubicación aproximada por IP, detalles de navegador/dispositivo) para
             medir el tráfico del sitio. Transferencias a EE. UU. amparadas por CCT.
           </li>
+          <li>
+            <strong>Socios de producción</strong> — solo para una idea que
+            desarrollemos contigo, y solo lo que necesite la producción.
+          </li>
+          <li>
+            <strong>Namecheap, Inc.</strong> (PrivateEmail) — nuestro buzón
+            contact@matio.tv, para la correspondencia contigo.
+          </li>
         </ul>
         <p>
           No vendemos tus datos personales. Podemos divulgarlos cuando la ley
@@ -605,6 +680,10 @@ function PrivacyEs() {
             completo.
           </li>
           <li>
+            <strong>Ideas de historias</strong>: hasta 24 meses desde el envío,
+            o más solo si desarrollamos tu idea contigo.
+          </li>
+          <li>
             <strong>Registros de petición y seguridad</strong>: 30 días.
           </li>
         </ul>
@@ -618,6 +697,12 @@ function PrivacyEs() {
           rechazando las cookies de marketing en el banner). Para ejercerlos,
           escríbenos a <strong>contact@matio.tv</strong>. Responderemos en un
           plazo de 30 días.
+        </p>
+        <p>
+          Puedes retirar en cualquier momento tu consentimiento para recibir
+          correos sobre nuevos episodios y convocatorias de historias
+          escribiendo a <strong>contact@matio.tv</strong> o mediante el enlace
+          «darse de baja» de cualquier correo que te enviemos.
         </p>
         <p>
           Si consideras que no hemos tratado tus datos correctamente, puedes
@@ -639,7 +724,8 @@ function PrivacyEs() {
         <p>
           El servicio está destinado a usuarios de 16 años o más. No recogemos
           conscientemente datos personales de menores. Si tenemos conocimiento
-          de ello, los eliminaremos.
+          de ello, los eliminaremos. Solo pueden enviar ideas de historias las
+          personas de 18 años o más.
         </p>
       </Section>
 

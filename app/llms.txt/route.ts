@@ -47,6 +47,7 @@ export async function GET() {
     "",
     `- [About](${SITE_URL}/about): what Matio is and who runs it`,
     `- [Press](${SITE_URL}/press): boilerplate, press kit and press contact`,
+    `- [Story ideas](${SITE_URL}/ideas): fans pitch a continuation of a Matio series or a brand-new one; the best ideas may be made, with the author credited`,
     `- [Terms of Service](${SITE_URL}/terms)`,
     `- [Privacy Policy](${SITE_URL}/privacy)`,
     `- [Cookie Policy](${SITE_URL}/cookies)`,

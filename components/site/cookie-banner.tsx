@@ -69,6 +69,11 @@ export function CookieBanner({
 
   return (
     <div
+      // A marker, not behaviour: layouts that pin their own bar to the
+      // bottom of the screen (the /ideas "Next" bar, #297) look it up so
+      // they stay out of the banner's way. Present exactly while the banner
+      // is on screen — the component renders nothing otherwise.
+      data-cookie-banner=""
       role="dialog"
       aria-modal="false"
       aria-labelledby="cookie-banner-heading"

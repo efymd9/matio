@@ -39,6 +39,7 @@ set -uo pipefail
 SCAN_DIRS=(
   "components/site"
   "components/watch"
+  "components/ideas"
   "app/(public)"
   "app/watch"
 )

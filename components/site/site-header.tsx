@@ -6,9 +6,10 @@ import { usePathname } from "next/navigation";
 import { Menu } from "@base-ui/react/menu";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n/client";
+import { stripLocalePrefix } from "@/lib/seo";
 import { MatioLogo } from "./matio-logo";
 import { Icon } from "./icon";
-import { LanguageSwitcher } from "./language-switcher";
+import { InlineLanguageToggle, LanguageSwitcher } from "./language-switcher";
 
 // Sticky transparent → frosted-dark header. Hides on /watch (immersive
 // fullscreen player) and /admin (own nav).
@@ -36,11 +37,17 @@ export function SiteHeader({
   // (circular back/share buttons over the hero, no site header below the
   // tablet breakpoint) — the persistent nav only appears from 834px up.
   const showDetail = pathname?.startsWith("/shows/") ?? false;
+  // The /ideas landing (#297) gets a trimmed header — the logo and EN · ES,
+  // nothing else: every other exit from a half-written story loses the draft.
+  // Stripped of the locale prefix so both /ideas and /es/ideas match,
+  // whatever usePathname() reports behind the /es rewrite.
+  const minimal = stripLocalePrefix(pathname ?? "").path === "/ideas";
   return (
     <SiteHeaderContent
       authSlot={authSlot}
       paymentsEnabled={paymentsEnabled}
       mobileHidden={showDetail}
+      minimal={minimal}
     />
   );
 }
@@ -60,10 +67,13 @@ function SiteHeaderContent({
   authSlot,
   paymentsEnabled,
   mobileHidden = false,
+  minimal = false,
 }: {
   authSlot: React.ReactNode;
   paymentsEnabled: boolean;
   mobileHidden?: boolean;
+  // Logo + inline language toggle only: no nav, no account slot, no menu.
+  minimal?: boolean;
 }) {
   const scrolled = useSyncExternalStore(
     subscribeToScroll,
@@ -94,40 +104,48 @@ function SiteHeaderContent({
           <MatioLogo size={22} className="tablet:hidden" />
           <MatioLogo size={24} className="hidden tablet:block" />
         </Link>
-        {/* Negative-margin padding trick: visually compact but exposes a
-            ~40px-tall hit area to touch + keyboard users without inflating
-            the visual gap between siblings. */}
-        <nav className="hidden gap-5 text-sm tablet:flex xl:gap-6">
-          <NavLink href="/" active={pathname === "/"}>
-            {t.header.browse}
-          </NavLink>
-          <NavLink href="/about" active={pathname === "/about"}>
-            {t.footer.about}
-          </NavLink>
-          <NavLink href="/press" active={pathname === "/press"}>
-            {t.footer.press}
-          </NavLink>
-          {/* No prefetch: for a signed-out visitor proxy.ts answers
-              /subscribe with a 307 to Clerk's origin, and the prefetch
-              fetch dies on CORS as an unhandled "Failed to fetch" (#259). */}
-          {paymentsEnabled && (
-            <NavLink
-              href="/subscribe"
-              active={pathname === "/subscribe"}
-              prefetch={false}
-            >
-              {t.header.subscribe}
-            </NavLink>
-          )}
-        </nav>
-        <div className="ml-auto flex items-center gap-3 sm:gap-4">
-          <LanguageSwitcher />
-          {authSlot}
-          {/* Mobile-only nav disclosure — without it phones can't reach
-              /about or /subscribe from the header (the inline nav above is
-              tablet:flex-gated). Desktop/tablet hides the trigger. */}
-          <MobileNavMenu t={t} paymentsEnabled={paymentsEnabled} />
-        </div>
+        {minimal ? (
+          <div className="ml-auto flex items-center">
+            <InlineLanguageToggle />
+          </div>
+        ) : (
+          <>
+            {/* Negative-margin padding trick: visually compact but exposes a
+                ~40px-tall hit area to touch + keyboard users without inflating
+                the visual gap between siblings. */}
+            <nav className="hidden gap-5 text-sm tablet:flex xl:gap-6">
+              <NavLink href="/" active={pathname === "/"}>
+                {t.header.browse}
+              </NavLink>
+              <NavLink href="/about" active={pathname === "/about"}>
+                {t.footer.about}
+              </NavLink>
+              <NavLink href="/press" active={pathname === "/press"}>
+                {t.footer.press}
+              </NavLink>
+              {/* No prefetch: for a signed-out visitor proxy.ts answers
+                  /subscribe with a 307 to Clerk's origin, and the prefetch
+                  fetch dies on CORS as an unhandled "Failed to fetch" (#259). */}
+              {paymentsEnabled && (
+                <NavLink
+                  href="/subscribe"
+                  active={pathname === "/subscribe"}
+                  prefetch={false}
+                >
+                  {t.header.subscribe}
+                </NavLink>
+              )}
+            </nav>
+            <div className="ml-auto flex items-center gap-3 sm:gap-4">
+              <LanguageSwitcher />
+              {authSlot}
+              {/* Mobile-only nav disclosure — without it phones can't reach
+                  /about or /subscribe from the header (the inline nav above is
+                  tablet:flex-gated). Desktop/tablet hides the trigger. */}
+              <MobileNavMenu t={t} paymentsEnabled={paymentsEnabled} />
+            </div>
+          </>
+        )}
       </div>
     </header>
   );
