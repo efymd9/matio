@@ -18,7 +18,16 @@ import type {
 // cases — the chrome, reduced to the `paused` it is handed.
 
 type VideoProps = {
-  source: { uri: string; metadata?: { imageUri?: string } };
+  source: {
+    uri: string;
+    metadata?: {
+      title?: string;
+      subtitle?: string;
+      artist?: string;
+      description?: string;
+      imageUri?: string;
+    };
+  };
   paused: boolean;
   onLoad?: (e: { duration: number }) => void;
   onProgress?: (e: { currentTime: number }) => void;
@@ -845,6 +854,31 @@ describe("EpisodeFeed — the lock-screen artwork is resized (#292 item 10)", ()
     expect(imageUri?.startsWith("https://matio.tv/_next/image?")).toBe(true);
     expect(params.get("url")).toBe(poster);
     expect(params.get("w")).toBe("640");
+  });
+});
+
+describe("EpisodeFeed — the lock screen names the show (#315)", () => {
+  // react-native-video 6.19: iOS now-playing shows title + artist; Android
+  // 13+ media controls read title + artist; Android ≤12's own notification
+  // is title + description. A bare «Capítulo 3» must come with its show.
+  it("the page in view hands the OS the episode as the title and the show as the artist — never «Matio»", async () => {
+    await renderFeed(makeShow("horizontal", ["free", "free"]));
+
+    const metadata = video("ep1").props.source.metadata;
+    expect(metadata?.title).toBe("Episode 1");
+    expect(metadata?.artist).toBe("The Scarlet Oath");
+    // Android ≤12 prints description as the notification's second line.
+    expect(metadata?.description).toBe("The Scarlet Oath");
+    expect(Object.values(metadata ?? {})).not.toContain("Matio");
+  });
+
+  it("a neighbour warmed in the pool carries its own episode, so the auto-advance shows the right one", async () => {
+    h.allPages = true;
+    await renderFeed(makeShow("vertical", ["free", "free"]));
+
+    const metadata = video("ep2").props.source.metadata;
+    expect(metadata?.title).toBe("Episode 2");
+    expect(metadata?.artist).toBe("The Scarlet Oath");
   });
 });
 
