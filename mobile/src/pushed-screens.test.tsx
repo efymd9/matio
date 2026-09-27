@@ -48,12 +48,24 @@ vi.mock("@/auth/clerk", () => ({
   useOptionalAuth: () => ({ isLoaded: true, isSignedIn: false, stalled: false, retry: () => undefined }),
 }));
 // The player's orientation lock and the feed itself are not under test: the
-// errors come before either.
+// errors come before either. The #302 cases settle the screen and read what
+// it hands the feed.
+type FeedProps = {
+  initialIndex: number;
+  resumeSeconds: number;
+  onCurrentChange: (index: number, positionSeconds: number) => void;
+};
+const feed = vi.hoisted(() => ({ settled: false, props: null as null | FeedProps }));
 vi.mock("@/orientation", () => ({
   useOrientationLock: () => null,
-  useOrientationSettled: () => false,
+  useOrientationSettled: () => feed.settled,
 }));
-vi.mock("@/watch/episode-feed", () => ({ EpisodeFeed: () => null }));
+vi.mock("@/watch/episode-feed", () => ({
+  EpisodeFeed: (props: FeedProps) => {
+    feed.props = props;
+    return null;
+  },
+}));
 vi.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 
 vi.mock("react-native-safe-area-context", () => ({
@@ -142,6 +154,8 @@ beforeEach(() => {
   router.canGoBack.mockReset().mockReturnValue(true);
   params = {};
   show.answer = async () => SHOW;
+  feed.settled = false;
+  feed.props = null;
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -218,5 +232,63 @@ describe("the player screen (#292 item 1)", () => {
     expect(text()).not.toContain("Try again");
     press("Back");
     expect(router.back).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #302 item 3 — the feed is taken down while another screen covers the
+// player (useOrientationSettled) and comes back on the page the viewer left;
+// now also at the playhead they left it, never at a stale deep-link resume.
+describe("the player screen brings the feed back where the viewer was (#302 item 3)", () => {
+  const TWO_EPISODES: ShowDetail = {
+    ...SHOW,
+    episodeCount: 2,
+    episodes: [SHOW.episodes[0], { ...SHOW.episodes[0], id: "ep2", number: 2, title: "Episode 2" }],
+  };
+
+  beforeEach(() => {
+    params = { episodeId: "ep1", showSlug: "the-scarlet-oath", resume: "120" };
+    show.answer = async () => TWO_EPISODES;
+    feed.settled = true;
+  });
+
+  const mounted = () => {
+    if (!feed.props) throw new Error("the feed is not mounted");
+    return feed.props;
+  };
+
+  // A screen pushed over the player and popped again.
+  async function coverAndReturn() {
+    feed.settled = false;
+    await render(<WatchScreen />);
+    feed.props = null;
+    feed.settled = true;
+    await render(<WatchScreen />);
+    return mounted();
+  }
+
+  it("opens on the deep link's episode, at its resume", async () => {
+    await render(<WatchScreen />);
+    expect(mounted()).toMatchObject({ initialIndex: 0, resumeSeconds: 120 });
+  });
+
+  it("comes back on the page the viewer left, at its playhead", async () => {
+    await render(<WatchScreen />);
+    mounted().onCurrentChange(1, 250);
+
+    expect(await coverAndReturn()).toMatchObject({ initialIndex: 1, resumeSeconds: 250 });
+  });
+
+  it("on the deep-linked page itself, at the viewer's playhead — not back at the stale resume", async () => {
+    await render(<WatchScreen />);
+    mounted().onCurrentChange(0, 400);
+
+    expect(await coverAndReturn()).toMatchObject({ initialIndex: 0, resumeSeconds: 400 });
+  });
+
+  it("an episode that ended (0) reopens at the start — 0 is a position, not a gap for the deep link to fill", async () => {
+    await render(<WatchScreen />);
+    mounted().onCurrentChange(0, 0);
+
+    expect(await coverAndReturn()).toMatchObject({ initialIndex: 0, resumeSeconds: 0 });
   });
 });
