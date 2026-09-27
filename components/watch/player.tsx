@@ -1418,10 +1418,14 @@ function EpisodePlayback({
       className={`relative flex w-full items-center justify-center overflow-hidden bg-black ${surfaceShape}`}
     >
       {current.thumbnailUrl ? (
+        // Unoptimized here and on the poster gate below: a signed Mux still
+        // is a new URL on every render, so /_next/image would re-transform
+        // it with nothing to cache (#306).
         <Image
           src={current.thumbnailUrl}
           alt=""
           fill
+          unoptimized
           sizes="100vw"
           className="object-cover opacity-40"
           priority
@@ -1462,6 +1466,7 @@ function EpisodePlayback({
             src={current.thumbnailUrl}
             alt=""
             fill
+            unoptimized
             sizes="100vw"
             className="object-cover opacity-40"
             priority
