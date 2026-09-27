@@ -55,14 +55,18 @@ function isLocale(value: unknown): value is Locale {
 //      (checked in node_modules), so there it is simply absent.
 //   2. Intl.DateTimeFormat().resolvedOptions().locale — Hermes' own Intl,
 //      which asks the platform for its default locale (NSLocale on iOS).
-//      The iOS path in practice.
+//      The iOS path in practice. iOS answers with the language of the
+//      bundle's localizations, not the phone's raw setting — which is why
+//      app.json declares `CFBundleLocalizations: ["en", "es"]`; without it
+//      a Spanish iPhone reads an English tag ("en_ES") here (#307).
 //
 // Both tags run through the web's pickFromLanguageTags (primary subtag,
 // case-insensitive, underscore-tolerant), so "es-419" / "es_MX" resolve to
 // Spanish exactly as an Accept-Language header would on the site. Anything
 // unmatched — or any source that throws — falls to English, the site's
-// default. The manual switcher in the home header covers a device this
-// misreads; the choice it writes wins on every later launch.
+// default. The manual switcher (the Language group of the Settings tab)
+// covers a device this misreads; the choice it writes wins on every later
+// launch.
 export function detectDeviceLocale(): Locale {
   const tags: string[] = [];
   try {

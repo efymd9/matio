@@ -68,6 +68,15 @@ jobs:
         working-directory: mobile
         run: npm ci --no-audit --no-fund
 
+      # Типы приложения его собственным TypeScript (~5.9, не корневым):
+      # `pnpm typecheck` мобильное исключает, а приложение импортирует
+      # lib/api/types.ts и словари из lib/i18n — переименованное поле DTO
+      # или ключ словаря должно краснеть здесь, а не в сборке на телефоне,
+      # которую не исправить хотфиксом (#307).
+      - name: Типы мобильного
+        working-directory: mobile
+        run: npm run typecheck
+
       - name: Линт
         run: pnpm lint
 

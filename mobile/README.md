@@ -39,6 +39,8 @@ stored choice (SecureStore, key `matio_locale`) → the device language → Engl
 detection uses `I18nManager.getConstants().localeIdentifier` (Android) and
 `Intl.DateTimeFormat().resolvedOptions().locale` (iOS — RN 0.86's `RCTI18nManager` does not
 export the constant), both through the web's `pickFromLanguageTags`, with **no new dependency**.
+On iOS that `Intl` tag carries the language of the bundle's localizations, so `app.json` declares
+`CFBundleLocalizations: ["en", "es"]` — without it a Spanish iPhone reads English (#307).
 The manual switcher is the Language group of the Settings tab (`src/app/(tabs)/settings.tsx`);
 screens read copy via `useT()`, and the tab bar's own labels follow the switch in place.
 
@@ -50,8 +52,8 @@ bar. Liquid Glass (`expo-glass-effect`) on iOS 26+, a translucent espresso fallb
 
 ## Running it
 
-The app needs the web app's `/api/v1` endpoints, which are not yet deployed to production. So
-in development, run **both**:
+Release builds talk to https://matio.tv/api/v1 (see «API base URL» below). In development the
+app defaults to http://localhost:3100, so run both:
 
 ```bash
 # terminal 1 — repo root: the API
@@ -132,8 +134,8 @@ the window has the show's shape (`useOrientationSettled`, a 1s grace per focus w
 does not act) — a `FlatList` mounted in portrait and then rotated, or resized under a screen
 pushed over it, re-creates its page — and comes back on the page it left (`onCurrentChange`).
 The module is native and `app.json` changed — `expo prebuild --clean` before the next dev
-build. A multitasking iPad ignores the lock (`UIRequiresFullScreen` is false), which is the
-pre-existing behaviour there.
+build. iPad gets the iPhone build in compatibility mode (`ios.supportsTablet: false`, #307); a
+real iPad version is a registry row.
 
 ### API base URL
 
@@ -168,3 +170,8 @@ The repo's convention is to ask before adding a dependency. Still pending the ow
   source is unlinted. Tracked in `docs/registry.md`.
 - `expo-localization` — only if device-language detection (see "Language") proves wrong on a
   real device; today it is done without it.
+- `@sentry/react-native` — the app has no crash or error telemetry. Non-fatal errors (a render
+  exception caught by a boundary, an unhandled rejection) are invisible; fatal crashes reach
+  only Apple, as native crash logs with no JS stack mapped to source: App Store Connect →
+  TestFlight → Crashes (next to the tester's feedback), or Xcode → Window → Organizer →
+  Crashes. Tracked in `docs/registry.md`.
