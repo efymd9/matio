@@ -110,8 +110,12 @@ vi.mock("@clerk/nextjs/webhooks", () => ({ verifyWebhook: clerkVerify }));
 // keeps the audit on the path that actually reaches the database.
 // The guest checkout cases (#224) need an ANONYMOUS caller — a signed-in one
 // is bounced to the auth flow before anything is logged.
+// The app's «Delete account» (#309) deletes the account at Clerk after the
+// erasure — a spy, so its refusal can be seeded with a marker.
+const accountAudit = vi.hoisted(() => ({ clerkDelete: vi.fn() }));
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: walletAudit.authUserId }),
+  clerkClient: async () => ({ users: { deleteUser: accountAudit.clerkDelete } }),
 }));
 // The guest action's per-IP brake is not the thing under audit; inert. The
 // signed-in builders' per-account brake (#227) is a spy: one case flips it to
@@ -264,6 +268,7 @@ import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as retentionCron } from "@/app/api/cron/retention/route";
 import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
+import { POST as deleteAccount } from "@/app/api/v1/account/delete/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
 import { POST as appPlaybackToken } from "@/app/api/v1/playback-token/route";
@@ -814,6 +819,128 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     );
     expect(logged()).not.toContain(MARKER_EMAIL);
     expect(logged()).not.toContain(MARKER_NAME);
+  });
+});
+
+describe("log audit · /api/v1/account/delete (the app's self-service erasure, #309)", () => {
+  // The same erasure as the webhook above, run inline from the app, plus the
+  // Clerk half. Three places the address could leak: the users row eraseUser
+  // reads, a driver refusal that quotes the statement, and Clerk's refusal —
+  // its errors quote the identifier they are about.
+  const USER_ID = "user_1"; // who the audit's auth() says is calling
+
+  beforeEach(() => {
+    vi.stubEnv("POSTHOG_PERSONAL_API_KEY", "");
+    vi.stubEnv("POSTHOG_PROJECT_ID", "");
+    accountAudit.clerkDelete.mockReset().mockResolvedValue({ id: USER_ID });
+  });
+
+  function selectChain(rows: unknown[]) {
+    const chain = { from: () => chain, where: () => chain, limit: async () => rows };
+    return chain;
+  }
+
+  function accountWithLiveSubscription() {
+    select
+      .mockImplementationOnce(() =>
+        selectChain([{ email: MARKER_EMAIL, stripeCustomerId: "cus_dummy" }]),
+      )
+      .mockImplementationOnce(() => selectChain([{ stripeSubscriptionId: "sub_dummy" }]));
+    insert.mockImplementation(() => ({
+      values: () => ({ onConflictDoNothing: async () => undefined }),
+    }));
+    del.mockImplementation(() => ({
+      where: () =>
+        Object.assign(Promise.resolve(undefined), {
+          returning: async () => [{ id: "rem_1" }],
+        }),
+    }));
+  }
+
+  function request() {
+    return new Request("https://matio.tv/api/v1/account/delete", {
+      method: "POST",
+      headers: { authorization: "Bearer sess_dummy" },
+    }) as never;
+  }
+
+  it("erases and deletes an account with a live subscription without logging its address", async () => {
+    accountWithLiveSubscription();
+    const logged = captureConsole();
+
+    const res = await deleteAccount(request());
+
+    expect(res.status).toBe(200);
+    expect(accountAudit.clerkDelete).toHaveBeenCalledWith(USER_ID);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    // What it DOES log: the subject and the outcome of each half.
+    expect(logged()).toContain("account delete: done");
+    expect(logged()).toContain(USER_ID);
+    expect(logged()).toContain('"clerk":"deleted"');
+  });
+
+  it("a database refusal mid-erasure is logged and answered by class — never the statement the driver quoted", async () => {
+    vi.stubEnv("DATABASE_URL", MARKER_DATABASE_URL);
+    accountWithLiveSubscription();
+    del.mockImplementation(() => ({
+      where: () => {
+        throw Object.assign(
+          new Error(
+            `delete from show_reminders where email = '${MARKER_EMAIL}' (${MARKER_NAME}) — ${MARKER_DATABASE_URL}`,
+          ),
+          { name: "PostgresError", code: "57P01" },
+        );
+      },
+    }));
+    const logged = captureConsole();
+
+    const res = await deleteAccount(request());
+
+    expect(res.status).toBe(500);
+    expect(accountAudit.clerkDelete).not.toHaveBeenCalled();
+    const body = JSON.stringify(await res.json());
+    const sentry = sentryMessage.mock.calls.map(render).join("\n");
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+      expect(body).not.toContain(marker);
+      expect(sentry).not.toContain(marker);
+    }
+    expect(logged()).toContain(USER_ID);
+    expect(logged()).toContain("PostgresError");
+    expect(logged()).toContain("57P01");
+  });
+
+  it("Clerk's refusal is logged by status and class — never the identifier its error quotes", async () => {
+    accountWithLiveSubscription();
+    accountAudit.clerkDelete.mockRejectedValue(
+      Object.assign(new Error(`Unprocessable Entity: ${MARKER_EMAIL}`), {
+        name: "ClerkAPIResponseError",
+        status: 422,
+        errors: [
+          {
+            code: "form_identifier_invalid",
+            message: `${MARKER_EMAIL} is invalid`,
+            longMessage: `${MARKER_NAME} <${MARKER_EMAIL}> cannot be deleted right now`,
+          },
+        ],
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await deleteAccount(request());
+
+    expect(res.status).toBe(500);
+    const body = JSON.stringify(await res.json());
+    const sentry = sentryMessage.mock.calls.map(render).join("\n");
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+      expect(body).not.toContain(marker);
+      expect(sentry).not.toContain(marker);
+    }
+    expect(logged()).toContain("Clerk account could NOT be deleted");
+    expect(logged()).toContain(USER_ID);
+    expect(logged()).toContain('"httpStatus":422');
+    expect(logged()).toContain("ClerkAPIResponseError");
   });
 });
 

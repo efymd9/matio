@@ -1,7 +1,7 @@
 import { useClerk, useUser } from "@clerk/expo";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { api } from "@/api/client";
 import { useOptionalAuth } from "@/auth/clerk";
 import { AuthStalled } from "@/components/auth-stalled";
 import { useTabBarClearance } from "@/components/glass-tab-bar";
@@ -32,7 +33,8 @@ import { colors, display, fonts, radius, SCREEN_PAD, space } from "@/theme";
 import { useContinueWatching } from "@/watch/use-continue-watching";
 
 // Account (#245). Signed in: who you are, your membership, everything you
-// are mid-way through, the way out. Signed out: the sign-up wall's copy as a
+// are mid-way through, the way out — sign out, or delete the account (#309).
+// Signed out: the sign-up wall's copy as a
 // calm tab — the same two-step email → code form the locked-episode screen
 // uses — and one card on why an account is worth having.
 //
@@ -83,6 +85,7 @@ function SignedInAccount() {
   const { user } = useUser();
   const { signOut } = useClerk();
   const resume = useContinueWatching(true);
+  const [deleting, setDeleting] = useState(false);
 
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
   const initial = email.charAt(0).toUpperCase();
@@ -116,6 +119,48 @@ function SignedInAccount() {
       { text: t.app.account.signOut, style: "destructive", onPress: () => void signOutOrSay() },
     ]);
   }, [signOut, t]);
+
+  // «Delete account» (#309, App Store 5.1.1(v)). Nothing comes back, so two
+  // system dialogs ask first: what is erased and what happens to a
+  // subscription (cancelled at the end of its period), then that it is final.
+  // The server erases our side and then the Clerk account; only its {ok:true}
+  // signs the app out and goes Home. A failure keeps the session and says so,
+  // like a failed sign-out — the row can simply be tapped again, because both
+  // halves on the server are idempotent.
+  const confirmDelete = useCallback(() => {
+    const deleteOrSay = async () => {
+      setDeleting(true);
+      try {
+        await api.deleteAccount();
+      } catch {
+        setDeleting(false);
+        Alert.alert(t.app.account.deleteFailed, t.app.account.stalledBody);
+        return;
+      }
+      // The account no longer exists at Clerk: the local sign-out only tidies
+      // up. One that fails leaves a dead session Clerk drops on its next token
+      // refresh — never a reason to say the deletion failed.
+      try {
+        await signOut();
+      } catch {
+        // see above
+      }
+      router.replace("/");
+    };
+    const confirmFinal = () =>
+      Alert.alert(t.app.account.deleteFinalTitle, t.app.account.deleteFinalBody, [
+        { text: t.app.common.cancel, style: "cancel" },
+        {
+          text: t.app.account.deleteFinalCta,
+          style: "destructive",
+          onPress: () => void deleteOrSay(),
+        },
+      ]);
+    Alert.alert(t.app.account.deleteConfirmTitle, t.app.account.deleteConfirmBody, [
+      { text: t.app.common.cancel, style: "cancel" },
+      { text: t.app.account.deleteAccount, style: "destructive", onPress: confirmFinal },
+    ]);
+  }, [router, signOut, t]);
 
   return (
     <ScrollView
@@ -168,6 +213,15 @@ function SignedInAccount() {
       <View style={styles.group}>
         <Card>
           <Row first label={t.app.account.signOut} danger onPress={confirmSignOut} />
+          {/* While the request is out the row is not pressable — a second
+              chain of dialogs would only send the same deletion again. */}
+          <Row
+            label={t.app.account.deleteAccount}
+            sub={deleting ? t.app.common.pleaseWait : undefined}
+            danger
+            onPress={deleting ? undefined : confirmDelete}
+            accessibilityLabel={t.app.account.deleteAccount}
+          />
         </Card>
       </View>
     </ScrollView>
