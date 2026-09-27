@@ -79,6 +79,23 @@ vi.mock("expo-glass-effect", () => ({
 vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
+// #312 — the consent line's two links. The legal URLs exactly as /v1/config
+// sends them (already the embed variant, #310); the in-app browser is a spy,
+// so a test reads the URL a tap would open.
+vi.mock("@/api/config-context", () => ({
+  useConfig: () => ({
+    urls: {
+      web: "https://matio.tv",
+      terms: "https://matio.tv/terms?embed=app",
+      privacy: "https://matio.tv/privacy?embed=app",
+      cookies: "https://matio.tv/cookies?embed=app",
+      support: "mailto:contact@matio.tv",
+    },
+  }),
+}));
+const browser = vi.hoisted(() => ({ open: vi.fn(async () => undefined) }));
+vi.mock("expo-web-browser", () => ({ openBrowserAsync: browser.open }));
+
 const props = {
   kicker: "Watch for free",
   headline: "Create your account",
@@ -712,6 +729,80 @@ flowSuite("SignInForm — the code step (#292 item 4)", () => {
     await press(props.cta);
     expect(text()).toContain("Check your email");
     expect(glyphs()).toBe(0);
+  });
+});
+
+// ------------------------------------------------ #312 the consent line
+
+flowSuite("SignInForm — the Terms / Privacy line under the email CTA (#312)", () => {
+  // The element whose own text is exactly `label` — a nested Text link is a
+  // leaf span inside the line.
+  function leaf(label: string): Element | undefined {
+    return Array.from(container.querySelectorAll("*")).find(
+      (el) => el.children.length === 0 && el.textContent === label,
+    );
+  }
+
+  beforeEach(() => browser.open.mockClear());
+
+  it("the email step says what the address is taken under, both documents as links", async () => {
+    clerkResources();
+    await renderForm();
+
+    expect(text()).toContain(
+      "By continuing you agree to the Terms and acknowledge the Privacy Policy",
+    );
+    expect(leaf("Terms")?.getAttribute("role")).toBe("link");
+    expect(leaf("Privacy Policy")?.getAttribute("role")).toBe("link");
+
+    // Legal copy the viewer must be able to read: the line and both links
+    // clear AA on the screen's espresso (nothing in the form paints behind).
+    const link = leaf("Terms") as Element;
+    const line = link.parentElement as Element;
+    expect(paintedBackground(line)).toBeNull();
+    expect(contrastRatio(getComputedStyle(line).color, colors.bg)).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(contrastRatio(getComputedStyle(link).color, colors.bg)).toBeGreaterThanOrEqual(AA_TEXT);
+  });
+
+  it("each link opens its document's embed page in English", async () => {
+    clerkResources();
+    await renderForm("en");
+
+    await press("Terms");
+    expect(browser.open).toHaveBeenLastCalledWith("https://matio.tv/terms?embed=app");
+
+    await press("Privacy Policy");
+    expect(browser.open).toHaveBeenLastCalledWith("https://matio.tv/privacy?embed=app");
+    expect(browser.open).toHaveBeenCalledTimes(2);
+  });
+
+  it("a Spanish viewer reads the line in Spanish and gets the /es documents", async () => {
+    clerkResources();
+    await renderForm("es");
+
+    expect(text()).toContain(
+      "Al continuar, aceptas los Términos y reconoces haber leído la Política de privacidad",
+    );
+    expect(leaf("Términos")?.getAttribute("role")).toBe("link");
+    expect(leaf("Política de privacidad")?.getAttribute("role")).toBe("link");
+
+    await press("Términos");
+    expect(browser.open).toHaveBeenLastCalledWith("https://matio.tv/es/terms?embed=app");
+
+    await press("Política de privacidad");
+    expect(browser.open).toHaveBeenLastCalledWith("https://matio.tv/es/privacy?embed=app");
+  });
+
+  it("the line goes with the email step — the code step does not repeat it", async () => {
+    clerkResources();
+    await renderForm();
+
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    expect(text()).toContain("Check your email");
+    expect(text()).not.toContain("By continuing you agree");
+    expect(leaf("Terms")).toBeUndefined();
   });
 });
 

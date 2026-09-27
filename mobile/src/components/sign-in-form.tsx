@@ -1,10 +1,13 @@
 import { useSignIn, useSignUp } from "@clerk/expo";
+import { openBrowserAsync } from "expo-web-browser";
 import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { useConfig } from "@/api/config-context";
 import { CLERK_PUBLISHABLE_KEY } from "@/auth/clerk";
 import { GlassSurface } from "@/components/glass";
 import { ErrorState, GoldButton, Pill } from "@/components/ui";
 import { useLocale, useT } from "@/i18n/locale";
+import { legalUrl } from "@/i18n/localized-url";
 import { body, colors, display, radius, space } from "@/theme";
 
 // Passwordless email-code sign-in — the two-step form itself, shared by the
@@ -103,6 +106,7 @@ function ClerkSignInForm({
 }: SignInFormProps) {
   const t = useT();
   const locale = useLocale();
+  const config = useConfig();
 
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
@@ -402,6 +406,33 @@ function ClerkSignInForm({
         style={{ alignSelf: "stretch", marginTop: space(5) }}
       />
 
+      {/* The step that collects the address says what it is taken under
+          (#312, App Store 5.1.1(i)). The two documents open the way Settings
+          opens them — the chosen language's embed page (#310), through the
+          same legalUrl. Nested Text links: VoiceOver and TalkBack reach each
+          one as its own link, named by its words; an inline link inside a
+          sentence is the target the size rules exempt (WCAG 2.5.8, «Inline»). */}
+      {step === "email" ? (
+        <Text style={styles.consent}>
+          {t.app.signIn.consentBefore}
+          <Text
+            style={styles.consentLink}
+            accessibilityRole="link"
+            onPress={() => void openBrowserAsync(legalUrl(config.urls.terms, locale))}
+          >
+            {t.app.signIn.consentTerms}
+          </Text>
+          {t.app.signIn.consentMiddle}
+          <Text
+            style={styles.consentLink}
+            accessibilityRole="link"
+            onPress={() => void openBrowserAsync(legalUrl(config.urls.privacy, locale))}
+          >
+            {t.app.signIn.consentPrivacy}
+          </Text>
+        </Text>
+      ) : null}
+
       {step === "code" ? (
         <Pressable
           onPress={() => void resendCode()}
@@ -485,4 +516,15 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: space(6),
   },
+  // The Terms / Privacy line (#312): legal copy, so the brighter of the two
+  // quiet inks; the links in the gold every text link of the form uses.
+  consent: {
+    ...body,
+    color: colors.inkMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+    marginTop: space(3),
+  },
+  consentLink: { color: colors.gold, textDecorationLine: "underline" },
 });
