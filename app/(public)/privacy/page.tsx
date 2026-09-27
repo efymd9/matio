@@ -368,8 +368,10 @@ function PrivacyEn() {
             locked — and sends it with every request to our servers. On iPhone
             the keychain can keep the identifier after the app is deleted, so
             reinstalling the app may bring back the same identifier; on
-            Android it is normally removed together with the app. We never
-            store it with your account, even when you are signed in.
+            Android it is normally removed together with the app. Signing in
+            in the app does not link the identifier to your account (for the
+            one way a record kept against it can become linked, see &ldquo;How
+            long we keep it&rdquo; below).
           </li>
           <li>
             <strong>What the identifier is used for</strong> — when an episode
@@ -377,9 +379,9 @@ function PrivacyEn() {
             show, when playback started, when a free preview expires, when the
             sign-up screen was first reached, and a HMAC hash of your IP
             address (the raw IP is never stored). These records let us apply
-            the viewing rules for people who are not signed in (such as the
-            60-second preview), limit abuse, and measure how our own service
-            is used. Lawful basis: <em>legitimate interests</em> — offering
+            the viewing rules to episodes you do not have full access to,
+            whether or not you are signed in (such as the 60-second preview),
+            limit abuse, and measure how our own service is used. Lawful basis: <em>legitimate interests</em> — offering
             free viewing fairly and understanding how our own service is used,
             without third-party tracking. Like the{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">matio_aid</code>{" "}
@@ -397,8 +399,14 @@ function PrivacyEn() {
           <li>
             <strong>How long we keep it</strong> — records kept against the
             device identifier are deleted 30 days after they are created (the
-            &ldquo;Trial sessions&rdquo; period in section 6). The viewing
-            counters hold no personal data.
+            &ldquo;Trial sessions&rdquo; period in section 6). One exception:
+            if, within six hours of such a record being created, matio.tv is
+            used from the same internet connection (the same IP address) by
+            someone signed in to an account — usually you, for example on the
+            same Wi-Fi — the record may be linked to that account, and a
+            linked record is kept like the rest of that account&rsquo;s data
+            (section 6) until the account is deleted. The viewing counters
+            hold no personal data.
           </li>
           <li>
             <strong>If you sign in</strong> — to sign in or create an account,
@@ -410,9 +418,13 @@ function PrivacyEn() {
             sends us your watch progress — the episode, how far you got,
             whether you finished it and how long you watched — so you can
             pick up where you left off, in the app or on matio.tv; we also
-            record the days on which you watched. This is the account and
-            usage data described in section 2, used and kept as described in
-            sections 3 and 6.
+            record the days on which you watched, to measure how our own
+            service is used. Lawful basis: <em>performance of the contract</em>{" "}
+            for your account and watch progress (section 3),{" "}
+            <em>legitimate interests</em> for the days watched. Watch progress
+            is kept while your account exists (section 6); the days watched
+            are kept for up to 25 months. Both are erased if you delete your
+            account.
           </li>
           <li>
             <strong>Kept only on your device</strong> — the autoplay setting,
@@ -437,7 +449,8 @@ function PrivacyEn() {
             an error, it can send a report to{" "}
             <strong>Functional Software, Inc.</strong> (Sentry; US company, our
             data held in its EU region; US transfers covered by the EU-US Data
-            Privacy Framework and SCCs) so we can find and fix the fault. A
+            Privacy Framework and its UK Extension) so we can find and fix the
+            fault. A
             report holds the technical details of the error, the app version,
             the device model, operating system and similar device details, a
             trail of recent app events with the parameters removed from web
@@ -451,14 +464,18 @@ function PrivacyEn() {
           <li>
             <strong>Deleting your account</strong> — you can delete your
             account in the app at any time: Account → Delete account. Once you
-            confirm, your account and the data linked to it are erased,
-            including your watch progress and new-episode reminders, and an
-            active subscription is cancelled at the end of the current billing
-            period. You can also write to <strong>contact@matio.tv</strong>,
-            which is also how you exercise the other rights in section 7.
-            Records kept against the device identifier are not linked to your
-            account, so deleting the account does not remove them; they are
-            deleted 30 days after they are created, as above.
+            confirm, your account and the data we keep with it are erased,
+            including your watch progress, the days you watched and your
+            new-episode reminders; an active subscription is set to end at the
+            close of the period you have paid for; and your billing records
+            held by Stripe, our payment processor, are kept as described under
+            &ldquo;Payment and tax records&rdquo; in section 6. You can also
+            write to <strong>contact@matio.tv</strong>, which is also how you
+            exercise the other rights in section 7. Records kept against the
+            device identifier are deleted 30 days after they are created, as
+            above: deleting the account does not remove them sooner, and one
+            that was linked to your account loses the link and then follows
+            the same rule.
           </li>
         </ul>
       </Section>
@@ -805,8 +822,10 @@ function PrivacyEs() {
             servidores. En iPhone, el llavero puede conservar el identificador
             después de eliminar la aplicación, de modo que al reinstalarla
             puede volver el mismo identificador; en Android normalmente se
-            elimina junto con la aplicación. Nunca lo guardamos junto a tu
-            cuenta, ni siquiera cuando has iniciado sesión.
+            elimina junto con la aplicación. Iniciar sesión en la aplicación
+            no vincula el identificador a tu cuenta (para el único caso en
+            que un registro asociado a él puede quedar vinculado, véase
+            «Cuánto tiempo lo conservamos» más abajo).
           </li>
           <li>
             <strong>Para qué se usa el identificador</strong>: cuando se
@@ -815,9 +834,10 @@ function PrivacyEs() {
             reproducción, cuándo caduca una vista previa gratuita, cuándo se
             llegó por primera vez a la pantalla de registro y un hash HMAC de
             tu dirección IP (la IP en claro no se almacena). Estos registros
-            nos permiten aplicar las reglas de visionado a quien no ha
-            iniciado sesión (como la vista previa de 60 segundos), limitar
-            abusos y medir cómo se usa nuestro propio servicio. Base jurídica:{" "}
+            nos permiten aplicar las reglas de visionado a los episodios a
+            los que no tienes acceso completo, hayas iniciado sesión o no
+            (como la vista previa de 60 segundos), limitar abusos y medir
+            cómo se usa nuestro propio servicio. Base jurídica:{" "}
             <em>interés legítimo</em> de ofrecer el visionado gratuito de
             forma justa y de comprender cómo se usa nuestro propio servicio,
             sin recurrir a seguimiento de terceros. Como la cookie{" "}
@@ -838,8 +858,14 @@ function PrivacyEs() {
             <strong>Cuánto tiempo lo conservamos</strong>: los registros
             asociados al identificador del dispositivo se eliminan 30 días
             después de crearse (el plazo de las «Sesiones de prueba» de la
-            sección 6). Los contadores de visionado no contienen datos
-            personales.
+            sección 6). Una excepción: si, en las seis horas siguientes a la
+            creación de uno de esos registros, alguien con la sesión iniciada
+            en una cuenta usa matio.tv desde la misma conexión a internet (la
+            misma dirección IP) —normalmente tú, por ejemplo en la misma red
+            wifi—, el registro puede quedar vinculado a esa cuenta, y un
+            registro vinculado se conserva como el resto de los datos de esa
+            cuenta (sección 6) hasta que la cuenta se elimine. Los contadores
+            de visionado no contienen datos personales.
           </li>
           <li>
             <strong>Si inicias sesión</strong>: para iniciar sesión o crear
@@ -852,9 +878,13 @@ function PrivacyEs() {
             aplicación nos envía tu progreso de reproducción (el episodio,
             hasta dónde llegaste, si lo terminaste y cuánto tiempo lo viste)
             para que puedas continuar donde lo dejaste, en la aplicación o en
-            matio.tv; también registramos los días en que viste algo. Son los
-            datos de cuenta y de uso descritos en la sección 2, que usamos y
-            conservamos como se indica en las secciones 3 y 6.
+            matio.tv; también registramos los días en que viste algo, para
+            medir cómo se usa nuestro propio servicio. Base jurídica:{" "}
+            <em>ejecución del contrato</em> para tu cuenta y tu progreso de
+            reproducción (sección 3), <em>interés legítimo</em> para los días
+            de visionado. El progreso de reproducción se conserva mientras
+            exista tu cuenta (sección 6); los días de visionado, hasta 25
+            meses. Ambos se borran si eliminas tu cuenta.
           </li>
           <li>
             <strong>Solo en tu dispositivo</strong>: el ajuste de
@@ -883,8 +913,8 @@ function PrivacyEs() {
             informe a <strong>Functional Software, Inc.</strong> (Sentry;
             empresa de EE. UU., nuestros datos alojados en su región de la UE;
             transferencias a EE. UU. amparadas por el Marco de Privacidad de
-            Datos UE-EE. UU. y las CCT) para que podamos localizar y corregir
-            el fallo. Un informe contiene los detalles técnicos del error, la
+            Datos UE-EE. UU. y su extensión para el Reino Unido) para que
+            podamos localizar y corregir el fallo. Un informe contiene los detalles técnicos del error, la
             versión de la aplicación, el modelo del dispositivo, el sistema
             operativo y datos similares del dispositivo, un registro de los
             últimos eventos de la aplicación con los parámetros eliminados de
@@ -899,15 +929,19 @@ function PrivacyEs() {
           <li>
             <strong>Eliminar tu cuenta</strong>: puedes eliminar tu cuenta
             desde la aplicación en cualquier momento: Cuenta → Eliminar
-            cuenta. Cuando lo confirmas, se borran tu cuenta y los datos
-            vinculados a ella, incluidos tu progreso de reproducción y los
-            avisos de nuevos episodios, y una suscripción activa se cancela al
-            final del periodo de facturación en curso. También puedes
+            cuenta. Cuando lo confirmas, se borran tu cuenta y los datos que
+            conservamos con ella, incluidos tu progreso de reproducción, los
+            días de visionado y los avisos de nuevos episodios; una
+            suscripción activa queda programada para terminar al final del
+            periodo ya pagado; y tus registros de facturación que guarda
+            Stripe, nuestro encargado de pagos, se conservan como se indica
+            en «Registros de pago y fiscales» de la sección 6. También puedes
             escribirnos a <strong>contact@matio.tv</strong>, que es además la
             vía para ejercer los demás derechos de la sección 7. Los registros
-            asociados al identificador del dispositivo no están vinculados a
-            tu cuenta, así que eliminarla no los borra; se eliminan 30 días
-            después de crearse, como se indica arriba.
+            asociados al identificador del dispositivo se eliminan 30 días
+            después de crearse, como se indica arriba: eliminar la cuenta no
+            los borra antes, y uno que estuviera vinculado a tu cuenta pierde
+            el vínculo y sigue la misma regla.
           </li>
         </ul>
       </Section>

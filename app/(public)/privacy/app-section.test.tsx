@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // variant the app itself opens (#310) — the same page component, so the app's
 // readers get the same section. The section is DRAFT legal copy; what these
 // cases pin is that it is there, in the reader's language, and that its
-// numbers are the code's: the retention window is read from lib/retention.ts,
+// numbers are the code's: the retention windows are read from lib/retention.ts,
 // and §6 — which that module cites — keeps its number.
 //
 // Real getDict/getLocale and LegalLink: only the request is faked, as in
@@ -58,6 +58,12 @@ const trialWindowDays = (() => {
   return policy.window.days;
 })();
 
+const watchDaysWindowMonths = (() => {
+  const policy = RETENTION_POLICIES.find((p) => p.name === "watch_days");
+  if (!policy || !("months" in policy.window)) throw new Error("no watch_days month window");
+  return policy.window.months;
+})();
+
 const CASES = [
   {
     locale: "en",
@@ -70,19 +76,23 @@ const CASES = [
       "random identifier (a UUID)",
       "keychain",
       "can keep the identifier after the app is deleted",
-      "We never store it with your account",
+      "does not link the identifier to your account",
       "legitimate interests",
       "10-second stretches",
       "hold no identifier",
       `deleted ${trialWindowDays} days after they are created`,
+      "within six hours",
+      "may be linked to that account",
       "Clerk",
       "watch progress",
+      `the days watched are kept for up to ${watchDaysWindowMonths} months`,
       "Vercel and Neon",
       "Mux",
       "Error reports",
       "Functional Software, Inc.",
       "never a screenshot",
       "Account → Delete account",
+      "Payment and tax records",
       "contact@matio.tv",
     ],
   },
@@ -97,19 +107,23 @@ const CASES = [
       "identificador aleatorio (un UUID)",
       "llavero",
       "puede conservar el identificador después de eliminar la aplicación",
-      "Nunca lo guardamos junto a tu cuenta",
+      "no vincula el identificador a tu cuenta",
       "interés legítimo",
       "tramos de 10 segundos",
       "no contienen ningún",
       `se eliminan ${trialWindowDays} días`,
+      "seis horas",
+      "puede quedar vinculado a esa cuenta",
       "Clerk",
       "progreso de reproducción",
+      `hasta ${watchDaysWindowMonths} meses`,
       "Vercel y Neon",
       "Mux",
       "Informes de errores",
       "Functional Software, Inc.",
       "nunca una captura",
       "Cuenta → Eliminar cuenta",
+      "Registros de pago y fiscales",
       "contact@matio.tv",
     ],
   },
