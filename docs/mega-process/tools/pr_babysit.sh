@@ -10,6 +10,8 @@
 # смену reviewDecision · конфликт с main · отставание ветки (BEHIND) ·
 # MERGED/CLOSED. Зелёные завершения чеков сами по
 # себе не будят: агенту там делать нечего, мерж — забота основной сессии.
+# Идущий чек — тоже не событие: красный только ЗАВЕРШИВШИЙСЯ неуспехом
+# (см. FILTER ниже).
 #
 # Конструктивные решения — те же, что у tools/claude/pr_watcher.sh
 # (не упрощать!): снимок переживает перезапуски (сеем только если файла
@@ -38,11 +40,24 @@ echo "$$" > "$PIDFILE"
 # конфликт → разрешить (правило «пришедший вторым»), отстал →
 # git merge origin/main и пуш.
 # mergeable=UNKNOWN (пересчёт после пуша) намеренно НЕ событие.
+#
+# red — только чеки, завершившиеся неуспехом (#353). У check run, который
+# ещё идёт, gh отдаёт conclusion "" (пустую строку), а не null: прежний
+# select(.conclusion != null) пропускал его, "" не SUCCESS — и каждый пуш
+# будил агента ложным `red: ["web (lint · types · tests):"]`. Пустое и null —
+# «ещё идёт», как PENDING/EXPECTED у статусов. Статус (StatusContext — так
+# отчитывается Vercel, в том числе обязательный «Vercel – matio») несёт
+# context/state вместо name/conclusion; тот же select отбрасывал их целиком,
+# и упавшая сборка превью не будила никого. Строка прежняя: "имя:ИТОГ".
+# Фильтр пришпилен tools/claude/pr_babysit.test.ts — тест вырезает FILTER
+# прямо из этого файла, поэтому одинарных кавычек внутри быть не должно.
 FILTER='{state: .state,
-  red: ([.statusCheckRollup[]? | select(.conclusion != null)
-        | select((.conclusion | ascii_upcase) as $c
-                 | ($c == "SUCCESS" or $c == "NEUTRAL" or $c == "SKIPPED") | not)
-        | "\(.name):\(.conclusion)"] | sort),
+  red: ([.statusCheckRollup[]?
+        | {name: (.name // .context), result: (.conclusion // .state // "")}
+        | select((.result | ascii_upcase) as $c
+                 | ($c == "" or $c == "PENDING" or $c == "EXPECTED"
+                    or $c == "SUCCESS" or $c == "NEUTRAL" or $c == "SKIPPED") | not)
+        | "\(.name):\(.result)"] | sort),
   comments: (.comments | length),
   reviews: (.latestReviews | length),
   decision: .reviewDecision,
