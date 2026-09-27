@@ -1,7 +1,9 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import * as Sentry from "@sentry/nextjs";
+import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
+import { users } from "@/db/schema";
 import type { DeleteAccountResponse } from "@/lib/api/types";
 import { apiError, apiOk } from "@/lib/api/v1";
 import { clerkTokenInHeader } from "@/lib/authorized-parties";
@@ -33,7 +35,17 @@ import { getStripe } from "@/lib/stripe";
 //      session still works, and a retry runs eraseUser again (its not-found
 //      path writes nothing locally and repeats only the PostHog step) and then
 //      Clerk.
-//   3. Where Clerk's `user.deleted` webhook is subscribed, it arrives after
+//   3. The sweep: one more look at `users`. Between steps 1 and 2 the account
+//      still existed at Clerk, and /v1/progress heals a missing mirror row
+//      FROM Clerk (#303, getOrSyncCurrentUser) — a save landing in that
+//      window would put the row, address and all, back. After step 2 that
+//      heal can no longer write (Clerk answers 404 to its read), so a row
+//      found now is erased again by the same eraseUser. A sweep that fails
+//      does not undo the deletion the viewer asked for — it is shouted by id
+//      for the operator (`pnpm erase-user <id> --apply`, runbook §4). What
+//      is left: a heal that read Clerk before step 2 and inserts after this
+//      look — a gap of milliseconds, closed by the webhook where subscribed.
+//   4. Where Clerk's `user.deleted` webhook is subscribed, it arrives after
 //      step 2 and takes eraseUser's same not-found path: a 200 no-op.
 //
 // Bearer-only, literally: the session must come from the Authorization header
@@ -105,7 +117,30 @@ export async function POST(req: NextRequest) {
     clerk = "already_gone";
   }
 
-  console.info("account delete: done", { userId, erase, clerk });
+  let sweep: "clean" | "erased_again" | "failed" = "clean";
+  try {
+    const [back] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (back) {
+      await eraseUser(userId, { db, getStripe, posthog: getPosthogQueryConfig() });
+      sweep = "erased_again";
+    }
+  } catch (err) {
+    sweep = "failed";
+    console.error(
+      "account delete: the Clerk account is gone but the sweep for a healed users row FAILED — run pnpm erase-user <id> --apply (docs/runbooks/gdpr-requests.md §4)",
+      { userId, error: describeError(err) },
+    );
+    Sentry.captureMessage("account delete: post-Clerk sweep failed — erase by hand", {
+      level: "error",
+      tags: { userId, step: "sweep" },
+    });
+  }
+
+  console.info("account delete: done", { userId, erase, clerk, sweep });
   const body: DeleteAccountResponse = { ok: true };
   return apiOk(body);
 }

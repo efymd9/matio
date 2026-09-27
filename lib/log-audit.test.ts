@@ -845,7 +845,9 @@ describe("log audit · /api/v1/account/delete (the app's self-service erasure, #
       .mockImplementationOnce(() =>
         selectChain([{ email: MARKER_EMAIL, stripeCustomerId: "cus_dummy" }]),
       )
-      .mockImplementationOnce(() => selectChain([{ stripeSubscriptionId: "sub_dummy" }]));
+      .mockImplementationOnce(() => selectChain([{ stripeSubscriptionId: "sub_dummy" }]))
+      // The sweep after Clerk's delete: nothing came back.
+      .mockImplementationOnce(() => selectChain([]));
     insert.mockImplementation(() => ({
       values: () => ({ onConflictDoNothing: async () => undefined }),
     }));
@@ -877,6 +879,7 @@ describe("log audit · /api/v1/account/delete (the app's self-service erasure, #
     expect(logged()).toContain("account delete: done");
     expect(logged()).toContain(USER_ID);
     expect(logged()).toContain('"clerk":"deleted"');
+    expect(logged()).toContain('"sweep":"clean"');
   });
 
   it("a database refusal mid-erasure is logged and answered by class — never the statement the driver quoted", async () => {
@@ -908,6 +911,36 @@ describe("log audit · /api/v1/account/delete (the app's self-service erasure, #
     expect(logged()).toContain(USER_ID);
     expect(logged()).toContain("PostgresError");
     expect(logged()).toContain("57P01");
+  });
+
+  it("a failed sweep after Clerk's delete is logged by class — never the row the driver quoted", async () => {
+    accountWithLiveSubscription();
+    select.mockReset();
+    select
+      .mockImplementationOnce(() =>
+        selectChain([{ email: MARKER_EMAIL, stripeCustomerId: "cus_dummy" }]),
+      )
+      .mockImplementationOnce(() => selectChain([{ stripeSubscriptionId: "sub_dummy" }]))
+      .mockImplementationOnce(() => {
+        throw Object.assign(
+          new Error(`select from users where email = '${MARKER_EMAIL}' (${MARKER_NAME})`),
+          { name: "PostgresError", code: "08006" },
+        );
+      });
+    const logged = captureConsole();
+
+    const res = await deleteAccount(request());
+
+    expect(res.status).toBe(200);
+    const sentry = sentryMessage.mock.calls.map(render).join("\n");
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+      expect(sentry).not.toContain(marker);
+    }
+    expect(logged()).toContain("sweep for a healed users row FAILED");
+    expect(logged()).toContain(USER_ID);
+    expect(logged()).toContain("08006");
+    expect(sentry).toContain('"step":"sweep"');
   });
 
   it("Clerk's refusal is logged by status and class — never the identifier its error quotes", async () => {

@@ -22,6 +22,8 @@ const h = vi.hoisted(() => ({
   usersDeleteFails: false,
   // clerkClient() itself throws — @clerk/nextjs without a secret key.
   clerkClientFails: false,
+  // Every read of `users` throws from now on — the database gone mid-request.
+  usersSelectFails: false,
   clerkDelete: vi.fn(),
   stripeUpdate: vi.fn(),
   stripeSearch: vi.fn(),
@@ -39,6 +41,11 @@ vi.mock("@/db", async () => {
             limit: async () => {
               h.selects += 1;
               const name = getTableName(table);
+              if (name === "users" && h.usersSelectFails) {
+                throw Object.assign(new Error("connection terminated"), {
+                  name: "PostgresError",
+                });
+              }
               if (name === "users") return h.userRow ? [h.userRow] : [];
               if (name === "subscriptions") return h.liveSub ? [h.liveSub] : [];
               throw new Error(`unexpected select from ${name}`);
@@ -136,6 +143,7 @@ beforeEach(() => {
   h.selects = 0;
   h.usersDeleteFails = false;
   h.clerkClientFails = false;
+  h.usersSelectFails = false;
   h.clerkDelete.mockReset().mockResolvedValue({ id: USER_ID });
   h.stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
   h.stripeSearch.mockReset().mockResolvedValue({ data: [], has_more: false });
@@ -292,6 +300,59 @@ describe("POST /api/v1/account/delete — failures a retry finishes", () => {
     expect(res.status).toBe(500);
     expect((await res.json()).error.code).toBe("server_error");
     expect(h.clerkDelete).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/v1/account/delete — the sweep after Clerk (step 3)", () => {
+  it("a users row healed back from Clerk between the erasure and the Clerk delete (#303's /v1/progress) is erased again", async () => {
+    // A progress save lands while the account still exists at Clerk: its
+    // heal re-creates the mirror row, address and all.
+    h.clerkDelete.mockImplementationOnce(async () => {
+      h.userRow = { email: EMAIL, stripeCustomerId: null };
+      return { id: USER_ID };
+    });
+
+    const res = await POST(deleteRequest());
+
+    expect(res.status).toBe(200);
+    expect(h.userRow).toBeUndefined();
+    expect(h.writes).toEqual([
+      "delete show_reminders",
+      "delete users",
+      `clerk deleteUser ${USER_ID}`,
+      "delete show_reminders",
+      "delete users",
+    ]);
+    expect(console.info).toHaveBeenCalledWith(
+      "account delete: done",
+      expect.objectContaining({ userId: USER_ID, sweep: "erased_again" }),
+    );
+  });
+
+  it("finds nothing to sweep on an ordinary deletion — one erasure, no second pass", async () => {
+    await POST(deleteRequest());
+
+    expect(h.writes.filter((w) => w === "delete users")).toHaveLength(1);
+    expect(console.info).toHaveBeenCalledWith(
+      "account delete: done",
+      expect.objectContaining({ sweep: "clean", clerk: "deleted", erase: "erased" }),
+    );
+  });
+
+  it("a sweep that fails is shouted by id for the operator — the deletion the viewer asked for still stands", async () => {
+    h.clerkDelete.mockImplementationOnce(async () => {
+      h.usersSelectFails = true;
+      return { id: USER_ID };
+    });
+
+    const res = await POST(deleteRequest());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(h.sentryMessage).toHaveBeenCalledWith(
+      expect.stringContaining("sweep failed"),
+      expect.objectContaining({ tags: { userId: USER_ID, step: "sweep" } }),
+    );
   });
 });
 
