@@ -153,7 +153,38 @@ vi.mock("@/lib/reminder-email", () => ({
 }));
 vi.mock("@/lib/mux-token", () => ({
   muxThumbnailUrl: () => "https://image.mux.com/dummy/thumbnail.jpg",
+  // The playback-token routes (#305) sign on every success; the JWT is not
+  // under audit.
+  signMuxPlaybackToken: () => "dummy-playback-jwt",
 }));
+
+// The playback-token routes' best-effort funnel writes (#305): the trial
+// helpers are spies so a case can make them fail the way the driver does —
+// with the statement and its params, the anonymous identity among them. They
+// DELEGATE to the real functions by default, so nothing else in this file
+// sees a difference. `trialCookie` is the web viewer's trial_session cookie.
+const tokenAudit = vi.hoisted(() => {
+  const real: Record<string, (...args: unknown[]) => unknown> = {};
+  return {
+    real,
+    find: vi.fn((...args: unknown[]) => real.findTrialSession(...args)),
+    mint: vi.fn((...args: unknown[]) => real.mintTrialSession(...args)),
+    stamp: vi.fn((...args: unknown[]) => real.stampSignupWall(...args)),
+    trialCookie: "",
+  };
+});
+vi.mock("@/lib/trial", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/trial")>();
+  tokenAudit.real.findTrialSession = actual.findTrialSession as (...args: unknown[]) => unknown;
+  tokenAudit.real.mintTrialSession = actual.mintTrialSession as (...args: unknown[]) => unknown;
+  tokenAudit.real.stampSignupWall = actual.stampSignupWall as (...args: unknown[]) => unknown;
+  return {
+    ...actual,
+    findTrialSession: tokenAudit.find,
+    mintTrialSession: tokenAudit.mint,
+    stampSignupWall: tokenAudit.stamp,
+  };
+});
 
 // The paywall wallet's confirm-time reporting (#214): the CAPI identity
 // capture, the Meta call and PostHog are the vendor steps that can fail with a
@@ -195,6 +226,9 @@ vi.mock("next/headers", () => ({
       if (name === "cookie_consent" && walletAudit.consent) {
         return { value: walletAudit.consent };
       }
+      if (name === "trial_session" && tokenAudit.trialCookie) {
+        return { value: tokenAudit.trialCookie };
+      }
       return undefined;
     },
   }),
@@ -232,6 +266,8 @@ import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
+import { POST as appPlaybackToken } from "@/app/api/v1/playback-token/route";
+import { GET as webPlaybackToken } from "@/app/api/playback-token/route";
 import { eraseUser, summarizeEraseResult } from "@/lib/erase-user";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
 import { assembleUserExport, summarizeExport } from "@/lib/user-export";
@@ -287,6 +323,11 @@ beforeEach(() => {
   sentryMessage.mockReset();
   walletAudit.authUserId = "user_1";
   walletAudit.claimCookie = "";
+  // mockReset puts back the delegating implementation each spy was built with.
+  tokenAudit.find.mockReset();
+  tokenAudit.mint.mockReset();
+  tokenAudit.stamp.mockReset();
+  tokenAudit.trialCookie = "";
 });
 
 afterEach(() => {
@@ -959,6 +1000,161 @@ describe("log audit · /api/v1/watch-segments (the app's retention flush)", () =
     expect(logged()).toContain(EPISODE); // the id IS logged — that is the point of the line
     for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
       expect(logged()).not.toContain(marker);
+    }
+  });
+});
+
+describe("log audit · the playback-token routes' funnel writes (#305)", () => {
+  // Both token routes (the app's POST /api/v1/playback-token and the web's
+  // GET /api/playback-token) mint a trial_sessions row on a free episode and
+  // stamp the sign-up wall on it on a member episode — STRICTLY best-effort:
+  // a failure is swallowed and warned about, playback goes on. The realistic
+  // worst case is a driver error: Drizzle's wrapper repeats the statement
+  // with its params — the anonymous identity (the app's device UUID, the
+  // web's trial cookie) and the HMAC of the viewer's IP. Only the show and
+  // episode ids may come out.
+  const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+  const SHOW = "show_1";
+  const MARKER_IDENTITY = "1eaf0000-dead-4bee-8f00-00000000beef";
+  const MARKER_IP_HASH = "dummy-ip-hash-leak-marker";
+  const MARKERS = [MARKER_IDENTITY, MARKER_IP_HASH, MARKER_SECRET, "db.example.invalid"];
+
+  function driverError(statement: string) {
+    const text = `${statement} params: ${MARKER_IDENTITY},${SHOW},${MARKER_IP_HASH} — ${MARKER_DATABASE_URL}`;
+    const cause = Object.assign(new Error(text), { name: "PostgresError", code: "57P01" });
+    return Object.assign(new Error(`Failed query: ${text}`), {
+      name: "DrizzleQueryError",
+      cause,
+    });
+  }
+  const MINT = 'insert into "trial_sessions" ("session_token", "show_id", "ip_hash") values ($1, $2, $3)';
+  const STAMP = 'update "trial_sessions" set "signup_wall_at" = now() where "session_token" = $1 and "show_id" = $2';
+
+  /** The episode lookup both routes open with: a ready episode of a published show. */
+  function episodeRow(access: "free" | "member") {
+    const chain = {
+      from: () => chain,
+      innerJoin: () => chain,
+      where: () => chain,
+      limit: async () => [{ playbackId: "pb_dummy", showId: SHOW, access }],
+    };
+    select.mockImplementation(() => chain);
+  }
+
+  function appRequest(): Parameters<typeof appPlaybackToken>[0] {
+    return {
+      headers: new Headers({
+        "x-matio-device-id": MARKER_IDENTITY,
+        "x-vercel-forwarded-for": "203.0.113.9",
+      }),
+      json: async () => ({ episodeId: EPISODE }),
+    } as unknown as Parameters<typeof appPlaybackToken>[0];
+  }
+
+  function webRequest(episodeId: string): Parameters<typeof webPlaybackToken>[0] {
+    const url = new URL("https://matio.tv/api/playback-token");
+    url.searchParams.set("episode_id", episodeId);
+    return {
+      nextUrl: url,
+      cookies: { get: () => undefined },
+      headers: new Headers({ "x-vercel-forwarded-for": "203.0.113.9" }),
+    } as unknown as Parameters<typeof webPlaybackToken>[0];
+  }
+
+  beforeEach(() => {
+    // Paid mode — the episode's own tier decides, as in production today —
+    // and an anonymous viewer, the only one these writes exist for.
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    walletAudit.authUserId = null;
+    tokenAudit.trialCookie = MARKER_IDENTITY;
+    tokenAudit.find.mockResolvedValue(null);
+  });
+
+  it("app, free episode: a failed trial mint is logged by show and episode id — never the device id, the IP hash or the database URL", async () => {
+    episodeRow("free");
+    tokenAudit.mint.mockRejectedValue(driverError(MINT));
+    const logged = captureConsole();
+
+    const res = await appPlaybackToken(appRequest());
+
+    expect(res.status).toBe(200); // playback is never the price of a tracking failure
+    // The fixture is honest: the device id really was in the failed write.
+    expect(tokenAudit.mint).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionToken: MARKER_IDENTITY }),
+    );
+    for (const marker of MARKERS) expect(logged()).not.toContain(marker);
+    expect(logged()).toContain(
+      `[v1/playback-token] free tracking skipped {"showId":"${SHOW}","episodeId":"${EPISODE}"}`,
+    );
+  });
+
+  it("app, member episode: a failed sign-up-wall stamp is logged by show and episode id only", async () => {
+    episodeRow("member");
+    tokenAudit.stamp.mockRejectedValue(driverError(STAMP));
+    const logged = captureConsole();
+
+    const res = await appPlaybackToken(appRequest());
+
+    expect(res.status).toBe(403);
+    expect(tokenAudit.stamp).toHaveBeenCalledWith(MARKER_IDENTITY, SHOW);
+    for (const marker of MARKERS) expect(logged()).not.toContain(marker);
+    expect(logged()).toContain(
+      `[v1/playback-token] signup-wall stamp skipped {"showId":"${SHOW}","episodeId":"${EPISODE}"}`,
+    );
+  });
+
+  it("web, free episode: a failed trial mint is logged by show and episode id — never the trial cookie, the IP hash or the database URL", async () => {
+    episodeRow("free");
+    tokenAudit.mint.mockRejectedValue(driverError(MINT));
+    const logged = captureConsole();
+
+    const res = await webPlaybackToken(webRequest(EPISODE));
+
+    expect(res.status).toBe(200);
+    expect(tokenAudit.mint).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionToken: MARKER_IDENTITY }),
+    );
+    for (const marker of MARKERS) expect(logged()).not.toContain(marker);
+    expect(logged()).toContain(
+      `[playback-token] free-tier tracking skipped {"showId":"${SHOW}","episodeId":"${EPISODE}"}`,
+    );
+  });
+
+  it("web, member episode: a failed sign-up-wall stamp is logged by show and episode id only", async () => {
+    episodeRow("member");
+    tokenAudit.stamp.mockRejectedValue(driverError(STAMP));
+    const logged = captureConsole();
+
+    const res = await webPlaybackToken(webRequest(EPISODE));
+
+    expect(res.status).toBe(403);
+    expect(tokenAudit.stamp).toHaveBeenCalledWith(MARKER_IDENTITY, SHOW);
+    for (const marker of MARKERS) expect(logged()).not.toContain(marker);
+    expect(logged()).toContain(
+      `[playback-token] signup-wall stamp skipped {"showId":"${SHOW}","episodeId":"${EPISODE}"}`,
+    );
+  });
+
+  it("web: an episode_id that is not an id is refused before the query — Postgres would quote it back, and the framework logs that", async () => {
+    // What the driver does with text bound for a uuid column: refuse it,
+    // quoting the value. The route would throw it to the framework's logger.
+    const typed = `${MARKER_NAME} <${MARKER_EMAIL}>`;
+    select.mockImplementation(() => {
+      throw Object.assign(new Error(`invalid input syntax for type uuid: "${typed}"`), {
+        name: "PostgresError",
+        code: "22P02",
+      });
+    });
+    const logged = captureConsole();
+
+    const res = await webPlaybackToken(webRequest(typed));
+    const body = JSON.stringify(await res.json());
+
+    expect(res.status).toBe(400);
+    expect(select).not.toHaveBeenCalled();
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+      expect(body).not.toContain(marker);
     }
   });
 });

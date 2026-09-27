@@ -34,6 +34,7 @@ const SUBSCRIBER_TTL = 60 * 60; // 1h
 // Cap trial JWT TTL at the trial duration so a token never outlives the row.
 const TRIAL_TTL_CAP = TRIAL_DURATION_SECONDS;
 const NO_CACHE = { "Cache-Control": "private, no-store" } as const;
+const UUID_RE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
 // Structured, greppable log so token volume + outcome (esp. a trial 403/429
 // spike that would flag a client refresh-loop regression) is queryable in
@@ -50,10 +51,14 @@ function logToken(fields: {
 
 export async function GET(req: NextRequest) {
   const episodeId = req.nextUrl.searchParams.get("episode_id");
-  if (!episodeId) {
+  // Shape-checked before it reaches the query or a log line (#305): a
+  // non-uuid makes the driver throw with the statement AND its params, so
+  // whatever the client put in the URL would land in the runtime log. The
+  // player only ever sends database ids; the app's twin guards the same way.
+  if (!episodeId || !UUID_RE.test(episodeId)) {
     logToken({ result: 400, mode: "none" });
     return NextResponse.json(
-      { error: "Missing episode_id" },
+      { error: "Missing or invalid episode_id" },
       { status: 400, headers: NO_CACHE },
     );
   }
@@ -165,9 +170,16 @@ export async function GET(req: NextRequest) {
       // TrialRateLimitError or transient DB failure — tracking skipped,
       // playback unaffected. Warn on the unexpected case so a systemic DB
       // failure can't silently zero the funnel (rate limits are normal
-      // abuse-control noise, not failures).
+      // abuse-control noise, not failures). Ids only: the driver's message
+      // quotes the failed statement WITH its params — the trial cookie and
+      // the IP hash (#305).
       if (!(err instanceof TrialRateLimitError)) {
-        console.warn(`[playback-token] free-tier tracking skipped: ${err}`);
+        console.warn(
+          `[playback-token] free-tier tracking skipped ${JSON.stringify({
+            showId: row.showId,
+            episodeId,
+          })}`,
+        );
       }
     }
     const token = signMuxPlaybackToken(row.playbackId, SUBSCRIBER_TTL);
@@ -210,9 +222,15 @@ export async function GET(req: NextRequest) {
     if (existingToken) {
       try {
         await stampSignupWall(existingToken, row.showId);
-      } catch (err) {
-        // analytics-only — never block the response
-        console.warn(`[playback-token] signup-wall stamp skipped: ${err}`);
+      } catch {
+        // analytics-only — never block the response. Ids only, same reason
+        // as the free-tier tracking catch above.
+        console.warn(
+          `[playback-token] signup-wall stamp skipped ${JSON.stringify({
+            showId: row.showId,
+            episodeId,
+          })}`,
+        );
       }
     }
     // First-party visit ledger: mark "hit the sign-up wall today" on the
