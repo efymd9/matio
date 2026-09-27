@@ -23,7 +23,11 @@ export type ApiErrorCode =
   | "not_found"
   | "rate_limited"
   | "upgrade_required"
-  | "server_error";
+  | "server_error"
+  // 503: a transient server-side state the client should simply retry — the
+  // progress save answers it while the account's mirror row cannot be
+  // healed yet (#303). Nothing was written.
+  | "unavailable";
 
 export type ApiErrorBody = {
   error: {
@@ -168,6 +172,15 @@ export type SaveProgressRequest = {
 };
 
 export type SaveProgressResponse = { ok: true };
+
+// GET /api/v1/progress?episodeId=<uuid> — the signed-in viewer's own resume
+// position for ONE episode (#303), so every partly watched episode resumes,
+// not only the one per show on the continue rail. Bearer-only (401
+// anonymous). `positionSeconds` is the stored resume playhead, 0 when the
+// episode has no row. It is returned as stored even for a finished episode,
+// like the web's resume: an `ended` save writes the episode's end, and the
+// player's RESUME_TAIL_SECONDS rule turns that into a start from 0:00.
+export type EpisodeProgressResponse = { positionSeconds: number };
 
 // GET /api/v1/continue — one tile per show the user is mid-way through,
 // most-recently-watched first. `positionSeconds` is the resume target the
