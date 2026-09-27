@@ -19,6 +19,11 @@ import { api } from "@/api/client";
 //   - `ended` saves once with completed=true, and nothing else is saved for
 //     the episode until the playhead moves back (a replay), matching the
 //     web's "an ended element was already final-saved" rule
+//   - a save that FAILS is not recorded as saved (#300): the next flush —
+//     unmount, background, or the return to the foreground, which is the
+//     closest thing to "the network is back" — sends it again. A failed
+//     `ended` save stays owed as completed=true until one lands, or the
+//     episode never leaves Up next and resumes in the credits
 //
 // Signed-out viewers save nothing: POST /v1/progress is 401 for them, and a
 // request that is known to be refused is battery, not measurement.
@@ -43,7 +48,16 @@ export function onProgressSaved(listener: Listener): () => void {
 }
 
 export function useProgressSaver(episodeId: string, enabled: boolean) {
-  const state = useRef({ position: 0, sampledAt: 0, lastSaved: -1, ended: false });
+  const state = useRef({
+    position: 0,
+    sampledAt: 0,
+    lastSaved: -1,
+    ended: false,
+    // A completed=true save failed and none has gone out since. Cleared the
+    // moment the next one is sent (a failure sets it again), so the iOS
+    // inactive → background pair does not send it twice.
+    pendingCompleted: false,
+  });
 
   const save = useCallback(
     (completed: boolean) => {
@@ -52,6 +66,7 @@ export function useProgressSaver(episodeId: string, enabled: boolean) {
       const t = Math.floor(s.position);
       if (completed) {
         s.ended = true;
+        s.pendingCompleted = false;
       } else {
         if (s.ended) return;
         if (t <= 0 || t === s.lastSaved) return;
@@ -63,11 +78,23 @@ export function useProgressSaver(episodeId: string, enabled: boolean) {
           for (const listener of listeners) listener();
         })
         .catch(() => {
-          // Best-effort: the next tick retries with a fresher position.
+          // Not saved, so not recorded as saved: the next flush sends it
+          // again. Only if nothing newer went out meanwhile — a later save
+          // that is still in flight (or landed) owns lastSaved now.
+          if (s.lastSaved === t) s.lastSaved = -1;
+          // Still ended = still owed; a replay since then made it moot.
+          if (completed && s.ended) s.pendingCompleted = true;
         });
     },
     [enabled, episodeId],
   );
+
+  // What the lifecycle moments send: the owed completed=true if there is
+  // one, else the playhead — which save() skips when it is unchanged since
+  // the last save that did not fail.
+  const flush = useCallback(() => {
+    save(state.current.pendingCompleted);
+  }, [save]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -76,15 +103,16 @@ export function useProgressSaver(episodeId: string, enabled: boolean) {
       if (s.ended || Date.now() - s.sampledAt > PLAYING_WINDOW_MS) return;
       save(false);
     }, PROGRESS_SAVE_INTERVAL_MS);
-    const subscription = AppState.addEventListener("change", (next) => {
-      if (next === "background" || next === "inactive") save(false);
-    });
+    // Background / inactive: the phone is being locked or left. Active: back
+    // in front, which is when a save that failed in a dead zone gets its
+    // next chance — without it a paused player never saves again.
+    const subscription = AppState.addEventListener("change", flush);
     return () => {
       clearInterval(interval);
       subscription.remove();
-      save(false);
+      flush();
     };
-  }, [enabled, save]);
+  }, [enabled, save, flush]);
 
   return useMemo(
     () => ({
@@ -92,7 +120,10 @@ export function useProgressSaver(episodeId: string, enabled: boolean) {
         const s = state.current;
         // A playhead that jumped backwards after `ended` is a replay or a
         // seek — the episode is live again and may be saved again.
-        if (s.ended && currentTime + 1 < s.position) s.ended = false;
+        if (s.ended && currentTime + 1 < s.position) {
+          s.ended = false;
+          s.pendingCompleted = false;
+        }
         s.position = currentTime;
         s.sampledAt = Date.now();
       },
