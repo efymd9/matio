@@ -312,6 +312,23 @@ describe("submitIdea — idempotent on (email, content_hash)", () => {
 });
 
 describe("submitIdea — refusals that never touch the brake", () => {
+  it("the honeypot is checked BEFORE validation: a filled trap with junk everywhere still gets the silent success", async () => {
+    const res = await submitIdea(
+      input({
+        website: "x",
+        logline: "",
+        email: "nope",
+        ageConfirmed: false,
+        termsAccepted: false,
+      }),
+    );
+
+    expect(res).toEqual({ ok: true, onList: false });
+    expect(h.rateLimited).not.toHaveBeenCalled();
+    expect(h.inserts).toEqual([]);
+    expect(consoleCalls()).toEqual([["submitIdea: honeypot"]]);
+  });
+
   it("honeypot: a success that writes nothing, logged without data", async () => {
     const res = await submitIdea(input({ website: "https://spam.example" }));
 
@@ -384,6 +401,34 @@ describe("submitIdea — the hourly brake", () => {
     expect(key).not.toContain(CLIENT_IP);
     expect(key).toBe(`idea:${hashClientIp(CLIENT_IP)}`);
     expect(limit).toBe(IDEA_RATELIMIT_PER_HOUR);
+  });
+
+  async function keyFor(ip: string) {
+    h.headers = new Headers({ "x-vercel-forwarded-for": ip });
+    h.rateLimited.mockClear();
+    await submitIdea(input());
+    return h.rateLimited.mock.calls[0][0];
+  }
+
+  it("an IPv6 client is counted per /64 — rotating inside its prefix buys no fresh bucket", async () => {
+    const a = await keyFor("2001:db8:abcd:12:1::1");
+    const b = await keyFor("2001:0db8:abcd:0012:ffff:ffff:ffff:fffe");
+    const c = await keyFor("2001:db8:abcd:13::1");
+
+    expect(a).toBe(b);
+    expect(a).toBe(`idea:${hashClientIp("2001:db8:abcd:12::/64")}`);
+    expect(c).not.toBe(a);
+    for (const key of [a, c]) {
+      expect(key).toMatch(/^idea:[0-9a-f]{64}$/);
+      expect(key).not.toContain("2001");
+    }
+  });
+
+  it("a compressed prefix expands before it is cut; IPv4 and IPv4-mapped stay per address", async () => {
+    expect(await keyFor("2001:db8::7")).toBe(await keyFor("2001:db8:0:0:5::"));
+    expect(await keyFor("2001:db8::7")).toBe(`idea:${hashClientIp("2001:db8:0:0::/64")}`);
+    expect(await keyFor("::ffff:203.0.113.7")).toBe(`idea:${hashClientIp(CLIENT_IP)}`);
+    expect(await keyFor("203.0.113.8")).not.toBe(await keyFor(CLIENT_IP));
   });
 });
 

@@ -19,7 +19,8 @@ import { integer, pgTable, primaryKey, text, timestamp } from "drizzle-orm/pg-co
 //
 // Since #297 a third key prefix brakes the public story-idea form
 // (app/(public)/ideas/actions.ts:submitIdea): `idea:` + HMAC of the client IP
-// (same salt), so an idea submission never shares a bucket with a checkout.
+// — of its /64 for an IPv6 client — (same salt), so an idea submission never
+// shares a bucket with a checkout.
 // Still hashes only; comment-only change, no migration.
 export const guestCheckoutAttempts = pgTable(
   "guest_checkout_attempts",
