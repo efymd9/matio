@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
   StyleSheet,
@@ -118,6 +118,19 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
+// A failure a second attempt can cure: the phone could not reach the server,
+// the server failed, or the answer did not parse. A 403 (the gate) or a 429
+// (the hourly limit) is an answer, and asking again changes nothing.
+function isTransient(err: ApiError): boolean {
+  return (
+    err.code === "network" ||
+    err.code === "server_error" ||
+    err.code === "malformed" ||
+    err.status === 0 ||
+    err.status >= 500
+  );
+}
+
 export function EpisodeFeed({
   show,
   initialIndex,
@@ -134,9 +147,10 @@ export function EpisodeFeed({
   signedIn: boolean;
   onBack: () => void;
   onSignIn: () => void;
-  // The current page, every time it changes (and once on mount) — the watch
-  // screen remembers it across a remount of the feed (#252).
-  onCurrentChange?: (index: number) => void;
+  // The current page and its playhead (undefined until that page has
+  // played), every time either changes and once on mount — the watch screen
+  // remembers both across a remount of the feed (#252, #302).
+  onCurrentChange?: (index: number, positionSeconds: number | undefined) => void;
 }) {
   const { height } = useWindowDimensions();
   const config = useConfig();
@@ -152,9 +166,29 @@ export function EpisodeFeed({
   const currentRef = useRef(current);
   currentRef.current = current;
 
+  // Where each episode's page last reported its playhead (0 once it ended).
+  // A page leaves the pool when the viewer moves two pages on, and a rotated
+  // iPad drops and re-creates the page in view: the new page starts from
+  // here — not from 0:00, and not from the deep link's resume, which may be
+  // long stale by then (#302 item 3).
+  const playheadsRef = useRef(new Map<string, number>());
+  // The deep link's resume is for the page it opened on, until the viewer
+  // leaves it once.
+  const resumeUsedRef = useRef(false);
+  if (current !== initialIndex) resumeUsedRef.current = true;
+
   useEffect(() => {
-    onCurrentChange?.(current);
-  }, [current, onCurrentChange]);
+    onCurrentChange?.(current, playheadsRef.current.get(episodes[current].id));
+  }, [current, episodes, onCurrentChange]);
+
+  const onPlayhead = useCallback(
+    (episodeId: string, seconds: number) => {
+      playheadsRef.current.set(episodeId, seconds);
+      const index = currentRef.current;
+      if (episodes[index].id === episodeId) onCurrentChange?.(index, seconds);
+    },
+    [episodes, onCurrentChange],
+  );
 
   // Subscription state is not exposed to the app yet (registry): paid mode is
   // live, and every signed-in viewer reads as a non-subscriber. Same stance
@@ -261,6 +295,7 @@ export function EpisodeFeed({
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<EpisodeSummary>) => {
       const locked = lockedAt(index);
+      const isCurrent = index === current;
       // The pool rule: players live on the current page and its neighbours
       // only. A horizontal show never returns to a previous page, so it
       // keeps just current + next.
@@ -290,13 +325,17 @@ export function EpisodeFeed({
             show={show}
             episode={item}
             index={index}
-            isCurrent={index === current}
+            isCurrent={isCurrent}
             armed={index <= armedIndex}
             vertical={vertical}
             muted={muted}
             onToggleMute={() => setMuted((m) => !m)}
             signedIn={signedIn}
-            resumeSeconds={index === initialIndex ? resumeSeconds : 0}
+            resumeSeconds={
+              playheadsRef.current.get(item.id) ??
+              (index === initialIndex && !resumeUsedRef.current ? resumeSeconds : 0)
+            }
+            onPlayhead={onPlayhead}
             onEnded={onEnded}
             onNearEnd={onNearEnd}
             onBack={onBack}
@@ -304,7 +343,18 @@ export function EpisodeFeed({
           />
         );
       }
-      return <View style={{ height }}>{content}</View>;
+      // Only the page in view speaks to VoiceOver / TalkBack. A neighbour
+      // carries the same controls (Play/Pause, Back, Mute — or the native
+      // transport and the title in landscape) a swipe of focus away:
+      // focusing one scrolled the paged list and switched the episode behind
+      // the viewer's back (#302 item 4). `aria-hidden` is React Native's own
+      // spelling of accessibilityElementsHidden (iOS) +
+      // importantForAccessibility "no-hide-descendants" (Android).
+      return (
+        <View style={{ height }} aria-hidden={!isCurrent}>
+          {content}
+        </View>
+      );
     },
     [
       armedIndex,
@@ -316,6 +366,7 @@ export function EpisodeFeed({
       onBack,
       onEnded,
       onNearEnd,
+      onPlayhead,
       onSignIn,
       resumeSeconds,
       show,
@@ -376,6 +427,7 @@ function FeedPage({
   onToggleMute,
   signedIn,
   resumeSeconds,
+  onPlayhead,
   onEnded,
   onNearEnd,
   onBack,
@@ -390,7 +442,12 @@ function FeedPage({
   muted: boolean;
   onToggleMute: () => void;
   signedIn: boolean;
+  // Where this page's player lands on its first load (never inside the
+  // credits — RESUME_TAIL_SECONDS).
   resumeSeconds: number;
+  // Every playhead sample, and 0 at the end: the feed remembers it for a
+  // page re-created later.
+  onPlayhead: (episodeId: string, seconds: number) => void;
   onEnded: (index: number) => boolean;
   onNearEnd: (index: number) => void;
   onBack: () => void;
@@ -421,6 +478,9 @@ function FeedPage({
   const loadingRef = useRef(false);
   const nearEndFiredRef = useRef(false);
   const initialSeekDoneRef = useRef(false);
+  // The player is in a picture-in-picture window (its own on leave, or the
+  // native transport's button).
+  const pipActiveRef = useRef(false);
   // Playhead to restore after a token refresh — or a retry — reloads the
   // source.
   const resumeAfterRefreshRef = useRef<number | null>(null);
@@ -467,6 +527,27 @@ function FeedPage({
     setPlayback(null);
     setFetchNonce((n) => n + 1);
   }, []);
+
+  // A page whose warm-up failed while it was only a neighbour — one blip
+  // during the token fetch (at mount on a vertical show, 45s before the end
+  // on a landscape one), or its paused player erroring — must not greet the
+  // viewer with «Playback unavailable» when the auto-advance or a swipe makes
+  // it current: the network is usually back by then. Coming into view
+  // retries it once, quietly (#302 item 1); a second failure is the error
+  // page with its Try again. A 403 or a 429 is an answer and stays. Failures
+  // while in view are not retried here — their Try again is on screen.
+  // A layout effect, so the error page is never painted for the frame
+  // between the swipe and the retry.
+  const wasCurrentRef = useRef(isCurrent);
+  useLayoutEffect(() => {
+    const cameIntoView = isCurrent && !wasCurrentRef.current;
+    wasCurrentRef.current = isCurrent;
+    if (!cameIntoView) return;
+    if (videoFailed || (tokenError !== null && isTransient(tokenError))) refetch();
+    // Only the transition into view triggers it; the failure is read, not
+    // watched.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCurrent]);
 
   // The late-session retry (SIGNED_IN_RETRY_MS): once per page.
   const staleSession =
@@ -600,6 +681,7 @@ function FeedPage({
   const onProgress = useCallback(
     (e: OnProgressData) => {
       positionRef.current = e.currentTime;
+      onPlayhead(episode.id, e.currentTime);
       saver.onProgress(e.currentTime);
       tracker.onProgress(e.currentTime);
       if (vertical) setPosition(e.currentTime);
@@ -613,20 +695,42 @@ function FeedPage({
         onNearEnd(index);
       }
     },
-    [index, onNearEnd, saver, tracker, vertical],
+    [episode.id, index, onNearEnd, onPlayhead, saver, tracker, vertical],
   );
+
+  // Hand the end to the feed: it advances, or — the last episode, autoplay
+  // off — the page rests. Our own chrome then shows the play glyph again;
+  // the native transport handles its own end state. A page the feed
+  // advanced past is left un-paused — it restarts when it is swiped back to
+  // (below).
+  const settleEnd = useCallback(() => {
+    const advanced = onEnded(index);
+    setUserPaused(!advanced && vertical);
+  }, [index, onEnded, vertical]);
 
   const onEnd = useCallback(() => {
     endedRef.current = true;
     cancelPendingPause();
+    onPlayhead(episode.id, 0);
     saver.onEnded();
     tracker.onEnded();
-    const advanced = onEnded(index);
-    // Last episode: our own chrome shows the play glyph again; the native
-    // transport handles its own end state. A page the feed advanced past is
-    // left un-paused — it restarts when it is swiped back to (below).
-    setUserPaused(!advanced && vertical);
-  }, [cancelPendingPause, index, onEnded, saver, tracker, vertical]);
+    // In a picture-in-picture window the end waits for the window to close
+    // (below): advancing would hand the stream to another player — the
+    // landscape page leaves the pool and its window closes, a vertical
+    // window freezes on the last frame — and the next episode would go on as
+    // sound only, behind another app (#302 item 2).
+    if (pipActiveRef.current) return;
+    settleEnd();
+  }, [cancelPendingPause, episode.id, onPlayhead, saver, settleEnd, tracker]);
+
+  const onPictureInPictureStatusChanged = useCallback(
+    (e: { isActive: boolean }) => {
+      const closed = pipActiveRef.current && !e.isActive;
+      pipActiveRef.current = e.isActive;
+      if (closed && endedRef.current && isCurrent) settleEnd();
+    },
+    [isCurrent, settleEnd],
+  );
 
   // The player pauses on its own — a lock-screen or Control Center pause, a
   // call — without the `paused` prop knowing. On a VERTICAL page, where our
@@ -788,15 +892,29 @@ function FeedPage({
           onBuffer={onBuffer}
           onPlaybackStateChanged={onPlaybackStateChanged}
           onAudioBecomingNoisy={onAudioBecomingNoisy}
-          // Picture-in-picture when the viewer leaves the app, audio when
-          // the screen locks, now-playing controls on the lock screen —
-          // the current page only, never a warming neighbour. The native
-          // config behind these (iOS `audio` background mode, the Android
-          // media-playback foreground service, supportsPictureInPicture)
-          // comes from the react-native-video plugin options in app.json.
+          onPictureInPictureStatusChanged={onPictureInPictureStatusChanged}
+          // Audio when the screen locks or the app is left: on EVERY pooled
+          // page, not only the current one. iOS plays in the background only
+          // a player whose layer react-native-video detached when the app
+          // went there, and it detaches only players that had
+          // playInBackground at that moment — so a neighbour without it,
+          // made current by the auto-advance on a locked phone, would not
+          // play (#302 item 2). A neighbour is paused and muted anyway.
+          playInBackground
+          playWhenInactive
+          // Picture-in-picture when the viewer leaves the app, now-playing
+          // controls on the lock screen: the current page only, never a
+          // warming neighbour. PiP on leave works for VERTICAL shows only
+          // (iOS): react-native-video 6.19 arms automatic PiP on its own
+          // AVPlayerLayer, and a landscape page with `controls` renders an
+          // AVPlayerViewController instead, on which it never sets
+          // canStartPictureInPictureAutomaticallyFromInline — there PiP is
+          // the native transport's button (registry, upstream fix). The
+          // native config behind these (iOS `audio` background mode, the
+          // Android media-playback foreground service,
+          // supportsPictureInPicture) comes from the react-native-video
+          // plugin options in app.json.
           enterPictureInPictureOnLeave={isCurrent}
-          playInBackground={isCurrent}
-          playWhenInactive={isCurrent}
           showNotificationControls={isCurrent}
           ignoreSilentSwitch="ignore"
           // AirPlay: the native transport's route button on landscape shows;

@@ -29,6 +29,12 @@ type VideoProps = {
   onSeek?: () => void;
   onPlaybackStateChanged?: (e: { isPlaying: boolean; isSeeking: boolean }) => void;
   onAudioBecomingNoisy?: () => void;
+  onPictureInPictureStatusChanged?: (e: { isActive: boolean }) => void;
+  muted?: boolean;
+  playInBackground?: boolean;
+  playWhenInactive?: boolean;
+  enterPictureInPictureOnLeave?: boolean;
+  showNotificationControls?: boolean;
 };
 type VideoInstance = { props: VideoProps; seek: ReturnType<typeof vi.fn> };
 
@@ -42,6 +48,7 @@ const h = vi.hoisted(() => ({
   videos: new Map<string, { props: unknown; seek: unknown }>(),
   mounts: [] as string[],
   chrome: new Map<string, { paused: boolean; buffering?: boolean; onTogglePlay: () => void }>(),
+  allPages: false,
   // The feed list's props: its viewability callback is how a SWIPE changes
   // the page, and jsdom has no layout to fire it — a case calls it directly.
   list: null as null | {
@@ -51,12 +58,24 @@ const h = vi.hoisted(() => ({
   },
 }));
 
+// jsdom has no layout, so the virtualized list never renders past its first
+// batch: only the opening page exists. A case about neighbour pages turns
+// `h.allPages` on and every page is rendered — the feed's own pool rule
+// still decides which of them carry a player.
 vi.mock("react-native", async (importOriginal) => {
   const rn = await importOriginal<typeof import("react-native")>();
   const React = await import("react");
   const FlatList = React.forwardRef(function FlatList(props: object, ref) {
     h.list = props;
-    return React.createElement(rn.FlatList as never, { ...props, ref });
+    const { data, initialNumToRender } = props as {
+      data?: ArrayLike<unknown> | null;
+      initialNumToRender?: number;
+    };
+    return React.createElement(rn.FlatList as never, {
+      ...props,
+      initialNumToRender: h.allPages ? (data?.length ?? 1) : initialNumToRender,
+      ref,
+    });
   });
   return { ...rn, FlatList };
 });
@@ -212,7 +231,20 @@ async function flush() {
   });
 }
 
-async function renderFeed(show: ShowDetail, { signedIn = false, initialIndex = 0, resumeSeconds = 0 } = {}) {
+async function renderFeed(
+  show: ShowDetail,
+  {
+    signedIn = false,
+    initialIndex = 0,
+    resumeSeconds = 0,
+    onCurrentChange,
+  }: {
+    signedIn?: boolean;
+    initialIndex?: number;
+    resumeSeconds?: number;
+    onCurrentChange?: (index: number, positionSeconds: number | undefined) => void;
+  } = {},
+) {
   act(() =>
     root.render(
       <EpisodeFeed
@@ -222,6 +254,7 @@ async function renderFeed(show: ShowDetail, { signedIn = false, initialIndex = 0
         signedIn={signedIn}
         onBack={onBack}
         onSignIn={onSignIn}
+        onCurrentChange={onCurrentChange}
       />,
     ),
   );
@@ -252,6 +285,7 @@ beforeEach(() => {
   h.videos.clear();
   h.mounts.length = 0;
   h.chrome.clear();
+  h.allPages = false;
   tokens.calls.length = 0;
   tokens.answer = async (episodeId) => granted(episodeId);
   gate = { mode: "tiers" };
@@ -787,5 +821,392 @@ describe("EpisodeFeed — the lock-screen artwork is resized (#292 item 10)", ()
     expect(imageUri?.startsWith("https://matio.tv/_next/image?")).toBe(true);
     expect(params.get("url")).toBe(poster);
     expect(params.get("w")).toBe("640");
+  });
+});
+
+// ---- #302: the player feed's robustness ---------------------------------
+
+// Every episode's tokens numbered on their own (ep2's first grant is
+// tok-ep2-1 whatever ep1 asked for before it); `fail` turns an attempt into
+// a rejection.
+function countingGrants(
+  fail: (episodeId: string, attempt: number) => ApiError | null = () => null,
+  expiresIn = 3600,
+) {
+  const counts = new Map<string, number>();
+  tokens.answer = async (episodeId) => {
+    const n = (counts.get(episodeId) ?? 0) + 1;
+    counts.set(episodeId, n);
+    const err = fail(episodeId, n);
+    if (err) throw err;
+    return { ...granted(episodeId, n), expiresIn };
+  };
+}
+const callsFor = (episodeId: string) => tokens.calls.filter((id) => id === episodeId).length;
+
+// A swipe: the list's viewability callback, as FlatList would fire it.
+const swipe = (index: number) =>
+  act(() =>
+    h.list?.viewabilityConfigCallbackPairs?.[0].onViewableItemsChanged({
+      viewableItems: [{ index }],
+    }),
+  );
+
+const advance = (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+
+// The rendered <Video> of a grant, if it is mounted at all.
+const playerEl = (episodeId: string, n = 1) =>
+  container.querySelector(`[data-video="${uri(episodeId, n)}"]`);
+// Whether VoiceOver / TalkBack can reach a node (react-native-web renders
+// `aria-hidden` as the DOM attribute).
+const hiddenFromReader = (node: Element | null) => {
+  if (!node) throw new Error("no such node");
+  return node.closest('[aria-hidden="true"]') !== null;
+};
+
+describe("EpisodeFeed — a neighbour whose warm-up failed is retried when it comes into view (#302 item 1)", () => {
+  beforeEach(() => {
+    h.allPages = true;
+  });
+
+  it("the auto-advance lands on a player, not on «Playback unavailable», after one blip on the warm-up fetch", async () => {
+    countingGrants((id, n) =>
+      id === "ep2" && n === 1 ? new ApiError("network", "The request timed out.", 0) : null,
+    );
+    await renderFeed(makeShow("horizontal", ["free", "free"]));
+
+    // 45s before the end the next page arms — and its fetch hits the blip.
+    act(() => video("ep1").props.onLoad?.({ duration: 600 }));
+    act(() => video("ep1").props.onProgress?.({ currentTime: 560 }));
+    await flush();
+    expect(callsFor("ep2")).toBe(1);
+
+    act(() => video("ep1").props.onEnd?.());
+    await flush();
+
+    expect(callsFor("ep2")).toBe(2);
+    expect(video("ep2", 2).props.paused).toBe(false);
+    expect(text()).not.toContain("Playback unavailable");
+  });
+
+  it("so does a swipe on a vertical show, whose neighbour warms at mount", async () => {
+    countingGrants((id, n) =>
+      id === "ep2" && n === 1 ? new ApiError("server_error", "Request failed (503).", 503) : null,
+    );
+    await renderFeed(makeShow("vertical", ["free", "free", "free"]));
+    expect(callsFor("ep2")).toBe(1);
+
+    swipe(1);
+    await flush();
+
+    expect(callsFor("ep2")).toBe(2);
+    expect(video("ep2", 2).props.paused).toBe(false);
+    expect(text()).not.toContain("Playback unavailable");
+  });
+
+  it("a neighbour whose paused player failed comes into view on a fresh token and player", async () => {
+    countingGrants();
+    await renderFeed(makeShow("vertical", ["free", "free"]));
+    act(() => video("ep2").props.onError?.());
+
+    swipe(1);
+    await flush();
+
+    expect(callsFor("ep2")).toBe(2);
+    expect(video("ep2", 2).props.paused).toBe(false);
+    expect(text()).not.toContain("Playback unavailable");
+  });
+
+  it("a 429 is an answer, not a blip — no retry", async () => {
+    countingGrants((id) =>
+      id === "ep2" ? new ApiError("rate_limited", "Too many requests.", 429) : null,
+    );
+    await renderFeed(makeShow("vertical", ["free", "free"]));
+
+    swipe(1);
+    await flush();
+
+    expect(callsFor("ep2")).toBe(1);
+    expect(text()).toContain("Too many previews");
+  });
+
+  it("once per coming into view: a second failure is the error page with its Try again", async () => {
+    countingGrants((id) => (id === "ep2" ? new ApiError("network", "Network request failed.", 0) : null));
+    await renderFeed(makeShow("vertical", ["free", "free"]));
+
+    swipe(1);
+    await flush();
+    await flush();
+    expect(callsFor("ep2")).toBe(2);
+    expect(text()).toContain("Playback unavailable");
+    expect(text()).toContain(TRY_AGAIN);
+
+    // Swiped away and back: one more quiet attempt, no loop.
+    swipe(0);
+    swipe(1);
+    await flush();
+    expect(callsFor("ep2")).toBe(3);
+  });
+
+  it("a failure on the page in view is not retried behind the viewer's back — its Try again is on screen", async () => {
+    tokens.answer = async () => {
+      throw new ApiError("network", "Network request failed.", 0);
+    };
+    await renderFeed(makeShow("horizontal", ["free"]));
+    await flush();
+
+    expect(tokens.calls).toEqual(["ep1"]);
+    expect(text()).toContain(TRY_AGAIN);
+  });
+});
+
+describe("EpisodeFeed — the lock screen and picture-in-picture (#302 item 2)", () => {
+  beforeEach(() => {
+    h.allPages = true;
+  });
+
+  const chrome = (n: number) => {
+    const c = h.chrome.get(`Episode ${n}`);
+    if (!c) throw new Error(`no chrome for episode ${n}`);
+    return c;
+  };
+
+  // react-native-video (iOS) lets a player go on in the background only if
+  // it had playInBackground when the app went there: a neighbour the
+  // auto-advance makes current on a locked phone must already carry it.
+  it("every pooled player may play in the background; PiP on leave and the lock-screen controls stay with the page in view", async () => {
+    await renderFeed(makeShow("vertical", ["free", "free", "free"]));
+
+    const next = video("ep2");
+    expect(next.props.paused).toBe(true);
+    expect(next.props.playInBackground).toBe(true);
+    expect(next.props.playWhenInactive).toBe(true);
+    expect(next.props.enterPictureInPictureOnLeave).toBe(false);
+    expect(next.props.showNotificationControls).toBe(false);
+
+    const playing = video("ep1");
+    expect(playing.props.playInBackground).toBe(true);
+    expect(playing.props.enterPictureInPictureOnLeave).toBe(true);
+    expect(playing.props.showNotificationControls).toBe(true);
+  });
+
+  it("an episode that ends in a PiP window stays in it — the feed advances when the window closes", async () => {
+    await renderFeed(makeShow("vertical", ["free", "free"]));
+
+    act(() => video("ep1").props.onPictureInPictureStatusChanged?.({ isActive: true }));
+    act(() => video("ep1").props.onEnd?.());
+    await flush();
+    // Still on episode 1: the next page did not become current.
+    expect(video("ep1").props.enterPictureInPictureOnLeave).toBe(true);
+    expect(video("ep2").props.paused).toBe(true);
+
+    act(() => video("ep1").props.onPictureInPictureStatusChanged?.({ isActive: false }));
+    await flush();
+    expect(video("ep2").props.paused).toBe(false);
+    expect(video("ep1").props.paused).toBe(true);
+  });
+
+  it("a landscape page keeps its player (and so its window) until the window closes", async () => {
+    await renderFeed(makeShow("horizontal", ["free", "free"]));
+    act(() => video("ep1").props.onLoad?.({ duration: 600 }));
+    act(() => video("ep1").props.onProgress?.({ currentTime: 560 }));
+    await flush();
+
+    // The native transport's PiP button.
+    act(() => video("ep1").props.onPictureInPictureStatusChanged?.({ isActive: true }));
+    act(() => video("ep1").props.onEnd?.());
+    await flush();
+    expect(playerEl("ep1")).not.toBeNull();
+    expect(video("ep2").props.paused).toBe(true);
+
+    act(() => video("ep1").props.onPictureInPictureStatusChanged?.({ isActive: false }));
+    await flush();
+    expect(video("ep2").props.paused).toBe(false);
+    // Advanced: the page behind leaves the landscape pool.
+    expect(playerEl("ep1")).toBeNull();
+  });
+
+  it("a window closed mid-episode changes nothing", async () => {
+    await renderFeed(makeShow("vertical", ["free", "free"]));
+
+    act(() => video("ep1").props.onPictureInPictureStatusChanged?.({ isActive: true }));
+    act(() => video("ep1").props.onPictureInPictureStatusChanged?.({ isActive: false }));
+    await flush();
+
+    expect(video("ep1").props.paused).toBe(false);
+    expect(video("ep2").props.paused).toBe(true);
+  });
+
+  it("the last episode, ended in a window, rests on its play glyph once the window closes", async () => {
+    await renderFeed(makeShow("vertical", ["free"]));
+
+    act(() => video("ep1").props.onPictureInPictureStatusChanged?.({ isActive: true }));
+    act(() => video("ep1").props.onEnd?.());
+    expect(chrome(1).paused).toBe(false);
+
+    act(() => video("ep1").props.onPictureInPictureStatusChanged?.({ isActive: false }));
+    expect(chrome(1).paused).toBe(true);
+  });
+});
+
+describe("EpisodeFeed — a page re-created in the pool starts where it was (#302 item 3)", () => {
+  beforeEach(() => {
+    h.allPages = true;
+    countingGrants();
+  });
+
+  it("a page that left the pool and came back resumes at its playhead, not at 0:00", async () => {
+    await renderFeed(makeShow("vertical", ["free", "free", "free"]));
+    act(() => video("ep1").props.onLoad?.({ duration: 600 }));
+    act(() => video("ep1").props.onProgress?.({ currentTime: 300 }));
+
+    // Two pages on: episode 1 leaves the pool…
+    swipe(1);
+    swipe(2);
+    await flush();
+    expect(playerEl("ep1")).toBeNull();
+    // …and one back re-creates it, on a new token.
+    swipe(1);
+    await flush();
+
+    const again = video("ep1", 2);
+    act(() => again.props.onLoad?.({ duration: 600 }));
+    expect(again.seek).toHaveBeenCalledWith(300);
+  });
+
+  it("the deep-linked episode, once finished, comes back at 0:00 — not at the stale resume", async () => {
+    await renderFeed(makeShow("vertical", ["free", "free", "free"]), { resumeSeconds: 300 });
+    const first = video("ep1");
+    act(() => first.props.onLoad?.({ duration: 600 }));
+    expect(first.seek).toHaveBeenCalledWith(300);
+    act(() => first.props.onProgress?.({ currentTime: 599 }));
+    act(() => first.props.onEnd?.());
+    await flush();
+
+    swipe(2);
+    await flush();
+    swipe(1);
+    await flush();
+
+    const again = video("ep1", 2);
+    act(() => again.props.onLoad?.({ duration: 600 }));
+    expect(again.seek).not.toHaveBeenCalled();
+  });
+
+  it("tells the screen the page in view and its playhead", async () => {
+    const onCurrentChange = vi.fn();
+    await renderFeed(makeShow("vertical", ["free", "free"]), { onCurrentChange });
+    expect(onCurrentChange).toHaveBeenLastCalledWith(0, undefined);
+
+    act(() => video("ep1").props.onProgress?.({ currentTime: 42 }));
+    expect(onCurrentChange).toHaveBeenLastCalledWith(0, 42);
+    // A neighbour's samples are not the page in view's.
+    act(() => video("ep2").props.onProgress?.({ currentTime: 7 }));
+    expect(onCurrentChange).toHaveBeenLastCalledWith(0, 42);
+
+    swipe(1);
+    expect(onCurrentChange).toHaveBeenLastCalledWith(1, 7);
+    act(() => video("ep2").props.onEnd?.());
+    expect(onCurrentChange).toHaveBeenLastCalledWith(1, 0);
+  });
+});
+
+describe("EpisodeFeed — only the page in view speaks to VoiceOver (#302 item 4)", () => {
+  beforeEach(() => {
+    h.allPages = true;
+  });
+
+  it("a vertical show: the neighbours' pages are hidden, and a swipe moves that with the page", async () => {
+    await renderFeed(makeShow("vertical", ["free", "free", "free"]));
+    expect(hiddenFromReader(playerEl("ep1"))).toBe(false);
+    expect(hiddenFromReader(playerEl("ep2"))).toBe(true);
+
+    swipe(1);
+    await flush();
+
+    expect(hiddenFromReader(playerEl("ep1"))).toBe(true);
+    expect(hiddenFromReader(playerEl("ep2"))).toBe(false);
+    expect(hiddenFromReader(playerEl("ep3"))).toBe(true);
+  });
+
+  it("a landscape show: the next page's title and «‹» are out of reach", async () => {
+    await renderFeed(makeShow("horizontal", ["free", "free"]));
+
+    expect(hiddenFromReader(leaf("Episode 1"))).toBe(false);
+    expect(hiddenFromReader(leaf("Episode 2"))).toBe(true);
+    const backs = Array.from(container.querySelectorAll('[aria-label="Back to show"]'));
+    expect(backs).toHaveLength(2);
+    expect(backs.filter((b) => !hiddenFromReader(b))).toHaveLength(1);
+  });
+
+  it("so is a locked neighbour's wall", async () => {
+    await renderFeed(makeShow("horizontal", ["free", "member"]));
+
+    expect(hiddenFromReader(leaf(WALL_CTA))).toBe(true);
+  });
+});
+
+describe("EpisodeFeed — the token refresh (#302 item 6)", () => {
+  it("swaps in the new token where the viewer was, and schedules the next refresh", async () => {
+    vi.useFakeTimers();
+    countingGrants(undefined, 61); // refresh one second in
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    const first = video("ep1", 1);
+    act(() => first.props.onLoad?.({ duration: 600 }));
+    act(() => first.props.onProgress?.({ currentTime: 300 }));
+    expect(first.seek).not.toHaveBeenCalled();
+
+    await advance(1_000);
+    expect(tokens.calls).toEqual(["ep1", "ep1"]);
+    const second = video("ep1", 2);
+    expect(second.props.paused).toBe(false);
+    act(() => second.props.onLoad?.({ duration: 600 }));
+    expect(second.seek).toHaveBeenLastCalledWith(300);
+
+    await advance(1_000);
+    expect(tokens.calls).toEqual(["ep1", "ep1", "ep1"]);
+  });
+
+  it("a refresh failing on 5xx retries after 1s, 2s and 4s — the old token playing meanwhile — then gives up", async () => {
+    vi.useFakeTimers();
+    countingGrants(
+      (_, n) => (n > 1 ? new ApiError("server_error", "Request failed (503).", 503) : null),
+      61,
+    );
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    await advance(1_000);
+    expect(tokens.calls).toHaveLength(2);
+    await advance(999);
+    expect(tokens.calls).toHaveLength(2);
+    await advance(1);
+    expect(tokens.calls).toHaveLength(3);
+    await advance(2_000);
+    expect(tokens.calls).toHaveLength(4);
+    expect(video("ep1").props.paused).toBe(false);
+    expect(text()).not.toContain("Playback unavailable");
+
+    await advance(4_000);
+    expect(tokens.calls).toHaveLength(5);
+    expect(text()).toContain("Playback unavailable");
+
+    await advance(60_000);
+    expect(tokens.calls).toHaveLength(5);
+  });
+
+  it("a page swiped away before its refresh stops refreshing", async () => {
+    vi.useFakeTimers();
+    countingGrants(undefined, 61);
+    await renderFeed(makeShow("vertical", ["free", "free"]));
+
+    await advance(500);
+    swipe(1);
+    await advance(10_000);
+
+    expect(callsFor("ep1")).toBe(1);
   });
 });

@@ -568,7 +568,12 @@ props + its config plugin).
   preview token (paid mode) is not refreshed — its expiry is the paywall, as on the web.
 - **PiP + background audio + now-playing**: `enterPictureInPictureOnLeave` / `playInBackground`
   / `playWhenInactive` / `showNotificationControls` on the current page only, `source.metadata`
-  (title / show / poster) for the lock screen; `app.json` turns on the plugin's
+  (title / show / poster) for the lock screen. **Corrected 2026-09-27 (#302):** PiP on leave
+  works for VERTICAL shows only — on iOS react-native-video arms automatic PiP on its own
+  `AVPlayerLayer`, and a landscape page (`controls` → `AVPlayerViewController`) never gets
+  `canStartPictureInPictureAutomaticallyFromInline`, so there PiP is the native transport's
+  button (registry row, upstream fix); and `playInBackground` / `playWhenInactive` now sit on
+  every pooled page (see #302 below). `app.json` turns on the plugin's
   `enableBackgroundAudio` (iOS `UIBackgroundModes: audio`), `enableNotificationControls` (the
   Android `mediaPlayback` foreground service) and `enableAndroidPictureInPicture`. **Native
   config changed → `expo prebuild --clean` before the next dev build.** AirPlay: the native
@@ -748,6 +753,34 @@ pinned by `orientation.test.tsx`, not by a device run; the native transport's pi
 here); PiP-on-leave (no PiP window appeared over Settings — AVPictureInPictureController is
 unsupported on the simulator; the props are untouched from #97); Android; a physical device.
 `pnpm test:unit` (unit + mobile), both typechecks, `expo export` green.
+
+**Player feed robustness, 2026-09-27 (#302)** — from the 27.09 app audit, no visible change.
+
+- **A neighbour's failed warm-up is retried when it comes into view**: a transient failure
+  (network / 5xx / malformed) of the next page's token fetch, or its paused player erroring,
+  used to greet the viewer with «Playback unavailable» on the auto-advance or swipe. Coming into
+  view now retries once, quietly (a layout effect — the error page is never painted); a 403 or
+  a 429 stays an answer; a failure while in view keeps its Try again.
+- **Background and PiP**: `playInBackground` / `playWhenInactive` on every pooled page
+  (react-native-video on iOS detaches a player's layer for background audio only if it had the
+  prop when the app went to the background — a neighbour without it, made current on a locked
+  phone, would not play); an episode that ends inside a PiP window (`onPictureInPictureStatusChanged`)
+  rests there and the feed advances when the window closes — advancing inside it closed the
+  landscape window (the page left the pool) and froze the vertical one. Unverified on a phone:
+  registry row.
+- **Per-episode playheads**: the feed remembers every page's last playhead (0 once it ended);
+  a page re-created in the pool (two pages on and back, an iPad rotated mid-episode) starts
+  there, and the deep link's resume applies to its own page only until the viewer first leaves
+  it. `onCurrentChange(index, positionSeconds)` carries the current playhead to the watch
+  screen, so the feed remounted after a covering screen comes back at it (closes the #252
+  review's registry row).
+- **VoiceOver / TalkBack**: only the page in view is reachable — every page wrapper carries
+  `aria-hidden={!isCurrent}` (React Native's spelling of `accessibilityElementsHidden` +
+  `importantForAccessibility="no-hide-descendants"`); focusing a neighbour's identical controls
+  used to scroll the list and switch the episode.
+- **Tests**: `src/watch/episode-feed.test.tsx` (every case above plus the token refresh — the
+  restored playhead after the swap, the 1/2/4s backoff, no refresh off the current page) and
+  `src/pushed-screens.test.tsx` (the screen's remount seed).
 
 ## 15. Traps
 

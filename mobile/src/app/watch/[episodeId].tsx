@@ -88,15 +88,20 @@ export default function WatchScreen() {
   const focus = useOrientationLock(orientation);
   const settled = useOrientationSettled(orientation, focus);
 
-  // The feed's current page, remembered across its remounts: the feed is
-  // unmounted while another screen covers this one (sign-in from the wall —
-  // see useOrientationSettled) and must come back on the page the viewer
-  // left, not on the deep-linked one. Keyed on the episode so a stale page
+  // The feed's current page and its playhead, remembered across its
+  // remounts: the feed is unmounted while another screen covers this one
+  // (sign-in from the wall — see useOrientationSettled) and must come back
+  // on the page the viewer left, where they left it — not on the deep-linked
+  // one, and not at 0:00 (#302 item 3). Keyed on the episode so a stale page
   // can never survive a change of route params.
-  const pageRef = useRef<{ episodeId: string; index: number } | null>(null);
+  const pageRef = useRef<{
+    episodeId: string;
+    index: number;
+    positionSeconds: number | undefined;
+  } | null>(null);
   const onCurrentChange = useCallback(
-    (index: number) => {
-      pageRef.current = { episodeId, index };
+    (index: number, positionSeconds: number | undefined) => {
+      pageRef.current = { episodeId, index, positionSeconds };
     },
     [episodeId],
   );
@@ -151,9 +156,12 @@ export default function WatchScreen() {
     );
   }
 
-  // Back on the page the viewer left, if the feed was up before; the deep
-  // link's resume applies only when that is still the deep-linked episode.
-  const startIndex = pageRef.current?.episodeId === episodeId ? pageRef.current.index : index;
+  // Back on the page the viewer left, if the feed was up before, at the
+  // playhead it last reported; the deep link's resume applies only while
+  // that is still the deep-linked episode and it has not played since.
+  const left = pageRef.current?.episodeId === episodeId ? pageRef.current : null;
+  const startIndex = left ? left.index : index;
+  const startSeconds = left?.positionSeconds ?? (startIndex === index ? resumeSeconds : 0);
 
   return (
     <>
@@ -161,7 +169,7 @@ export default function WatchScreen() {
       <EpisodeFeed
         show={show}
         initialIndex={startIndex}
-        resumeSeconds={startIndex === index ? resumeSeconds : 0}
+        resumeSeconds={startSeconds}
         signedIn={isSignedIn}
         onBack={onBack}
         onSignIn={onSignIn}
