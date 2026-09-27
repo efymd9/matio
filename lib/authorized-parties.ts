@@ -85,7 +85,7 @@ function withHostname(url: URL, hostname: string): string {
 }
 
 /** The only surface the native app talks to; the exemption below is scoped to it. */
-const NATIVE_API_PREFIX = "/api/v1/";
+export const NATIVE_API_PREFIX = "/api/v1/";
 
 /**
  * The allowlist to verify ONE request with. The deploy-time list applies to
