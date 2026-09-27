@@ -160,6 +160,41 @@ vi.mock("expo-glass-effect", () => ({
 }));
 vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+// Read by the root layout for the tracker's release (#317).
+vi.mock("expo-constants", () => ({
+  default: { expoConfig: { version: "0.1.0" }, nativeBuildVersion: "7" },
+}));
+
+// The error tracker (#317). The fake SDK does what the real one does with a
+// caught error — builds an event from it (the thrown message as the
+// exception value, the console trail as breadcrumbs) and runs it through the
+// `beforeSend` the app configured — and keeps what would leave the device.
+const tracker = vi.hoisted(() => ({
+  sent: [] as unknown[],
+  beforeSend: null as null | ((event: unknown, hint: unknown) => unknown),
+}));
+vi.mock("@sentry/react-native", () => ({
+  init: vi.fn((options: { beforeSend?: (event: unknown, hint: unknown) => unknown }) => {
+    tracker.beforeSend = options.beforeSend ?? null;
+  }),
+  captureException: vi.fn((error: Error) => {
+    const event = {
+      exception: {
+        values: [
+          {
+            type: error.name,
+            value: error.message,
+            mechanism: { type: "generic", handled: true },
+            stacktrace: { frames: [{ filename: "app:///main.jsbundle", lineno: 1, colno: 1 }] },
+          },
+        ],
+      },
+      breadcrumbs: [{ category: "console", message: `Error: ${error.message}` }],
+    };
+    const out = tracker.beforeSend ? tracker.beforeSend(event, { originalException: error }) : event;
+    if (out) tracker.sent.push(out);
+  }),
+}));
 
 import * as RootLayoutRoute from "@/app/_layout";
 import * as TabsRoute from "@/app/(tabs)/_layout";
@@ -167,6 +202,8 @@ import * as ShowRoute from "@/app/show/[slug]";
 import * as SignInRoute from "@/app/sign-in";
 import * as WatchRoute from "@/app/watch/[episodeId]";
 import { LocaleProvider } from "@/i18n/locale";
+import { initObservability, resetObservabilityForTests } from "@/observability";
+import * as Sentry from "@sentry/react-native";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -443,5 +480,61 @@ describe("the error itself stays out of sight (#308)", () => {
     expect(text()).not.toContain("ana@example.com");
     for (const spy of spies) spy.mockRestore();
     expect(JSON.stringify(printed.map((args) => args.map(String)))).not.toContain("ana@example.com");
+  });
+});
+
+describe("a caught crash goes to the error tracker, scrubbed (#317)", () => {
+  const captureException = vi.mocked(Sentry.captureException);
+  let printed: unknown[][];
+  let spies: { mockRestore: () => void }[];
+
+  beforeEach(() => {
+    // A build with a DSN; the SDK is the fake above.
+    initObservability(
+      { dsn: "https://dummy@sentry.invalid/1", appEnv: undefined, isDev: false, version: "0.1.0", build: 7 },
+      () => Sentry,
+    );
+    captureException.mockClear();
+    tracker.sent = [];
+    printed = [];
+    spies = (["log", "info", "warn", "error", "debug"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
+        printed.push(args);
+      }),
+    );
+  });
+
+  afterEach(() => {
+    for (const spy of spies) spy.mockRestore();
+    resetObservabilityForTests();
+    tracker.beforeSend = null;
+  });
+
+  it("a tab's crash is captured once — the address never leaves, and nothing is printed", async () => {
+    const error = new Error(CRASH_MESSAGE);
+    crash.tab = error;
+    await render(<Route module={TabsRoute} />);
+    expect(text()).toContain("Something glitched");
+
+    expect(captureException).toHaveBeenCalledTimes(1);
+    expect(captureException).toHaveBeenCalledWith(error);
+    // The same crashed screen rendering again is not a new crash.
+    await render(<Route module={TabsRoute} />);
+    expect(captureException).toHaveBeenCalledTimes(1);
+
+    expect(tracker.sent).toHaveLength(1);
+    const sent = JSON.stringify(tracker.sent);
+    expect(sent).not.toContain("ana@example.com");
+    expect(sent).toContain("viewer [redacted-email], card ending 4242");
+    expect(JSON.stringify(printed.map((args) => args.map(String)))).not.toContain("ana@example.com");
+  });
+
+  it("the root layout's last resort reports its crash too", async () => {
+    crash.rootProvider = true;
+    await render(<Route module={RootLayoutRoute} />);
+    expect(text()).toContain("Something glitched");
+
+    expect(captureException).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(tracker.sent)).not.toContain("ana@example.com");
   });
 });
