@@ -1,5 +1,14 @@
 import type { ReactElement } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import {
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GlassSurface } from "@/components/glass";
 import {
   Artwork,
@@ -48,12 +57,20 @@ type Handlers = {
 // passes as an ELEMENT (never a component type — a new type per render would
 // remount the carousel and lose its position), whose rows are the feed items
 // and whose footer is the tagline.
+//
+// Pull-to-refresh (#313) is the system control in the brand's gold; WHAT a
+// pull reloads, and when the spinner stops, is the screen's business
+// (`refreshing` / `onRefresh`). The list runs under the status bar — the
+// header pads itself by the inset — so the spinner is pushed down by the
+// same inset, or it would sit behind the notch / Dynamic Island.
 export function HomeFeed({
   items,
   header,
   footer = null,
   bottomPadding,
   playBusy = false,
+  refreshing,
+  onRefresh,
   onOpenShow,
   onPlayShow,
   onResume,
@@ -65,8 +82,11 @@ export function HomeFeed({
   // The Home CTA's in-flight state: a second Play tap is ignored while the
   // show loads, so the discs dim together with the caption button.
   playBusy?: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
 } & Handlers) {
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const cardWidth = width - 2 * SCREEN_PAD;
   const last = items[items.length - 1];
 
@@ -76,6 +96,14 @@ export function HomeFeed({
       keyExtractor={(item) => item.id}
       style={styles.list}
       contentContainerStyle={{ paddingBottom: bottomPadding }}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.gold}
+          progressViewOffset={insets.top}
+        />
+      }
       ListHeaderComponent={header}
       // A rail already ends in its own bottom margin; a card does not.
       ListFooterComponent={

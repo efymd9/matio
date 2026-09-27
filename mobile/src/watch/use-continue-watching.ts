@@ -23,16 +23,24 @@ const NONE: ContinueWatchingEntry[] = [];
 // device), and a change of account. Every load is numbered, and only the
 // newest may write: an older answer can neither overwrite a newer one nor
 // repopulate the list after a sign-out.
-export function useContinueWatching(signedIn: boolean): ContinueWatchingEntry[] {
+//
+// `reload` is Home's pull-to-refresh (#313): the same load, asked for now,
+// and a promise that settles with it — never rejects, so a failure keeps the
+// list on screen and marks it dirty exactly as above. Signed out there is
+// nothing to ask for, and it resolves at once without a request.
+export function useContinueWatching(signedIn: boolean): {
+  items: ContinueWatchingEntry[];
+  reload: () => Promise<void>;
+} {
   const [items, setItems] = useState<ContinueWatchingEntry[]>(NONE);
   const focused = useRef(false);
   const dirty = useRef(true);
   const gen = useRef(0);
 
-  const load = useCallback(() => {
+  const load = useCallback((): Promise<void> => {
     const g = ++gen.current;
     dirty.current = false;
-    api
+    return api
       .continueWatching()
       .then((res) => {
         if (g === gen.current) setItems(res.items);
@@ -60,7 +68,7 @@ export function useContinueWatching(signedIn: boolean): ContinueWatchingEntry[] 
   useFocusEffect(
     useCallback(() => {
       focused.current = true;
-      if (signedIn && dirty.current) load();
+      if (signedIn && dirty.current) void load();
       return () => {
         focused.current = false;
       };
@@ -69,9 +77,14 @@ export function useContinueWatching(signedIn: boolean): ContinueWatchingEntry[] 
 
   // Load now if someone is looking, otherwise on the next focus.
   const refresh = useCallback(() => {
-    if (focused.current && signedIn) load();
+    if (focused.current && signedIn) void load();
     else dirty.current = true;
   }, [signedIn, load]);
+
+  const reload = useCallback(
+    (): Promise<void> => (signedIn ? load() : Promise.resolve()),
+    [signedIn, load],
+  );
 
   useEffect(() => onProgressSaved(refresh), [refresh]);
 
@@ -82,5 +95,5 @@ export function useContinueWatching(signedIn: boolean): ContinueWatchingEntry[] 
     return () => subscription.remove();
   }, [refresh]);
 
-  return items;
+  return { items, reload };
 }
