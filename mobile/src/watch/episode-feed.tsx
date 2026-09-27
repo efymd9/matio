@@ -61,6 +61,9 @@ import { useSegmentTracker } from "./use-segment-tracker";
 // sign-up wall as its page, a subscribers-only one the «Subscribers only»
 // state — so an auto-advance or a swipe into it lands on the answer, never on
 // a stalled player — and the token route still enforces the gate underneath.
+// One exception (#316): a signed-in viewer is never locked up front on a
+// subscribers-only episode, because the app cannot tell a subscriber from a
+// member — the token route answers for them (see lockedAt).
 
 // How long before the current episode ends the next one's token is fetched
 // and its player mounted (horizontal). Same lead as the web player.
@@ -97,6 +100,16 @@ const SIGNED_IN_RETRY_MS = 1_000;
 // onPlaybackStateChanged. The explaining events arrive in the same native
 // tick; this only has to outlast the bridge.
 export const PAUSE_REPORT_SETTLE_MS = 300;
+
+// A preview (paid mode's 60s trial) is over when Mux refuses its token, and
+// Mux goes by the JWT's own `exp` — signed in whole seconds on the server,
+// before the answer travelled — while this page's clock starts when the
+// answer ARRIVES. So a player on a preview token that fails this close to
+// the page's expiry failed because the preview ran out.
+const PREVIEW_END_SLACK_MS = 5_000;
+
+// The preview's end — the answer the token route gives once it has run out.
+const previewEnded = () => new ApiError("forbidden", "", 403, "subscribe_required");
 
 type Playback = {
   playbackId: string;
@@ -213,20 +226,24 @@ export function EpisodeFeed({
     [episodes, onCurrentChange],
   );
 
-  // Subscription state is not exposed to the app yet (registry): paid mode is
-  // live, and every signed-in viewer reads as a non-subscriber. Same stance
-  // as the show page.
-  const hasSubscription = false;
-
+  // Subscription state is not exposed to the app (registry), so a signed-in
+  // viewer might be a subscriber: for them a subscribers-only episode is not
+  // locked here, the token route decides (#316). A subscriber gets a token
+  // and plays; anyone else gets the 403 subscribe_required — or, on a show
+  // whose episodes are ALL subscribers-only, the 60s preview the web gives
+  // too — and both end on the same «Subscribers only» page. A signed-out
+  // viewer is still locked up front: no account, no subscription.
   const lockedAt = useCallback(
-    (index: number) =>
-      isEpisodeLockedForApp({
+    (index: number) => {
+      const lock = isEpisodeLockedForApp({
         gate: config.signupGate,
         signedIn,
-        hasSubscription,
+        hasSubscription: false,
         position: index + 1,
         access: episodes[index].access,
-      }),
+      });
+      return signedIn && lock === "subscribe_required" ? false : lock;
+    },
     [config.signupGate, signedIn, episodes],
   );
 
@@ -330,9 +347,10 @@ export function EpisodeFeed({
       if (locked === "signup_required") {
         content = <SignupWall onSignIn={onSignIn} onBack={onBack} />;
       } else if (locked === "subscribe_required") {
-        // Signing in cannot open it, so no wall and no retry: the same
-        // answer the token route's 403 gets inside the page — with a way
-        // back, since in landscape nothing else on screen leads out.
+        // Signed out only (see lockedAt). An account alone does not open
+        // it, so no sign-up wall and no retry: the same answer the token
+        // route's 403 gets inside the page — with a way back, since in
+        // landscape nothing else on screen leads out.
         content = (
           <ErrorState
             message={t.app.watch.subscribersOnly}
@@ -589,10 +607,7 @@ function FeedPage({
     const remaining = playback.expiresAt - Date.now();
 
     if (playback.mode === "trial") {
-      const endTimer = setTimeout(
-        () => setTokenError(new ApiError("forbidden", "", 403, "subscribe_required")),
-        Math.max(0, remaining),
-      );
+      const endTimer = setTimeout(() => setTokenError(previewEnded()), Math.max(0, remaining));
       return () => clearTimeout(endTimer);
     }
 
@@ -824,6 +839,19 @@ function FeedPage({
     setUserPaused((p) => !p);
   }, []);
 
+  // A player that fails is «Playback unavailable» — except one on a preview
+  // token at the preview's end (PREVIEW_END_SLACK_MS): Mux refused the token
+  // a moment before the timer above fired, and the honest answer is the
+  // preview's own end, not a failure with a Try again that could only mint
+  // what is left of the minute.
+  const onVideoError = useCallback(() => {
+    if (playback?.mode === "trial" && Date.now() >= playback.expiresAt - PREVIEW_END_SLACK_MS) {
+      setTokenError(previewEnded());
+      return;
+    }
+    setVideoFailed(true);
+  }, [playback]);
+
   // --- end states, mirroring the web player's three distinct overlays ----
   // Every one carries «Back»: it replaces the whole page, the «‹» and the
   // vertical chrome with it (#292).
@@ -848,13 +876,14 @@ function FeedPage({
       );
     }
     // 403 subscribe_required — paid mode: the episode (or the legacy 60s
-    // preview) needs a subscription the app cannot sell.
+    // preview, run out) needs a subscription the app cannot sell. The same
+    // page as a locked one: what it is, a way back — no retry, since asking
+    // again only gets the same answer (#316), and nothing to buy (3.1.1).
     if (code === "forbidden" && reason === "subscribe_required") {
       return (
         <ErrorState
           message={t.app.watch.subscribersOnly}
           hint={t.app.watch.subscribersOnlyHint}
-          onRetry={retry}
           onBack={onBack}
         />
       );
@@ -916,7 +945,7 @@ function FeedPage({
           onProgress={onProgress}
           onSeek={onSeek}
           onEnd={onEnd}
-          onError={() => setVideoFailed(true)}
+          onError={onVideoError}
           onBuffer={onBuffer}
           onPlaybackStateChanged={onPlaybackStateChanged}
           onAudioBecomingNoisy={onAudioBecomingNoisy}
