@@ -1,6 +1,7 @@
 import type { AppConfig } from "@/lib/api/types";
 import { API_VERSION } from "@/lib/api/types";
 import { apiOk, envInt, resolveSignupGate } from "@/lib/api/v1";
+import { withAppEmbed } from "@/lib/app-embed";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { SITE_URL } from "@/lib/seo";
 
@@ -43,9 +44,13 @@ export async function GET() {
     locales: ["en", "es"],
     urls: {
       web: SITE_URL,
-      terms: `${SITE_URL}/terms`,
-      privacy: `${SITE_URL}/privacy`,
-      cookies: `${SITE_URL}/cookies`,
+      // The embed variant (#310, lib/app-embed.ts): the document alone — no
+      // site header with its Subscribe link, no trackers — in the app's
+      // in-app browser. Here, not only in the app, so builds already in
+      // testers' hands switch with no store release.
+      terms: `${SITE_URL}${withAppEmbed("/terms")}`,
+      privacy: `${SITE_URL}${withAppEmbed("/privacy")}`,
+      cookies: `${SITE_URL}${withAppEmbed("/cookies")}`,
       support: "mailto:contact@matio.tv",
     },
   };

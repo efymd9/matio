@@ -201,3 +201,84 @@ describe("proxy — Clerk authorized parties (wiring)", () => {
     ).toEqual({ authorizedParties: parties });
   });
 });
+
+// #310 — a legal document opened by the app (`?embed=app`). The rule itself
+// is lib/app-embed.ts; what is proved here is the wiring: exactly the three
+// documents (bare and /es) get the request stamped for the bare layout, the
+// URL's language is authoritative (no 307 to /es, whatever the phone speaks),
+// and nothing is written back — no consent default, no visitor id.
+describe("proxy — the app's embed of the legal documents", () => {
+  // What the page render will see: NextResponse.next/rewrite({ request })
+  // forwards request headers as x-middleware-request-*.
+  const forwarded = (res: Awaited<ReturnType<typeof proxy>>, name: string) =>
+    (res && res.headers.get(`x-middleware-request-${name}`)) ?? null;
+
+  // A first visit from outside the EU — the case where the normal page would
+  // default marketing consent ON and mint matio_aid.
+  const firstVisit = { "x-vercel-ip-country": "US" };
+
+  it("stamps /terms?embed=app for the bare layout, in English, and writes nothing", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(
+      request("/terms?embed=app", { ...firstVisit, "accept-language": "es-ES,es;q=0.9" }),
+      event,
+    );
+
+    expect(forwarded(res, "x-matio-embed")).toBe("app");
+    // The app put the viewer's choice in the path: bare = English, even on a
+    // Spanish phone — so no 307 to /es.
+    expect(forwarded(res, "x-matio-locale")).toBe("en");
+    expect(res?.status).not.toBe(307);
+    expect(res?.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("rewrites /es/privacy?embed=app onto /privacy, stamped Spanish", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(request("/es/privacy?embed=app", firstVisit), event);
+
+    const rewrite = new URL(res!.headers.get("x-middleware-rewrite")!);
+    expect(rewrite.pathname).toBe("/privacy");
+    expect(rewrite.searchParams.get("embed")).toBe("app");
+    expect(forwarded(res, "x-matio-embed")).toBe("app");
+    expect(forwarded(res, "x-matio-locale")).toBe("es");
+    // Not even the sticky locale cookie an /es visit normally sets.
+    expect(res?.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("covers /cookies too", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(request("/cookies?embed=app"), event);
+
+    expect(forwarded(res, "x-matio-embed")).toBe("app");
+  });
+
+  it("leaves the normal legal page exactly as it was", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(request("/terms", firstVisit), event);
+
+    expect(forwarded(res, "x-matio-embed")).toBeNull();
+    expect(res?.headers.get("Set-Cookie")).toContain("matio_aid");
+    expect(res?.headers.get("Set-Cookie")).toContain("cookie_consent");
+  });
+
+  it("gives no other page an embed variant, and no other value counts", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    for (const path of ["/?embed=app", "/about?embed=app", "/subscribe?embed=app", "/terms?embed=1"]) {
+      const res = await proxy(request(path), event);
+      expect(forwarded(res, "x-matio-embed")).toBeNull();
+    }
+  });
+
+  it("stays behind the staging lock", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", PASSWORD);
+
+    const res = await proxy(request("/terms?embed=app"), event);
+
+    expect(res?.status).toBe(401);
+  });
+});

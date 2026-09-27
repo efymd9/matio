@@ -6,6 +6,8 @@
 // added 2026-06-24.
 import type { Metadata } from "next";
 import Link from "next/link";
+import { LegalLink } from "@/components/site/legal-link";
+import { isAppEmbed, legalPageRobots } from "@/lib/app-embed-server";
 import { getDict } from "@/lib/i18n/server";
 import { localeAlternates } from "@/lib/seo";
 
@@ -15,7 +17,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: t.legal.privacyTitle,
     description: t.legal.privacyDescription,
     alternates: localeAlternates("/privacy", locale),
-    robots: { index: true, follow: true },
+    robots: await legalPageRobots(),
   };
 }
 
@@ -24,8 +26,15 @@ const LAST_UPDATED_EN = "June 24, 2026";
 
 export default async function PrivacyPage() {
   const { locale, t } = await getDict();
+  const embed = await isAppEmbed();
   return (
-    <main className="bg-background pt-28 pb-24 sm:pt-32">
+    <main
+      className={
+        embed
+          ? "bg-background pt-10 pb-16"
+          : "bg-background pt-28 pb-24 sm:pt-32"
+      }
+    >
       <article className="mx-auto max-w-3xl px-6 sm:px-8">
         <header className="mb-10 space-y-3">
           <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-gold">
@@ -39,14 +48,17 @@ export default async function PrivacyPage() {
           </p>
         </header>
         {locale === "en" ? <PrivacyEn /> : <PrivacyEs />}
-        <div className="mt-12 border-t border-white/[0.06] pt-6">
-          <Link
-            href="/"
-            className="text-sm font-semibold text-cream/70 transition-colors hover:text-cream"
-          >
-            ← {t.legal.backHome}
-          </Link>
-        </div>
+        {/* No way «home» in the app's embed (#310): home is the full site. */}
+        {!embed && (
+          <div className="mt-12 border-t border-white/[0.06] pt-6">
+            <Link
+              href="/"
+              className="text-sm font-semibold text-cream/70 transition-colors hover:text-cream"
+            >
+              ← {t.legal.backHome}
+            </Link>
+          </div>
+        )}
       </article>
     </main>
   );
@@ -100,7 +112,7 @@ function PrivacyEn() {
             PostHog for product analytics (funnel and engagement events, masked
             session replays, processed in the EU), and Google Analytics (GA4)
             for site-traffic measurement.
-            See the <Link href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</Link>.
+            See the <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</LegalLink>.
           </li>
           <li>
             <strong>First-party audience measurement</strong> — a strictly
@@ -334,13 +346,13 @@ function PrivacyEn() {
       <Section id="contact" title="11. Contact">
         <p>
           Privacy questions: <strong>contact@matio.tv</strong>. See also our{" "}
-          <Link href="/terms" className="underline underline-offset-2 hover:text-white">
+          <LegalLink href="/terms" className="underline underline-offset-2 hover:text-white">
             Terms of Service
-          </Link>{" "}
+          </LegalLink>{" "}
           and{" "}
-          <Link href="/cookies" className="underline underline-offset-2 hover:text-white">
+          <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">
             Cookie Policy
-          </Link>
+          </LegalLink>
           .
         </p>
       </Section>
@@ -401,9 +413,9 @@ function PrivacyEs() {
             analítica de producto (eventos de embudo y de uso, grabaciones de
             sesión enmascaradas, procesados en la UE) y Google Analytics (GA4)
             para medir el tráfico del sitio. Consulta la{" "}
-            <Link href="/cookies" className="underline underline-offset-2 hover:text-white">
+            <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">
               Política de cookies
-            </Link>
+            </LegalLink>
             .
           </li>
           <li>
@@ -655,13 +667,13 @@ function PrivacyEs() {
         <p>
           Consultas de privacidad: <strong>contact@matio.tv</strong>. Consulta
           también nuestros{" "}
-          <Link href="/terms" className="underline underline-offset-2 hover:text-white">
+          <LegalLink href="/terms" className="underline underline-offset-2 hover:text-white">
             Términos del servicio
-          </Link>{" "}
+          </LegalLink>{" "}
           y la{" "}
-          <Link href="/cookies" className="underline underline-offset-2 hover:text-white">
+          <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">
             Política de cookies
-          </Link>
+          </LegalLink>
           .
         </p>
       </Section>

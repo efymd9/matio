@@ -14,6 +14,11 @@ import {
   serializeAttribution,
 } from "@/lib/attribution";
 import {
+  APP_EMBED_HEADER,
+  APP_EMBED_VALUE,
+  isAppEmbedRequest,
+} from "@/lib/app-embed";
+import {
   authorizedPartiesForRequest,
   resolveAuthorizedParties,
 } from "@/lib/authorized-parties";
@@ -37,6 +42,7 @@ import {
   isLocalizablePath,
   LEGACY_ALIAS_HOST,
   localizedPath,
+  type SeoLocale,
   SITE_URL,
   stripLocalePrefix,
 } from "@/lib/seo";
@@ -243,6 +249,28 @@ function applyLocalizedRewrite(req: NextRequest, basePath: string): NextResponse
   return applyVisitorCookie(req, res) ?? res;
 }
 
+// A legal document in the app's in-app browser (`?embed=app`, #310 — the rule
+// is lib/app-embed.ts). The request is stamped so the layout renders the page
+// alone, and the URL's language is made authoritative: the app put the
+// viewer's chosen language in the path, so a bare URL is English even on a
+// Spanish phone (no 307 to /es), and /es is rewritten like any /es page.
+// Nothing is written back — no consent default, no attribution or _fbc, no
+// matio_aid, no sticky locale: the page loads no tracker and no beacon that
+// could use them, and the app's own browser is no audience to measure.
+function applyAppEmbed(
+  req: NextRequest,
+  basePath: string,
+  locale: SeoLocale,
+): NextResponse {
+  const headers = new Headers(req.headers);
+  headers.set(APP_EMBED_HEADER, APP_EMBED_VALUE);
+  headers.set(URL_LOCALE_HEADER, locale);
+  if (locale === "en") return NextResponse.next({ request: { headers } });
+  const url = req.nextUrl.clone();
+  url.pathname = basePath;
+  return NextResponse.rewrite(url, { request: { headers } });
+}
+
 // Mints the first-party audience-measurement cookie (matio_aid) when the
 // visitor doesn't have one yet. Consent-exempt first-party analytics — the
 // cookie itself is just a random UUID; all data lives server-side and is
@@ -310,6 +338,11 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
   // through and 404s rather than bypassing the gates below.
   {
     const { locale, path } = stripLocalePrefix(req.nextUrl.pathname);
+    // A legal document opened by the app (#310) — ahead of the /es rewrite
+    // and the language redirect below, both of which it replaces.
+    if (isAppEmbedRequest(path, req.nextUrl.searchParams)) {
+      return applyAppEmbed(req, path, locale);
+    }
     if (locale === "es" && isLocalizablePath(path)) {
       return applyLocalizedRewrite(req, path);
     }
