@@ -75,7 +75,18 @@ describe("GET /api/v1/config", () => {
     for (const url of [body.urls.web, body.urls.terms, body.urls.privacy]) {
       expect(url).toMatch(/^https:\/\//);
     }
-    expect(body.urls.terms).toMatch(/\/terms$/);
     expect(body.urls.support).toBe("mailto:contact@matio.tv");
+  });
+
+  it("sends the legal links as the bare embed pages (#310)", async () => {
+    // The app opens these in an in-app browser; the normal page's header
+    // carries a Subscribe link to a Stripe purchase outside the App Store,
+    // and the page loads the marketing trackers. Builds already installed
+    // read the URLs from here — no store release needed.
+    const { urls } = await config();
+    expect(urls.terms).toBe("https://matio.tv/terms?embed=app");
+    expect(urls.privacy).toBe("https://matio.tv/privacy?embed=app");
+    expect(urls.cookies).toBe("https://matio.tv/cookies?embed=app");
+    expect(urls.web).toBe("https://matio.tv");
   });
 });

@@ -7,6 +7,8 @@
 // Analytics (GA4) disclosure added 2026-06-24.
 import type { Metadata } from "next";
 import Link from "next/link";
+import { LegalLink } from "@/components/site/legal-link";
+import { isAppEmbed, legalPageRobots } from "@/lib/app-embed-server";
 import { getDict } from "@/lib/i18n/server";
 import { localeAlternates } from "@/lib/seo";
 
@@ -16,7 +18,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: t.legal.cookiesTitle,
     description: t.legal.cookiesDescription,
     alternates: localeAlternates("/cookies", locale),
-    robots: { index: true, follow: true },
+    robots: await legalPageRobots(),
   };
 }
 
@@ -25,8 +27,15 @@ const LAST_UPDATED_EN = "June 24, 2026";
 
 export default async function CookiesPage() {
   const { locale, t } = await getDict();
+  const embed = await isAppEmbed();
   return (
-    <main className="bg-background pt-28 pb-24 sm:pt-32">
+    <main
+      className={
+        embed
+          ? "bg-background pt-10 pb-16"
+          : "bg-background pt-28 pb-24 sm:pt-32"
+      }
+    >
       <article className="mx-auto max-w-3xl px-6 sm:px-8">
         <header className="mb-10 space-y-3">
           <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-gold">
@@ -40,14 +49,17 @@ export default async function CookiesPage() {
           </p>
         </header>
         {locale === "en" ? <CookiesEn /> : <CookiesEs />}
-        <div className="mt-12 border-t border-white/[0.06] pt-6">
-          <Link
-            href="/"
-            className="text-sm font-semibold text-cream/70 transition-colors hover:text-cream"
-          >
-            ← {t.legal.backHome}
-          </Link>
-        </div>
+        {/* No way «home» in the app's embed (#310): home is the full site. */}
+        {!embed && (
+          <div className="mt-12 border-t border-white/[0.06] pt-6">
+            <Link
+              href="/"
+              className="text-sm font-semibold text-cream/70 transition-colors hover:text-cream"
+            >
+              ← {t.legal.backHome}
+            </Link>
+          </div>
+        )}
       </article>
     </main>
   );
@@ -229,13 +241,13 @@ function CookiesEn() {
       <Section id="contact" title="5. Contact">
         <p>
           Cookie questions: <strong>contact@matio.tv</strong>. See also our{" "}
-          <Link href="/privacy" className="underline underline-offset-2 hover:text-white">
+          <LegalLink href="/privacy" className="underline underline-offset-2 hover:text-white">
             Privacy Policy
-          </Link>{" "}
+          </LegalLink>{" "}
           and{" "}
-          <Link href="/terms" className="underline underline-offset-2 hover:text-white">
+          <LegalLink href="/terms" className="underline underline-offset-2 hover:text-white">
             Terms of Service
-          </Link>
+          </LegalLink>
           .
         </p>
       </Section>
@@ -428,13 +440,13 @@ function CookiesEs() {
         <p>
           Consultas sobre cookies: <strong>contact@matio.tv</strong>. Consulta
           también nuestra{" "}
-          <Link href="/privacy" className="underline underline-offset-2 hover:text-white">
+          <LegalLink href="/privacy" className="underline underline-offset-2 hover:text-white">
             Política de privacidad
-          </Link>{" "}
+          </LegalLink>{" "}
           y los{" "}
-          <Link href="/terms" className="underline underline-offset-2 hover:text-white">
+          <LegalLink href="/terms" className="underline underline-offset-2 hover:text-white">
             Términos del servicio
-          </Link>
+          </LegalLink>
           .
         </p>
       </Section>

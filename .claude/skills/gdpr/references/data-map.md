@@ -146,6 +146,20 @@ Google Pay прямо на paywall создают Checkout Session с `ui_mode: 
 
 `localStorage` и SecureStore — см. §1 (последние две строки).
 
+**Юр. страницы из приложения (#310).** Settings открывает `/terms`,
+`/privacy`, `/cookies` (и `/es`-двойники) во встроенном браузере
+(`expo-web-browser` — SFSafariViewController / Custom Tab): это сайт, а не
+приложение — свой cookie-jar браузера, IP и UA уходят Vercel, как у любого
+визита. Ссылки идут с `?embed=app` (`/v1/config` +
+`mobile/src/i18n/localized-url.ts:legalUrl`): на таком запросе `proxy.ts` не
+пишет ни одной cookie (ни `cookie_consent`, ни `matio_aid`, ни атрибуции, ни
+`locale`), а layout рендерит только документ — без баннера, без загрузчиков
+Meta / GA4 / PostHog / OpenAI и без маяка `/api/t`. Остаётся фронтенд-скрипт
+Clerk (`ClerkProvider` оборачивает каждую страницу, `clerk.matio.tv`) — это
+auth-процессор, не трекер; его cookies — в строке `__session` выше. Ссылки
+между документами остаются внутри embed (`components/site/legal-link.tsx`),
+выхода на главную нет.
+
 ## 5. Дыры — стирание/ретеншен, которые ещё не реализованы
 
 Каждая дыра — issue на доске (`tech`) и строка в `docs/registry.md`. Чинить в

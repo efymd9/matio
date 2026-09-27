@@ -4,6 +4,8 @@
 // (digital-content waiver, §6) is wired in app/subscribe/actions.ts.
 import type { Metadata } from "next";
 import Link from "next/link";
+import { LegalLink } from "@/components/site/legal-link";
+import { isAppEmbed, legalPageRobots } from "@/lib/app-embed-server";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { getDict } from "@/lib/i18n/server";
 import { localeAlternates } from "@/lib/seo";
@@ -14,7 +16,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: t.legal.termsTitle,
     description: t.legal.termsDescription,
     alternates: localeAlternates("/terms", locale),
-    robots: { index: true, follow: true },
+    robots: await legalPageRobots(),
   };
 }
 
@@ -23,6 +25,7 @@ const LAST_UPDATED_EN = "September 9, 2026";
 
 export default async function TermsPage() {
   const { locale, t } = await getDict();
+  const embed = await isAppEmbed();
   // Free pivot: with payments off, §4 (60s preview) and §5-6 (pricing /
   // billing / withdrawal) describe a purchase flow that doesn't currently
   // exist. The legal wording below stays untouched (counsel-pending, and it
@@ -30,7 +33,13 @@ export default async function TermsPage() {
   // it so the indexed page doesn't sell "$1 today" as a current fact.
   const paymentsOn = paymentsEnabled();
   return (
-    <main className="bg-background pt-28 pb-24 sm:pt-32">
+    <main
+      className={
+        embed
+          ? "bg-background pt-10 pb-16"
+          : "bg-background pt-28 pb-24 sm:pt-32"
+      }
+    >
       <article className="mx-auto max-w-3xl px-6 sm:px-8">
         <header className="mb-10 space-y-3">
           <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-gold">
@@ -70,14 +79,17 @@ export default async function TermsPage() {
           </div>
         )}
         {locale === "en" ? <TermsEn /> : <TermsEs />}
-        <div className="mt-12 border-t border-white/[0.06] pt-6">
-          <Link
-            href="/"
-            className="text-sm font-semibold text-cream/70 transition-colors hover:text-cream"
-          >
-            ← {t.legal.backHome}
-          </Link>
-        </div>
+        {/* No way «home» in the app's embed (#310): home is the full site. */}
+        {!embed && (
+          <div className="mt-12 border-t border-white/[0.06] pt-6">
+            <Link
+              href="/"
+              className="text-sm font-semibold text-cream/70 transition-colors hover:text-cream"
+            >
+              ← {t.legal.backHome}
+            </Link>
+          </div>
+        )}
       </article>
     </main>
   );
@@ -268,9 +280,9 @@ function TermsEn() {
       <Section id="contact" title="15. Contact">
         <p>
           Questions about these Terms or the service: <strong>contact@matio.tv</strong>.
-          See also the <Link href="/privacy" className="underline underline-offset-2 hover:text-white">Privacy Policy</Link>{" "}
+          See also the <LegalLink href="/privacy" className="underline underline-offset-2 hover:text-white">Privacy Policy</LegalLink>{" "}
           and{" "}
-          <Link href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</Link>.
+          <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</LegalLink>.
         </p>
       </Section>
     </div>
@@ -475,13 +487,13 @@ function TermsEs() {
         <p>
           Para cualquier consulta sobre estos Términos o el servicio:{" "}
           <strong>contact@matio.tv</strong>. Consulta también la{" "}
-          <Link href="/privacy" className="underline underline-offset-2 hover:text-white">
+          <LegalLink href="/privacy" className="underline underline-offset-2 hover:text-white">
             Política de privacidad
-          </Link>{" "}
+          </LegalLink>{" "}
           y la{" "}
-          <Link href="/cookies" className="underline underline-offset-2 hover:text-white">
+          <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">
             Política de cookies
-          </Link>
+          </LegalLink>
           .
         </p>
       </Section>
