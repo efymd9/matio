@@ -496,7 +496,17 @@ const styles = StyleSheet.create({
     paddingVertical: space(4),
   },
   codeInput: { letterSpacing: 6, textAlign: "center", fontFamily: "GeistMono_400Regular" },
-  error: { ...body, color: colors.rust, fontSize: 13, marginTop: space(3) },
+  // Cream, not rust: rust text on espresso is 3.2:1, under AA's 4.5 (#314).
+  // Rust stays as the non-text cue — a 2pt bar at the start of the line.
+  error: {
+    ...body,
+    color: colors.ink,
+    fontSize: 13,
+    marginTop: space(3),
+    borderLeftWidth: 2,
+    borderLeftColor: colors.rust,
+    paddingLeft: space(2),
+  },
   secondary: { ...body, color: colors.gold, fontSize: 14, textAlign: "center" },
   secondaryWaiting: { color: colors.inkDim },
   fine: {
