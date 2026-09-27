@@ -63,7 +63,8 @@
           "enableNotificationControls": true,
           "enableAndroidPictureInPicture": true
         }
-      ]
+      ],
+      "@sentry/react-native/expo"
     ],
     "experiments": {
       "typedRoutes": true,

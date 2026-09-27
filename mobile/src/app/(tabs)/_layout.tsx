@@ -31,3 +31,12 @@ export default function TabsLayout() {
     </CatalogProvider>
   );
 }
+
+// A render crash in a tab, or in the bar itself, is the tab group's, not the
+// app's (#308): expo-router wraps THIS layout in the boundary, so the
+// fallback takes the group's place — the bar with it — while the root stack
+// and any screen pushed over the tabs live on. The tab navigator's state
+// goes with its unmount, so «Try again» remounts the group on Home, and so
+// does «Back» (nothing is under the tabs: goBackOrHome replaces the group
+// with a fresh one). See components/route-error.tsx.
+export { RouteErrorBoundary as ErrorBoundary } from "@/components/route-error";

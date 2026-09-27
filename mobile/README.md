@@ -25,9 +25,10 @@ The app imports a few genuinely universal modules straight from the web app's `l
 |---|---|---|
 | `src/shared/design.ts` | `../../../lib/design` | brand tokens — colours must not drift between surfaces |
 | `src/shared/api-types.ts` | `../../../lib/api/types` | the `/api/v1` wire contract, so a DTO change fails compilation instead of failing on a user's phone |
+| `src/shared/observability.ts` | `../../../lib/observability` | the Sentry privacy contract (scrubbers + `sentryPrivacyOptions()`) — the app's error reports are scrubbed by the same code as the site's (#317) |
 | `src/shared/i18n.ts` | `../../../lib/i18n/dictionaries`, `…/app-dictionaries`, `…/negotiate` | the site's es/en copy (rails, walls, player labels) — the app never re-types a string; `app-dictionaries.ts` holds the app-only copy (sign-in steps, the update wall); `negotiate.ts` is the tag-matching rule the device language goes through |
 
-Those three files are the **only** places holding a path across the project boundary. Import
+The files in `src/shared/` are the **only** places holding a path across the project boundary. Import
 `@/shared/...` everywhere else. Do not extend this to modules that aren't universal — anything
 importing `server-only`, `next/*`, or drizzle will break the bundle (`lib/i18n/server.ts` is
 exactly such a module and is deliberately not re-exported).
@@ -106,6 +107,21 @@ that needs effects and timers (`src/auth/clerk.test.tsx`, the Account tab's Cler
 `src/app/` — that is expo-router's route tree, and the file would become a route; a screen's
 test lives next to the hook or component it exercises.
 
+## Error tracking
+
+`@sentry/react-native` (#317, approved by the owner 27.09) — the web's Sentry project, EU
+region, and the web's privacy contract: `src/observability.ts` spreads the same
+`sentryPrivacyOptions()` from `lib/observability.ts` (via `src/shared/observability.ts`), with
+no Session Replay, no feedback widget, no screenshots, no tracing and no `Sentry.wrap`. It is
+**DSN-optional**: `EXPO_PUBLIC_SENTRY_DSN` unset (today — it belongs in EAS env, see
+`docs/services.md` → Sentry → The app) means no `Sentry.init`, and the SDK's JavaScript is only
+`require`d inside the branch that has a DSN. The root layout starts it before anything renders;
+the one explicit capture is `CrashScreen` (`src/components/route-error.tsx`), once per render
+crash a route's boundary catches. Source-map and dSYM upload stay off
+(`SENTRY_DISABLE_AUTO_UPLOAD=true` in `eas.json` — without it the config plugin's build phases
+fail the EAS build). Until the DSN is set, fatal crashes reach only Apple: App Store Connect →
+TestFlight → Crashes, or Xcode → Window → Organizer → Crashes. Tracked in `docs/registry.md`.
+
 ## Player
 
 One engine for both orientations — `src/watch/episode-feed.tsx`. Every episode of the show is
@@ -170,8 +186,3 @@ The repo's convention is to ask before adding a dependency. Still pending the ow
   source is unlinted. Tracked in `docs/registry.md`.
 - `expo-localization` — only if device-language detection (see "Language") proves wrong on a
   real device; today it is done without it.
-- `@sentry/react-native` — the app has no crash or error telemetry. Non-fatal errors (a render
-  exception caught by a boundary, an unhandled rejection) are invisible; fatal crashes reach
-  only Apple, as native crash logs with no JS stack mapped to source: App Store Connect →
-  TestFlight → Crashes (next to the tester's feedback), or Xcode → Window → Organizer →
-  Crashes. Tracked in `docs/registry.md`.

@@ -26,7 +26,7 @@ description: Карта живой инфраструктуры Matio (хост�
 | Vercel Blob | store `matio-blob`, Frankfurt, Public | артворк шоу; заливка client-direct, байты не проходят через функции |
 | Resend | **LIVE**: домен `matio.tv` верифицирован (eu-west-1), `RESEND_API_KEY` в проде с июля 2026 | на стенде ключ пустой — форма сбора работает, письма не уходят; free tier 100/день |
 | PostHog | EU Cloud, проект 190233 | прокси через `/ingest` |
-| Sentry | **живой с 15.08.2026**: организация `deep-ordinary` (регион EU), проект `javascript-nextjs` (id 4511916989743184); DSN задан на проде и стенде, прод-события приходят с 0.5.0 | регион менялся бы только пересозданием организации. Один проект на весь веб; без `NEXT_PUBLIC_SENTRY_DSN` SDK не инициализируется вообще. У стенда есть свой DSN и `NEXT_PUBLIC_APP_ENV=staging` (проверено `vercel env ls` 06.09.2026), поэтому его события помечены `environment: staging`; `request.url` остаётся вторым признаком при разборе (грабля из #126) |
+| Sentry | **живой с 15.08.2026**: организация `deep-ordinary` (регион EU), проект `javascript-nextjs` (id 4511916989743184); DSN задан на проде и стенде, прод-события приходят с 0.5.0 | регион менялся бы только пересозданием организации. Один проект на весь веб — и на приложение (#317: свой DSN-гейт `EXPO_PUBLIC_SENTRY_DSN` в EAS env, пока не задан; раздел «Наблюдаемость»); без `NEXT_PUBLIC_SENTRY_DSN` SDK не инициализируется вообще. У стенда есть свой DSN и `NEXT_PUBLIC_APP_ENV=staging` (проверено `vercel env ls` 06.09.2026), поэтому его события помечены `environment: staging`; `request.url` остаётся вторым признаком при разборе (грабля из #126) |
 | Apple / EAS (мобильное) | Apple Developer Program: Team `MTFRZQ8SRX` (Individual, тот же, что у Focu); EAS-проект `@matvei-dev/matio` (id `755ce20c-…`) | сборки и TestFlight — `docs/runbooks/mobile-builds.md`; первая сборка требует логина Apple ID владельцем (2FA); Android/Play Console не заведён; перенос на Organization-аккаунт LTD — до публичной подачи |
 | GitHub App `matio-release-please` | App ID 4447605, установлен на репозиторий | секреты `RELEASE_PLEASE_APP_ID` / `RELEASE_PLEASE_APP_PRIVATE_KEY`; приватный ключ — у владельца в менеджере паролей |
 
@@ -398,7 +398,8 @@ Neon, пулер, Drizzle. Миграции: `pnpm db:generate` → `pnpm db:mig
 
 ## Наблюдаемость
 
-Sentry (ошибки сервера, edge и браузера + 10% трейсов) плюс две ручки здоровья.
+Sentry (ошибки сервера, edge и браузера + 10% трейсов; приложения — ошибки и
+крэши без трейсов, #317) плюс две ручки здоровья.
 Этап 07 плейбука, issue #36.
 
 ### Где живёт DSN и как он включается
@@ -434,7 +435,9 @@ Sentry (ошибки сервера, edge и браузера + 10% трейсо
 `beforeBreadcrumb`, которые срезают query-строки и креды из URL, удаляют куки,
 тело запроса и разобранный query, оставляют из заголовков только белый список,
 сводят пользователя к id, вымарывают адреса из текстов и **целиком выбрасывают
-console-брэдкрамбы**. Всё это — в `lib/observability.ts`, под тестами
+console-брэдкрамбы**. URL-ключи чистятся и в данных спанов, и в атрибутах
+корневого спана `contexts.trace.data` — там Next кладёт `http.target` с query
+(ссылка отписки, #346). Всё это — в `lib/observability.ts`, под тестами
 (`lib/observability.test.ts`) и тест-аудитом логов (`lib/log-audit.test.ts`).
 Трогаешь этот файл — доказывай тестом.
 
@@ -459,6 +462,50 @@ Developer — **5000 ошибок за период**, а один визит с
 Туннеля через свой роут нет: события идут на Sentry напрямую. У нас уже есть
 `/ingest` для PostHog, а потерянный из-за блокировщика отчёт об ошибке — наша
 потеря, не зрителя.
+
+### Приложение (Expo) — свой init, тот же проект (#317)
+
+`@sentry/react-native` в `mobile/` (владелец одобрил зависимость 27.09).
+События идут в ТОТ ЖЕ проект `javascript-nextjs`, регион EU. Выключатель —
+**`EXPO_PUBLIC_SENTRY_DSN`**, и он живёт не в Vercel, а в **EAS env**
+(окружение `production`; команда — `docs/services.md` → Sentry). Не задан —
+`Sentry.init` не вызывается, и JS самого SDK даже не исполняется (`require`
+внутри ветки с DSN, `mobile/src/observability.ts`); нативная часть влинкована
+в бинарь всегда и без JS не стартует. `EXPO_PUBLIC_*`, как и `NEXT_PUBLIC_*`,
+инлайнится **на сборке** бандла: задать переменную и не пересобрать = ничего не
+изменилось; OTA-обновлений у приложения нет, так что это следующая сборка EAS.
+
+- **Где смотреть и как отличить от веба.** Всё приложение — это
+  `release:matio-app@*` (формат `matio-app@<версия>+<сборка>`, `dist` = номер
+  сборки EAS; у веба release — голый `X.Y.Z`, так что пересечься не могут).
+  JS-ошибки несут `sdk.name:sentry.javascript.react-native`, нативные крэши —
+  SDK cocoa/android; платформа — тег `os.name` (`iOS` / `Android`), у веба
+  вместо него `browser.*` или серверный runtime. `environment` =
+  `EXPO_PUBLIC_APP_ENV`, без него `production` для сборки EAS и `development`
+  для Metro-бандла — то есть `environment:production` смешивает сайт и
+  приложение, разделяет их только release.
+- **Что попадает.** Падение рендера, пойманное границей маршрута (#308,
+  `CrashScreen` → `captureCrash`, один раз на падение); необработанные
+  JS-исключения и rejection; нативные крэши и зависания (iOS). Сессий release
+  health нет (`enableAutoSessionTracking:false` — иначе installation id с
+  каждого запуска), поэтому crash-free-метрик у приложения нет. Трейсинга нет
+  совсем, replay/feedback/скриншотов/иерархии вида нет, `Sentry.wrap` не
+  используется (он добавил бы брэдкрамбы касаний и провайдер виджета отзывов).
+- **Приватность** — те же `beforeSend` / `beforeBreadcrumb` из
+  `lib/observability.ts` (реэкспорт `mobile/src/shared/observability.ts`).
+  **Нативный крэш их не проходит** — его отправляет нативный SDK; поэтому
+  нативные сетевые брэдкрамбы выключены на источнике
+  (`enableNetworkBreadcrumbs: false`), а JS-брэдкрамбы синхронизируются в
+  native уже вычищенными. Пользователя приложение не задаёт: в нативных
+  событиях `user.id` — случайный installation id SDK.
+- **Карты исходников и dSYM не загружаются**, как и у веба: в
+  `mobile/eas.json` у обоих профилей `SENTRY_DISABLE_AUTO_UPLOAD=true` —
+  без него сборочные фазы плагина (`@sentry/react-native/expo` в `app.json`)
+  попытаются грузить без токена и **уронят сборку EAS**. Итог: JS-кадры
+  указывают в `main.jsbundle`/`index.android.bundle` по строке/колонке,
+  нативные кадры iOS — адресами. Реестр.
+- **Квота общая.** Тариф Developer — 5000 ошибок за период на весь проект;
+  приложение тратит ту же квоту, что и сайт.
 
 ### `/api/healthz` и `/api/readyz`
 

@@ -132,6 +132,27 @@ describe("scrubSentryBreadcrumb", () => {
     expect(crumb?.message).toBe("reminder queued for [redacted-email]");
   });
 
+  it("drops the query and fragment the SDK splits off next to a clean URL", () => {
+    // sentry-cocoa's network breadcrumb (merged into an app event, #317) and
+    // Node's outgoing-request breadcrumb carry the query in a key of its own.
+    const crumb = scrubSentryBreadcrumb({
+      category: "http",
+      data: {
+        url: "https://image.mux.com/abc/thumbnail.webp",
+        "http.query": "token=secret&email=viewer@example.invalid",
+        "http.fragment": "t=10",
+        method: "GET",
+        status_code: 200,
+      },
+    });
+
+    expect(crumb?.data).toEqual({
+      url: "https://image.mux.com/abc/thumbnail.webp",
+      method: "GET",
+      status_code: 200,
+    });
+  });
+
   it("strips both ends of a navigation breadcrumb", () => {
     const crumb = scrubSentryBreadcrumb({
       category: "navigation",
@@ -165,7 +186,19 @@ function seededEvent(): SentryEventLike {
       { category: "console", message: "viewer@example.invalid" },
       { category: "fetch", data: { url: "/api/t?aid=abc" } },
     ],
-    spans: [{ data: { "http.url": "https://api.stripe.com/v1/x?key=sk-test-1" } }],
+    spans: [
+      {
+        data: {
+          "http.url": "https://api.stripe.com/v1/x?key=sk-test-1",
+          "http.query": "?key=sk-test-1",
+          // Browser fetch/XHR and Node undici spans: the whole href, plus the
+          // query and fragment on their own (#346).
+          "url.full": "https://api.stripe.com/v1/x?key=sk-test-1#frag",
+          "url.query": "?key=sk-test-1",
+          "url.fragment": "#frag",
+        },
+      },
+    ],
     exception: {
       values: [{ value: "no reminder row for viewer@example.invalid" }],
     },
@@ -183,7 +216,42 @@ describe("scrubSentryEvent", () => {
     expect(event.breadcrumbs?.[0]?.data).toEqual({ url: "/api/t" });
     expect(event.spans?.[0]?.data).toEqual({
       "http.url": "https://api.stripe.com/v1/x",
+      "url.full": "https://api.stripe.com/v1/x",
     });
+  });
+
+  it("cleans the root span's attributes — Next's http.target carries the query (#346)", () => {
+    // The unsubscribe link from a reminder email: `e` is the address in
+    // base64url, `t` its HMAC. A sampled server transaction for that request
+    // records the raw path WITH the query on its root span.
+    const e = Buffer.from("viewer@example.invalid").toString("base64url");
+    const event: SentryEventLike = {
+      transaction: "GET /unsubscribe",
+      contexts: {
+        trace: {
+          data: {
+            "http.target": `/unsubscribe?e=${e}&t=dummy-hmac`,
+            "http.url": `https://matio.tv/unsubscribe?e=${e}&t=dummy-hmac`,
+            "url.full": `https://matio.tv/unsubscribe?e=${e}&t=dummy-hmac`,
+            "url.query": `?e=${e}&t=dummy-hmac`,
+            "http.query": `e=${e}&t=dummy-hmac`,
+            "http.method": "GET",
+            "http.status_code": 200,
+          },
+        },
+      },
+    };
+
+    scrubSentryEvent(event);
+
+    expect(event.contexts?.trace?.data).toEqual({
+      "http.target": "/unsubscribe",
+      "http.url": "https://matio.tv/unsubscribe",
+      "url.full": "https://matio.tv/unsubscribe",
+      "http.method": "GET",
+      "http.status_code": 200,
+    });
+    expect(JSON.stringify(event)).not.toContain(e);
   });
 
   it("removes cookies, the request body and the parsed query", () => {
@@ -703,6 +771,20 @@ describe("sentryPrivacyOptions", () => {
       expect(event?.request?.url).toBe("https://matio.tv/welcome");
       expect(event?.request).not.toHaveProperty("cookies");
     }
+  });
+
+  it("scrubs the root span's http.target in a transaction (#346)", () => {
+    const options = sentryPrivacyOptions();
+    const transaction = options.beforeSendTransaction({
+      transaction: "POST /api/email/unsubscribe",
+      contexts: {
+        trace: { data: { "http.target": "/api/email/unsubscribe?e=dmlld2Vy&t=dummy" } },
+      },
+    });
+
+    expect(transaction.contexts?.trace?.data).toEqual({
+      "http.target": "/api/email/unsubscribe",
+    });
   });
 
   it("returns the event itself, so nothing else in the pipeline is lost", () => {

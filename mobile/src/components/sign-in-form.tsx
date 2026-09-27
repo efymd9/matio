@@ -1,10 +1,10 @@
 import { useSignIn, useSignUp } from "@clerk/expo";
 import { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { AccessibilityInfo, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { CLERK_PUBLISHABLE_KEY } from "@/auth/clerk";
 import { GlassSurface } from "@/components/glass";
 import { ErrorState, GoldButton, Pill } from "@/components/ui";
-import { useT } from "@/i18n/locale";
+import { useLocale, useT } from "@/i18n/locale";
 import { body, colors, display, radius, space } from "@/theme";
 
 // Passwordless email-code sign-in — the two-step form itself, shared by the
@@ -102,6 +102,7 @@ function ClerkSignInForm({
   signInHint = false,
 }: SignInFormProps) {
   const t = useT();
+  const locale = useLocale();
 
   const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
@@ -112,15 +113,43 @@ function ClerkSignInForm({
   // same one that sent it.
   const [flow, setFlow] = useState<Flow>("signIn");
   const [mode, setMode] = useState<Mode>("create");
+  // When «Resend code» may be used again (epoch ms), and the clock as of the
+  // last tick. A DEADLINE, not a counter (#304 item 2): JS timers stop while
+  // the app is in the background — the viewer is in Mail, fetching the code
+  // — and a counter ticked down once a second came back 45 s later still
+  // reading «Resend code in 26s». The first tick after coming back reads the
+  // real time instead.
+  const [resendAt, setResendAt] = useState(0);
+  const [now, setNow] = useState(0);
   // Seconds until «Resend code» may be used again; 0 = now.
-  const [cooldown, setCooldown] = useState(0);
+  const cooldown = Math.max(0, Math.ceil((resendAt - now) / 1000));
   const emailInput = useRef<TextInput>(null);
 
   useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = setTimeout(() => setCooldown((s) => s - 1), 1000);
+    if (now >= resendAt) return;
+    // To the next whole second of the countdown, so the label steps on time.
+    const timer = setTimeout(() => setNow(Date.now()), (resendAt - now) % 1000 || 1000);
     return () => clearTimeout(timer);
-  }, [cooldown]);
+  }, [now, resendAt]);
+
+  // A failure: shown, and said (#304 item 1) — the line used to appear in
+  // silence. Said HERE, once per failure, not from an effect on the text: a
+  // second wrong address or code is the same words, and React commits
+  // «clear, then set the same message» inside one handler as no change at
+  // all, so an effect would never fire for it. Queued: it waits for what
+  // VoiceOver is already saying (the button just pressed) instead of cutting
+  // it off. The line itself is also a polite live region, TalkBack's own way
+  // to hear it.
+  function fail(message: string) {
+    setError(message);
+    AccessibilityInfo.announceForAccessibilityWithOptions(message, { queue: true });
+  }
+
+  function startCooldown() {
+    const started = Date.now();
+    setNow(started);
+    setResendAt(started + RESEND_COOLDOWN_SECONDS * 1000);
+  }
 
   // Each step starts clean: no code or error left over from the last one.
   function toCodeStep(resolved: Flow) {
@@ -128,7 +157,7 @@ function ClerkSignInForm({
     setCode("");
     setError(null);
     setStep("code");
-    setCooldown(RESEND_COOLDOWN_SECONDS);
+    startCooldown();
   }
 
   function toEmailStep() {
@@ -173,7 +202,7 @@ function ClerkSignInForm({
     if (busy || !signIn || !signUp) return;
     const address = email.trim();
     if (!address.includes("@")) {
-      setError(t.app.signIn.invalidEmail);
+      fail(t.app.signIn.invalidEmail);
       return;
     }
 
@@ -190,23 +219,26 @@ function ClerkSignInForm({
         return;
       }
       if (clerkErrorCode(attempt.error) !== UNKNOWN_ADDRESS) {
-        setError(messageFor(attempt.error));
+        fail(messageFor(attempt.error));
         return;
       }
 
-      const created = await signUp.create({ emailAddress: address });
+      // The app's language rides along (#304 item 3): with none, Clerk
+      // records no locale and any email it localises goes out in the
+      // instance's default language.
+      const created = await signUp.create({ emailAddress: address, locale });
       if (created.error) {
-        setError(messageFor(created.error));
+        fail(messageFor(created.error));
         return;
       }
       const sent = await signUp.verifications.sendEmailCode();
       if (sent.error) {
-        setError(messageFor(sent.error));
+        fail(messageFor(sent.error));
         return;
       }
       toCodeStep("signUp");
     } catch (e) {
-      setError(messageFor(e));
+      fail(messageFor(e));
     } finally {
       setBusy(false);
     }
@@ -215,7 +247,8 @@ function ClerkSignInForm({
   // A fresh code to the same address, on the flow that sent the first one —
   // a sign-in that already exists resends with no parameters.
   async function resendCode() {
-    if (busy || cooldown > 0 || !signIn || !signUp) return;
+    // The clock itself, not the last tick's reading of it.
+    if (busy || Date.now() < resendAt || !signIn || !signUp) return;
     setBusy(true);
     setError(null);
     try {
@@ -224,13 +257,13 @@ function ClerkSignInForm({
           ? await signIn.emailCode.sendCode()
           : await signUp.verifications.sendEmailCode();
       if (sent.error) {
-        setError(messageFor(sent.error));
+        fail(messageFor(sent.error));
         return;
       }
       setCode("");
-      setCooldown(RESEND_COOLDOWN_SECONDS);
+      startCooldown();
     } catch (e) {
-      setError(messageFor(e));
+      fail(messageFor(e));
     } finally {
       setBusy(false);
     }
@@ -240,7 +273,7 @@ function ClerkSignInForm({
     if (busy || !signIn || !signUp) return;
     const value = code.trim();
     if (value.length < 4) {
-      setError(t.app.signIn.invalidCode);
+      fail(t.app.signIn.invalidCode);
       return;
     }
 
@@ -253,7 +286,7 @@ function ClerkSignInForm({
           : await signUp.verifications.verifyEmailCode({ code: value });
 
       if (verified.error) {
-        setError(messageFor(verified.error));
+        fail(messageFor(verified.error));
         return;
       }
 
@@ -261,13 +294,13 @@ function ClerkSignInForm({
       // but nobody is signed in.
       const finalized = flow === "signIn" ? await signIn.finalize() : await signUp.finalize();
       if (finalized.error) {
-        setError(messageFor(finalized.error));
+        fail(messageFor(finalized.error));
         return;
       }
 
       onDone();
     } catch (e) {
-      setError(messageFor(e));
+      fail(messageFor(e));
     } finally {
       setBusy(false);
     }
@@ -300,7 +333,9 @@ function ClerkSignInForm({
 
       {/* The field is glass, of the same family as the tab bar (board). Keyed
           per step: two different fields, so the code field MOUNTS when its
-          step opens — autoFocus acts on mount only. */}
+          step opens — autoFocus acts on mount only. Each has a spoken name
+          (#304 item 1), the web /welcome form's labels: the placeholder
+          alone made the code field «000000». */}
       <GlassSurface style={styles.field}>
         {step === "email" ? (
           <TextInput
@@ -310,6 +345,7 @@ function ClerkSignInForm({
             value={email}
             onChangeText={setEmail}
             placeholder={t.seriesEndOverlay.emailPlaceholder}
+            accessibilityLabel={t.welcome.emailLabel}
             placeholderTextColor={colors.inkDim}
             keyboardType="email-address"
             autoCapitalize="none"
@@ -326,6 +362,7 @@ function ClerkSignInForm({
             value={code}
             onChangeText={setCode}
             placeholder="000000"
+            accessibilityLabel={t.welcome.codeLabel}
             placeholderTextColor={colors.inkDim}
             keyboardType="number-pad"
             autoComplete="one-time-code"
@@ -339,7 +376,11 @@ function ClerkSignInForm({
         )}
       </GlassSurface>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? (
+        <Text style={styles.error} accessibilityRole="alert" accessibilityLiveRegion="polite">
+          {error}
+        </Text>
+      ) : null}
 
       <GoldButton
         label={
@@ -424,7 +465,17 @@ const styles = StyleSheet.create({
     paddingVertical: space(4),
   },
   codeInput: { letterSpacing: 6, textAlign: "center", fontFamily: "GeistMono_400Regular" },
-  error: { ...body, color: colors.rust, fontSize: 13, marginTop: space(3) },
+  // Cream, not rust: rust text on espresso is 3.2:1, under AA's 4.5 (#314).
+  // Rust stays as the non-text cue — a 2pt bar at the start of the line.
+  error: {
+    ...body,
+    color: colors.ink,
+    fontSize: 13,
+    marginTop: space(3),
+    borderLeftWidth: 2,
+    borderLeftColor: colors.rust,
+    paddingLeft: space(2),
+  },
   secondary: { ...body, color: colors.gold, fontSize: 14, textAlign: "center" },
   secondaryWaiting: { color: colors.inkDim },
   fine: {

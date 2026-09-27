@@ -59,11 +59,18 @@ export function VerticalChrome({
     <>
       {/* Full-surface play/pause. The glyph shows only while paused, so
           nothing overlays the picture during playback — except a quiet
-          spinner while the stream stalls. */}
+          spinner while the stream stalls. The native transport is off, so
+          this control is the only place VoiceOver can learn the state: it
+          is the button's value, «Play/Pause, Playing» (#304 item 4) —
+          `aria-valuetext`, which Pressable turns into accessibilityValue.text.
+          Magic Tap (the two-finger double tap) toggles it, as in every
+          player on iOS. */}
       <Pressable
         onPress={onTogglePlay}
+        onMagicTap={onTogglePlay}
         accessibilityRole="button"
         accessibilityLabel={t.player.playPauseAria}
+        aria-valuetext={paused ? t.app.player.paused : t.app.player.playing}
         style={StyleSheet.absoluteFill}
       >
         {!paused && buffering ? (

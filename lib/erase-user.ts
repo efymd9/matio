@@ -26,8 +26,10 @@ import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-status";
 import { isSubjectId } from "@/lib/user-export";
 
 // Art. 17 GDPR for our database and the processors we can reach — the ONE
-// erasure mechanism, run by two callers with the same code: the Clerk
-// `user.deleted` webhook (app/api/webhooks/clerk/route.ts) and
+// erasure mechanism, run by three callers with the same code: the Clerk
+// `user.deleted` webhook (app/api/webhooks/clerk/route.ts), the app's
+// «Delete account» (app/api/v1/account/delete/route.ts, #309 — it runs this
+// FIRST and deletes the Clerk account only after it) and
 // `pnpm erase-user <id> --apply` (scripts/erase-user.ts) for the day the
 // webhook did not arrive or a restore from backup resurrected what it had
 // erased (docs/runbooks/db-restore.md §7). Clerk is the source of truth for

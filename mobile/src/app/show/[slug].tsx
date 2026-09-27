@@ -44,6 +44,10 @@ import { episodeRoute, firstEpisodeLocked } from "@/watch/first-episode";
 // place (#311 — the SEO fallback promised free viewing in paid mode), and no
 // About tab either: the synopsis is all that tab holds.
 const HERO_HEIGHT = 330;
+// The hero's copy sits in that fixed 330pt: unbounded iOS Larger Text grew
+// «QUEDATE CONMIGO» past its top edge at AX5 (#304 item 7). Capped like the
+// Home hero card's copy, and at most three lines of title.
+const HERO_TEXT_CAP = 1.3;
 
 type Segment = "episodes" | "about";
 
@@ -135,14 +139,25 @@ export default function ShowScreen() {
           style={[styles.back, { top: insets.top + space(2) }]}
         />
 
-        <View style={styles.heroContent}>
-          <Pill label={t.hero.matioOriginal} />
-          <Text style={styles.title}>{data.title}</Text>
+        {/* Nothing in here is tappable, so none of it takes a touch: where
+            a long title reaches up to the «‹», the tap is the button's. */}
+        <View style={styles.heroContent} pointerEvents="none">
+          <Pill label={t.hero.matioOriginal} maxFontSizeMultiplier={HERO_TEXT_CAP} />
+          <Text
+            style={styles.title}
+            accessibilityRole="header"
+            numberOfLines={3}
+            maxFontSizeMultiplier={HERO_TEXT_CAP}
+          >
+            {data.title}
+          </Text>
           {chips.length > 0 ? (
             <View style={styles.genres}>
               {chips.map((c) => (
                 <View key={c.key} testID="genre-chip" style={styles.genreChip}>
-                  <Text style={styles.genreText}>{c.label}</Text>
+                  <Text style={styles.genreText} maxFontSizeMultiplier={HERO_TEXT_CAP}>
+                    {c.label}
+                  </Text>
                 </View>
               ))}
             </View>
@@ -166,7 +181,8 @@ export default function ShowScreen() {
         ) : null}
       </View>
 
-      <View style={styles.segments}>
+      {/* The segments' container: VoiceOver reads «Episodes, tab, 1 of 2». */}
+      <View style={styles.segments} accessibilityRole="tabbar">
         {segments.map((key) => {
           const active = view === key;
           return (
@@ -365,5 +381,10 @@ const styles = StyleSheet.create({
   },
   episodeTitle: { ...display, color: colors.ink, fontSize: 13, letterSpacing: 0.3 },
   episodeDescription: { ...body, color: colors.inkDim, fontSize: 12, lineHeight: 17 },
-  episodeDuration: { fontFamily: fonts.mono, color: colors.rust, fontSize: 11, marginTop: space(0.5) },
+  // inkDim, not rust: rust on the card is 3.0:1, under AA's 4.5 for 11pt (#314).
+  episodeDuration: { fontFamily: fonts.mono, color: colors.inkDim, fontSize: 11, marginTop: space(0.5) },
 });
+
+// A render crash here is this screen's, not the app's (#308): Back / Try
+// again instead of RCTFatal. See components/route-error.tsx.
+export { RouteErrorBoundary as ErrorBoundary } from "@/components/route-error";

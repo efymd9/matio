@@ -39,7 +39,13 @@ export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProp
   const insets = useSafeAreaInsets();
 
   return (
-    <GlassSurface interactive style={[styles.bar, { bottom: TAB_BAR_BOTTOM + insets.bottom }]}>
+    <GlassSurface
+      interactive
+      // The container of the four «tab»s: VoiceOver then reads each as
+      // «Browse, tab, 2 of 4» (#304 item 6).
+      accessibilityRole="tabbar"
+      style={[styles.bar, { bottom: TAB_BAR_BOTTOM + insets.bottom }]}
+    >
       {state.routes.map((route, index) => {
         const focused = state.index === index;
         // The (tabs) layout sets each screen's `title` from the live

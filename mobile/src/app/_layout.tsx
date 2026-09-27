@@ -9,9 +9,15 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConfigProvider } from "@/api/config-context";
 import { AuthProvider } from "@/auth/clerk";
 import { LocaleProvider, useInitialLocale } from "@/i18n/locale";
+import { initObservability } from "@/observability";
+import { readObservabilityEnv } from "@/observability-env";
 import { lockOrientation, PORTRAIT_LOCK } from "@/orientation";
 import { loadAutoplayNext } from "@/prefs/autoplay";
 import { colors } from "@/theme";
+
+// The error tracker first (#317), before anything below can throw — and a
+// no-op in a build without EXPO_PUBLIC_SENTRY_DSN. See src/observability.ts.
+initObservability(readObservabilityEnv());
 
 // Hold the splash until the brand faces are ready. Without this the first
 // frame renders in the system font and visibly reflows into Anton — worse
@@ -110,3 +116,9 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+// The last resort (#308): a render crash in this layout — a provider, the
+// stack — that no screen's own boundary caught. «Try again» only; the copy
+// cannot lean on the LocaleProvider above, which is part of what crashed.
+// See components/route-error.tsx.
+export { RootErrorBoundary as ErrorBoundary } from "@/components/route-error";
