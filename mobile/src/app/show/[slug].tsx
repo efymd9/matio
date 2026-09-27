@@ -383,3 +383,7 @@ const styles = StyleSheet.create({
   episodeDescription: { ...body, color: colors.inkDim, fontSize: 12, lineHeight: 17 },
   episodeDuration: { fontFamily: fonts.mono, color: colors.rust, fontSize: 11, marginTop: space(0.5) },
 });
+
+// A render crash here is this screen's, not the app's (#308): Back / Try
+// again instead of RCTFatal. See components/route-error.tsx.
+export { RouteErrorBoundary as ErrorBoundary } from "@/components/route-error";

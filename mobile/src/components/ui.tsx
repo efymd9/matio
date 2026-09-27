@@ -378,6 +378,7 @@ export function Row({
   first = false,
   role = "button",
   selected,
+  accessibilityLabel,
 }: {
   icon?: IconName;
   iconSpacer?: boolean;
@@ -394,6 +395,8 @@ export function Row({
   first?: boolean;
   role?: AccessibilityRole;
   selected?: boolean;
+  // What VoiceOver / TalkBack say for a pressable row; without it, the text.
+  accessibilityLabel?: string;
 }) {
   const content = (
     <>
@@ -433,6 +436,7 @@ export function Row({
     <Pressable
       onPress={onPress}
       accessibilityRole={role}
+      accessibilityLabel={accessibilityLabel}
       aria-checked={role === "radio" ? selected : undefined}
       aria-selected={role === "radio" ? undefined : selected}
       style={({ pressed }) => [rowStyle, pressed && { opacity: 0.7 }]}

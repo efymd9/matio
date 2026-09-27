@@ -100,6 +100,9 @@ describe("the autoplay setting on Settings' first open (#288 item 14)", () => {
     vi.doMock("@/api/config-context", () => ({ ConfigProvider: () => null }));
     vi.doMock("@/auth/clerk", () => ({ AuthProvider: () => null }));
     vi.doMock("@/orientation", () => ({ lockOrientation: () => undefined, PORTRAIT_LOCK: 0 }));
+    // The layout's crash screen (#308) pulls in the UI kit and its native
+    // image module; only the module-load read is under test here.
+    vi.doMock("@/components/route-error", () => ({ RootErrorBoundary: () => null }));
     store.getItemAsync.mockClear();
 
     await import("@/app/_layout");

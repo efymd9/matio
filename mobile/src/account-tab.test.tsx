@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 //           subscription status (registry).
 //   item 8: «Sign out» asks first — getting back in costs an email round
 //           trip — and a sign-out that fails (offline) says so.
+// #309 — «Delete account» (App Store 5.1.1(v)): two confirmations, then the
+//   server; only its success signs out and goes Home.
 // The tab is rendered for real in jsdom on react-native-web; Clerk, the
 // router and the system Alert are faked. (Not under app/ — a test file there
 // would become an expo-router route.)
@@ -34,15 +36,44 @@ vi.mock("react-native", async (importOriginal) => {
   };
 });
 
-const signOut = vi.fn(async () => undefined);
+// Every step of the deletion, in the order it happened: the request, the
+// local sign-out, the navigation.
+const h = vi.hoisted(() => ({
+  steps: [] as string[],
+  signedIn: true,
+}));
+const signOut = vi.fn(async () => {
+  h.steps.push("signOut");
+});
+const deleteAccount = vi.fn(async () => {
+  h.steps.push("api.deleteAccount");
+  return { ok: true as const };
+});
+const router = {
+  push: vi.fn(),
+  replace: vi.fn((href: string) => {
+    h.steps.push(`replace ${href}`);
+  }),
+};
 vi.mock("@clerk/expo", () => ({
   useUser: () => ({ user: { primaryEmailAddress: { emailAddress: "member@example.com" } } }),
   useClerk: () => ({ signOut }),
 }));
 vi.mock("@/auth/clerk", () => ({
   CLERK_PUBLISHABLE_KEY: "pk_test_dummy",
-  useOptionalAuth: () => ({ isLoaded: true, isSignedIn: true, stalled: false, retry: () => undefined }),
+  useOptionalAuth: () => ({
+    isLoaded: true,
+    isSignedIn: h.signedIn,
+    stalled: false,
+    retry: () => undefined,
+  }),
 }));
+vi.mock("@/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/client")>();
+  return { ...actual, api: { ...actual.api, deleteAccount: () => deleteAccount() } };
+});
+// The signed-out tab's email → code form has its own suite.
+vi.mock("@/components/sign-in-form", () => ({ SignInForm: () => null }));
 // Paid mode, as live since 2026-09-09 — the mode the row used to show in.
 vi.mock("@/api/config-context", () => ({
   useConfig: () => ({
@@ -51,7 +82,7 @@ vi.mock("@/api/config-context", () => ({
     urls: { web: "https://matio.tv" },
   }),
 }));
-vi.mock("expo-router", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("expo-router", () => ({ useRouter: () => router }));
 vi.mock("@/watch/use-continue-watching", () => ({
   useContinueWatching: () => ({ items: [], reload: async () => undefined }),
 }));
@@ -118,7 +149,16 @@ async function choose(label: string) {
 
 beforeEach(() => {
   alerts.calls.length = 0;
-  signOut.mockReset().mockResolvedValue(undefined);
+  h.steps.length = 0;
+  h.signedIn = true;
+  signOut.mockReset().mockImplementation(async () => {
+    h.steps.push("signOut");
+  });
+  deleteAccount.mockReset().mockImplementation(async () => {
+    h.steps.push("api.deleteAccount");
+    return { ok: true as const };
+  });
+  router.replace.mockClear();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -191,5 +231,150 @@ describe("Account tab — «Sign out» asks first (#292 item 8)", () => {
 
     expect(alerts.calls[0].title).toBe("¿Cerrar sesión?");
     expect(alerts.calls[0].buttons?.map((b) => b.text)).toEqual(["Cancelar", "Cerrar sesión"]);
+  });
+});
+
+describe("Account tab — «Delete account» (#309)", () => {
+  const deleteRow = () => container.querySelector('[aria-label="Delete account"]');
+
+  it("is a labelled button under «Sign out» for a signed-in viewer", () => {
+    render();
+
+    const row = deleteRow();
+    expect(row).not.toBeNull();
+    expect(row?.getAttribute("role")).toBe("button");
+    expect(text().indexOf("Sign out")).toBeLessThan(text().indexOf("Delete account"));
+  });
+
+  it("is not offered to a signed-out viewer — there is no account to delete", () => {
+    h.signedIn = false;
+    render();
+
+    expect(deleteRow()).toBeNull();
+    expect(text()).not.toContain("Delete account");
+  });
+
+  it("a tap asks first — what is erased and that a subscription stops at the end of its period", () => {
+    render();
+    press("Delete account");
+
+    expect(alerts.calls).toHaveLength(1);
+    const [dialog] = alerts.calls;
+    expect(dialog.title).toBe("Delete your account?");
+    expect(dialog.message).toContain("cancelled at the end of the current billing period");
+    expect(dialog.message).toContain("won't be charged again");
+    expect(dialog.buttons?.map((b) => [b.text, b.style])).toEqual([
+      ["Cancel", "cancel"],
+      ["Delete account", "destructive"],
+    ]);
+    expect(deleteAccount).not.toHaveBeenCalled();
+  });
+
+  it("«Cancel» on the first question does nothing", async () => {
+    render();
+    press("Delete account");
+    await choose("Cancel");
+
+    expect(alerts.calls).toHaveLength(1);
+    expect(deleteAccount).not.toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("the second question says it is permanent — and «Cancel» there does nothing either", async () => {
+    render();
+    press("Delete account");
+    await choose("Delete account");
+
+    expect(alerts.calls).toHaveLength(2);
+    const final = alerts.calls[1];
+    expect(final.title).toBe("This can't be undone");
+    expect(final.message).toContain("deleted for good");
+    expect(final.buttons?.map((b) => [b.text, b.style])).toEqual([
+      ["Cancel", "cancel"],
+      ["Delete permanently", "destructive"],
+    ]);
+
+    await choose("Cancel");
+    expect(deleteAccount).not.toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("both confirmations: the server deletes, THEN the app signs out, THEN it goes Home", async () => {
+    render();
+    press("Delete account");
+    await choose("Delete account");
+    await choose("Delete permanently");
+
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(h.steps).toEqual(["api.deleteAccount", "signOut", "replace /"]);
+    expect(alerts.calls).toHaveLength(2); // no failure dialog
+  });
+
+  it("a deletion that fails says so and keeps the session — no sign-out, no navigation", async () => {
+    deleteAccount.mockRejectedValueOnce(
+      Object.assign(new Error("Request failed (500)."), { code: "server_error", status: 500 }),
+    );
+    render();
+    press("Delete account");
+    await choose("Delete account");
+    await choose("Delete permanently");
+
+    expect(alerts.calls).toHaveLength(3);
+    expect(alerts.calls[2].title).toBe("Couldn't delete your account");
+    expect(alerts.calls[2].message).toBe("Check your connection and try again.");
+    expect(JSON.stringify(alerts.calls)).not.toContain("Request failed");
+    expect(signOut).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+    // …and the row can simply be tapped again: the server's halves are idempotent.
+    press("Delete account");
+    expect(alerts.calls).toHaveLength(4);
+  });
+
+  it("while the request is out the row says so and cannot start a second deletion", async () => {
+    let finish: (value: { ok: true }) => void = () => undefined;
+    deleteAccount.mockImplementationOnce(
+      () => new Promise<{ ok: true }>((resolve) => (finish = resolve)),
+    );
+    render();
+    press("Delete account");
+    await choose("Delete account");
+    await choose("Delete permanently");
+
+    expect(text()).toContain("Please wait…");
+    expect(deleteRow()).toBeNull(); // no longer a button
+    await act(async () => {
+      finish({ ok: true });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith("/");
+  });
+
+  it("a local sign-out that fails after the account is gone still goes Home, without a failure dialog", async () => {
+    signOut.mockRejectedValueOnce(new Error("Network request failed"));
+    render();
+    press("Delete account");
+    await choose("Delete account");
+    await choose("Delete permanently");
+
+    expect(router.replace).toHaveBeenCalledWith("/");
+    expect(alerts.calls).toHaveLength(2);
+  });
+
+  it("asks in Spanish too", async () => {
+    render("es");
+    press("Eliminar cuenta");
+
+    expect(alerts.calls[0].title).toBe("¿Eliminar tu cuenta?");
+    expect(alerts.calls[0].message).toContain("se cancelará al final del periodo");
+    expect(alerts.calls[0].buttons?.map((b) => b.text)).toEqual(["Cancelar", "Eliminar cuenta"]);
+    await choose("Eliminar cuenta");
+    expect(alerts.calls[1].title).toBe("Esta acción no se puede deshacer");
+    expect(alerts.calls[1].buttons?.map((b) => b.text)).toEqual([
+      "Cancelar",
+      "Eliminar definitivamente",
+    ]);
   });
 });

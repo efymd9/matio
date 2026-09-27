@@ -4,6 +4,7 @@ import type {
   AppConfig,
   CatalogResponse,
   ContinueResponse,
+  DeleteAccountResponse,
   EpisodeProgressResponse,
   PlaybackTokenResponse,
   SaveProgressRequest,
@@ -27,6 +28,13 @@ export const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? DEFAULT_BASE
 // Mobile networks stall rather than fail. Without a bound, a dead connection
 // leaves the UI on a spinner forever.
 const REQUEST_TIMEOUT_MS = 12_000;
+
+// Account deletion is the one request whose server side waits on vendors in
+// sequence — Stripe (cancel ≈17s at worst with its retries, then the customer
+// search, 5s), PostHog (5s a request), then Clerk; each bounded, typically
+// ~2s in all. 12s would abandon a deletion the server is still finishing and
+// tell the viewer it failed. The route's own ceiling is 60s (maxDuration).
+export const ACCOUNT_DELETE_TIMEOUT_MS = 45_000;
 
 // Clerk's getToken() is a hook-bound function, but this module is plain and is
 // imported by non-React code. The provider is injected once at startup by
@@ -152,14 +160,19 @@ async function buildHeaders(hasBody: boolean, auth: AuthMode): Promise<Record<st
 
 async function request<T>(
   path: string,
-  init: { method: "GET" | "POST"; body?: unknown; auth?: AuthMode } = { method: "GET" },
+  init: {
+    method: "GET" | "POST";
+    body?: unknown;
+    auth?: AuthMode;
+    timeoutMs?: number;
+  } = { method: "GET" },
 ): Promise<T> {
   const headers = await buildHeaders(init.body !== undefined, init.auth ?? "optional");
 
   // AbortSignal.timeout() is not reliably present in Hermes, so drive the
   // controller manually.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), init.timeoutMs ?? REQUEST_TIMEOUT_MS);
 
   let res: Response;
   try {
@@ -233,6 +246,16 @@ export const api = {
       method: "POST",
       body,
       auth: "required",
+    }),
+  // «Delete account» (#309). Bearer-only on the server; "required" so a token
+  // that does not arrive fails as a network error before any request, never
+  // an anonymous call into the 401. Safe to repeat after any failure — the
+  // server's two halves are idempotent.
+  deleteAccount: () =>
+    request<DeleteAccountResponse>("/api/v1/account/delete", {
+      method: "POST",
+      auth: "required",
+      timeoutMs: ACCOUNT_DELETE_TIMEOUT_MS,
     }),
 };
 
