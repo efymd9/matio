@@ -339,6 +339,12 @@ afterEach(() => {
 const WALL_CTA = "Create free account";
 const SUBSCRIBERS_ONLY = "Subscribers only";
 const TRY_AGAIN = "Try again";
+// What a purchase call to action would read like — none may appear (3.1.1).
+// «Subscribers only» itself is not one (\b stops «Subscribe» inside it).
+const PURCHASE_CTA = /\$|\bSubscribe\b|Become a member/;
+
+const SUBSCRIBE_REQUIRED = () =>
+  new ApiError("forbidden", "Subscribe to watch.", 403, "subscribe_required");
 
 describe("EpisodeFeed — which answer a locked page gives (#288 item 1)", () => {
   it("plays an open episode", async () => {
@@ -347,22 +353,30 @@ describe("EpisodeFeed — which answer a locked page gives (#288 item 1)", () =>
     expect(video("ep1").props.paused).toBe(false);
   });
 
-  it("a subscribers-only page tells a SIGNED-IN viewer so — no sign-up wall, no retry, no token asked", async () => {
+  it("a subscribers-only page tells a SIGNED-IN non-subscriber so, from the token route's 403 — no sign-up wall, no retry, nothing to buy (#316)", async () => {
+    tokens.answer = async (episodeId) => {
+      if (episodeId === "ep3") throw SUBSCRIBE_REQUIRED();
+      return granted(episodeId);
+    };
     await renderFeed(makeShow("horizontal", ["free", "member", "subscriber"]), {
       signedIn: true,
       initialIndex: 2,
     });
 
+    // Asked once — the app cannot tell a subscriber from a member — and the
+    // answer is the page.
+    expect(tokens.calls).toEqual(["ep3"]);
+    expect(playerEl("ep3")).toBeNull();
     expect(text()).toContain(SUBSCRIBERS_ONLY);
     expect(text()).toContain("This episode needs an active subscription.");
     expect(text()).not.toContain(WALL_CTA);
     expect(text()).not.toContain("No card needed");
     expect(text()).not.toContain(TRY_AGAIN);
-    expect(tokens.calls).not.toContain("ep3");
+    expect(text()).not.toMatch(PURCHASE_CTA);
   });
 
   it("a subscribers-only page has a visible way back — in landscape nothing else on screen leads out", async () => {
-    await renderFeed(makeShow("horizontal", ["subscriber"]), { signedIn: true });
+    await renderFeed(makeShow("horizontal", ["subscriber"]));
 
     expect(text()).toContain(SUBSCRIBERS_ONLY);
     expect(roleOf("Back")).toBe("link");
@@ -370,9 +384,9 @@ describe("EpisodeFeed — which answer a locked page gives (#288 item 1)", () =>
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
-  it("so does the token route's 403 subscribe_required, next to its retry", async () => {
+  it("so does the token route's 403 subscribe_required — with no retry either (#316)", async () => {
     // The client thinks the episode is open; the server says it needs a
-    // subscription (the legacy 60s preview running out, say).
+    // subscription. Asking again only gets the same answer.
     gate = { mode: "none" };
     tokens.answer = async () => {
       throw new ApiError("forbidden", "Subscribe to keep watching.", 403, "subscribe_required");
@@ -380,7 +394,9 @@ describe("EpisodeFeed — which answer a locked page gives (#288 item 1)", () =>
     await renderFeed(makeShow("horizontal", ["free"]));
 
     expect(text()).toContain(SUBSCRIBERS_ONLY);
-    expect(text()).toContain(TRY_AGAIN);
+    expect(text()).not.toContain(TRY_AGAIN);
+    expect(text()).not.toMatch(PURCHASE_CTA);
+    expect(tokens.calls).toEqual(["ep1"]);
     press("Back");
     expect(onBack).toHaveBeenCalledTimes(1);
   });
@@ -1365,5 +1381,163 @@ describe("EpisodeFeed — the token refresh (#302 item 6)", () => {
     await advance(10_000);
 
     expect(callsFor("ep1")).toBe(1);
+  });
+});
+
+// ---- #316: a signed-in viewer's subscribers-only episode ----------------
+
+// The token route's legacy preview for one all-subscribers-only show
+// (app/api/v1/playback-token): the first request starts the minute, every
+// later one — any episode of the show — gets what is left of it, and once it
+// has run out the answer is 403 subscribe_required.
+function previewMinute() {
+  let endsAt: number | null = null;
+  tokens.answer = async (episodeId) => {
+    endsAt ??= Date.now() + 60_000;
+    const left = Math.floor((endsAt - Date.now()) / 1000);
+    if (left <= 0) {
+      throw new ApiError("forbidden", "Your preview has ended.", 403, "subscribe_required");
+    }
+    return { ...granted(episodeId), expiresIn: left, mode: "trial" };
+  };
+}
+
+describe("EpisodeFeed — a signed-in viewer's subscribers-only episode is the token route's call (#316)", () => {
+  it("a subscriber is not locked out: the episode asks for its token and plays", async () => {
+    tokens.answer = async (episodeId) => ({ ...granted(episodeId), mode: "subscriber" });
+    await renderFeed(makeShow("horizontal", ["free", "member", "subscriber"]), {
+      signedIn: true,
+      initialIndex: 2,
+    });
+
+    expect(tokens.calls).toEqual(["ep3"]);
+    expect(video("ep3").props.paused).toBe(false);
+    expect(text()).not.toContain(SUBSCRIBERS_ONLY);
+  });
+
+  it("a subscriber's swipe into a subscribers-only episode lands on a player warmed in the pool", async () => {
+    h.allPages = true;
+    tokens.answer = async (episodeId) => ({ ...granted(episodeId), mode: "subscriber" });
+    await renderFeed(makeShow("vertical", ["member", "subscriber"]), { signedIn: true });
+    expect(tokens.calls).toEqual(["ep1", "ep2"]);
+    expect(video("ep2").props.paused).toBe(true);
+
+    swipe(1);
+    await flush();
+
+    expect(video("ep2").props.paused).toBe(false);
+    expect(tokens.calls).toEqual(["ep1", "ep2"]);
+    expect(text()).not.toContain(SUBSCRIBERS_ONLY);
+  });
+
+  it("a non-subscriber's auto-advance lands on the answer the warm-up got — no player, no second ask", async () => {
+    h.allPages = true;
+    countingGrants((id) => (id === "ep2" ? SUBSCRIBE_REQUIRED() : null));
+    await renderFeed(makeShow("horizontal", ["member", "subscriber"]), { signedIn: true });
+
+    act(() => video("ep1").props.onLoad?.({ duration: 600 }));
+    act(() => video("ep1").props.onProgress?.({ currentTime: 560 }));
+    await flush();
+    expect(callsFor("ep2")).toBe(1);
+    expect(hiddenFromReader(leaf(SUBSCRIBERS_ONLY))).toBe(true);
+
+    act(() => video("ep1").props.onEnd?.());
+    await flush();
+
+    // The page in view now — and it is still the 403's page, asked once.
+    expect(hiddenFromReader(leaf(SUBSCRIBERS_ONLY))).toBe(false);
+    expect(callsFor("ep2")).toBe(1);
+    expect(playerEl("ep2")).toBeNull();
+    expect(text()).not.toContain(TRY_AGAIN);
+    expect(text()).not.toMatch(PURCHASE_CTA);
+  });
+
+  it("a signed-out viewer is still locked up front: no token asked, no sign-up wall, no retry", async () => {
+    await renderFeed(makeShow("horizontal", ["free", "member", "subscriber"]), { initialIndex: 2 });
+
+    expect(tokens.calls).toEqual([]);
+    expect(text()).toContain(SUBSCRIBERS_ONLY);
+    expect(text()).not.toContain(WALL_CTA);
+    expect(text()).not.toContain(TRY_AGAIN);
+  });
+});
+
+describe("EpisodeFeed — a non-subscriber's 60s preview of an all-subscribers-only show (#316)", () => {
+  it("plays, then ends on «Subscribers only» at its minute — the player gone, no retry, never re-minted", async () => {
+    vi.useFakeTimers();
+    previewMinute();
+    await renderFeed(makeShow("horizontal", ["subscriber", "subscriber"]), { signedIn: true });
+
+    expect(video("ep1").props.paused).toBe(false);
+    await advance(59_000);
+    expect(playerEl("ep1")).not.toBeNull();
+    expect(text()).not.toContain(SUBSCRIBERS_ONLY);
+
+    await advance(1_000);
+    expect(playerEl("ep1")).toBeNull();
+    expect(text()).toContain(SUBSCRIBERS_ONLY);
+    expect(text()).not.toContain("Playback unavailable");
+    expect(text()).not.toContain(TRY_AGAIN);
+    expect(text()).not.toMatch(PURCHASE_CTA);
+
+    await advance(10 * 60_000);
+    expect(tokens.calls).toEqual(["ep1"]);
+  });
+
+  it("a player that fails in the preview's last seconds — Mux refusing the token by its own clock — ends the same way, not on «Playback unavailable»", async () => {
+    vi.useFakeTimers();
+    previewMinute();
+    await renderFeed(makeShow("horizontal", ["subscriber"]), { signedIn: true });
+
+    await advance(58_000);
+    act(() => video("ep1").props.onError?.());
+
+    expect(text()).toContain(SUBSCRIBERS_ONLY);
+    expect(text()).not.toContain("Playback unavailable");
+    expect(text()).not.toContain(TRY_AGAIN);
+    await advance(10 * 60_000);
+    expect(tokens.calls).toEqual(["ep1"]);
+  });
+
+  it("a failure early in the preview is a failure, with its Try again — and the minute still ends on «Subscribers only»", async () => {
+    vi.useFakeTimers();
+    previewMinute();
+    await renderFeed(makeShow("horizontal", ["subscriber"]), { signedIn: true });
+
+    await advance(10_000);
+    act(() => video("ep1").props.onError?.());
+    expect(text()).toContain("Playback unavailable");
+    expect(text()).toContain(TRY_AGAIN);
+
+    await advance(50_000);
+    expect(text()).toContain(SUBSCRIBERS_ONLY);
+    expect(text()).not.toContain("Playback unavailable");
+    expect(tokens.calls).toEqual(["ep1"]);
+  });
+
+  it("the minute is the show's, not the episode's: a swipe after it ran out lands on «Subscribers only» with no new token for that page", async () => {
+    vi.useFakeTimers();
+    h.allPages = true;
+    previewMinute();
+    await renderFeed(makeShow("vertical", ["subscriber", "subscriber", "subscriber"]), {
+      signedIn: true,
+    });
+    // The page in view and its neighbour, both cut from the same minute.
+    expect(tokens.calls).toEqual(["ep1", "ep2"]);
+
+    await advance(60_000);
+    expect(playerEl("ep1")).toBeNull();
+
+    swipe(1);
+    await advance(0);
+    await flush();
+
+    expect(playerEl("ep2")).toBeNull();
+    expect(text()).not.toContain("Playback unavailable");
+    expect(text()).not.toContain(TRY_AGAIN);
+    // The page that came into view is not asked again; only the new
+    // neighbour asks — and gets the run-out answer.
+    expect(tokens.calls).toEqual(["ep1", "ep2", "ep3"]);
+    expect(playerEl("ep3")).toBeNull();
   });
 });
