@@ -422,15 +422,31 @@ function PrivacyEn() {
           <li>
             <strong>Providers</strong> — the app contains no analytics,
             advertising or tracking tools, and it does not track you across
-            other companies&rsquo; apps or websites. It uses only providers
-            already listed in section 4: Vercel and Neon (our servers and
-            database), Clerk (sign-in) and Mux (video and episode images).
-            Like any request to our servers, the app&rsquo;s requests carry
-            your IP address and basic device details, handled as
-            &ldquo;Technical data&rdquo; in section 2. When you open our
-            Terms, this policy or the Cookie Policy from the app, the page
-            opens in an in-app browser without our analytics or advertising
-            tools.
+            other companies&rsquo; apps or websites. Besides Sentry for error
+            reports (below), it uses only providers already listed in section
+            4: Vercel and Neon (our servers and database), Clerk (sign-in) and
+            Mux (video and episode images). Like any request to our servers,
+            the app&rsquo;s requests carry your IP address and basic device
+            details, handled as &ldquo;Technical data&rdquo; in section 2.
+            When you open our Terms, this policy or the Cookie Policy from the
+            app, the page opens in an in-app browser without our analytics or
+            advertising tools.
+          </li>
+          <li>
+            <strong>Error reports</strong> — when the app crashes or runs into
+            an error, it can send a report to{" "}
+            <strong>Functional Software, Inc.</strong> (Sentry; US company, our
+            data held in its EU region; US transfers covered by the EU-US Data
+            Privacy Framework and SCCs) so we can find and fix the fault. A
+            report holds the technical details of the error, the app version,
+            the device model, operating system and similar device details, a
+            trail of recent app events with the parameters removed from web
+            addresses, and a random identifier that Sentry&rsquo;s software
+            creates on the device. It never includes
+            your email address, your account or the device identifier above,
+            and never a screenshot or a recording of your screen. Lawful
+            basis: <em>legitimate interests</em> — keeping the app working.
+            Sentry keeps reports for up to 90 days.
           </li>
           <li>
             <strong>Deleting your account</strong> — you can delete your
@@ -850,7 +866,8 @@ function PrivacyEs() {
             <strong>Proveedores</strong>: la aplicación no contiene
             herramientas de analítica, publicidad ni seguimiento, y no te
             rastrea a través de aplicaciones o sitios web de otras empresas.
-            Solo usa proveedores que ya figuran en la sección 4: Vercel y Neon
+            Además de Sentry para los informes de errores (véase abajo), solo
+            usa proveedores que ya figuran en la sección 4: Vercel y Neon
             (nuestros servidores y base de datos), Clerk (inicio de sesión) y
             Mux (vídeo e imágenes de los episodios). Como cualquier petición a
             nuestros servidores, las de la aplicación llevan tu dirección IP y
@@ -859,6 +876,25 @@ function PrivacyEs() {
             esta política o la Política de cookies, la página se abre en un
             navegador integrado, sin nuestras herramientas de analítica ni de
             publicidad.
+          </li>
+          <li>
+            <strong>Informes de errores</strong>: cuando la aplicación se
+            cierra inesperadamente o encuentra un error, puede enviar un
+            informe a <strong>Functional Software, Inc.</strong> (Sentry;
+            empresa de EE. UU., nuestros datos alojados en su región de la UE;
+            transferencias a EE. UU. amparadas por el Marco de Privacidad de
+            Datos UE-EE. UU. y las CCT) para que podamos localizar y corregir
+            el fallo. Un informe contiene los detalles técnicos del error, la
+            versión de la aplicación, el modelo del dispositivo, el sistema
+            operativo y datos similares del dispositivo, un registro de los
+            últimos eventos de la aplicación con los parámetros eliminados de
+            las direcciones web y un identificador aleatorio que el software
+            de Sentry crea en el dispositivo. Nunca incluye tu dirección de
+            correo electrónico, tu cuenta ni el identificador del dispositivo
+            descrito arriba, y nunca una captura ni una grabación de tu
+            pantalla. Base jurídica: <em>interés legítimo</em> de mantener la
+            aplicación en funcionamiento. Sentry conserva los informes hasta
+            90 días.
           </li>
           <li>
             <strong>Eliminar tu cuenta</strong>: puedes eliminar tu cuenta
