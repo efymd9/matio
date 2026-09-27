@@ -3,7 +3,11 @@
 // ORDINARY LTD, company no. 17381666, UK). No DPO appointed (not required
 // under Art. 37). Supervisory authorities named inline: AEPD (ES) / ICO (UK).
 // PostHog disclosure added 2026-05-30. Google Analytics (GA4) disclosure
-// added 2026-06-24.
+// added 2026-06-24. §11 «Our mobile app» added 2026-09-27 (#312, App Store
+// 5.1.1(i) + art. 13): drafted by an agent from the code, merged on the
+// owner's approval in the PR thread, counsel review pending with the rest of
+// this page (#168); "Contact" moved from §11 to §12 — §1–§10 keep their
+// numbers (lib/retention.ts cites §6).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalLink } from "@/components/site/legal-link";
@@ -21,8 +25,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED_ES = "24 de junio de 2026";
-const LAST_UPDATED_EN = "June 24, 2026";
+const LAST_UPDATED_ES = "27 de septiembre de 2026";
+const LAST_UPDATED_EN = "September 27, 2026";
 
 export default async function PrivacyPage() {
   const { locale, t } = await getDict();
@@ -343,7 +347,107 @@ function PrivacyEn() {
         </p>
       </Section>
 
-      <Section id="contact" title="11. Contact">
+      {/* DRAFT (#312) — see the note at the top of the file. Each sentence
+          is tied to the code in #312's PR; the data map
+          (.claude/skills/gdpr/references/data-map.md) says the same. */}
+      <Section id="app" title="11. Our mobile app">
+        <p>
+          This section covers the Matio app for phones. The rest of this
+          policy applies to the app too, except the website&rsquo;s cookies
+          and the tools that depend on them, which the app does not use.
+          Below is what the app adds.
+        </p>
+        <ul className="ml-5 list-disc space-y-1.5">
+          <li>
+            <strong>Device identifier</strong> — the first time the app
+            contacts our servers, it creates a random identifier (a UUID) that
+            contains nothing about you or your device. It keeps the identifier
+            in the device&rsquo;s secure storage — on iPhone, the keychain,
+            where the app can read it once the phone has been unlocked after
+            being switched on, so that playback can continue with the screen
+            locked — and sends it with every request to our servers. On iPhone
+            the keychain can keep the identifier after the app is deleted, so
+            reinstalling the app may bring back the same identifier; on
+            Android it is normally removed together with the app. We never
+            store it with your account, even when you are signed in.
+          </li>
+          <li>
+            <strong>What the identifier is used for</strong> — when an episode
+            plays, we may keep one record per show against the identifier: the
+            show, when playback started, when a free preview expires, when the
+            sign-up screen was first reached, and a HMAC hash of your IP
+            address (the raw IP is never stored). These records let us apply
+            the viewing rules for people who are not signed in (such as the
+            60-second preview), limit abuse, and measure how our own service
+            is used. Lawful basis: <em>legitimate interests</em> — offering
+            free viewing fairly and understanding how our own service is used,
+            without third-party tracking. Like the{" "}
+            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">matio_aid</code>{" "}
+            cookie on the website, the identifier is never shared with third
+            parties or used for advertising.
+          </li>
+          <li>
+            <strong>Viewing counters</strong> — the app reports which
+            10-second stretches of an episode were played, and we add them to
+            daily per-episode counters that hold no identifier — neither the
+            device identifier nor your account. For a device that is not
+            signed in, the identifier is only checked against the records
+            above, so that the counters reflect real playback.
+          </li>
+          <li>
+            <strong>How long we keep it</strong> — records kept against the
+            device identifier are deleted 30 days after they are created (the
+            &ldquo;Trial sessions&rdquo; period in section 6). The viewing
+            counters hold no personal data.
+          </li>
+          <li>
+            <strong>If you sign in</strong> — to sign in or create an account,
+            you enter your email address in the app, which sends it to Clerk,
+            our authentication provider; Clerk emails you a one-time code.
+            When you create an account, the app also passes Clerk the language
+            you use in the app. Your sign-in session is kept in the
+            device&rsquo;s secure storage. While you are signed in, the app
+            sends us your watch progress — the episode, how far you got,
+            whether you finished it and how long you watched — so you can
+            pick up where you left off, in the app or on matio.tv; we also
+            record the days on which you watched. This is the account and
+            usage data described in section 2, used and kept as described in
+            sections 3 and 6.
+          </li>
+          <li>
+            <strong>Kept only on your device</strong> — the autoplay setting,
+            and the language you choose in the app (apart from passing it to
+            Clerk when you create an account, as above).
+          </li>
+          <li>
+            <strong>Providers</strong> — the app contains no analytics,
+            advertising or tracking tools, and it does not track you across
+            other companies&rsquo; apps or websites. It uses only providers
+            already listed in section 4: Vercel and Neon (our servers and
+            database), Clerk (sign-in) and Mux (video and episode images).
+            Like any request to our servers, the app&rsquo;s requests carry
+            your IP address and basic device details, handled as
+            &ldquo;Technical data&rdquo; in section 2. When you open our
+            Terms, this policy or the Cookie Policy from the app, the page
+            opens in an in-app browser without our analytics or advertising
+            tools.
+          </li>
+          <li>
+            <strong>Deleting your account</strong> — you can delete your
+            account in the app at any time: Account → Delete account. Once you
+            confirm, your account and the data linked to it are erased,
+            including your watch progress and new-episode reminders, and an
+            active subscription is cancelled at the end of the current billing
+            period. You can also write to <strong>contact@matio.tv</strong>,
+            which is also how you exercise the other rights in section 7.
+            Records kept against the device identifier are not linked to your
+            account, so deleting the account does not remove them; they are
+            deleted 30 days after they are created, as above.
+          </li>
+        </ul>
+      </Section>
+
+      <Section id="contact" title="12. Contact">
         <p>
           Privacy questions: <strong>contact@matio.tv</strong>. See also our{" "}
           <LegalLink href="/terms" className="underline underline-offset-2 hover:text-white">
@@ -663,7 +767,116 @@ function PrivacyEs() {
         </p>
       </Section>
 
-      <Section id="contacto" title="11. Contacto">
+      {/* DRAFT (#312) — the Spanish twin of the English §11 above. */}
+      <Section id="aplicacion" title="11. Nuestra aplicación móvil">
+        <p>
+          Esta sección trata de la aplicación de Matio para móviles. El resto
+          de esta política también se aplica a la aplicación, salvo las
+          cookies del sitio web y las herramientas que dependen de ellas, que
+          la aplicación no utiliza. A continuación se describe lo que la
+          aplicación añade.
+        </p>
+        <ul className="ml-5 list-disc space-y-1.5">
+          <li>
+            <strong>Identificador del dispositivo</strong>: la primera vez que
+            la aplicación contacta con nuestros servidores, crea un
+            identificador aleatorio (un UUID) que no contiene nada sobre ti ni
+            sobre tu dispositivo. Lo guarda en el almacenamiento seguro del
+            dispositivo (en iPhone, el llavero o keychain, donde la aplicación
+            puede leerlo una vez que el teléfono se ha desbloqueado tras
+            encenderse, para que la reproducción pueda continuar con la
+            pantalla bloqueada) y lo envía con cada petición a nuestros
+            servidores. En iPhone, el llavero puede conservar el identificador
+            después de eliminar la aplicación, de modo que al reinstalarla
+            puede volver el mismo identificador; en Android normalmente se
+            elimina junto con la aplicación. Nunca lo guardamos junto a tu
+            cuenta, ni siquiera cuando has iniciado sesión.
+          </li>
+          <li>
+            <strong>Para qué se usa el identificador</strong>: cuando se
+            reproduce un episodio, podemos guardar un registro por serie
+            asociado al identificador: la serie, cuándo empezó la
+            reproducción, cuándo caduca una vista previa gratuita, cuándo se
+            llegó por primera vez a la pantalla de registro y un hash HMAC de
+            tu dirección IP (la IP en claro no se almacena). Estos registros
+            nos permiten aplicar las reglas de visionado a quien no ha
+            iniciado sesión (como la vista previa de 60 segundos), limitar
+            abusos y medir cómo se usa nuestro propio servicio. Base jurídica:{" "}
+            <em>interés legítimo</em> de ofrecer el visionado gratuito de
+            forma justa y de comprender cómo se usa nuestro propio servicio,
+            sin recurrir a seguimiento de terceros. Como la cookie{" "}
+            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">matio_aid</code>{" "}
+            del sitio web, el identificador nunca se comparte con terceros ni
+            se utiliza para publicidad.
+          </li>
+          <li>
+            <strong>Contadores de visionado</strong>: la aplicación indica qué
+            tramos de 10 segundos de un episodio se reprodujeron, y los
+            sumamos a contadores diarios por episodio que no contienen ningún
+            identificador: ni el del dispositivo ni tu cuenta. En un
+            dispositivo sin sesión iniciada, el identificador solo se
+            comprueba contra los registros anteriores, para que los contadores
+            reflejen reproducciones reales.
+          </li>
+          <li>
+            <strong>Cuánto tiempo lo conservamos</strong>: los registros
+            asociados al identificador del dispositivo se eliminan 30 días
+            después de crearse (el plazo de las «Sesiones de prueba» de la
+            sección 6). Los contadores de visionado no contienen datos
+            personales.
+          </li>
+          <li>
+            <strong>Si inicias sesión</strong>: para iniciar sesión o crear
+            una cuenta, introduces tu dirección de correo electrónico en la
+            aplicación, que la envía a Clerk, nuestro proveedor de
+            autenticación; Clerk te envía por correo un código de un solo uso.
+            Al crear una cuenta, la aplicación también comunica a Clerk el
+            idioma que usas en ella. Tu sesión se guarda en el almacenamiento
+            seguro del dispositivo. Mientras tienes la sesión iniciada, la
+            aplicación nos envía tu progreso de reproducción (el episodio,
+            hasta dónde llegaste, si lo terminaste y cuánto tiempo lo viste)
+            para que puedas continuar donde lo dejaste, en la aplicación o en
+            matio.tv; también registramos los días en que viste algo. Son los
+            datos de cuenta y de uso descritos en la sección 2, que usamos y
+            conservamos como se indica en las secciones 3 y 6.
+          </li>
+          <li>
+            <strong>Solo en tu dispositivo</strong>: el ajuste de
+            reproducción automática y el idioma que eliges en la aplicación
+            (salvo cuando se lo comunica a Clerk al crear una cuenta, como se
+            indica arriba).
+          </li>
+          <li>
+            <strong>Proveedores</strong>: la aplicación no contiene
+            herramientas de analítica, publicidad ni seguimiento, y no te
+            rastrea a través de aplicaciones o sitios web de otras empresas.
+            Solo usa proveedores que ya figuran en la sección 4: Vercel y Neon
+            (nuestros servidores y base de datos), Clerk (inicio de sesión) y
+            Mux (vídeo e imágenes de los episodios). Como cualquier petición a
+            nuestros servidores, las de la aplicación llevan tu dirección IP y
+            datos básicos del dispositivo, tratados como «Datos técnicos» en
+            la sección 2. Cuando abres desde la aplicación nuestros Términos,
+            esta política o la Política de cookies, la página se abre en un
+            navegador integrado, sin nuestras herramientas de analítica ni de
+            publicidad.
+          </li>
+          <li>
+            <strong>Eliminar tu cuenta</strong>: puedes eliminar tu cuenta
+            desde la aplicación en cualquier momento: Cuenta → Eliminar
+            cuenta. Cuando lo confirmas, se borran tu cuenta y los datos
+            vinculados a ella, incluidos tu progreso de reproducción y los
+            avisos de nuevos episodios, y una suscripción activa se cancela al
+            final del periodo de facturación en curso. También puedes
+            escribirnos a <strong>contact@matio.tv</strong>, que es además la
+            vía para ejercer los demás derechos de la sección 7. Los registros
+            asociados al identificador del dispositivo no están vinculados a
+            tu cuenta, así que eliminarla no los borra; se eliminan 30 días
+            después de crearse, como se indica arriba.
+          </li>
+        </ul>
+      </Section>
+
+      <Section id="contacto" title="12. Contacto">
         <p>
           Consultas de privacidad: <strong>contact@matio.tv</strong>. Consulta
           también nuestros{" "}

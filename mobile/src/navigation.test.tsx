@@ -62,6 +62,17 @@ vi.mock("expo-glass-effect", () => ({
 }));
 vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+// The form's Terms / Privacy line (#312): the legal URLs and the in-app
+// browser its links open — inert here, tested in sign-in-form.test.tsx.
+vi.mock("@/api/config-context", () => ({
+  useConfig: () => ({
+    urls: {
+      terms: "https://matio.tv/terms?embed=app",
+      privacy: "https://matio.tv/privacy?embed=app",
+    },
+  }),
+}));
+vi.mock("expo-web-browser", () => ({ openBrowserAsync: async () => ({}) }));
 
 const EPISODE = { episodeId: "ep-3", showSlug: "the-scarlet-oath" };
 const WATCH_EPISODE = { pathname: "/watch/[episodeId]", params: EPISODE };
