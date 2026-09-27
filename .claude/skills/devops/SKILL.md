@@ -35,7 +35,8 @@ description: Карта живой инфраструктуры Matio (хост�
 `.github/workflows/ci.yml` (джоба `web`), GitHub-раннеры, ~3 минуты:
 `pnpm install` → `npm ci` в `mobile/` (кэш `~/.npm` по
 `mobile/package-lock.json`; с #247 — зависимости для проекта `mobile`
-vitest'а, заодно ловит рассинхрон мобильного лока до сборки EAS) → линт →
+vitest'а, заодно ловит рассинхрон мобильного лока до сборки EAS) → типы
+мобильного (`npm run typecheck` в `mobile/`, его TS ~5.9, #307) → линт →
 типы → чек токенов (`tools/qa/no-magic-styles.sh`) → установка chromium →
 тесты трёх проектов (`unit`, `mobile`, `storybook`) с покрытием →
 diff-cover ≥85% на изменённых строках → стики-коммент с покрытием. Голден

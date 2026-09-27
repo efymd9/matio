@@ -11,10 +11,10 @@
     "backgroundColor": "#0f0a07",
     "ios": {
       "bundleIdentifier": "tv.matio.app",
-      "icon": "./assets/expo.icon",
-      "supportsTablet": true,
+      "supportsTablet": false,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleLocalizations": ["en", "es"]
       }
     },
     "android": {
@@ -50,7 +50,12 @@
           "appleSignIn": false
         }
       ],
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       [
         "react-native-video",
         {
