@@ -24,6 +24,8 @@ type RefreshProps = {
   refreshing: boolean;
   onRefresh?: () => void;
   tintColor?: unknown;
+  colors?: unknown[];
+  progressBackgroundColor?: unknown;
   progressViewOffset?: number;
   children?: ReactNode;
 };
@@ -215,10 +217,13 @@ afterEach(() => {
 });
 
 describe("Home pull-to-refresh (#313)", () => {
-  it("is the system control in the theme's gold, pushed below the status bar", async () => {
+  it("is the system control in the theme's gold on both platforms, pushed below the status bar", async () => {
     await mountHome();
 
+    // iOS reads tintColor; Android reads colors on progressBackgroundColor.
     expect(refresh.props?.tintColor).toBe(colors.gold);
+    expect(refresh.props?.colors).toEqual([colors.gold]);
+    expect(refresh.props?.progressBackgroundColor).toBe(colors.card);
     expect(refresh.props?.progressViewOffset).toBe(TOP_INSET);
     expect(spinning()).toBe(false);
   });

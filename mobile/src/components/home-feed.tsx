@@ -62,7 +62,11 @@ type Handlers = {
 // pull reloads, and when the spinner stops, is the screen's business
 // (`refreshing` / `onRefresh`). The list runs under the status bar — the
 // header pads itself by the inset — so the spinner is pushed down by the
-// same inset, or it would sit behind the notch / Dynamic Island.
+// same inset, or it would sit behind the notch / Dynamic Island. The colour
+// is set twice because the platforms read different props: `tintColor` is
+// iOS-only, and Android draws a Material disc from `colors` on
+// `progressBackgroundColor` (default: stock colours on white) — gold on the
+// card surface there.
 export function HomeFeed({
   items,
   header,
@@ -101,6 +105,8 @@ export function HomeFeed({
           refreshing={refreshing}
           onRefresh={onRefresh}
           tintColor={colors.gold}
+          colors={[colors.gold]}
+          progressBackgroundColor={colors.card}
           progressViewOffset={insets.top}
         />
       }
