@@ -110,3 +110,9 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+// The last resort (#308): a render crash in this layout — a provider, the
+// stack — that no screen's own boundary caught. «Try again» only; the copy
+// cannot lean on the LocaleProvider above, which is part of what crashed.
+// See components/route-error.tsx.
+export { RootErrorBoundary as ErrorBoundary } from "@/components/route-error";
