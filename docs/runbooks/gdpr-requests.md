@@ -50,14 +50,34 @@
    сверить «Last signed in» на карточке пользователя в Clerk Dashboard.
    Совпало — верифицирован; статус в реестре → `verified`.
 
-**Адрес без аккаунта.** Если адреса нет в Clerk, единственное, что о нём может
-быть у нас, — строки `show_reminders` (форма «напомнить о новой серии» работает
-без входа). Скрипт §3 ключуется по Clerk id и такой случай не покрывает:
-ответ собирается руками — `select count(*) from show_reminders where email =
-…` (только счётчик в чат/консоль, не строки), затем сами строки в файл
-ответа; верификация — попросить ответить на письмо, отправленное на этот
-адрес. Отписка (`/unsubscribe`) удаляет все строки адреса и часто закрывает
-такой запрос целиком.
+**Адрес без аккаунта.** Если адреса нет в Clerk, у нас о нём могут быть только
+строки двух таблиц, обе пишутся без входа: `show_reminders` (форма «напомнить
+о новой серии») и `idea_submissions` (идеи с `/ideas`, #297 — автору идеи
+аккаунт не нужен вовсе). Скрипты §3 и §4 ключуются по Clerk id и такой случай
+не покрывают (скриптовый путь по адресу — #339): всё руками, в
+SQL-редакторе Neon (ветка production), адрес — всегда через `lower('…')`
+(обе таблицы хранят его в нижнем регистре). Верификация — попросить ответить
+на письмо, отправленное на этот адрес.
+
+- **Найти.** `select count(*) from show_reminders where email = lower('…')`
+  и `select id, created_at from idea_submissions where email = lower('…')`.
+  В чат агента, в issue и в консоль — **только id и счётчики**, не строки:
+  в `idea_submissions` лежат имя, адрес и свободный текст истории.
+- **Доступ и портируемость (ст. 15/20).** `select * from show_reminders where
+  email = lower('…')` и `select * from idea_submissions where email =
+  lower('…')` — результат из SQL-редактора выгрузить в JSON/CSV-файл с
+  правами `0600` на машине оператора (не в репозиторий). Отправка — как у
+  экспорта (§3, шаг 4): `age -p`, пароль отдельным каналом, файл затем
+  удалить (§3, шаг 5). Карточка `/admin/ideas/<id>` — HTML для чтения, а не
+  машиночитаемый формат: ответом по ст. 20 она не считается.
+- **Удалить.** Напоминания — отписка (`/unsubscribe`) удаляет все строки
+  адреса и часто закрывает такой запрос целиком. Идеи — кнопкой «Удалить» на
+  карточке `/admin/ideas/<id>` по каждому id из поиска выше (отписка идеи не
+  удаляет — она только снимает `marketing_opt_in`). **Id удалённых идей —
+  в строку реестра заявок (§6)**: id не персональные данные, а по ним
+  `db-restore.md` §7 повторит удаление после восстановления из дампа.
+  Адрес в URL админки не класть (`?email=…` уезжает в логи запросов
+  Vercel) — поиск только в SQL-редакторе.
 
 ## 3. Экспорт (ст. 15 / 20)
 
@@ -97,17 +117,18 @@ PostHog 30 с на выражение): зависший вендор даёт `
 
 ```
 subject: user_…
-database rows: users=1 subscriptions=0 watch_progress=12 watch_days=5 trial_sessions=2 visitors=1 visitor_days=4 show_reminders=1
+database rows: users=1 subscriptions=0 watch_progress=12 watch_days=5 trial_sessions=2 visitors=1 visitor_days=4 show_reminders=1 idea_submissions=1
 processors: clerk=received stripe=received (invoices=3) posthog=received (events=143)
 notes (1):
   - clerk: the profile above is what the Backend API exposes; sign-in sessions and devices are not part of it — …
 written ~/dsr/DSR-2026-001.json (mode 0600) — delete it once the reply has gone out
 ```
 
-Что внутри файла: `database` — восемь таблиц, привязанных к человеку
+Что внутри файла: `database` — девять таблиц, привязанных к человеку
 (`users`, `subscriptions`, `watch_progress`, `watch_days`, `trial_sessions`,
-`visitors` + `visitor_days`, `show_reminders` — по `user_id` **и** по адресу),
-всегда все восемь ключей, даже с нулём строк; `processors.{clerk,stripe,
+`visitors` + `visitor_days`, `show_reminders` — по `user_id` **и** по адресу,
+`idea_submissions` — только по адресу аккаунта в нижнем регистре, #297),
+всегда все девять ключей, даже с нулём строк; `processors.{clerk,stripe,
 posthog}` — профиль Clerk, Customer + инвойсы Stripe, персона + события
 PostHog; `notes` — что пропущено и почему. `stripe_events` (сырые вебхуки) и
 `watch_segments` (агрегат без ключа пользователя) в выгрузку не входят.
@@ -140,6 +161,15 @@ per-user выгрузки не отдают: у них хешированный 
   содержать чужие query-параметры; если содержит — обрезать до хоста;
 - `show_reminders` — строки по адресу; если `user_id` в такой строке указывает
   на **другой** аккаунт (coalesce-backfill), убрать `user_id` из строки.
+
+`idea_submissions` (#297) — идеи, присланные с адреса аккаунта: логлайн,
+история, рабочее название, имя для титров, версия принятых Idea Submission
+Terms, галочка рассылки, атрибуция кампании. Текст — собственные слова
+субъекта и отдаётся как есть, даже если в нём упомянуты другие люди: он сам их
+туда написал, нового о них он не узнаёт. `content_hash` (ключ дедупа) —
+технический, остаётся. Идеи, присланные с ДРУГОГО адреса того же человека,
+скрипт не видит — если субъект о них пишет, собрать по §2 «Адрес без
+аккаунта».
 
 `ip_hash`, `stripe_customer_id`, `session_token`, `aid` остаются — это
 данные субъекта, не секреты.
@@ -228,10 +258,14 @@ Clerk его уже не покажет, а скрипт и реестр клю�
    Sentry по id — и **этот шаг скрипт повторить не может**: адреса больше
    нет. Тогда руками, см. «Stripe руками» ниже;
 3. `DELETE FROM show_reminders` по адресу аккаунта и по `user_id`;
-4. `DELETE FROM users` → каскады FK: `subscriptions`, `watch_progress`,
+4. `DELETE FROM idea_submissions` по адресу аккаунта (в нижнем регистре;
+   #297) — у таблицы нет `user_id` и FK на `users`, каскад её не достанет,
+   поэтому шаг явный и идёт до `DELETE FROM users`, пока адрес читается.
+   Удаляются и идеи с выданной лицензией (исключения в v1 нет — реестр);
+5. `DELETE FROM users` → каскады FK: `subscriptions`, `watch_progress`,
    `watch_days` удаляются; `trial_sessions`, `visitors`,
    `marketing_links.created_by` остаются с `user_id = NULL` (псевдонимно);
-5. PostHog: person с `distinct_id` = Clerk id, его события **и записи
+6. PostHog: person с `distinct_id` = Clerk id, его события **и записи
    сессий** (session replay в проекте включён) —
    `DELETE …/persons/{id}/?delete_events=true&delete_recordings=true`
    (best-effort, 5 с, без ретраев; сами события и записи PostHog удаляет
@@ -266,7 +300,7 @@ customer / тумбстоун / живая подписка, **сколько к
 ```
 DRY RUN — erase user_…
 subject: user_…
-would delete: users=1 show_reminders=1 subscriptions=1 watch_progress=12 watch_days=5
+would delete: users=1 show_reminders=1 idea_submissions=0 subscriptions=1 watch_progress=12 watch_days=5
 would de-identify (user_id → NULL): trial_sessions=2 visitors=1 marketing_links=0
 stripe: customer=yes live_subscription=no search=ok customers=2 (ids cus_…, cus_…) skipped=1 (other or no address)
 posthog: found persons=1
@@ -333,7 +367,7 @@ events of this person» → подтвердить; затем Session replay �
 ### Ответ и реестр
 
 Ответить в 30 дней: что стёрто (аккаунт, история и позиция просмотра,
-напоминания, аналитика), что и почему остаётся (таблица выше), срок жизни
+напоминания, присланные идеи, аналитика), что и почему остаётся (таблица выше), срок жизни
 бэкапов. Реестр (§6): статус `erased`, дата исполнения — по этой строке §7
 `db-restore.md` повторяет стирание после восстановления из дампа старше
 этой даты. Локально ничего не хранить.
@@ -351,7 +385,11 @@ events of this person» → подтвердить; затем Session replay �
 
 Одна строка на запрос, без имён и адресов. Статусы: `received` → `verified`
 → `answered` / `refused` (с причиной в issue владельца) / `erased` (для ст. 17).
+Для удаления идей адреса без аккаунта (§2) в колонку «Id строк» — id
+удалённых `idea_submissions` (id не персональные данные): по ним
+`db-restore.md` §7 повторит удаление после восстановления из дампа —
+`pnpm erase-user` такие строки не находит.
 
-| № | Получен | Тип | Хеш адреса | Статус | Отвечен |
-|---|---|---|---|---|---|
-| — | — | — | — | — | — |
+| № | Получен | Тип | Хеш адреса | Статус | Отвечен | Id строк (идеи) |
+|---|---|---|---|---|---|---|
+| — | — | — | — | — | — | — |
