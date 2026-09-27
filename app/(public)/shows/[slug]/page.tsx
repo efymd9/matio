@@ -514,11 +514,16 @@ function EpisodeRow({
         >
           {ep.thumbnailUrl && (
             <>
+              {/* Unoptimized: the still carries a JWT minted on every
+                  render, so every URL is new and /_next/image would
+                  re-transform it with nothing to cache (#306). Mux
+                  already serves it at 320×180. */}
               <Image
                 src={ep.thumbnailUrl}
                 alt=""
                 aria-hidden
                 fill
+                unoptimized
                 sizes="(max-width: 834px) 118px, 150px"
                 className="object-cover"
               />

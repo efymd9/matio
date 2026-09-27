@@ -74,11 +74,61 @@ describe("optimizedImageUrl — which sources go through the optimizer", () => {
   });
 
   it("encodes the source so its own query and reserved characters survive the round trip", () => {
-    const odd = "https://abc.public.blob.vercel-storage.com/shows/hero a&b=c?v=2#x%20y.png";
+    // A Blob URL can no longer carry any of this (no query, upload-key
+    // characters only — next block); a same-origin path still can.
+    const odd = "/shows/hero a&b=c.png?v=2#x%20y";
     const built = optimizedImageUrl(odd, 1000);
     expect(built).toContain(`url=${encodeURIComponent(odd)}&w=1080&q=75`);
     expect(paramsOf(built).source).toBe(odd);
     expect(paramsOf(optimizedImageUrl("/shows/x.png?v=2", 100)).source).toBe("/shows/x.png?v=2");
+  });
+});
+
+// #306 — only OUR store's upload folders go to the optimizer: the same list
+// next.config.ts builds its remotePatterns from (lib/blob-artwork.ts).
+const STORE = "https://waoyoctqyyvecbhm.public.blob.vercel-storage.com";
+
+// The keys the uploader writes (UPLOAD_PATH + addRandomSuffix) — real
+// shapes from the live catalog, plus an avatar.
+const OUR_ARTWORK = [
+  `${STORE}/shows/poster-ChatGPT-Image-23-.-2026-.-18_38_21-YOsHfa42ZnCxiKTma6UcTvOCbxjovZ.png`,
+  `${STORE}/shows/hero-dd0c2c76-1dc4-4a2d-bfa4-2fa629985e64-MpgejEUYrWFPPwvGWe7HtgzUhWveXd.png`,
+  `${STORE}/actors/avatar-lady-thorne-4kQm9bXw2ZrT7yPc1LdN0sVeHjUaGf.webp`,
+];
+
+// Remote images the optimizer must refuse under our next.config.ts.
+const REFUSED = [
+  // Another store — anyone's, which is what the old wildcard let through.
+  "https://abc.public.blob.vercel-storage.com/shows/poster.png",
+  "https://waoyoctqyyvecbhm.private.blob.vercel-storage.com/shows/poster.png",
+  // Our store, outside the upload folders.
+  `${STORE}/backups/matio-2026-09-27.dump.age`,
+  `${STORE}/poster.png`,
+  `${STORE}/showsx/poster.png`,
+  // A query string — remotePatterns pin `search: ""`.
+  `${STORE}/shows/poster.png?download=1`,
+  // A dot segment, which `new URL` resolves out of the folder.
+  `${STORE}/shows/../backups/db.dump`,
+  // Not https.
+  "http://waoyoctqyyvecbhm.public.blob.vercel-storage.com/shows/poster.png",
+  // Mux: signed episode stills are <Image unoptimized>, so nothing needs it.
+  "https://image.mux.com/pb-1/thumbnail.jpg?width=320&height=180&fit_mode=smartcrop&token=eyJ.dummy.sig",
+  "https://image.mux.com/pb-1/thumbnail.png",
+];
+
+describe("optimizedImageUrl — which Blob URLs are ours (#306)", () => {
+  it("sends show artwork and actor avatars on our store", () => {
+    for (const src of OUR_ARTWORK) {
+      expect(paramsOf(optimizedImageUrl(src, 400)).source).toBe(src);
+    }
+  });
+
+  it("leaves every other remote URL as it was", () => {
+    // Plus two the optimizer would take, but no upload key ever looks like:
+    // stricter here costs a bigger download, looser would cost a 400.
+    for (const other of [...REFUSED, `${STORE}/shows/poster.png#x`, `${STORE}/shows/./poster.png`]) {
+      expect(optimizedImageUrl(other, 400), other).toBe(other);
+    }
   });
 });
 
@@ -153,6 +203,26 @@ describe("the width list is the one the deployed optimizer enforces", () => {
     // SDWebImage's default (expo-image on iOS): no `image/webp` in it, so the
     // optimizer would resize and keep the PNG — why the header is sent.
     expect(validate(built, "image/*,*/*;q=0.8")).toMatchObject({ mimeType: "" });
+  });
+
+  // The optimizer's own remote check, under our remotePatterns.
+  const optimizerTakes = (url: string) =>
+    !(
+      "errorMessage" in
+      ImageOptimizerCache.validateParams({ headers: {} } as never, { url, w: "640", q: "75" }, merged, false)
+    );
+
+  it("takes our store's upload folders — and refuses other stores, other folders, a query, Mux (#306)", () => {
+    for (const src of OUR_ARTWORK) expect(optimizerTakes(src), src).toBe(true);
+    for (const src of REFUSED) expect(optimizerTakes(src), src).toBe(false);
+  });
+
+  it("is never handed a remote URL it would refuse — the helper reads the same list", () => {
+    for (const src of [BLOB, ...OUR_ARTWORK, ...REFUSED]) {
+      const built = optimizedImageUrl(src, 640);
+      if (built === src) continue;
+      expect(optimizerTakes(paramsOf(built).source!), src).toBe(true);
+    }
   });
 
   it("would refuse what the helper deliberately avoids: an unlisted width, a matio.tv absolute URL", () => {

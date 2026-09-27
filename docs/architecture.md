@@ -222,7 +222,7 @@ drag-and-drop (image-upload-field.tsx)
 
 **Orphan cleanup**: `addRandomSuffix` means a replacement upload never overwrites the old object, so `updateShow` snapshots the previous URLs and best-effort `del()`s any that changed — only when the old value is on `*.public.blob.vercel-storage.com` (legacy same-origin `/shows/*.png` and external URLs are untouched), never throwing (a Blob outage can't fail the save). Uploads completed but never saved do orphan — accepted; reconcile with `list()` if it ever matters.
 
-**Rendering**: stored values are ordinary URLs. Public surfaces render them via `next/image` (hero banner, show detail) — the Blob host is allowlisted in `remotePatterns` — or via raw `<img>` (catalog `Poster`, Safari aspect-ratio quirk). Same-origin legacy paths keep working; an arbitrary external host would throw in `next/image`, which is why the admin field's copy steers to upload-or-same-origin.
+**Rendering**: stored values are ordinary URLs. Public surfaces render them via `next/image` (hero banner, show detail) — our store's host and upload folders are allowlisted in `remotePatterns` (`lib/blob-artwork.ts`, #306) — or via raw `<img>` (catalog `Poster`, Safari aspect-ratio quirk). Same-origin legacy paths keep working; an arbitrary external host would throw in `next/image`, which is why the admin field's copy steers to upload-or-same-origin.
 
 ## Admin mutations
 
