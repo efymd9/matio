@@ -52,7 +52,9 @@ vi.mock("@/api/config-context", () => ({
   }),
 }));
 vi.mock("expo-router", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("@/watch/use-continue-watching", () => ({ useContinueWatching: () => [] }));
+vi.mock("@/watch/use-continue-watching", () => ({
+  useContinueWatching: () => ({ items: [], reload: async () => undefined }),
+}));
 vi.mock("@/components/glass-tab-bar", () => ({ useTabBarClearance: () => 0 }));
 
 vi.mock("react-native-safe-area-context", () => ({
