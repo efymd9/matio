@@ -72,3 +72,47 @@ describe("admin dictionaries — fork section", () => {
     }
   });
 });
+
+describe("admin dictionaries — story ideas (#297)", () => {
+  it("counts ideas with the three Russian plural forms", () => {
+    expect(ru.ideasList.countLine(1, 1)).toBe("всего 1 идея");
+    expect(ru.ideasList.countLine(3, 3)).toBe("всего 3 идеи");
+    expect(ru.ideasList.countLine(5, 5)).toBe("всего 5 идей");
+    expect(ru.ideasList.countLine(11, 11)).toBe("всего 11 идей");
+    expect(ru.ideasList.countLine(21, 21)).toBe("всего 21 идея");
+    expect(ru.ideasList.countLine(0, 0)).toBe("всего 0 идей");
+  });
+
+  it("says when the list is capped, in both locales", () => {
+    expect(ru.ideasList.countLine(500, 1234)).toBe(
+      "показаны последние 500 · всего 1234 идеи",
+    );
+    expect(en.ideasList.countLine(500, 1234)).toBe(
+      "showing the latest 500 of 1234",
+    );
+    expect(en.ideasList.countLine(7, 7)).toBe("7 total");
+    expect(ru.ideaDetail.received("2026-09-27 10:15 UTC")).toContain(
+      "2026-09-27 10:15 UTC",
+    );
+    expect(en.ideaDetail.received("2026-09-27 10:15 UTC")).toContain(
+      "2026-09-27 10:15 UTC",
+    );
+  });
+
+  it("is translated, not pasted, between RU and EN", () => {
+    // "Email" and "Id" read the same in both panels by design.
+    const same = new Set(["colEmail", "emailLabel", "idLabel"]);
+    for (const section of ["ideasList", "ideaDetail"] as const) {
+      const enLeaves = new Map(leaves(en[section]));
+      for (const [path, value] of leaves(ru[section])) {
+        const counterpart = enLeaves.get(path);
+        expect(counterpart, path).toBeDefined();
+        if (typeof value === "string" && !same.has(path)) {
+          expect(value.trim().length, path).toBeGreaterThan(0);
+          expect(counterpart, path).not.toBe(value);
+        }
+      }
+    }
+    expect(ru.nav.ideas).not.toBe(en.nav.ideas);
+  });
+});
