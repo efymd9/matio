@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useRef } from "react";
-import { api } from "@/api/client";
+import { api, settleOrNull } from "@/api/client";
 import { errorHint } from "@/api/error-hint";
 import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
@@ -26,7 +26,7 @@ type Params = {
   episodeId: string;
   showSlug: string;
   // Seconds; set by the continue-watching tile. Without it a signed-in
-  // viewer's position is looked up from /v1/continue.
+  // viewer's position for THIS episode is looked up from /v1/progress.
   resume?: string;
 };
 
@@ -36,10 +36,17 @@ function parseSeconds(value: string | undefined): number | null {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
 }
 
+// How long the player waits for the resume lookup before opening at 0:00.
+// Resume is best-effort: a slow read (a Neon cold start) costs only the
+// resume, never the screen (#303 item 3).
+const RESUME_LOOKUP_TIMEOUT_MS = 2_500;
+
 // The position to open at. An explicit `resume` param (the rail's tap) wins;
-// otherwise a signed-in viewer's own continue-watching row is consulted —
-// best-effort and in parallel with the show, so a failed lookup costs
-// nothing but the resume.
+// otherwise a signed-in viewer's own row for this very episode is read —
+// every partly watched episode resumes, not only the one per show the
+// continue rail carries (#303 item 2). In parallel with the show, bounded,
+// and a failed lookup is 0. The feed never seeks inside the credits
+// (RESUME_TAIL_SECONDS), so a finished episode's end reopens at the start.
 async function resolveResume(
   episodeId: string,
   explicit: number | null,
@@ -47,12 +54,8 @@ async function resolveResume(
 ): Promise<number> {
   if (explicit !== null) return explicit;
   if (!signedIn) return 0;
-  try {
-    const { items } = await api.continueWatching();
-    return items.find((item) => item.episodeId === episodeId)?.positionSeconds ?? 0;
-  } catch {
-    return 0;
-  }
+  const progress = await settleOrNull(api.episodeProgress(episodeId), RESUME_LOOKUP_TIMEOUT_MS);
+  return progress?.positionSeconds ?? 0;
 }
 
 export default function WatchScreen() {

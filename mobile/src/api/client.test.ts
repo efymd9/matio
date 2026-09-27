@@ -236,6 +236,31 @@ describe("writes that belong to a person (auth: required — progress, retention
   });
 });
 
+describe("the per-episode resume read (#303 — auth: required)", () => {
+  it("is a GET of /v1/progress for that episode, carrying the Bearer", async () => {
+    const { api, setAuthTokenProvider } = await loadClient();
+    setAuthTokenProvider(async () => "sess_token");
+    answer = async () => json(200, { positionSeconds: 240 });
+
+    await expect(api.episodeProgress("ep 1/x")).resolves.toEqual({ positionSeconds: 240 });
+
+    expect(calls[0].url).toBe("https://matio.tv/api/v1/progress?episodeId=ep%201%2Fx");
+    expect(calls[0].init.method).toBe("GET");
+    expect(headersOf(calls[0]).Authorization).toBe("Bearer sess_token");
+  });
+
+  it("never goes out anonymous when Clerk does not answer — the answer is only the Bearer's owner's", async () => {
+    const { api, setAuthTokenProvider } = await loadClient();
+    setAuthTokenProvider(NEVER);
+
+    const outcome = api.episodeProgress("ep_1").catch((err: unknown) => err);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    await expect(outcome).resolves.toMatchObject({ code: "network", status: 0 });
+    expect(calls).toHaveLength(0);
+  });
+});
+
 describe("the 12s request deadline", () => {
   it("rejects a fetch that never answers at 12s with ApiError{network, 0}", async () => {
     const { api, ApiError } = await loadClient();

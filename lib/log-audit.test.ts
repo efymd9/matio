@@ -881,6 +881,44 @@ describe("log audit · /api/v1/progress (the app's watch-progress save)", () => 
       expect(logged()).not.toContain(marker);
     }
   });
+
+  it("logs a users-row heal that did not take by ids only — never the synced address or the quoted row (#303)", async () => {
+    // A foreign-key failure sends the save through getOrSyncCurrentUser
+    // (mocked above: a user carrying MARKER_EMAIL) and one retry. Here the
+    // retry fails the same way, so the route answers 503 and logs the one
+    // line this path writes — the driver's echo and the synced user's
+    // address both within reach of it.
+    vi.stubEnv("DATABASE_URL", MARKER_DATABASE_URL);
+    const lookup = {
+      from: () => lookup,
+      innerJoin: () => lookup,
+      where: () => lookup,
+      limit: async () => [
+        { id: EPISODE, showId: "show_1", access: "free", durationSeconds: 600 },
+      ],
+    };
+    select.mockImplementation(() => lookup);
+    insert.mockImplementation(() => {
+      throw Object.assign(
+        new Error(
+          `insert into watch_progress (user_id) values ('${MARKER_NAME} <${MARKER_EMAIL}>') — ${MARKER_DATABASE_URL}`,
+        ),
+        { cause: Object.assign(new Error(`fk violation for ${MARKER_EMAIL}`), { code: "23503" }) },
+      );
+    });
+    const logged = captureConsole();
+
+    const res = await saveProgress(
+      post({ episodeId: EPISODE, positionSeconds: 10, completed: false }),
+    );
+
+    expect(res.status).toBe(503);
+    expect(logged()).toContain("users mirror not healed"); // the line was written
+    expect(logged()).toContain("user_1");
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET, "db.example.invalid"]) {
+      expect(logged()).not.toContain(marker);
+    }
+  });
 });
 
 describe("log audit · /api/v1/watch-segments (the app's retention flush)", () => {
