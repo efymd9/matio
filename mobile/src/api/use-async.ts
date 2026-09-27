@@ -48,9 +48,15 @@ export function useAsync<T>(fetcher: () => Promise<T>, deps: readonly unknown[])
   // (`retry` is the loud one: back to loading). Any run() that starts after
   // it — a retry, new deps — supersedes it, and a first load still in
   // flight is left to finish on its own.
-  const reload = useCallback(() => {
+  //
+  // The promise it returns resolves once the refresh has settled either way
+  // — pull-to-refresh holds its spinner on it (#313) — and never rejects, so
+  // the callers that fire and forget it (the foreground refreshes) cannot
+  // leak an unhandled rejection. A fetcher that throws before it returns a
+  // promise lands in the same failure branch.
+  const reload = useCallback((): Promise<void> => {
     const base = generation.current;
-    fetcher().then(
+    return new Promise<T>((resolve) => resolve(fetcher())).then(
       (data) => {
         if (generation.current !== base) return;
         setState((prev) => (prev.status === "loading" ? prev : { status: "ready", data, error: null }));

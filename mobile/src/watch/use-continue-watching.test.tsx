@@ -13,7 +13,9 @@ import type { ContinueResponse, ContinueWatchingEntry } from "@/shared/api-types
 // the end of it: the next focus or return to the foreground tries again, and
 // a return to the foreground refreshes the list anyway; (3) only the newest
 // load writes — an older answer neither overwrites a newer one nor puts a
-// signed-out account's list back.
+// signed-out account's list back. And (#313) Home's pull-to-refresh: `reload`
+// is the same load asked for now, its promise settles with it and never
+// rejects, and signed out it asks for nothing.
 
 // Navigation focus, as expo-router's useFocusEffect delivers it: the effect
 // runs on focus (and at once when mounted focused, or re-created while
@@ -109,11 +111,13 @@ function entry(episodeId: string): ContinueWatchingEntry {
   };
 }
 
-// Every list the screen rendered, in order: "ep,ep".
+// Every list the screen rendered, in order: "ep,ep"; and the latest reload.
 let rendered: string[] = [];
+let reload: () => Promise<void> = () => Promise.reject(new Error("not rendered"));
 function Home({ signedIn }: { signedIn: boolean }) {
-  const items = useContinueWatching(signedIn);
-  rendered.push(items.map((i) => i.episodeId).join(","));
+  const resume = useContinueWatching(signedIn);
+  rendered.push(resume.items.map((i) => i.episodeId).join(","));
+  reload = resume.reload;
   return null;
 }
 
@@ -341,5 +345,67 @@ describe("useContinueWatching — only the newest load writes (#298 item 2)", ()
 
     expect(pending).toHaveLength(2);
     expect(shown()).toBe("new-ep");
+  });
+});
+
+describe("useContinueWatching — pull-to-refresh reload (#313)", () => {
+  // Started the way the RefreshControl callback starts it, with a flag that
+  // flips when its promise settles — and what it settled with.
+  function pull() {
+    let promise: Promise<void> | undefined;
+    act(() => {
+      promise = reload();
+    });
+    if (!(promise instanceof Promise)) throw new Error("reload() returned no promise");
+    const settled = { value: "pending" as "pending" | "resolved" | "rejected" };
+    void promise.then(
+      () => {
+        settled.value = "resolved";
+      },
+      () => {
+        settled.value = "rejected";
+      },
+    );
+    return settled;
+  }
+
+  it("asks for the list now and resolves once the new answer is on screen", async () => {
+    await render(true);
+    await answer(0, "a-ep");
+
+    const settled = pull();
+    expect(pending).toHaveLength(2);
+    await settle();
+    expect(settled.value).toBe("pending");
+
+    await answer(1, "a-ep", "web-ep");
+    expect(settled.value).toBe("resolved");
+    expect(shown()).toBe("a-ep,web-ep");
+  });
+
+  it("a failed reload resolves, keeps the list on screen, and the next focus tries again", async () => {
+    await render(true);
+    await answer(0, "a-ep");
+
+    const settled = pull();
+    await fail(1);
+
+    expect(settled.value).toBe("resolved");
+    expect(shown()).toBe("a-ep");
+
+    await blur();
+    await focus();
+    expect(pending).toHaveLength(3);
+  });
+
+  it("signed out it resolves at once and asks the server for nothing", async () => {
+    await render(false);
+
+    const settled = pull();
+    await settle();
+
+    expect(settled.value).toBe("resolved");
+    expect(pending).toHaveLength(0);
+    expect(shown()).toBe("");
   });
 });

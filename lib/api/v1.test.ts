@@ -173,6 +173,7 @@ describe("apiOk / apiError", () => {
       ["rate_limited", 429],
       ["upgrade_required", 426],
       ["server_error", 500],
+      ["unavailable", 503],
     ] as const;
     for (const [code, status] of cases) {
       expect(apiError(code, "nope").status).toBe(status);
