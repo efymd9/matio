@@ -20,6 +20,7 @@
 // must bump IDEA_TERMS_VERSION in lib/idea-submission.ts — the version
 // stamped on every row is the only proof of which text a fan agreed to.
 
+import { IDEA_TERMS_VERSION } from "../idea-submission";
 import type { Locale } from "./dictionaries";
 
 /** A sentence with one inline link: `before` + <link>{link}</link> + `after`. */
@@ -241,7 +242,9 @@ export const es = {
     title: "Condiciones de envío de ideas",
     close: "Cerrar",
     scrimAria: "Cerrar las Condiciones de envío de ideas",
-    version: "Versión ideas-2026-09-draft1 · Borrador, pendiente de revisión legal",
+    // Built from the constant: the sheet shows the SAME version the server
+    // stamps on the row, and a bump cannot leave the displayed one behind.
+    version: `Versión ${IDEA_TERMS_VERSION} · Borrador, pendiente de revisión legal`,
     intro:
       "Estas condiciones se aplican cuando envías una idea de historia a DEEP ORDINARY LTD («Matio», «nosotros»), 66 Paul Street, Londres EC2A 4NA, a través de matio.tv.",
     items: [
@@ -499,7 +502,7 @@ export const en: IdeasDict = {
     title: "Idea Submission Terms",
     close: "Close",
     scrimAria: "Close the Idea Submission Terms",
-    version: "Version ideas-2026-09-draft1 · Draft, pending legal review",
+    version: `Version ${IDEA_TERMS_VERSION} · Draft, pending legal review`,
     intro:
       "These terms apply when you send a story idea to DEEP ORDINARY LTD (“Matio”, “we”), 66 Paul Street, London EC2A 4NA, through matio.tv.",
     items: [
