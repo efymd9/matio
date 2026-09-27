@@ -208,6 +208,15 @@ export type ContinueResponse = {
   items: ContinueWatchingEntry[];
 };
 
+// ---------------------------------------------------------------- account
+
+// POST /api/v1/account/delete — self-service account deletion (art. 17,
+// App Store 5.1.1(v), #309). Bearer-only, no body. `ok` means the account
+// is gone at Clerk AND our side is erased — the client signs out. Any error
+// (5xx, network) means the deletion did not finish and is safe to repeat:
+// both halves are idempotent.
+export type DeleteAccountResponse = { ok: true };
+
 // ---------------------------------------------------------------- retention
 
 // The bucket grain and per-flush cap are part of this contract: a bucket is

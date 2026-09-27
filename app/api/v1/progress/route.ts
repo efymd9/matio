@@ -139,7 +139,10 @@ export async function POST(req: NextRequest) {
 // user.deleted that erases the row — for an erased account that read throws
 // (Clerk answers 404), which lands here as `sync_failed` with nothing
 // written. The write it does make is ON CONFLICT DO NOTHING, so a webhook
-// landing at the same moment wins without an error.
+// landing at the same moment wins without an error. The app's «Delete
+// account» (#309) runs the other way round — our erasure first, Clerk after
+// — so a heal inside that gap CAN write; that route looks at `users` once
+// more after Clerk's delete and erases what it finds (its step 3).
 async function healAndRetry(
   userId: string,
   save: () => Promise<SaveWatchProgressOutcome>,

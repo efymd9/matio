@@ -59,6 +59,18 @@ export const appEs = {
     signOutConfirmTitle: "¿Cerrar sesión?",
     signOutConfirmBody: "Para volver a entrar te enviaremos un código a tu correo.",
     signOutFailed: "No se pudo cerrar la sesión",
+    // «Delete account» (#309, App Store 5.1.1(v)): two confirmations — what is
+    // erased and what happens to a subscription, then that it is final — and
+    // the failure, which keeps the session so the row can be tapped again.
+    deleteAccount: "Eliminar cuenta",
+    deleteConfirmTitle: "¿Eliminar tu cuenta?",
+    deleteConfirmBody:
+      "Se borrarán tu cuenta, tu progreso y tus avisos de nuevos episodios. Si tienes una suscripción activa, se cancelará al final del periodo de facturación en curso y no se te volverá a cobrar.",
+    deleteFinalTitle: "Esta acción no se puede deshacer",
+    deleteFinalBody:
+      "Tu cuenta se elimina para siempre: no podremos recuperarla y, si vuelves a registrarte, empezarás de cero.",
+    deleteFinalCta: "Eliminar definitivamente",
+    deleteFailed: "No se pudo eliminar la cuenta",
   },
   settings: {
     langHint: "Sigue el idioma del dispositivo hasta que elijas.",
@@ -143,6 +155,15 @@ export const appEn: AppDict = {
     signOutConfirmTitle: "Sign out?",
     signOutConfirmBody: "To sign back in, we'll email you a code.",
     signOutFailed: "Couldn't sign out",
+    deleteAccount: "Delete account",
+    deleteConfirmTitle: "Delete your account?",
+    deleteConfirmBody:
+      "Your account, your watch progress and your new-episode reminders will be erased. If you have an active subscription, it's cancelled at the end of the current billing period and you won't be charged again.",
+    deleteFinalTitle: "This can't be undone",
+    deleteFinalBody:
+      "Your account is deleted for good — we can't restore it, and signing up again starts from scratch.",
+    deleteFinalCta: "Delete permanently",
+    deleteFailed: "Couldn't delete your account",
   },
   settings: {
     langHint: "Follows your device language until you choose.",

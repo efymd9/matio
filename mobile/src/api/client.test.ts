@@ -353,3 +353,56 @@ describe("error classification", () => {
     await expect(api.catalog()).resolves.toEqual({ shows: [] });
   });
 });
+
+describe("deleteAccount (#309) — the one request with a longer deadline", () => {
+  it("POSTs to /api/v1/account/delete with the Bearer and no body", async () => {
+    const { api, setAuthTokenProvider } = await loadClient();
+    setAuthTokenProvider(async () => "sess_token");
+
+    await expect(api.deleteAccount()).resolves.toEqual({ ok: true });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://matio.tv/api/v1/account/delete");
+    expect(calls[0].init.method).toBe("POST");
+    expect(calls[0].init.body).toBeUndefined();
+    expect(headersOf(calls[0]).Authorization).toBe("Bearer sess_token");
+  });
+
+  it("never goes out anonymously when Clerk does not answer — a network error before any fetch", async () => {
+    const { api, setAuthTokenProvider } = await loadClient();
+    setAuthTokenProvider(NEVER);
+
+    const outcome = api.deleteAccount().catch((err: unknown) => err);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    await expect(outcome).resolves.toMatchObject({ code: "network", status: 0 });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("waits 45s, not 12s, for a server that is still cancelling at Stripe", async () => {
+    const { api, setAuthTokenProvider, ACCOUNT_DELETE_TIMEOUT_MS } = await loadClient();
+    setAuthTokenProvider(async () => "sess_token");
+    answer = hangUntilAborted;
+
+    const outcome = api.deleteAccount().catch((err: unknown) => err);
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(calls[0]?.init.signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(ACCOUNT_DELETE_TIMEOUT_MS - 12_000);
+
+    expect(ACCOUNT_DELETE_TIMEOUT_MS).toBe(45_000);
+    expect(calls[0]?.init.signal?.aborted).toBe(true);
+    await expect(outcome).resolves.toMatchObject({ code: "network", status: 0 });
+  });
+
+  it("keeps the server's code on a refusal — the Account tab says it failed and keeps the session", async () => {
+    const { api, setAuthTokenProvider } = await loadClient();
+    setAuthTokenProvider(async () => "sess_token");
+    answer = async () =>
+      json(500, { error: { code: "server_error", message: "Couldn't delete your account." } });
+
+    await expect(api.deleteAccount()).rejects.toMatchObject({
+      code: "server_error",
+      status: 500,
+    });
+  });
+});

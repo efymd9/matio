@@ -143,7 +143,13 @@ psql "$RESTORE_URL" -tAc "select count(*) from users"
   не нужны, `posthog: skipped_unconfigured` в выводе здесь норма. Аккаунт в
   Clerk удалён, вебхук сам второй раз не придёт; переотправка события из
   журнала эндпойнта (Clerk → Webhooks → endpoint → Messages → Resend) даёт
-  то же самое, пока журнал его хранит;
+  то же самое, пока журнал его хранит.
+  Самообслуживание в реестр не попадает — «Delete account» в приложении
+  (`POST /api/v1/account/delete`, #309) и UserProfile на сайте. Их находит
+  сверка с Clerk, источником истины: каждый `users.id` восстановленной базы,
+  которого в Clerk больше нет (Dashboard → Users → поиск по id, или Backend
+  API `GET /v1/users/<id>` → 404), стирается той же командой
+  `pnpm erase-user <id> --apply`. Скрипта для сверки нет — `docs/registry.md`;
 - **письма-напоминания**: строки `show_reminders` вернулись в состояние на
   момент дампа — отписки, сделанные позже, придётся исполнить повторно
   (`lib/email-unsubscribe.ts`);

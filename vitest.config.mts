@@ -255,11 +255,16 @@ export default defineConfig({
       //   lib/app-embed*.ts и components/site/legal-link.tsx. Полы — по логу
       //   CI прогона 36342503342: 49.03/40.17/42.75/48.19, минус 0.1, вниз
       //   до десятых).
+      // → 50.9/42.0/44.3/50.0 (#309: app/api/v1/account/delete/route.ts под
+      //   тестами целиком — порядок «стирание → Clerk», повторы, повторный
+      //   взгляд на users; плюс накопленное в main после #310. Полы — по
+      //   логу CI прогона 36348349188 (дерево слито с main 505d6b97):
+      //   51.08/42.14/44.43/50.15, минус 0.1, вниз до десятых).
       thresholds: {
-        lines: 48.9,
-        functions: 40.0,
-        branches: 42.6,
-        statements: 48.0,
+        lines: 50.9,
+        functions: 42.0,
+        branches: 44.3,
+        statements: 50.0,
       },
     },
 

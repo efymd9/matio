@@ -131,9 +131,10 @@ export function authorizedPartiesForRequest(
  * `@clerk/backend` 3.17.1 `parseAuthorizationHeader`, verbatim: no header →
  * nothing; no space → the whole value is the token; `Bearer <token>` (exact
  * case) → the token; any other scheme (`Basic`, `bearer`, …) → nothing, and
- * Clerk then authenticates from the cookie.
+ * Clerk then authenticates from the cookie. Exported for the one route that
+ * must refuse a cookie session outright (`/api/v1/account/delete`, #309).
  */
-function clerkTokenInHeader(
+export function clerkTokenInHeader(
   authorization: string | null | undefined,
 ): string | undefined {
   if (!authorization) return undefined;
