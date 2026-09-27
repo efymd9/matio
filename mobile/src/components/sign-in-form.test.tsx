@@ -3,6 +3,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AA_TEXT, contrastRatio, paintedBackground, parseColor } from "@/testing/contrast";
+import { colors } from "@/theme";
 
 // #247 — the Account tab of 0.1.0 (4) died on open. The TestFlight build
 // carried no EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY, AuthProvider therefore mounted
@@ -710,5 +712,29 @@ flowSuite("SignInForm — the code step (#292 item 4)", () => {
     await press(props.cta);
     expect(text()).toContain("Check your email");
     expect(glyphs()).toBe(0);
+  });
+});
+
+// #314 — the error line was rust: 3.2:1 on the screen's espresso, under AA's
+// 4.5 for 13pt text. It is cream now; rust stays as the bar at its start, so
+// the line still reads as an error without being the hard-to-read part.
+flowSuite("SignInForm — the error line reads at AA contrast (#314)", () => {
+  it("is cream straight on the screen's espresso — rust only as the bar before it", async () => {
+    clerkResources();
+    await renderForm();
+    typeInto("not-an-address");
+    await press(props.cta);
+
+    const line = container.querySelector('[role="alert"]');
+    expect(line?.textContent).toBe("Enter a valid email address.");
+    const style = getComputedStyle(line as Element);
+    expect(parseColor(style.color)).toEqual(parseColor(colors.ink));
+    // Nothing in the form paints behind the line: what shows through is the
+    // screen — /sign-in and the Account tab both paint colors.bg.
+    expect(paintedBackground(line as Element)).toBeNull();
+    expect(contrastRatio(style.color, colors.bg)).toBeGreaterThanOrEqual(AA_TEXT);
+    // The non-text cue.
+    expect(parseColor(style.borderLeftColor)).toEqual(parseColor(colors.rust));
+    expect(style.borderLeftWidth).toBe("2px");
   });
 });

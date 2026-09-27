@@ -72,6 +72,8 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 import ShowScreen from "@/app/show/[slug]";
 import { LocaleProvider } from "@/i18n/locale";
 import type { Locale } from "@/shared/i18n";
+import { AA_TEXT, contrastRatio, paintedBackground, parseColor } from "@/testing/contrast";
+import { colors } from "@/theme";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -263,5 +265,25 @@ describe("genre chips read like Browse's (#311 item 4)", () => {
     await renderShow(makeShow({ genre: [" ", ""] }));
 
     expect(chips()).toEqual([]);
+  });
+});
+
+// #314 — the 11pt mono duration under each episode was rust: 3.0:1 on the
+// episode card, under AA's 4.5. It is inkDim now, like the description above
+// it.
+describe("the episode duration reads at AA contrast (#314)", () => {
+  it("is inkDim on the episode card it sits in, on every row", async () => {
+    await renderShow(makeShow());
+
+    const durations = leaves("10 min");
+    expect(durations).toHaveLength(3);
+    for (const duration of durations) {
+      const { color } = getComputedStyle(duration);
+      expect(parseColor(color)).toEqual(parseColor(colors.inkDim));
+      const card = paintedBackground(duration);
+      expect(card).not.toBeNull();
+      expect(parseColor(card as string)).toEqual(parseColor(colors.card));
+      expect(contrastRatio(color, card as string)).toBeGreaterThanOrEqual(AA_TEXT);
+    }
   });
 });
