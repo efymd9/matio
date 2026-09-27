@@ -42,6 +42,21 @@ vi.mock("@clerk/expo", () => ({
   useSignUp: () => useSignUp(),
 }));
 
+// #304 item 1 — what VoiceOver is told. react-native-web's AccessibilityInfo
+// has no announceForAccessibilityWithOptions (a browser has no screen reader
+// API to call), so the native one is stood in for by a spy.
+const a11y = vi.hoisted(() => ({ announce: vi.fn() }));
+vi.mock("react-native", async (importOriginal) => {
+  const rn = await importOriginal<typeof import("react-native")>();
+  return {
+    ...rn,
+    AccessibilityInfo: {
+      ...rn.AccessibilityInfo,
+      announceForAccessibilityWithOptions: a11y.announce,
+    },
+  };
+});
+
 // Native modules the form's imports reach (keychain, uuid, gradients, glass,
 // images, SF Symbols): inert stand-ins, nothing here is under test.
 vi.mock("expo-secure-store", () => ({
@@ -254,9 +269,23 @@ describe("SignInForm — the email-code flow (#288)", { timeout: COLD_IMPORT_TIM
     typeInto("new@example.com");
     await press(props.cta);
 
-    expect(signUp.create).toHaveBeenCalledWith({ emailAddress: "new@example.com" });
+    // With the app's language (#304 item 3).
+    expect(signUp.create).toHaveBeenCalledWith({ emailAddress: "new@example.com", locale: "en" });
     expect(signUp.verifications.sendEmailCode).toHaveBeenCalledTimes(1);
     expect(text()).toContain("Check your email");
+  });
+
+  it("a Spanish viewer's account is created with the Spanish locale (#304 item 3)", async () => {
+    const { signIn, signUp } = clerkResources();
+    signIn.emailCode.sendCode.mockResolvedValueOnce({
+      error: apiError("form_identifier_not_found", "Couldn't find your account."),
+    });
+    await renderForm("es");
+
+    typeInto("nueva@example.com");
+    await press(props.cta);
+
+    expect(signUp.create).toHaveBeenCalledWith({ emailAddress: "nueva@example.com", locale: "es" });
   });
 
   it("a rate limit on sign-in is shown as itself — never a sign-up that says the address is taken", async () => {
@@ -501,6 +530,41 @@ flowSuite("SignInForm — the code step (#292 item 4)", () => {
     expect(text()).toContain("Resend code in 30s");
   });
 
+  // #304 item 2 — iOS stops JS timers while the app is in the background,
+  // which is exactly where the viewer goes to fetch the code (Mail). The
+  // clock moves on regardless; vi.setSystemTime is that: time passes, no
+  // timer fires.
+  it("back from Mail 45 s later, «Resend code» is ready on the first tick — the countdown reads the clock", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { signIn } = clerkResources();
+    await renderForm();
+    typeInto("member@example.com");
+    await press(props.cta);
+    await tick(4);
+    expect(text()).toContain("Resend code in 26s");
+
+    vi.setSystemTime(Date.now() + 45_000);
+    await tick(1);
+
+    expect(text()).not.toContain("Resend code in");
+    await press("Resend code");
+    expect(signIn.emailCode.sendCode).toHaveBeenCalledTimes(2);
+  });
+
+  it("a tap that beats the first tick back is judged by the clock, not by the stale label", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { signIn } = clerkResources();
+    await renderForm();
+    typeInto("member@example.com");
+    await press(props.cta);
+    await tick(4);
+
+    vi.setSystemTime(Date.now() + 45_000);
+    await press("Resend code in 26s");
+
+    expect(signIn.emailCode.sendCode).toHaveBeenCalledTimes(2);
+  });
+
   it("a new account's code is resent through the sign-up", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { signIn, signUp } = clerkResources();
@@ -559,6 +623,61 @@ flowSuite("SignInForm — the code step (#292 item 4)", () => {
     expect(text()).toContain("We sent a code to other@example.com.");
     expect(codeInput()?.value).toBe("");
     expect(text()).not.toContain("Incorrect code.");
+  });
+
+  it("each field has a spoken name — the code field is no longer «000000» (#304 item 1)", async () => {
+    clerkResources();
+    await renderForm();
+    expect(codeInput()?.getAttribute("aria-label")).toBe("Email address");
+
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    expect(codeInput()?.getAttribute("aria-label")).toBe("Verification code");
+    expect(codeInput()?.getAttribute("placeholder")).toBe("000000");
+  });
+
+  it("names the fields in Spanish for a Spanish viewer (#304 item 1)", async () => {
+    clerkResources();
+    await renderForm("es");
+    expect(codeInput()?.getAttribute("aria-label")).toBe("Correo electrónico");
+
+    typeInto("socia@example.com");
+    await press(props.cta);
+
+    expect(codeInput()?.getAttribute("aria-label")).toBe("Código de verificación");
+  });
+
+  it("a failure is announced, queued, and drawn as a polite alert (#304 item 1)", async () => {
+    a11y.announce.mockClear();
+    const { signIn } = clerkResources();
+    await renderForm();
+    typeInto("member@example.com");
+    await press(props.cta);
+    expect(a11y.announce).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+
+    signIn.emailCode.verifyCode.mockResolvedValueOnce({
+      error: apiError("form_code_incorrect", "is incorrect"),
+    });
+    typeInto("111111");
+    await press("Sign in");
+
+    expect(a11y.announce).toHaveBeenCalledTimes(1);
+    expect(a11y.announce).toHaveBeenCalledWith("Incorrect code.", { queue: true });
+    const line = container.querySelector('[role="alert"]');
+    expect(line?.textContent).toBe("Incorrect code.");
+    expect(line?.getAttribute("aria-live")).toBe("polite");
+
+    // A second wrong code is a second failure — said again, not swallowed
+    // because the words are the same.
+    signIn.emailCode.verifyCode.mockResolvedValueOnce({
+      error: apiError("form_code_incorrect", "is incorrect"),
+    });
+    typeInto("222222");
+    await press("Sign in");
+
+    expect(a11y.announce).toHaveBeenCalledTimes(2);
   });
 
   it("none of the form's gold buttons carries the ▶ play glyph", async () => {
