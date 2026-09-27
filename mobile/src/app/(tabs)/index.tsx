@@ -72,9 +72,22 @@ export default function HomeScreen() {
   const shows = catalog.status === "ready" ? catalog.data.shows : EMPTY;
   const ordered = useMemo(() => carouselOrder(shows), [shows]);
   const feed = useMemo(
-    () => buildHomeFeed({ shows, resume, signedIn: isSignedIn }),
-    [shows, resume, isSignedIn],
+    () => buildHomeFeed({ shows, resume: resume.items, signedIn: isSignedIn }),
+    [shows, resume.items, isSignedIn],
   );
+
+  // Pull-to-refresh (#313): the catalog and Up next, reloaded together, and
+  // the spinner held until BOTH have settled. Both reloads are the silent
+  // kind — what is on screen stays until an answer lands, a failure changes
+  // nothing — and neither rejects; allSettled is the belt to that. Signed
+  // out, Up next's reload resolves at once without asking the server.
+  const [refreshing, setRefreshing] = useState(false);
+  const { reload: reloadCatalog } = catalog;
+  const { reload: reloadResume } = resume;
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    void Promise.allSettled([reloadCatalog(), reloadResume()]).then(() => setRefreshing(false));
+  }, [reloadCatalog, reloadResume]);
 
   // Which card is in focus — the caption under the carousel reads it. The
   // scroll position itself lives on the UI thread (scrollX) and drives the
@@ -208,6 +221,8 @@ export default function HomeScreen() {
       footer={focused ? <Text style={styles.tagline}>{t.footer.tagline}</Text> : null}
       bottomPadding={clearance + space(4)}
       playBusy={busy}
+      refreshing={refreshing}
+      onRefresh={refresh}
       onOpenShow={openShow}
       onPlayShow={play}
       onResume={openResume}

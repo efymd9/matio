@@ -84,7 +84,7 @@ function SignedInAccount() {
   const clearance = useTabBarClearance();
   const { user } = useUser();
   const { signOut } = useClerk();
-  const resume = useContinueWatching(true);
+  const { items: resume } = useContinueWatching(true);
   const [deleting, setDeleting] = useState(false);
 
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
