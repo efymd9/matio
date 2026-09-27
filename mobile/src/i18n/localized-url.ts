@@ -8,6 +8,11 @@ import { localizedPath } from "@/shared/seo";
 // viewer who picked Español on an English phone. The query and fragment stay
 // where they were, after the path. Anything that is not an absolute http(s)
 // URL is returned untouched.
+//
+// Residual, by the site's design: English picked on a SPANISH phone is still
+// read in Spanish — the in-app browser carries the phone's Accept-Language,
+// and a bare URL gets the visitor's preferred language (proxy.ts, the embed
+// variant included); there is no /en prefix to ask for English explicitly.
 export function localizedUrl(url: string, locale: Locale): string {
   const match = /^(https?:\/\/[^/?#]+)([^?#]*)(.*)$/.exec(url);
   if (!match) return url;
@@ -17,11 +22,9 @@ export function localizedUrl(url: string, locale: Locale): string {
 
 // A legal document as Settings opens it (#310): in the chosen language, and as
 // the site's embed variant — the document alone, with no site header (its
-// Subscribe link is a purchase outside the App Store) and no trackers. The
-// embed URL's path is authoritative for its language (proxy.ts), so English
-// picked on a Spanish phone stays English. /v1/config already sends the embed
-// URLs; the parameter is added here too so this build does not depend on
-// the server for it, and never twice.
+// Subscribe link is a purchase outside the App Store) and no trackers.
+// /v1/config already sends the embed URLs; the parameter is added here too so
+// this build does not depend on the server for it, and never twice.
 export function legalUrl(url: string, locale: Locale): string {
   const localized = localizedUrl(url, locale);
   const match = /^(https?:\/\/[^?#]+)(\?[^#]*)?(#.*)?$/.exec(localized);
