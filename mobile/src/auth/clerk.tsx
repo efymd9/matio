@@ -1,7 +1,8 @@
-import { ClerkProvider, useAuth, useClerk } from "@clerk/expo";
+import { ClerkProvider, useAuth, useClerk, type TokenCache } from "@clerk/expo";
 import * as SecureStore from "expo-secure-store";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { setAuthTokenProvider } from "@/api/client";
+import { keychainOptions } from "@/keychain";
 
 // Clerk wiring for the app, against the SAME production Clerk instance as the
 // web app — one user pool, no second identity system. Sign-in is passwordless
@@ -10,33 +11,84 @@ import { setAuthTokenProvider } from "@/api/client";
 
 export const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
-// Clerk persists the session JWT here. SecureStore (keychain / EncryptedSharedPreferences)
+// Clerk persists the client JWT here. SecureStore (keychain / EncryptedSharedPreferences)
 // rather than AsyncStorage: this is a bearer credential.
-const tokenCache = {
+//
+// Hand-rolled rather than @clerk/expo's own `tokenCache`, which deletes the
+// item when a read fails — and a read fails for a transient reason (a locked
+// phone, a keychain hiccup), so the stock cache would sign the viewer out for
+// good over a moment's unavailability. Here a failed read is only "no JWT
+// this time".
+//
+// Keychain class AFTER_FIRST_UNLOCK (../keychain.ts): Clerk reads this JWT
+// before every request it makes, and it keeps making them behind a locked
+// screen — the hourly member-token refresh and the next-episode prefetch of a
+// background or PiP episode. Under the default class the read fails a minute
+// after the lock, those requests go out anonymous and the episode walls.
+//
+// A save deletes before it writes: a keychain update keeps the item's
+// original class, so a plain overwrite would leave a JWT written by an older
+// build WHEN_UNLOCKED forever; delete + add re-creates it with the class
+// above. That opens a moment with no item at all — and a read landing in it
+// would send Clerk a request with no client JWT, which Clerk answers with a
+// brand-new, signed-out client. So every operation on a key runs after the
+// one before it: a read waits for a save in flight to finish.
+const queues = new Map<string, Promise<unknown>>();
+
+function inTurn<T>(key: string, op: () => Promise<T>): Promise<T> {
+  const turn = (queues.get(key) ?? Promise.resolve()).then(op);
+  const settled = turn.catch(() => undefined);
+  queues.set(key, settled);
+  void settled.then(() => {
+    if (queues.get(key) === settled) queues.delete(key);
+  });
+  return turn;
+}
+
+const tokenCache: TokenCache = {
   async getToken(key: string) {
     try {
-      return await SecureStore.getItemAsync(key);
+      return await inTurn(key, () => SecureStore.getItemAsync(key, keychainOptions()));
     } catch {
       return null;
     }
   },
   async saveToken(key: string, value: string) {
     try {
-      await SecureStore.setItemAsync(key, value);
+      await inTurn(key, async () => {
+        await SecureStore.deleteItemAsync(key, keychainOptions());
+        await SecureStore.setItemAsync(key, value, keychainOptions());
+      });
     } catch {
       // A failed cache write costs the user a re-login, nothing more.
+    }
+  },
+  // Clerk calls this when the stored JWT has to go (a native sign-out, a
+  // changed publishable key). Without it the item outlived both.
+  async clearToken(key: string) {
+    try {
+      await inTurn(key, () => SecureStore.deleteItemAsync(key, keychainOptions()));
+    } catch {
+      // A JWT left behind is overwritten by the next one Clerk hands back.
     }
   },
 };
 
 // Hands Clerk's getToken to the plain fetch client, which can't use hooks.
+//
+// A Clerk whose load failed (#251/#253, no network at launch, an outage) never
+// produces a session, but its getToken() waits for a load that is not coming —
+// so every request would sit out the client's 3s pre-flight deadline for an
+// answer that is already known: nobody is signed in. `clerk.status` is a live
+// getter, read at call time.
 function AuthBridge({ children }: { children: ReactNode }) {
   const { getToken } = useAuth();
+  const clerk = useClerk();
 
   useEffect(() => {
-    setAuthTokenProvider(() => getToken());
+    setAuthTokenProvider(() => (clerk.status === "error" ? Promise.resolve(null) : getToken()));
     return () => setAuthTokenProvider(null);
-  }, [getToken]);
+  }, [clerk, getToken]);
 
   return children;
 }

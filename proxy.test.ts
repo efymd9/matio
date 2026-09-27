@@ -142,6 +142,57 @@ describe("proxy — staging lock on", () => {
   });
 });
 
+// The app's JSON surface skips the landing machinery (#299). Before, a native
+// request from outside the consent-required countries got the default-consent
+// cookie on its answer — and Vercel's CDN caches no response with Set-Cookie,
+// so the public /v1 reads missed their 60s edge copy. Everything else keeps
+// the machinery, and Clerk's per-request options are untouched by it.
+describe("proxy — /api/v1 answers carry no cookies", () => {
+  const nonEu = { "x-vercel-ip-country": "US" };
+
+  it("sets no consent cookie on a /v1 read from a country that defaults consent on", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(request("/api/v1/catalog", nonEu), event);
+
+    expect(res?.headers.get("Set-Cookie")).toBeNull();
+    // A plain pass-through: the route answers, nothing is rewritten.
+    expect(res?.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("persists no attribution or _fbc from a /v1 URL, even under consent", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const consented = JSON.stringify({ necessary: true, marketing: true, ts: 1, v: 1 });
+    const res = await proxy(
+      request("/api/v1/shows/some-show?utm_source=tiktok&utm_campaign=c1&fbclid=abc", {
+        ...nonEu,
+        cookie: `cookie_consent=${encodeURIComponent(consented)}`,
+      }),
+      event,
+    );
+
+    expect(res?.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("leaves every other path as it was: pages and the web's own /api still get the geo default", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    for (const path of ["/", "/watch/some-show", "/api/playback-token", "/api/v1"]) {
+      const res = await proxy(request(path, nonEu), event);
+      expect(res?.headers.get("Set-Cookie"), path).toContain("cookie_consent=");
+    }
+  });
+
+  it("keeps the bench lock in front of /v1 — the lock wraps the proxy, the early return is inside it", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", PASSWORD);
+
+    const res = await proxy(request("/api/v1/catalog", nonEu), event);
+
+    expect(res?.status).toBe(401);
+  });
+});
+
 // The list itself is specified in lib/authorized-parties.test.ts; what is
 // proved here is that proxy.ts actually hands it to clerkMiddleware, per
 // request, and hands NOTHING where the origin is not stable.
@@ -199,6 +250,33 @@ describe("proxy — Clerk authorized parties (wiring)", () => {
     expect(
       options!(request("/api/v1/continue", { authorization: `bearer ${nativeToken}` })),
     ).toEqual({ authorizedParties: parties });
+  });
+
+  it("keeps the same per-request decision on /api/v1 now that the handler returns early there (#299)", async () => {
+    const options = await importWithEnv({
+      VERCEL_ENV: "production",
+      VERCEL_PROJECT_PRODUCTION_URL: "matio.tv",
+      STAGING_LOCK_PASSWORD: undefined,
+    });
+    const { default: prodProxy } = await import("./proxy");
+    const parties = ["https://matio.tv", "https://www.matio.tv"];
+    const nativeToken = `x.${btoa(JSON.stringify({ sub: "user_1" }))}.y`;
+    const browserToken = `x.${btoa(JSON.stringify({ sub: "user_1", azp: "https://other-app.example" }))}.y`;
+    const native = request("/api/v1/progress", {
+      authorization: `Bearer ${nativeToken}`,
+      "x-vercel-ip-country": "US",
+    });
+
+    // The early return is inside the handler; the options Clerk verifies with
+    // are computed for the request exactly as before.
+    expect(options!(native)).toEqual({ authorizedParties: undefined });
+    expect(
+      options!(request("/api/v1/progress", { authorization: `Bearer ${browserToken}` })),
+    ).toEqual({ authorizedParties: parties });
+
+    const res = await prodProxy(native, event);
+    expect(res?.headers.get("x-middleware-next")).toBe("1");
+    expect(res?.headers.get("Set-Cookie")).toBeNull();
   });
 });
 

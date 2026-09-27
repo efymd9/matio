@@ -7,8 +7,12 @@ import { absoluteMediaUrl, apiOk, linearShowsOnly } from "@/lib/api/v1";
 // GET /api/v1/catalog — every published show, with its ready-episode count.
 //
 // Deliberately auth-independent: the response is identical for every caller,
-// which is what lets it be CDN-cached and shared between anonymous and
-// signed-in clients. Access gating is NOT expressed here — the client derives
+// which is what lets it be CDN-cached. The edge copy serves only a request
+// WITHOUT an Authorization header (Vercel's CDN caches nothing a request with
+// one asks for) and only a response without Set-Cookie — so the app sends
+// this read, /v1/config and /v1/shows/:slug with no token even when signed in
+// (mobile/src/api/client.ts, `auth: false`), and proxy.ts adds no cookies
+// on /api/v1. Access gating is NOT expressed here — the client derives
 // presentation from /v1/config.signupGate and /v1/playback-token remains the
 // enforcement point.
 //

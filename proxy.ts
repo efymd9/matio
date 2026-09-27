@@ -20,6 +20,7 @@ import {
 } from "@/lib/app-embed";
 import {
   authorizedPartiesForRequest,
+  NATIVE_API_PREFIX,
   resolveAuthorizedParties,
 } from "@/lib/authorized-parties";
 import { FBC_COOKIE, buildFbc } from "@/lib/capi-identity";
@@ -344,6 +345,15 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
       308,
     );
   }
+
+  // The app's JSON surface is not a landing: a native client has no banner,
+  // no UTM and no fbclid, so the cookie work below could only ever attach a
+  // default-consent Set-Cookie to its answers — and Vercel's CDN caches no
+  // response that carries one, so /v1/catalog and /v1/shows/:slug missed
+  // their 60s edge copy. Clerk has already authenticated the request by now,
+  // with the per-request options above (#100), so the routes' auth() is
+  // unchanged.
+  if (req.nextUrl.pathname.startsWith(NATIVE_API_PREFIX)) return;
 
   // Spanish subpath (/es/*): rewrite to the base route with the locale stamped
   // on the request. Only the indexable public set is localized — anything else
