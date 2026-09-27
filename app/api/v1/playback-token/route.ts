@@ -161,8 +161,15 @@ export async function POST(req: NextRequest) {
           });
         }
       } catch (err) {
+        // Ids only: the driver's message quotes the failed statement WITH
+        // its params — this device's id and the IP hash (#305).
         if (!(err instanceof TrialRateLimitError)) {
-          console.warn(`[v1/playback-token] free tracking skipped: ${err}`);
+          console.warn(
+            `[v1/playback-token] free tracking skipped ${JSON.stringify({
+              showId: row.showId,
+              episodeId,
+            })}`,
+          );
         }
       }
     }
@@ -178,8 +185,14 @@ export async function POST(req: NextRequest) {
     if (deviceId) {
       try {
         await stampSignupWall(deviceId, row.showId);
-      } catch (err) {
-        console.warn(`[v1/playback-token] signup-wall stamp skipped: ${err}`);
+      } catch {
+        // Ids only, same reason as the free-tracking catch above.
+        console.warn(
+          `[v1/playback-token] signup-wall stamp skipped ${JSON.stringify({
+            showId: row.showId,
+            episodeId,
+          })}`,
+        );
       }
     }
     logToken({ result: 403, mode: "free", showId: row.showId, episodeId });
