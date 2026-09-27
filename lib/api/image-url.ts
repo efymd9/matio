@@ -6,8 +6,10 @@
 // instead — as WebP when the request says it takes WebP (OPTIMIZER_ACCEPT).
 //
 // UNIVERSAL — imported by the app through Metro (mobile/src/shared/
-// image-url.ts). No `server-only`, no next/*: lib/seo.ts is dependency-free.
+// image-url.ts). No `server-only`, no next/*: lib/seo.ts and
+// lib/blob-artwork.ts are dependency-free.
 
+import { ARTWORK_BLOB_HOSTS, ARTWORK_BLOB_PREFIXES } from "../blob-artwork";
 import { SITE_URL } from "../seo";
 
 // The widths /_next/image accepts: Next's defaults (`imageSizes` then
@@ -29,11 +31,18 @@ export const OPTIMIZER_QUALITY = 75;
 // has to send this itself.
 export const OPTIMIZER_ACCEPT = "image/webp,image/*;q=0.8";
 
-// A URL on the Blob store (`https://<storeId>.public.blob.vercel-storage.com/…`)
-// — the remotePattern in next.config.ts, and the only remote host show
-// artwork lives on. Plain string rules rather than `new URL`: nothing here
-// needs more, and the app's runtime then needs nothing either.
-const BLOB_URL = /^https:\/\/[a-z0-9-]+\.public\.blob\.vercel-storage\.com\//i;
+// An artwork URL on our Blob store — what next.config.ts's remotePatterns let
+// the optimizer fetch, from the same list (lib/blob-artwork.ts): a listed
+// host, a listed upload folder, no query string. Stricter on the path than
+// the pattern, on purpose: only the characters an upload key holds, and no
+// "." / ".." segment, which the optimizer's `new URL` would resolve out of
+// the folder and then refuse — the app would get a 400 instead of the
+// original. Plain string rules rather than `new URL`: nothing here needs
+// more, and the app's runtime then needs nothing either.
+const BLOB_URL = new RegExp(
+  `^https://(?:${ARTWORK_BLOB_HOSTS.map((h) => h.replace(/\./g, "\\.")).join("|")})` +
+    `/(?:${ARTWORK_BLOB_PREFIXES.join("|")})(?:/[A-Za-z0-9_-][A-Za-z0-9._-]*)+$`,
+);
 
 // The smallest allowed width that covers `px` device pixels; past the
 // largest, the largest.
@@ -50,8 +59,10 @@ export function snapImageWidth(px: number): number {
 //     turns it into (absoluteMediaUrl) — goes as the PATH: the optimizer
 //     reads local images from its own deployment, and matio.tv is not a
 //     remotePattern, so the absolute form would be refused;
-//   - a Blob URL goes as itself (remotePatterns allows it);
-//   - anything else (a signed Mux thumbnail, an unknown host) is left alone.
+//   - an artwork URL on our Blob store goes as itself (remotePatterns
+//     allows it);
+//   - anything else (a signed Mux thumbnail, another Blob store, an unknown
+//     host) is left alone.
 function optimizerSource(src: string): string | null {
   if (src.startsWith("/") && !src.startsWith("//")) return src;
   if (src.startsWith(`${SITE_URL}/`)) return src.slice(SITE_URL.length);

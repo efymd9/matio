@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
+import { ARTWORK_BLOB_HOSTS, ARTWORK_BLOB_PREFIXES } from "./lib/blob-artwork";
+
 // The product version, single-sourced from package.json — which release-please
 // bumps when a Release PR is merged (release-please-config.json). Inlined at
 // build time and served by /api/healthz, so "which version is actually live"
@@ -60,14 +62,24 @@ const nextConfig: NextConfig = {
     ];
   },
   images: {
-    // Mux image service hosts every video thumbnail; Vercel Blob hosts admin-
-    // uploaded show artwork (poster + hero). Anything not listed here falls
-    // through to raw <img>. The Blob host is `<storeId>.public.blob.vercel-
-    // storage.com`, so a single-level wildcard covers any store.
-    remotePatterns: [
-      { protocol: "https", hostname: "image.mux.com" },
-      { protocol: "https", hostname: "*.public.blob.vercel-storage.com" },
-    ],
+    // The only remote images the optimizer takes: admin-uploaded artwork
+    // (show poster/hero, actor avatars) on OUR Blob store, under the upload
+    // folders, with no query string — lib/blob-artwork.ts, the list the
+    // app's lib/api/image-url.ts reads too. Anything else is a 400 at
+    // /_next/image (and a throw at render in dev).
+    //
+    // No image.mux.com (#306): episode stills carry a JWT minted on every
+    // render, so each URL is new and the optimizer re-transformed every one
+    // with nothing to cache. Those <Image>s are `unoptimized` and load from
+    // Mux directly, at the size Mux was asked for.
+    remotePatterns: ARTWORK_BLOB_HOSTS.flatMap((hostname) =>
+      ARTWORK_BLOB_PREFIXES.map((prefix) => ({
+        protocol: "https" as const,
+        hostname,
+        pathname: `/${prefix}/**`,
+        search: "",
+      })),
+    ),
   },
   experimental: {
     // Tree-shake barrel imports so importing one symbol from these
