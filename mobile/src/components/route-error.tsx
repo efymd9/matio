@@ -1,8 +1,10 @@
 import { useRouter, type ErrorBoundaryProps } from "expo-router";
+import { useEffect } from "react";
 import { View } from "react-native";
 import { ErrorState } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import { goBackOrHome } from "@/navigation";
+import { captureCrash } from "@/observability";
 import { colors } from "@/theme";
 
 // What a render crash shows instead of closing the app (#308). A route file
@@ -15,13 +17,19 @@ import { colors } from "@/theme";
 //
 // The copy is the web's route-error kicker and title (app/error.tsx) — the
 // same situation, already in both languages. Its body is not used: «we've
-// logged it» is not true in the app yet.
+// logged it» is true only in a build with a Sentry DSN (#317).
 
 // Both boundaries render this, so it is the one place the error tracker
 // (#317) hooks in — with the web's privacy contract: `error` is never shown
 // and never logged here, because its message can carry whatever the code
-// that threw had in hand.
-function CrashScreen({ retry, onBack }: ErrorBoundaryProps & { onBack?: () => void }) {
+// that threw had in hand. It goes to Sentry only (a no-op without a DSN),
+// through the scrubbers in src/observability.ts — once per caught crash: the
+// effect runs when a boundary mounts this screen, and a re-render of it
+// reports nothing new («Try again» that crashes again is a new catch).
+function CrashScreen({ error, retry, onBack }: ErrorBoundaryProps & { onBack?: () => void }) {
+  useEffect(() => {
+    captureCrash(error);
+  }, [error]);
   const t = useT();
   return (
     <ErrorState

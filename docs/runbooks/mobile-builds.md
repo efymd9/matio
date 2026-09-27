@@ -81,9 +81,19 @@ cd mobile && npm ci && EAS_BUILD_NO_EXPO_GO_WARNING=true npx eas-cli@latest buil
   исправлена, без ключа таб теперь говорит «Sign-in unavailable», но войти в
   такой сборке нельзя). Перед сборкой в TestFlight ключ должен быть в EAS:
   `npx eas-cli@latest env:create --environment production --name
-  EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY --value pk_live_… --visibility plain`
+  EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY --value pk_live_… --visibility plaintext`
   (значение — из `mobile/.env.local`; ключ публичный, он же лежит в HTML
   каждой страницы сайта), проверка — `eas env:list --environment production`.
   Секретов у приложения по-прежнему нет — только этот публичный ключ; в
-  `.env` мобильного (коммитимый) ничего не класть.
+  `.env` мобильного (коммитимый) ничего не класть. (`--visibility` принимает
+  `plaintext` / `sensitive` / `secret` — `plain` eas-cli 24.8 отвергает.)
+- **Sentry в приложении (#317) включается так же — переменной EAS, не кодом.**
+  `EXPO_PUBLIC_SENTRY_DSN` в окружении `production` (команда —
+  `docs/services.md` → Sentry → The app); без неё сборка просто не
+  отчитывается. `eas.json` задаёт обоим профилям
+  `SENTRY_DISABLE_AUTO_UPLOAD=true` — **не убирать**: плагин
+  `@sentry/react-native/expo` встраивает в сборку фазы загрузки карт/dSYM, и
+  без токена они роняют `eas build`. Нативный модуль Sentry — ещё одна
+  причина, по которой смена `app.json` требует `expo prebuild --clean` перед
+  локальной dev-сборкой.
 - **Сборка, которой нужен новый роут `/v1`, ждёт релиза, который этот роут подаёт.** Приложение ходит в прод (`https://matio.tv`), а прод — это последний Release, не `main`: слитый в `main` роут до «релизь» отвечает 405/404 (так было с `GET /api/v1/progress`, #303). Порядок: релиз → `curl` нового роута на matio.tv → только потом `eas build`.
