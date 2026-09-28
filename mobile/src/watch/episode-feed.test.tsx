@@ -163,8 +163,12 @@ vi.mock("@/api/config-context", () => ({
   useConfig: (): Partial<AppConfig> => ({ signupGate: gate }),
 }));
 
+// The safe-area insets a case runs under — none by default; the landscape
+// «‹» cases (#359) set a phone's.
+const NO_INSETS = { top: 0, bottom: 0, left: 0, right: 0 };
+const safeArea = vi.hoisted(() => ({ insets: { top: 0, bottom: 0, left: 0, right: 0 } }));
 vi.mock("react-native-safe-area-context", () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+  useSafeAreaInsets: () => safeArea.insets,
 }));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: async () => null,
@@ -319,6 +323,7 @@ beforeEach(() => {
   h.chrome.clear();
   h.allPages = false;
   screen.settled = true;
+  safeArea.insets = NO_INSETS;
   tokens.calls.length = 0;
   tokens.answer = async (episodeId) => granted(episodeId);
   gate = { mode: "tiers" };
@@ -1305,11 +1310,9 @@ describe("EpisodeFeed — only the page in view speaks to VoiceOver (#302 item 4
     expect(hiddenFromReader(playerEl("ep3"))).toBe(true);
   });
 
-  it("a landscape show: the next page's title and «‹» are out of reach", async () => {
+  it("a landscape show: the next page's «‹» is out of reach", async () => {
     await renderFeed(makeShow("horizontal", ["free", "free"]));
 
-    expect(hiddenFromReader(leaf("Episode 1"))).toBe(false);
-    expect(hiddenFromReader(leaf("Episode 2"))).toBe(true);
     const backs = Array.from(container.querySelectorAll('[aria-label="Back to show"]'));
     expect(backs).toHaveLength(2);
     expect(backs.filter((b) => !hiddenFromReader(b))).toHaveLength(1);
@@ -1539,5 +1542,58 @@ describe("EpisodeFeed — a non-subscriber's 60s preview of an all-subscribers-o
     // neighbour asks — and gets the run-out answer.
     expect(tokens.calls).toEqual(["ep1", "ep2", "ep3"]);
     expect(playerEl("ep3")).toBeNull();
+  });
+});
+
+describe("EpisodeFeed — the landscape «‹» stays out of the native transport's top row (#359)", () => {
+  // AVPlayerViewController lays its top row (fullscreen, PiP, AirPlay on the
+  // leading side, volume on the trailing one) inside the safe area; the «‹»
+  // goes in the black strip the leading inset leaves beside the picture.
+  const DYNAMIC_ISLAND_LANDSCAPE = { top: 0, bottom: 21, left: 59, right: 59 };
+  const backs = () =>
+    Array.from(container.querySelectorAll<HTMLElement>('[aria-label="Back to show"]'));
+  const placeOf = (el: HTMLElement) => {
+    const { top, left } = getComputedStyle(el);
+    return { top, left };
+  };
+
+  it("a Face ID iPhone: the disc is centred in the leading strip, 44pt down — off the picture, clear of the native row", async () => {
+    safeArea.insets = DYNAMIC_ISLAND_LANDSCAPE;
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(backs()).toHaveLength(1);
+    // (59 − 40) / 2: the 40pt disc in the middle of the 59pt strip.
+    expect(placeOf(backs()[0])).toEqual({ top: "44px", left: "9.5px" });
+    press("‹");
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("a phone with no strip (iPhone SE, inset 0): below the native row, at the screen padding", async () => {
+    safeArea.insets = NO_INSETS;
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(backs()).toHaveLength(1);
+    expect(placeOf(backs()[0])).toEqual({ top: "64px", left: "20px" });
+  });
+
+  it("draws no episode title of its own — the native transport names the episode from the source", async () => {
+    safeArea.insets = DYNAMIC_ISLAND_LANDSCAPE;
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(playerEl("ep1")).not.toBeNull();
+    expect(text()).not.toContain("Episode 1");
+    expect(video("ep1").props.source.metadata?.title).toBe("Episode 1");
+  });
+
+  it("a vertical show is untouched: no «‹» of the feed's, its chrome gets the episode and the way back", async () => {
+    // Pins what did NOT change — it passes before #359 too, by design.
+    safeArea.insets = DYNAMIC_ISLAND_LANDSCAPE;
+    await renderFeed(makeShow("vertical", ["free"]));
+
+    expect(backs()).toHaveLength(0);
+    const chrome = h.chrome.get("Episode 1") as { onBack?: () => void } | undefined;
+    expect(chrome).toBeDefined();
+    chrome?.onBack?.();
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 });
