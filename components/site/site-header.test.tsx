@@ -124,6 +124,47 @@ describe("SiteHeader — the trimmed header on the /ideas landing (#297)", () =>
     expect(click.defaultPrevented).toBe(true);
   });
 
+  describe("scrolling (#362): the /ideas header scrolls away, the rest stay pinned", () => {
+    // jsdom has no layout, so the positioning scheme IS the observable: an
+    // absolute header travels up with the page, a fixed one stays put — and
+    // only a fixed one ever turns into the frosted bar.
+    const scrollTo = (y: number) => {
+      Object.defineProperty(window, "scrollY", { value: y, configurable: true });
+      fireEvent.scroll(window);
+    };
+    afterEach(() => scrollTo(0));
+
+    it.each(["/ideas", "/es/ideas"])(
+      "%s: absolute, not fixed, and no frosted bar after a scroll",
+      (pathname) => {
+        nav.pathname = pathname;
+        scrollTo(400);
+        render(<SiteHeader authSlot={null} paymentsEnabled />);
+
+        const header = screen.getByRole("banner");
+        expect(header.classList.contains("absolute")).toBe(true);
+        expect(header.classList.contains("fixed")).toBe(false);
+        expect(header.classList.contains("bg-espresso/85")).toBe(false);
+        expect(header.classList.contains("backdrop-blur-xl")).toBe(false);
+        // Still the top-of-page scrim, so the logo reads over the hero.
+        expect(header.classList.contains("bg-gradient-to-b")).toBe(true);
+      },
+    );
+
+    it("/about: fixed, and frosted once the page scrolls", () => {
+      nav.pathname = "/about";
+      render(<SiteHeader authSlot={null} paymentsEnabled />);
+      const header = screen.getByRole("banner");
+      expect(header.classList.contains("fixed")).toBe(true);
+      expect(header.classList.contains("bg-espresso/85")).toBe(false);
+
+      scrollTo(400);
+      expect(header.classList.contains("fixed")).toBe(true);
+      expect(header.classList.contains("bg-espresso/85")).toBe(true);
+      expect(header.classList.contains("backdrop-blur-xl")).toBe(true);
+    });
+  });
+
   it("/about keeps the full header", () => {
     nav.pathname = "/about";
     render(

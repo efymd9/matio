@@ -767,6 +767,9 @@ export function IdeasLanding({
                       aria-describedby={describedBy("logline", id("logline-help"))}
                       className={cn(
                         shell(bad("logline")),
+                        // The only field over the hero still: a heavy blur of
+                        // the art behind it, or it reads washed out (#362).
+                        "backdrop-blur-2xl backdrop-saturate-150",
                         "min-h-[103px] max-h-[129px] resize-none overflow-y-auto py-3 leading-[1.6] xl:min-h-[78px]",
                       )}
                     />
@@ -813,7 +816,7 @@ export function IdeasLanding({
               aria-labelledby={id("rail-title")}
               className={cn(
                 CARD,
-                "hidden w-80 flex-col gap-5 p-6 xl:sticky xl:top-24 xl:col-span-4 xl:flex",
+                "hidden w-80 flex-col gap-5 p-6 xl:sticky xl:top-8 xl:col-span-4 xl:flex",
               )}
             >
               <div className="flex items-center gap-2">
@@ -950,7 +953,7 @@ export function IdeasLanding({
                   {/* Chapter 2 · Your story */}
                   <div
                     ref={ch2Ref}
-                    className="flex flex-col gap-6 pt-16 scroll-mt-6 tablet:scroll-mt-0 tablet:pt-[88px] xl:scroll-mt-24 xl:pt-0"
+                    className="flex flex-col gap-6 pt-16 scroll-mt-6 tablet:pt-[88px] xl:pt-0"
                   >
                     <ChapterHeading label={t.chapter(2)} title={t.headings.story} />
 

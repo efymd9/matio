@@ -86,9 +86,14 @@ function SiteHeaderContent({
   return (
     <header
       className={cn(
-        "fixed inset-x-0 top-0 z-40 transition-[background-color,backdrop-filter,border-color] duration-500 ease-out",
+        // The /ideas header is not sticky (#362): it sits over the hero at
+        // the top of the page and scrolls away with it — no frosted bar.
+        minimal
+          ? "absolute"
+          : "fixed transition-[background-color,backdrop-filter,border-color] duration-500 ease-out",
+        "inset-x-0 top-0 z-40",
         mobileHidden && "hidden tablet:block",
-        scrolled
+        scrolled && !minimal
           ? "border-b border-rust/20 bg-espresso/85 backdrop-blur-xl backdrop-saturate-150"
           : "border-b-0 bg-gradient-to-b from-espresso/70 via-espresso/25 to-transparent",
       )}
