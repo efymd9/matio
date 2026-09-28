@@ -25,6 +25,8 @@ let params: Record<string, string | undefined> = {};
 vi.mock("expo-router", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), canGoBack: () => true }),
   useLocalSearchParams: () => params,
+  // The screen's own options (#358: no edge swipe on the landscape player).
+  Stack: { Screen: () => null },
 }));
 
 const NEVER = () => new Promise<never>(() => {});
@@ -57,6 +59,8 @@ const feed = vi.hoisted(() => ({ props: null as null | FeedProps }));
 vi.mock("@/orientation", () => ({
   useOrientationLock: () => null,
   useOrientationSettled: () => true,
+  // The leave's upright turn (#358) is pinned in watch-back.test.tsx.
+  useLeaveUpright: (leave: () => void) => ({ leaving: false, requestLeave: leave }),
 }));
 vi.mock("@/watch/episode-feed", () => ({
   EpisodeFeed: (props: FeedProps) => {

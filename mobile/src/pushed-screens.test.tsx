@@ -28,6 +28,8 @@ let params: Record<string, string | undefined> = {};
 vi.mock("expo-router", () => ({
   useRouter: () => router,
   useLocalSearchParams: () => params,
+  // The player's own options (#358: no edge swipe on the landscape player).
+  Stack: { Screen: () => null },
 }));
 
 const show = vi.hoisted(() => ({ answer: null as null | (() => Promise<unknown>) }));
@@ -59,6 +61,9 @@ const feed = vi.hoisted(() => ({ settled: false, props: null as null | FeedProps
 vi.mock("@/orientation", () => ({
   useOrientationLock: () => null,
   useOrientationSettled: () => feed.settled,
+  // The leave's upright turn (#358) is pinned in watch-back.test.tsx; here
+  // «Back» is the pop itself.
+  useLeaveUpright: (leave: () => void) => ({ leaving: false, requestLeave: leave }),
 }));
 vi.mock("@/watch/episode-feed", () => ({
   EpisodeFeed: (props: FeedProps) => {
