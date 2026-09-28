@@ -148,6 +148,8 @@ vi.mock("@/api/client", async (importOriginal) => {
 vi.mock("expo-router", () => ({
   useRouter: () => ({ push: () => undefined, replace: () => undefined, back: () => undefined }),
   useLocalSearchParams: () => screen.params,
+  // The watch screen's own options (#358: no edge swipe on the landscape player).
+  Stack: { Screen: () => null },
 }));
 vi.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 vi.mock("@/auth/clerk", () => ({
@@ -156,6 +158,8 @@ vi.mock("@/auth/clerk", () => ({
 vi.mock("@/orientation", () => ({
   useOrientationLock: () => null,
   useOrientationSettled: () => screen.settled,
+  // The leave's upright turn (#358) is pinned in src/watch-back.test.tsx.
+  useLeaveUpright: (leave: () => void) => ({ leaving: false, requestLeave: leave }),
 }));
 
 let gate: SignupGate = { mode: "tiers" };

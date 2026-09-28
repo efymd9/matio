@@ -1,6 +1,6 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { api, ApiError, settleOrNull } from "@/api/client";
 import { errorHint } from "@/api/error-hint";
 import { useAsync } from "@/api/use-async";
@@ -8,7 +8,7 @@ import { useOptionalAuth } from "@/auth/clerk";
 import { ErrorState, Loading } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import { goBackOrHome } from "@/navigation";
-import { useOrientationLock, useOrientationSettled } from "@/orientation";
+import { useLeaveUpright, useOrientationLock, useOrientationSettled } from "@/orientation";
 import { EpisodeFeed } from "@/watch/episode-feed";
 
 // The watch screen. Loads the show (its ordered ready episodes are what the
@@ -21,6 +21,9 @@ import { EpisodeFeed } from "@/watch/episode-feed";
 // long as this screen is mounted (full-bleed, status bar hidden); a vertical
 // show keeps portrait. The lock follows the SHOW, so it can only be taken
 // once the show has loaded — the spinner is portrait, the player is not.
+// Back turns the screen upright BEFORE the pop (#358, useLeaveUpright), and
+// the iOS edge swipe is off on the landscape player: a swipe pops at once,
+// and a rotation during the pop freezes the app.
 
 type Params = {
   episodeId: string;
@@ -98,14 +101,29 @@ export default function WatchScreen() {
     [showSlug, episodeId, explicitResume],
   );
 
-  const onBack = useCallback(() => goBackOrHome(router), [router]);
+  // Every «Back» on this screen — the feed's «‹» and its walls, the error
+  // states — goes through the leave (#358): the feed comes down and the
+  // screen turns upright while it is still focused, and only then the pop.
+  const leaveNow = useCallback(() => goBackOrHome(router), [router]);
+  const { leaving, requestLeave: onBack } = useLeaveUpright(leaveNow);
   const onSignIn = useCallback(() => router.push("/sign-in"), [router]);
 
   // Before the early returns: hooks — and the lock must also be RELEASED
   // when this screen unmounts from an error state after having rotated.
+  // Leaving reads as «no show»: the lock hands portrait back and the feed
+  // is held back, in the same commit, before anything pops.
   const orientation = state.status === "ready" ? state.data.show.orientation : null;
-  const focus = useOrientationLock(orientation);
-  const settled = useOrientationSettled(orientation, focus);
+  const lockFor = leaving ? null : orientation;
+  const focus = useOrientationLock(lockFor);
+  const settled = useOrientationSettled(lockFor, focus);
+
+  // No edge swipe on the landscape player (#358): it pops without going
+  // through the leave, so the unmount would rotate in the middle of the pop.
+  // A vertical show keeps it — nothing turns on its way out.
+  const screenOptions = useMemo(
+    () => ({ gestureEnabled: orientation !== "horizontal" }),
+    [orientation],
+  );
 
   // The feed's current page and its playhead, remembered across its
   // remounts: the feed is unmounted while another screen covers this one
@@ -144,11 +162,14 @@ export default function WatchScreen() {
   // reprocessing) — the same answer the token route would give.
   if (index < 0) {
     return (
-      <ErrorState
-        message={t.watch.unavailableKicker}
-        hint={t.watch.unavailableTitle}
-        onBack={onBack}
-      />
+      <>
+        <Stack.Screen options={screenOptions} />
+        <ErrorState
+          message={t.watch.unavailableKicker}
+          hint={t.watch.unavailableTitle}
+          onBack={onBack}
+        />
+      </>
     );
   }
 
@@ -162,11 +183,12 @@ export default function WatchScreen() {
     show.orientation === "horizontal" && focus !== null ? <StatusBar hidden /> : null;
 
   // The feed lays its pages out by the window it mounts with: hold it until
-  // the lock has turned the screen, and while another screen covers this
-  // one (see useOrientationSettled).
+  // the lock has turned the screen, while another screen covers this one
+  // (see useOrientationSettled), and from the moment Back is pressed.
   if (!settled) {
     return (
       <>
+        <Stack.Screen options={screenOptions} />
         {statusBar}
         <Loading />
       </>
@@ -184,6 +206,7 @@ export default function WatchScreen() {
 
   return (
     <>
+      <Stack.Screen options={screenOptions} />
       {statusBar}
       <EpisodeFeed
         show={show}
@@ -201,5 +224,6 @@ export default function WatchScreen() {
 // A render crash here is this screen's, not the app's (#308): Back / Try
 // again instead of RCTFatal. The boundary unmounts the crashed tree, and
 // with it the lock above hands portrait back — the fallback and the screen
-// Back returns to are upright. See components/route-error.tsx.
+// Back returns to are upright, so its Back pops at once (goBackOrHome, not
+// the leave: nothing is left to turn). See components/route-error.tsx.
 export { RouteErrorBoundary as ErrorBoundary } from "@/components/route-error";

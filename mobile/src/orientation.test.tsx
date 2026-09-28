@@ -13,11 +13,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // (react-dom/client under jsdom), because the lock lives in an effect and its
 // release in the effect's cleanup.
 
-// The native module as the hook sees it: the enum the hook reads its values
-// from, and lockAsync as a spy whose outcome each case controls. Hoisted with
-// the mock — vi.mock is lifted above every import, this has to be too.
-const { lockAsync, OrientationLock } = vi.hoisted(() => ({
+// The native module as the hook sees it: the enums the hooks read their
+// values from, lockAsync as a spy whose outcome each case controls, and the
+// orientation-change event (#358) — the end of a rotation, as the root view
+// controller reports it — which a case fires with `rotated`. Hoisted with the
+// mock — vi.mock is lifted above every import, this has to be too.
+const { lockAsync, OrientationLock, Orientation, orientationListeners } = vi.hoisted(() => ({
   lockAsync: vi.fn<(lock: number) => Promise<void>>(async () => undefined),
+  Orientation: {
+    UNKNOWN: 0,
+    PORTRAIT_UP: 1,
+    PORTRAIT_DOWN: 2,
+    LANDSCAPE_LEFT: 3,
+    LANDSCAPE_RIGHT: 4,
+  } as const,
+  orientationListeners: new Set<(event: { orientationInfo: { orientation: number } }) => void>(),
   OrientationLock: {
     DEFAULT: 0,
     ALL: 1,
@@ -32,7 +42,15 @@ const { lockAsync, OrientationLock } = vi.hoisted(() => ({
   } as const,
 }));
 
-vi.mock("expo-screen-orientation", () => ({ OrientationLock, lockAsync }));
+vi.mock("expo-screen-orientation", () => ({
+  OrientationLock,
+  Orientation,
+  lockAsync,
+  addOrientationChangeListener(listener: (event: { orientationInfo: { orientation: number } }) => void) {
+    orientationListeners.add(listener);
+    return { remove: () => orientationListeners.delete(listener) };
+  },
+}));
 
 // Navigation focus, as expo-router's useFocusEffect delivers it: the effect
 // runs on focus (and at once when mounted focused), its cleanup runs on blur
@@ -84,10 +102,13 @@ vi.mock("expo-router", async () => {
 });
 
 import {
+  LEAVE_ROTATION_TIMEOUT_MS,
   lockOrientation,
   ORIENTATION_GRACE_MS,
   orientationLockFor,
   PORTRAIT_LOCK,
+  resetOrientationLockForTests,
+  useLeaveUpright,
   useOrientationLock,
   useOrientationSettled,
   type FocusSession,
@@ -161,6 +182,7 @@ function unmountRoot() {
 
 describe("useOrientationLock (#252)", () => {
   beforeEach(() => {
+    resetOrientationLockForTests();
     lockAsync.mockClear();
     lockAsync.mockImplementation(async () => undefined);
     nav.focused = true;
@@ -184,12 +206,15 @@ describe("useOrientationLock (#252)", () => {
     expect(locks()).toEqual(["LANDSCAPE", "PORTRAIT_UP"]);
   });
 
-  it("a vertical show asserts portrait — and still restores portrait on unmount", () => {
+  // #358: the unmount still asks for portrait, but portrait is already the
+  // lock last asked of the device — so nothing more reaches it (see
+  // "lockOrientation drops a request equal to the last one").
+  it("a vertical show asserts portrait — and its unmount asks the device for nothing more", () => {
     render("vertical");
     expect(locks()).toEqual(["PORTRAIT_UP"]);
 
     act(() => root.unmount());
-    expect(locks()).toEqual(["PORTRAIT_UP", "PORTRAIT_UP"]);
+    expect(locks()).toEqual(["PORTRAIT_UP"]);
   });
 
   it("locks nothing while the show is loading, then landscape once it arrives, exactly once", () => {
@@ -246,11 +271,49 @@ describe("useOrientationLock (#252)", () => {
     // An unhandled rejection here would fail the run (vitest reports it);
     // the assertion is that the microtask drains clean.
     expect(() => lockOrientation(OrientationLock.LANDSCAPE)).not.toThrow();
+    // …and a refused lock is not remembered as asked (#358): once the
+    // refusal has come back, the same lock reaches the device again.
+    await act(async () => {
+      await Promise.resolve();
+    });
     expect(() => render("horizontal")).not.toThrow();
     await act(async () => {
       await Promise.resolve();
     });
     expect(lockAsync).toHaveBeenCalledTimes(2);
+  });
+});
+
+// #358 — a lock equal to the last one asked of the device is dropped: the
+// module would still ask UIKit for a geometry update, and a stray one must
+// never start a rotation in the middle of a transition.
+describe("lockOrientation drops a request equal to the last one (#358)", () => {
+  beforeEach(() => {
+    resetOrientationLockForTests();
+    lockAsync.mockClear();
+    lockAsync.mockImplementation(async () => undefined);
+  });
+
+  it("a repeated lock never reaches the device; a different one always does", () => {
+    lockOrientation(OrientationLock.LANDSCAPE);
+    lockOrientation(OrientationLock.LANDSCAPE);
+    expect(locks()).toEqual(["LANDSCAPE"]);
+
+    lockOrientation(OrientationLock.PORTRAIT_UP);
+    lockOrientation(OrientationLock.PORTRAIT_UP);
+    expect(locks()).toEqual(["LANDSCAPE", "PORTRAIT_UP"]);
+
+    // Only the LAST request counts: landscape again is a real change.
+    lockOrientation(OrientationLock.LANDSCAPE);
+    expect(locks()).toEqual(["LANDSCAPE", "PORTRAIT_UP", "LANDSCAPE"]);
+  });
+
+  it("the root layout's launch lock and a vertical show's are one request, not two", () => {
+    // app/_layout.tsx locks portrait at launch; the watch screen of a
+    // vertical show then asks for the same thing.
+    lockOrientation(PORTRAIT_LOCK);
+    lockOrientation(orientationLockFor("vertical"));
+    expect(locks()).toEqual(["PORTRAIT_UP"]);
   });
 });
 
@@ -263,6 +326,7 @@ describe("useOrientationLock (#252)", () => {
 describe("useOrientationSettled (#252)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    resetOrientationLockForTests();
     lockAsync.mockClear();
     lockAsync.mockImplementation(async () => undefined);
     nav.focused = true;
@@ -360,5 +424,171 @@ describe("useOrientationSettled (#252)", () => {
     expect(text()).toBe("waiting:focus2");
     elapse(ORIENTATION_GRACE_MS);
     expect(text()).toBe("settled:focus2");
+  });
+});
+
+// #358 — the back from the landscape player. The portrait lock taken by the
+// watch screen's UNMOUNT lands in the middle of the native pop, and on iOS
+// that rotation strands the transition: a frozen, stretched snapshot of the
+// player over a window that no longer takes touches (TestFlight 0.1.0 (7)).
+// So the back turns upright FIRST — the feed unmounted and portrait asked
+// for while the screen is still focused — and pops once that rotation has
+// FINISHED (or after a timeout); after the pop nothing reaches the device.
+describe("useLeaveUpright (#358)", () => {
+  // The watch screen's composition: the leave feeds the lock and the
+  // hold-back as «no show». The button is the «‹»; the text is what the
+  // screen renders (the feed, or the spinner).
+  function Leaving({ orientation, back }: { orientation: ShowOrientation; back: () => void }) {
+    const { leaving, requestLeave } = useLeaveUpright(back);
+    const lockFor = leaving ? null : orientation;
+    const focus = useOrientationLock(lockFor);
+    const settled = useOrientationSettled(lockFor, focus);
+    return (
+      <button type="button" onClick={requestLeave}>
+        {settled ? "feed" : "waiting"}
+      </button>
+    );
+  }
+
+  let back: ReturnType<typeof vi.fn<() => void>>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetOrientationLockForTests();
+    lockAsync.mockClear();
+    lockAsync.mockImplementation(async () => undefined);
+    orientationListeners.clear();
+    nav.focused = true;
+    back = vi.fn<() => void>();
+    mountRoot();
+  });
+
+  afterEach(() => {
+    unmountRoot();
+    vi.useRealTimers();
+  });
+
+  function renderLeaving(orientation: ShowOrientation) {
+    act(() => root.render(<Leaving orientation={orientation} back={back} />));
+  }
+
+  const pressBack = () =>
+    act(() => {
+      container.querySelector("button")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+  const elapse = (ms: number) =>
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+
+  // A rotation has finished: the event the root view controller sends from
+  // its transition coordinator's completion.
+  const rotated = (orientation: number) =>
+    act(() => {
+      orientationListeners.forEach((listener) => listener({ orientationInfo: { orientation } }));
+    });
+
+  // The pop: the route leaves the tree.
+  function pop() {
+    act(() => root.unmount());
+    root = createRoot(container);
+  }
+
+  it("landscape: the feed comes down and portrait is asked for BEFORE the pop, which waits for the rotation to finish", () => {
+    setWindow(844, 390);
+    renderLeaving("horizontal");
+    expect(text()).toBe("feed");
+    expect(locks()).toEqual(["LANDSCAPE"]);
+
+    pressBack();
+    // Still on the watch screen, still focused: the feed is gone, portrait
+    // is on its way — and nothing has popped.
+    expect(text()).toBe("waiting");
+    expect(locks()).toEqual(["LANDSCAPE", "PORTRAIT_UP"]);
+    expect(back).not.toHaveBeenCalled();
+
+    // The window reports its portrait size as the rotation BEGINS — too
+    // early: a pop now would still overlap the rotation.
+    setWindow(390, 844);
+    expect(back).not.toHaveBeenCalled();
+
+    // A second tap while the phone turns is not a second pop.
+    pressBack();
+    expect(back).not.toHaveBeenCalled();
+
+    // The rotation is over: now the pop, exactly once.
+    rotated(Orientation.PORTRAIT_UP);
+    expect(back).toHaveBeenCalledTimes(1);
+    rotated(Orientation.PORTRAIT_UP);
+    elapse(LEAVE_ROTATION_TIMEOUT_MS * 2);
+    expect(back).toHaveBeenCalledTimes(1);
+
+    // The pop unmounts the screen: the device hears nothing more while the
+    // native transition runs — the portrait lock was taken before it — and
+    // the screen stops listening.
+    const asked = lockAsync.mock.calls.length;
+    pop();
+    expect(lockAsync).toHaveBeenCalledTimes(asked);
+    expect(locks()).toEqual(["LANDSCAPE", "PORTRAIT_UP"]);
+    expect(orientationListeners.size).toBe(0);
+  });
+
+  it("the end of a LANDSCAPE rotation (the one that opened the player, reported late) does not pop", () => {
+    setWindow(844, 390);
+    renderLeaving("horizontal");
+    pressBack();
+
+    rotated(Orientation.LANDSCAPE_LEFT);
+    rotated(Orientation.LANDSCAPE_RIGHT);
+    expect(back).not.toHaveBeenCalled();
+
+    rotated(Orientation.PORTRAIT_UP);
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it("a rotation that never ends (a refused lock) still pops, once, after the timeout", () => {
+    setWindow(844, 390);
+    renderLeaving("horizontal");
+    pressBack();
+    expect(locks()).toEqual(["LANDSCAPE", "PORTRAIT_UP"]);
+
+    elapse(LEAVE_ROTATION_TIMEOUT_MS - 1);
+    expect(back).not.toHaveBeenCalled();
+
+    elapse(1);
+    expect(back).toHaveBeenCalledTimes(1);
+
+    // Neither more time nor a late end of the rotation pops a second time.
+    elapse(LEAVE_ROTATION_TIMEOUT_MS * 3);
+    setWindow(390, 844);
+    rotated(Orientation.PORTRAIT_UP);
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it("a vertical show pops at once — nothing to turn, no landscape↔portrait churn", () => {
+    setWindow(390, 844);
+    renderLeaving("vertical");
+    expect(text()).toBe("feed");
+    expect(locks()).toEqual(["PORTRAIT_UP"]);
+
+    pressBack();
+    expect(back).toHaveBeenCalledTimes(1);
+    // The release asked for the portrait the device already has — dropped.
+    expect(locks()).toEqual(["PORTRAIT_UP"]);
+    expect(orientationListeners.size).toBe(0);
+
+    const asked = lockAsync.mock.calls.length;
+    pop();
+    expect(lockAsync).toHaveBeenCalledTimes(asked);
+  });
+
+  it("nothing leaves until Back is pressed", () => {
+    setWindow(844, 390);
+    renderLeaving("horizontal");
+    setWindow(390, 844);
+    rotated(Orientation.PORTRAIT_UP);
+    elapse(LEAVE_ROTATION_TIMEOUT_MS * 2);
+    expect(back).not.toHaveBeenCalled();
   });
 });
