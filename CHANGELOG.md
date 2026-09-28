@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/efymd9/matio/compare/matio-v0.16.0...matio-v0.16.1) (2026-09-28)
+
+
+### Bug fixes
+
+* /ideas — поле логлайна под сильным блюром, шапка уезжает со скроллом ([#362](https://github.com/efymd9/matio/issues/362)) ([#363](https://github.com/efymd9/matio/issues/363)) ([d46e12e](https://github.com/efymd9/matio/commit/d46e12ed0ec91d26eeac16a283dca88b87b17e55))
+
 ## [0.16.0](https://github.com/efymd9/matio/compare/matio-v0.15.0...matio-v0.16.0) (2026-09-28)
 
 
