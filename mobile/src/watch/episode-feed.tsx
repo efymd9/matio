@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   FlatList,
   StyleSheet,
-  Text,
   View,
   useWindowDimensions,
   type ListRenderItemInfo,
@@ -31,7 +30,7 @@ import {
   type ShowDetail,
 } from "@/shared/api-types";
 import { optimizedImageUrl } from "@/shared/image-url";
-import { colors, display, SCREEN_PAD, space } from "@/theme";
+import { SCREEN_PAD, space } from "@/theme";
 import { useProgressSaver } from "./use-progress-saver";
 import { useSegmentTracker } from "./use-segment-tracker";
 
@@ -110,6 +109,36 @@ const PREVIEW_END_SLACK_MS = 5_000;
 
 // The preview's end — the answer the token route gives once it has run out.
 const previewEnded = () => new ApiError("forbidden", "", 403, "subscribe_required");
+
+// Where a landscape page's «‹» sits (#359). The page is locked to landscape
+// with the status bar hidden (#252), and the native transport — an
+// AVPlayerViewController on iOS — lays its own top row out inside the safe
+// area: fullscreen, picture-in-picture and AirPlay on the LEADING side,
+// volume on the trailing one. #252 put the «‹» at the leading edge of that
+// safe area, on the assumption the native row sat on the trailing side, so
+// the disc covered fullscreen and PiP, and the title next to it (a box as
+// wide as the screen) took the taps meant for the rest of the row.
+// react-native-video 6.19 on iOS neither reports when that row shows nor
+// lets one of its buttons be hidden, and the library is not patched here
+// (registry) — so the «‹» leaves the safe area. On a Face ID iPhone the
+// leading inset (44–62pt) is a black strip beside a 16:9 picture: the 40pt
+// disc is centred in it, LANDSCAPE_BACK_TOP down — past the rounded corner,
+// above the notch / Dynamic Island, which sit mid-height — where no native
+// button is drawn. Its 8pt hitSlop stays inside the strip at a 59pt inset
+// and reaches at most 6pt past it at 44pt, short of AVKit's buttons, which
+// keep their own margin inside the safe area. A phone with no such strip
+// (iPhone SE: inset 0) gets the «‹» below the native row instead.
+const BACK_DISC = 40; // GlassBackButton's disc
+const PILLARBOX_MIN = 44; // the narrowest strip the disc fits with room to spare
+const LANDSCAPE_BACK_TOP = space(11);
+const LANDSCAPE_BACK_BELOW_ROW = space(16);
+
+function landscapeBackPosition(insets: { top: number; left: number }) {
+  if (insets.left >= PILLARBOX_MIN) {
+    return { top: LANDSCAPE_BACK_TOP, left: Math.max(0, (insets.left - BACK_DISC) / 2) };
+  }
+  return { top: insets.top + LANDSCAPE_BACK_BELOW_ROW, left: SCREEN_PAD };
+}
 
 type Playback = {
   playbackId: string;
@@ -1004,32 +1033,15 @@ function FeedPage({
           onBack={onBack}
         />
       ) : (
-        <>
-          {/* The same glass «‹» as the show page — the board's one new
-              piece of player chrome. In landscape (#252) the screen is
-              locked with the status bar hidden, so the top inset is ~0 and
-              the LEFT inset is the notch: the «‹» and the title take the
-              leading safe area, top-left, clear of the native transport's
-              pill on the trailing side. */}
-          <GlassBackButton
-            onPress={onBack}
-            accessibilityLabel={t.player.backToShowAria}
-            style={[styles.back, { top: insets.top + space(2), left: insets.left + SCREEN_PAD }]}
-          />
-          <Text
-            style={[
-              styles.title,
-              {
-                top: insets.top + space(4),
-                left: insets.left + SCREEN_PAD + 52,
-                right: insets.right + SCREEN_PAD,
-              },
-            ]}
-            numberOfLines={1}
-          >
-            {episode.title}
-          </Text>
-        </>
+        // The same glass «‹» as the show page — the board's one new piece of
+        // player chrome — and nothing else: the native transport draws the
+        // rest, the episode's title included (from the source's metadata,
+        // #315). Where it sits: landscapeBackPosition.
+        <GlassBackButton
+          onPress={onBack}
+          accessibilityLabel={t.player.backToShowAria}
+          style={[styles.back, landscapeBackPosition(insets)]}
+        />
       )}
     </View>
   );
@@ -1038,13 +1050,6 @@ function FeedPage({
 const styles = StyleSheet.create({
   list: { flex: 1, backgroundColor: "#000" },
   stage: { flex: 1, backgroundColor: "#000" },
-  // Insets (top/left/right) are applied inline — they differ per orientation.
+  // Its top/left are applied inline — they follow the safe-area insets.
   back: { position: "absolute" },
-  title: {
-    position: "absolute",
-    ...display,
-    color: colors.ink,
-    fontSize: 13,
-    letterSpacing: 0.4,
-  },
 });
