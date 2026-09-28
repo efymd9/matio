@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.16.0](https://github.com/efymd9/matio/compare/matio-v0.15.0...matio-v0.16.0) (2026-09-28)
+
+
+### Features
+
+* лендинг /ideas — фанаты присылают идеи историй и контакты ([#297](https://github.com/efymd9/matio/issues/297)) ([#352](https://github.com/efymd9/matio/issues/352)) ([ebd81d1](https://github.com/efymd9/matio/commit/ebd81d130edf53f6da46dba026b06e155e45e831))
+
+
+### Bug fixes
+
+* «‹» в ландшафтном плеере больше не замораживает приложение ([#358](https://github.com/efymd9/matio/issues/358)) ([#361](https://github.com/efymd9/matio/issues/361)) ([44913fb](https://github.com/efymd9/matio/commit/44913fb5dd22a3801ceac1abdeae5e2805ce0192))
+* «‹» горизонтального плеера уходит в чёрную полосу у края и не накрывает кнопки AVKit ([#359](https://github.com/efymd9/matio/issues/359)) ([#360](https://github.com/efymd9/matio/issues/360)) ([cec16b6](https://github.com/efymd9/matio/commit/cec16b6396236c5de4dfcad6b30260c483583ba0))
+* вотчер бебиситинга не считает идущую проверку CI красной ([#353](https://github.com/efymd9/matio/issues/353)) ([#357](https://github.com/efymd9/matio/issues/357)) ([1e0a24d](https://github.com/efymd9/matio/commit/1e0a24d298527b25f0a7e90b921bf178b926ecea))
+
+
+### Documentation
+
+* DSN Sentry приложения задан в EAS — services.md и строка реестра ([#354](https://github.com/efymd9/matio/issues/354)) ([#355](https://github.com/efymd9/matio/issues/355)) ([3870fca](https://github.com/efymd9/matio/commit/3870fcaf973a619bcf7ec91bbd6124d67f394fad))
+
 ## [0.15.0](https://github.com/efymd9/matio/compare/matio-v0.14.0...matio-v0.15.0) (2026-09-27)
 
 
