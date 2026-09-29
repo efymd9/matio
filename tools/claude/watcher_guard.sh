@@ -25,10 +25,10 @@ case "$mode" in
   session-start)
     if main_checkout; then
       if ! alive; then
-        echo "PR watcher НЕ запущен. Взведи его инструментом Monitor: command='bash tools/claude/pr_watcher.sh', persistent=true (description='очередь PR'). Если Monitor не в списке инструментов — сначала ToolSearch select:Monitor. НЕ через Bash run_in_background и НЕ через '&'."
+        echo "PR watcher НЕ запущен. Запусти его Bash-инструментом с run_in_background=true: command='bash tools/claude/pr_watcher.sh' (description='очередь PR'). Вотчер выходит на первом событии — сессию будит сам выход; после обработки события запусти снова. НЕ через Monitor (истекает каждые 30 минут и будит впустую) и НЕ через '&' (процесс мимо харнесса не будит)."
       fi
       if ! issues_alive; then
-        echo "Issue watcher НЕ запущен (триаж и диспетчеризация автопилота зависят от него). Взведи инструментом Monitor: command='bash tools/claude/issue_watcher.sh', persistent=true (description='issues/автопилот')."
+        echo "Issue watcher НЕ запущен (триаж и диспетчеризация автопилота зависят от него). Запусти Bash-инструментом с run_in_background=true: command='bash tools/claude/issue_watcher.sh' (description='issues/автопилот'); после события — снова."
       fi
     fi
     ;;
@@ -36,7 +36,7 @@ case "$mode" in
     input=$(cat)
     active=$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null || echo false)
     if [ "$active" != "true" ] && main_checkout && { ! alive || ! issues_alive; }; then
-      jq -n '{decision: "block", reason: "Мёртв вотчер основной сессии (очередь PR и/или issues) — взведи оба до завершения хода инструментом Monitor (persistent=true): bash tools/claude/pr_watcher.sh и bash tools/claude/issue_watcher.sh. НЕ через Bash run_in_background. После запуска ход можно завершать."}'
+      jq -n '{decision: "block", reason: "Мёртв вотчер основной сессии (очередь PR и/или issues) — вотчер выходит после каждого события, запусти недостающий до завершения хода Bash-инструментом с run_in_background=true: bash tools/claude/pr_watcher.sh и/или bash tools/claude/issue_watcher.sh. НЕ через Monitor и НЕ через &. После запуска ход можно завершать."}'
     fi
     ;;
   *)
