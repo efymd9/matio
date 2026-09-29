@@ -18,8 +18,8 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/i18n/server", () => ({ getLocale: async () => state.locale }));
 vi.mock("@/lib/catalog", () => ({ getPublishedShows: async () => state.shows }));
-// lib/hero-preview.ts is NOT mocked: the hero follows the home page's real
-// pickFeaturedShow rule (its DB/Mux half is never called here).
+// The hero no longer reads the featured show (#370): the landing has its own
+// photo, and only `?show=` swaps in a series' hero.
 const action = vi.hoisted(() => ({ submitIdea: vi.fn() }));
 vi.mock("./actions", () => action);
 
@@ -90,32 +90,41 @@ describe("/ideas metadata", () => {
 });
 
 describe("/ideas page", () => {
-  it("?show=<published slug> preselects it and takes its hero", async () => {
+  it("?show=<published slug> preselects it and takes its hero, show focus", async () => {
     const props = await landing("morelli");
     expect(props.preselectedSlug).toBe("morelli");
     expect(props.heroImageUrl).toBe("/shows/morelli-hero.png");
+    expect(props.heroFocus).toBe("show");
   });
 
-  it("a preselected show without a hero falls back to the featured show's", async () => {
+  it("a preselected show without a hero gets the landing's own photo", async () => {
     const props = await landing("fallen");
     expect(props.preselectedSlug).toBe("fallen");
-    expect(props.heroImageUrl).toBe("/shows/the-scarlet-oath-hero.png");
+    expect(props.heroImageUrl).toBe("/ideas/hero.jpg");
+    expect(props.heroFocus).toBe("landing");
   });
 
   it.each([
     ["an unknown slug", "nope"],
     ["a repeated ?show (array)", ["morelli", "fallen"]],
     ["no ?show at all", undefined],
-  ])("%s preselects nothing and takes the featured hero", async (_, show) => {
+  ])("%s preselects nothing and takes the landing's own photo", async (_, show) => {
     const props = await landing(show);
     expect(props.preselectedSlug).toBeNull();
-    expect(props.heroImageUrl).toBe("/shows/the-scarlet-oath-hero.png");
+    expect(props.heroImageUrl).toBe("/ideas/hero.jpg");
+    expect(props.heroFocus).toBe("landing");
   });
 
-  it("no hero anywhere → none (the espresso + glow backdrop)", async () => {
+  it("the featured show's hero is not the landing's background any more (#370)", async () => {
+    // the-scarlet-oath is featured with a hero; without ?show it must not win.
+    const props = await landing();
+    expect(props.heroImageUrl).not.toBe("/shows/the-scarlet-oath-hero.png");
+  });
+
+  it("no show hero anywhere still leaves the landing photo", async () => {
     state.shows = [row("fallen", { heroImageUrl: null })];
     const props = await landing();
-    expect(props.heroImageUrl).toBeNull();
+    expect(props.heroImageUrl).toBe("/ideas/hero.jpg");
   });
 
   it("only slug, title and poster cross to the client, in catalog order", async () => {
