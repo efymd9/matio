@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/efymd9/matio/compare/matio-v0.16.1...matio-v0.17.0) (2026-09-29)
+
+
+### Features
+
+* /ideas — своя фотография фона лендинга, фокус на героине ([#370](https://github.com/efymd9/matio/issues/370)) ([#371](https://github.com/efymd9/matio/issues/371)) ([5ecd4f3](https://github.com/efymd9/matio/commit/5ecd4f3b375e8cc02baadb25d46e87c20ef48635))
+
+
+### Bug fixes
+
+* зависимости — ip-address 10.5.1 и undici 7.29.1 в pnpm-lock (ночной security, [#365](https://github.com/efymd9/matio/issues/365)) ([#366](https://github.com/efymd9/matio/issues/366)) ([2dd9561](https://github.com/efymd9/matio/commit/2dd9561fd85e801059452ce4bd8f4cb4c2bf17bc))
+
 ## [0.16.1](https://github.com/efymd9/matio/compare/matio-v0.16.0...matio-v0.16.1) (2026-09-28)
 
 
