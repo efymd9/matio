@@ -262,6 +262,7 @@ export function IdeasLanding({
   shows,
   preselectedSlug,
   heroImageUrl,
+  heroFocus = "show",
   submitIdea,
   children,
 }: {
@@ -271,6 +272,11 @@ export function IdeasLanding({
   /** A published show's slug from `?show=` (the page validated it), or null. */
   preselectedSlug: string | null;
   heroImageUrl: string | null;
+  /** Where the still is anchored when `object-cover` crops it. A phone shows
+   *  only a ~30%-wide vertical slice of a 16:9 frame: a show hero keeps its
+   *  subject right of centre (62%), the landing's own photo (#370) keeps the
+   *  heroine at ~31% in that slice. */
+  heroFocus?: "show" | "landing";
   submitIdea: (input: IdeaSubmissionInput) => Promise<IdeaSubmissionResult>;
   /** The server-rendered How-it-works + FAQ, under the form. */
   children?: ReactNode;
@@ -695,7 +701,10 @@ export function IdeasLanding({
               fill
               priority
               sizes="100vw"
-              className="object-cover object-[62%_30%]"
+              className={cn(
+                "object-cover",
+                heroFocus === "landing" ? "object-[26%_30%]" : "object-[62%_30%]",
+              )}
             />
           ) : null}
           <div aria-hidden className="duotone-strong pointer-events-none absolute inset-0" />

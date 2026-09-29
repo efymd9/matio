@@ -567,3 +567,45 @@ describe("IdeasLanding — the hero CTA and the Terms sheet", () => {
     expect(await screen.findByRole("dialog", { name: en.terms.title })).toBeTruthy();
   });
 });
+
+describe("hero focus (#370): which part of a 16:9 still a phone keeps", () => {
+  // A phone shows only a ~30%-wide vertical slice of the hero still, so the
+  // anchor decides who is on screen: a show hero keeps its subject right of
+  // centre, the landing's own photo keeps the heroine on the left third.
+  const heroImg = (container: HTMLElement) => {
+    const img = container.querySelector("section img");
+    expect(img).not.toBeNull();
+    return img as HTMLImageElement;
+  };
+
+  it("the landing's own photo is anchored on the heroine", () => {
+    const { container } = render(
+      <IdeasLanding
+        locale="en"
+        shows={SHOWS}
+        preselectedSlug={null}
+        heroImageUrl="/ideas/hero.jpg"
+        heroFocus="landing"
+        submitIdea={vi.fn()}
+      />,
+    );
+    const img = heroImg(container);
+    expect(img.classList.contains("object-[26%_30%]")).toBe(true);
+    expect(img.classList.contains("object-[62%_30%]")).toBe(false);
+  });
+
+  it("a show hero keeps the show anchor (the default)", () => {
+    const { container } = render(
+      <IdeasLanding
+        locale="en"
+        shows={SHOWS}
+        preselectedSlug="morelli"
+        heroImageUrl="/shows/morelli-hero.png"
+        submitIdea={vi.fn()}
+      />,
+    );
+    const img = heroImg(container);
+    expect(img.classList.contains("object-[62%_30%]")).toBe(true);
+    expect(img.classList.contains("object-[26%_30%]")).toBe(false);
+  });
+});

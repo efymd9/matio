@@ -2,11 +2,15 @@ import type { Metadata } from "next";
 import { IdeasLanding, type IdeasShow } from "@/components/ideas/ideas-landing";
 import { IdeasFaq, IdeasHowItWorks } from "@/components/ideas/ideas-sections";
 import { getPublishedShows } from "@/lib/catalog";
-import { pickFeaturedShow } from "@/lib/hero-preview";
 import { getLocale } from "@/lib/i18n/server";
 import { ideasDictFor } from "@/lib/i18n/ideas-dictionaries";
 import { localeAlternates } from "@/lib/seo";
 import { submitIdea } from "./actions";
+
+// The landing's own background (#370, the owner's photo): a static file, not
+// a show's artwork — the show heroes also dress the home page. 1672×941 JPG,
+// sRGB; its framing is written into the hero's "landing" focus.
+const LANDING_HERO_URL = "/ideas/hero.jpg";
 
 // /ideas (+ /es/ideas) — the landing where fans send Matio a story idea
 // (#297, design variant A). Bilingual and indexed; the canonical never
@@ -41,12 +45,13 @@ export default async function IdeasPage({
   const preselected =
     typeof show === "string" ? published.find((s) => s.slug === show) : undefined;
 
-  // The hero still: the preselected show's hero → the featured show's hero
-  // (the home page's rule) → none (espresso + floor glow). A poster is never
+  // The hero still (#370): an ad for one series (`?show=`) lands on that
+  // series' own hero; everything else — no `?show`, an unknown slug, a show
+  // without a hero — gets the landing's own photo. A poster is never
   // stretched into the hero on purpose — a 2:3 poster full-bleed looks wrong,
   // although the home hero falls back to one.
-  const heroImageUrl =
-    preselected?.heroImageUrl ?? pickFeaturedShow(published)?.heroImageUrl ?? null;
+  const showHero = preselected?.heroImageUrl ?? null;
+  const heroImageUrl = showHero ?? LANDING_HERO_URL;
 
   // Only what the select and the rail need crosses to the client, in catalog
   // order — a newly published show appears here by itself.
@@ -63,6 +68,7 @@ export default async function IdeasPage({
         shows={shows}
         preselectedSlug={preselected?.slug ?? null}
         heroImageUrl={heroImageUrl}
+        heroFocus={showHero ? "show" : "landing"}
         submitIdea={submitIdea}
       >
         <IdeasHowItWorks t={t} />
