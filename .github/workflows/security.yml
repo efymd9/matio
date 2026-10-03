@@ -24,9 +24,11 @@ jobs:
       # Гоняем официальный образ, а не action: имя и интерфейс образа
       # стабильны, а лишний слой сторонней обёртки здесь не нужен.
       # Сканируются локфайлы обеих половин: pnpm-lock.yaml и mobile/package-lock.json.
-      # Ignore — mobile/osv-scanner.toml: сканер читает конфиг из каталога
-      # САМОГО локфайла и вниз его не наследует, поэтому файл лежит в mobile/,
-      # а не в корне. Правила и срок пересмотра — /devops → «Ночной security».
+      # Ignore — по файлу на каждый лок: сканер читает osv-scanner.toml из
+      # каталога САМОГО локфайла и вниз его не наследует. Поэтому
+      # osv-scanner.toml в корне покрывает только pnpm-lock.yaml (#379), а
+      # mobile/osv-scanner.toml — только mobile/package-lock.json.
+      # Правила и срок пересмотра — /devops → «Ночной security».
       - name: osv-scanner
         run: |
           docker run --rm -v "${{ github.workspace }}:/src" \
