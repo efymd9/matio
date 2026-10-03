@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import * as Sentry from "@sentry/nextjs";
 import { and, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
@@ -10,6 +11,7 @@ import { paymentsEnabled } from "@/lib/free-mode";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import { EMPTY_ATTRIBUTION } from "@/lib/attribution";
+import { describeDbError } from "@/lib/db-errors";
 import {
   TRIAL_DURATION_SECONDS,
   TrialRateLimitError,
@@ -56,6 +58,26 @@ function logToken(fields: {
   episodeId?: string | null;
 }) {
   console.info(`[v1/playback-token] ${JSON.stringify(fields)}`);
+}
+
+// The legacy 60-second preview's own trial_sessions read/write failed — the one
+// path of this route whose failure used to be thrown to the framework (#326).
+// Drizzle's wrapper repeats the statement WITH its params (`Failed query: …
+// \nparams: <device id>,<show>,<ip hash>`) and Next prints an unhandled error's
+// message to the runtime log, so the failure is caught HERE and only its class
+// and SQLSTATE leave (`describeDbError`, the `submitIdea` / retention
+// precedent). The app gets the same 503 `unavailable` its other transient
+// failures use (the feed retries it with backoff). Sentry still hears of it, by
+// class and code, so a broken table does not go quiet.
+function trialStoreFailed(err: unknown, showId: string, episodeId: string) {
+  const { name, code } = describeDbError(err);
+  console.error("[v1/playback-token] trial store failed", { name, code });
+  Sentry.captureMessage("v1/playback-token: trial store failed", {
+    level: "error",
+    tags: { code: code ?? "none", name },
+  });
+  logToken({ result: 503, mode: "trial", showId, episodeId });
+  return apiError("unavailable", "Playback is unavailable right now. Try again.");
 }
 
 export async function POST(req: NextRequest) {
@@ -222,7 +244,12 @@ export async function POST(req: NextRequest) {
     return apiError("bad_request", "A device id is required for preview playback.");
   }
 
-  const trial = await findTrialSession(deviceId, row.showId);
+  let trial: Awaited<ReturnType<typeof findTrialSession>>;
+  try {
+    trial = await findTrialSession(deviceId, row.showId);
+  } catch (err) {
+    return trialStoreFailed(err, row.showId, episodeId);
+  }
   if (trial) {
     const remaining = Math.floor((trial.expiresAt.getTime() - Date.now()) / 1000);
     if (remaining > 0) return ok("trial", Math.min(remaining, TRIAL_TTL_CAP));
@@ -251,6 +278,6 @@ export async function POST(req: NextRequest) {
         headers: { "Retry-After": String(60 * 60) },
       });
     }
-    throw err;
+    return trialStoreFailed(err, row.showId, episodeId);
   }
 }

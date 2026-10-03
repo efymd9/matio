@@ -25,6 +25,14 @@ const h = vi.hoisted(() => ({
   // land BEFORE the users row goes.
   writes: [] as string[],
   insertFails: undefined as Error | undefined,
+  // user.created × an address held by another row (#380): the users insert's
+  // answers in order (undefined = it goes through), the row the address
+  // lookup finds, the mirror correction's writes, and Clerk's answer about
+  // the holder.
+  usersInsertResults: [] as (Error | undefined)[],
+  holderRow: undefined as { id: string } | undefined,
+  updates: [] as { table: string; set: unknown; where: unknown }[],
+  clerkGetUser: vi.fn(),
   stripeUpdate: vi.fn(),
   stripeSearch: vi.fn(),
   sentryMessage: vi.fn(),
@@ -32,7 +40,10 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/db", async () => {
   const { getTableName } = await import("drizzle-orm");
+  const { PgDialect } = await import("drizzle-orm/pg-core");
   type Table = Parameters<typeof getTableName>[0];
+  const byEmail = (where: unknown) =>
+    new PgDialect().sqlToQuery(where as SQL).sql === '"users"."email" = $1';
   return {
     db: {
       select: () => ({
@@ -41,6 +52,9 @@ vi.mock("@/db", async () => {
             limit: async () => {
               const name = getTableName(table);
               h.selects.push({ table: name, where });
+              if (name === "users" && byEmail(where)) {
+                return h.holderRow ? [h.holderRow] : [];
+              }
               if (name === "users") return h.userRow ? [h.userRow] : [];
               if (name === "subscriptions") return h.liveSub ? [h.liveSub] : [];
               throw new Error(`unexpected select from ${name}`);
@@ -68,14 +82,29 @@ vi.mock("@/db", async () => {
           onConflictDoNothing: async () => {
             if (h.insertFails) throw h.insertFails;
             const name = getTableName(table);
+            const fails = name === "users" ? h.usersInsertResults.shift() : undefined;
+            if (fails) throw fails;
             h.inserts.push({ table: name, values });
             h.writes.push(`insert ${name}`);
+          },
+        }),
+      }),
+      update: (table: Table) => ({
+        set: (set: unknown) => ({
+          where: async (where: unknown) => {
+            const name = getTableName(table);
+            h.updates.push({ table: name, set, where });
+            h.writes.push(`update ${name}`);
           },
         }),
       }),
     },
   };
 });
+
+vi.mock("@clerk/nextjs/server", () => ({
+  clerkClient: async () => ({ users: { getUser: h.clerkGetUser } }),
+}));
 
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
@@ -128,7 +157,10 @@ const userDeleted = (id?: string) => ({
   data: { object: "user", deleted: true, ...(id ? { id } : {}) },
 });
 
-const userCreated = (emails: { id: string; email_address: string }[]) => ({
+const userCreated = (
+  emails: { id: string; email_address: string }[],
+  extra: Record<string, unknown> = {},
+) => ({
   type: "user.created",
   object: "event",
   data: {
@@ -136,6 +168,7 @@ const userCreated = (emails: { id: string; email_address: string }[]) => ({
     object: "user",
     primary_email_address_id: emails[0]?.id ?? null,
     email_addresses: emails,
+    ...extra,
   },
 });
 
@@ -152,6 +185,10 @@ beforeEach(() => {
   h.inserts.length = 0;
   h.writes.length = 0;
   h.insertFails = undefined;
+  h.usersInsertResults.length = 0;
+  h.holderRow = undefined;
+  h.updates.length = 0;
+  h.clerkGetUser.mockReset();
   h.stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
   // Stripe knows no customer for the address unless a case says otherwise.
   h.stripeSearch.mockReset().mockResolvedValue({ data: [], has_more: false });
@@ -627,7 +664,148 @@ describe("Clerk webhook · user.deleted × PostHog (#180)", () => {
   });
 });
 
-describe("Clerk webhook · user.created (unchanged)", () => {
+describe("Clerk webhook · user.created × the address held by another row (#380)", () => {
+  // A row under ANOTHER Clerk id already holds the new account's address —
+  // an account deleted at Clerk without our erasure (#172), or an address
+  // changed at Clerk that the mirror never heard of. Clerk decides which.
+  const STALE_ID = "user_stale";
+  const emailTaken = () =>
+    Object.assign(new Error('Failed query: insert into "users" …'), {
+      cause: Object.assign(
+        new Error('duplicate key value violates unique constraint "users_email_unique"'),
+        { code: "23505", constraint_name: "users_email_unique" },
+      ),
+    });
+  // When Clerk created the NEW account (user.created's created_at, ms).
+  const CREATED_MS = Date.parse("2026-10-01T05:56:00Z");
+  const created = () =>
+    signed(userCreated([{ id: "idn_1", email_address: EMAIL }], { created_at: CREATED_MS }));
+
+  beforeEach(() => {
+    h.usersInsertResults.push(emailTaken());
+    h.holderRow = { id: STALE_ID };
+    // What eraseUser reads for the stale id: the row with the address.
+    h.userRow = { email: EMAIL, stripeCustomerId: null };
+  });
+
+  it("Clerk 404 for the holder → its row is erased as a LATE erasure, then the new row is inserted", async () => {
+    // The stale row had paid once — the very case where a Stripe search by
+    // the address would run on user.deleted. The address belongs to the new
+    // account now, so the late erasure must not search by it: the new
+    // account's own guest-checkout customer would be tombstoned forever.
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_old" };
+    h.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error("Not Found"), { name: "ClerkAPIResponseError", status: 404 }),
+    );
+
+    const res = await POST(created());
+
+    expect(res.status).toBe(200);
+    expect(h.clerkGetUser).toHaveBeenCalledWith(STALE_ID);
+    // No search by the address; the customer the OLD row names is still
+    // tombstoned, before the deletes.
+    expect(h.stripeSearch).not.toHaveBeenCalled();
+    expect(h.writes).toEqual([
+      "insert erased_customers",
+      "delete show_reminders",
+      "delete idea_submissions",
+      "delete users",
+      "insert users",
+    ]);
+    expect(h.inserts[0]).toEqual({
+      table: "erased_customers",
+      values: [{ stripeCustomerId: "cus_old" }],
+    });
+    // Address-matched rows only from before the new account existed; the
+    // reminders linked to the old account by user_id regardless.
+    const reminders = render(h.deletes[0].where);
+    expect(reminders.sql).toBe(
+      '(("show_reminders"."email" = $1 and "show_reminders"."created_at" < $2) or "show_reminders"."user_id" = $3)',
+    );
+    expect(reminders.params).toEqual([
+      EMAIL,
+      new Date(CREATED_MS).toISOString(),
+      STALE_ID,
+    ]);
+    const ideas = render(h.deletes[1].where);
+    expect(ideas.sql).toBe(
+      '("idea_submissions"."email" = $1 and "idea_submissions"."created_at" < $2)',
+    );
+    const erased = render(h.deletes[2].where);
+    expect(erased.sql).toBe('"users"."id" = $1');
+    expect(erased.params).toEqual([STALE_ID]);
+    expect(h.inserts[1]).toEqual({
+      table: "users",
+      values: { id: USER_ID, email: EMAIL },
+    });
+  });
+
+  it("alive with another address → the stale row gets that address, the new row is inserted, nothing is erased", async () => {
+    h.clerkGetUser.mockResolvedValue({
+      primaryEmailAddress: { emailAddress: "moved@example.invalid" },
+      emailAddresses: [{ emailAddress: "moved@example.invalid" }],
+    });
+
+    const res = await POST(created());
+
+    expect(res.status).toBe(200);
+    expect(h.deletes).toEqual([]);
+    expect(h.writes).toEqual(["update users", "insert users"]);
+    expect(h.updates[0].set).toEqual({ email: "moved@example.invalid" });
+    expect(render(h.updates[0].where).params).toEqual([STALE_ID, EMAIL]);
+    expect(h.inserts).toEqual([
+      { table: "users", values: { id: USER_ID, email: EMAIL } },
+    ]);
+  });
+
+  it("alive and still holding the address → nothing erased or written, acknowledged with 200 (a retry would change nothing)", async () => {
+    h.clerkGetUser.mockResolvedValue({
+      primaryEmailAddress: { emailAddress: EMAIL },
+      emailAddresses: [{ emailAddress: EMAIL }],
+    });
+
+    const res = await POST(created());
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("OK (address conflict unresolved)");
+    expect(h.writes).toEqual([]);
+    expect(h.sentryMessage.mock.calls[0][1]).toMatchObject({
+      level: "error",
+      tags: { userId: USER_ID, holderId: STALE_ID, outcome: "address_still_owned" },
+    });
+  });
+
+  it("Clerk failing with anything but 404 → nothing erased or written, 500 so Svix redelivers", async () => {
+    h.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error("Service Unavailable"), {
+        name: "ClerkAPIResponseError",
+        status: 503,
+      }),
+    );
+
+    const res = await POST(created());
+
+    expect(res.status).toBe(500);
+    expect(h.writes).toEqual([]);
+    expect(h.deletes).toEqual([]);
+  });
+
+  it("the redelivery after a successful run is a plain ON CONFLICT (id) DO NOTHING — Clerk is not asked again", async () => {
+    h.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error("Not Found"), { name: "ClerkAPIResponseError", status: 404 }),
+    );
+    await POST(created());
+    h.clerkGetUser.mockClear();
+
+    const res = await POST(created());
+
+    expect(res.status).toBe(200);
+    expect(h.clerkGetUser).not.toHaveBeenCalled();
+    expect(h.writes.slice(4)).toEqual(["insert users"]);
+  });
+});
+
+describe("Clerk webhook · user.created", () => {
   it("mirrors the primary email into users", async () => {
     const res = await POST(
       signed(

@@ -10,6 +10,7 @@ import {
   scrubSentryEvent,
   scrubUrl,
   sentryPrivacyOptions,
+  stripQueryParams,
   type SentryEventLike,
   type SentryExceptionValueLike,
   type SentryHintLike,
@@ -91,6 +92,35 @@ describe("redactEmails", () => {
   });
 });
 
+// What a failed Drizzle query puts in its message (drizzle-orm 0.45,
+// errors.js: `Failed query: ${query}\nparams: ${params}`). The params are what
+// the request bound — here a trial cookie / device UUID and an IP hash — and
+// must never reach the tracker; the SQL is what the incident is fixed from.
+const QUERY_SQL =
+  'select "id", "expires_at" from "trial_sessions" where ("session_token" = $1 and "show_id" = $2)';
+const QUERY_UUID = "1eaf0000-dead-4bee-8f00-00000000beef";
+const QUERY_HASH = "dummy-ip-hash-5f2c9a1b";
+const DRIZZLE_MESSAGE = `Failed query: ${QUERY_SQL}\nparams: ${QUERY_UUID},show_1,${QUERY_HASH}`;
+const STATEMENT_ONLY = `Failed query: ${QUERY_SQL}`;
+
+describe("stripQueryParams (#326)", () => {
+  it("cuts everything from the \\nparams: Drizzle appends, and keeps the statement", () => {
+    expect(stripQueryParams(DRIZZLE_MESSAGE)).toBe(STATEMENT_ONLY);
+  });
+
+  it("cuts a params list that itself spans lines", () => {
+    expect(stripQueryParams(`${STATEMENT_ONLY}\nparams: a,b\nc,d`)).toBe(STATEMENT_ONLY);
+  });
+
+  it("leaves a message with no params exactly as it is", () => {
+    expect(stripQueryParams("connect ECONNREFUSED 10.0.0.1:5432")).toBe(
+      "connect ECONNREFUSED 10.0.0.1:5432",
+    );
+    // `params:` mid-line is not Drizzle's format — nothing to cut on.
+    expect(stripQueryParams("bad params: x")).toBe("bad params: x");
+  });
+});
+
 describe("scrubSentryBreadcrumb", () => {
   it("drops console breadcrumbs entirely", () => {
     // Console arguments are whatever the app happened to log — the one channel
@@ -130,6 +160,15 @@ describe("scrubSentryBreadcrumb", () => {
     });
 
     expect(crumb?.message).toBe("reminder queued for [redacted-email]");
+  });
+
+  it("cuts the params Drizzle quotes after a failed statement (#326)", () => {
+    const crumb = scrubSentryBreadcrumb({
+      category: "sentry.event",
+      message: DRIZZLE_MESSAGE,
+    });
+
+    expect(crumb?.message).toBe(STATEMENT_ONLY);
   });
 
   it("drops the query and fragment the SDK splits off next to a clean URL", () => {
@@ -341,6 +380,55 @@ describe("scrubSentryEvent", () => {
     expect(event.message).toBe("checkout claim failed for [redacted-email]");
     expect(event.exception?.values?.[0]?.value).toBe(
       "no reminder row for [redacted-email]",
+    );
+  });
+
+  it("cuts the params of a failed query from the exception value, the message and the logentry (#326)", () => {
+    // The class does not matter — a DrizzleQueryError, a wrapper that kept its
+    // text, a captured message: the same `\nparams:` tail is cut wherever it is.
+    const event: SentryEventLike = {
+      message: DRIZZLE_MESSAGE,
+      logentry: { message: DRIZZLE_MESSAGE },
+      exception: {
+        values: [
+          { type: "PostgresError", value: "canceling statement due to statement timeout" },
+          { type: "DrizzleQueryError", value: DRIZZLE_MESSAGE },
+        ],
+      },
+    };
+
+    scrubSentryEvent(event);
+
+    expect(event.message).toBe(STATEMENT_ONLY);
+    expect(event.logentry?.message).toBe(STATEMENT_ONLY);
+    expect(event.exception?.values?.[0]?.value).toBe(
+      "canceling statement due to statement timeout",
+    );
+    expect(event.exception?.values?.[1]).toEqual({
+      type: "DrizzleQueryError", // the class stays — it is what the incident is searched by
+      value: STATEMENT_ONLY,
+    });
+    const json = JSON.stringify(event);
+    for (const param of [QUERY_UUID, QUERY_HASH, "show_1"]) {
+      expect(json).not.toContain(param);
+    }
+  });
+
+  it("cuts the params, then still redacts an address in the statement that is left", () => {
+    const event: SentryEventLike = {
+      exception: {
+        values: [
+          {
+            value: `Failed query: select 1 -- viewer@example.invalid\nparams: ${QUERY_UUID}`,
+          },
+        ],
+      },
+    };
+
+    scrubSentryEvent(event);
+
+    expect(event.exception?.values?.[0]?.value).toBe(
+      "Failed query: select 1 -- [redacted-email]",
     );
   });
 
@@ -771,6 +859,21 @@ describe("sentryPrivacyOptions", () => {
       expect(event?.request?.url).toBe("https://matio.tv/welcome");
       expect(event?.request).not.toHaveProperty("cookies");
     }
+  });
+
+  it("cuts a failed query's params through beforeSend and beforeBreadcrumb (#326)", () => {
+    const options = sentryPrivacyOptions();
+
+    const error = options.beforeSend({
+      exception: { values: [{ type: "DrizzleQueryError", value: DRIZZLE_MESSAGE }] },
+    });
+    const crumb = options.beforeBreadcrumb({
+      category: "sentry.event",
+      message: DRIZZLE_MESSAGE,
+    });
+
+    expect(error?.exception?.values?.[0]?.value).toBe(STATEMENT_ONLY);
+    expect(crumb?.message).toBe(STATEMENT_ONLY);
   });
 
   it("scrubs the root span's http.target in a transaction (#346)", () => {
