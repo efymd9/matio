@@ -25,6 +25,8 @@
     "stripe:scrub-capi": "tsx scripts/scrub-capi-metadata.ts",
     "export-user-data": "tsx scripts/export-user-data.ts",
     "erase-user": "tsx scripts/erase-user.ts",
+    "export-email": "tsx scripts/export-email.ts",
+    "erase-email": "tsx scripts/erase-email.ts",
     "test:locale": "vitest run lib/i18n/negotiate.test.ts lib/seo.test.ts",
     "backfill:mux-policy": "tsx scripts/backfill-mux-policy.ts",
     "seed:fake-shows": "tsx scripts/seed-fake-shows.ts",

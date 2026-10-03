@@ -328,6 +328,11 @@ import { stripeEvents } from "@/db/schema";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
 import { assembleUserExport, summarizeExport } from "@/lib/user-export";
 import {
+  runEraseEmail,
+  runExportEmail,
+  type AddressDb,
+} from "@/lib/address-requests";
+import {
   createAuthCheckoutSession,
   reportWalletCheckoutStarted,
 } from "@/app/subscribe/actions";
@@ -2798,5 +2803,245 @@ describe("log audit · idea submission (/ideas, #297)", () => {
     expect(leaked(logged, result)).toEqual([]);
     expect(logged()).toBe('submitIdea: failed {"name":"DrizzleQueryError","code":"57014"}');
     expect(render(sentryMessage.mock.calls)).toContain('"code":"57014"');
+  });
+});
+
+describe("log audit · subject requests by address (pnpm export-email / erase-email, #339)", () => {
+  // The address is the whole key of these two commands, so it is the one
+  // thing they must never print: stdout and stderr of a terminal end up in
+  // shell history, CI logs and chat pastes. The export FILE is the person's
+  // data and holds the address by definition; what the commands SAY is the
+  // reference `address#<hash>`, counts, row ids, an account's id and — on a
+  // failure — the error's class and SQLSTATE. The worst cases seed the
+  // markers into the rows and INTO the thrown text, the way the driver
+  // quotes the statement's parameters.
+  const MARKER_OTHER_ACCOUNT = "user_marker_other_account";
+  const MARKERS = [MARKER_EMAIL, MARKER_NAME, MARKER_STORY, MARKER_OTHER_ACCOUNT];
+  const ENV = { DATABASE_URL: "postgres://invalid.example.invalid/matio" };
+
+  const reminderRow = {
+    id: "rem_marker",
+    email: MARKER_EMAIL,
+    // Another account's id on a row of THIS address — the export drops it.
+    userId: MARKER_OTHER_ACCOUNT,
+  };
+  const ideaRow = {
+    id: "idea_marker",
+    email: MARKER_EMAIL,
+    authorName: MARKER_NAME,
+    logline: "What if a banished postman had one last letter to deliver?",
+    story: MARKER_STORY,
+  };
+
+  /** What Drizzle 0.44+ throws: its wrapper quoting the query, the PostgresError on `.cause`. */
+  function driverError(code: string) {
+    const statement = `delete from "idea_submissions" where "email" = '${MARKER_EMAIL}' -- ${MARKER_NAME}`;
+    return Object.assign(new Error(`Failed query: ${statement}`), {
+      name: "DrizzleQueryError",
+      cause: Object.assign(new Error(`${statement} — ${MARKER_STORY}`), {
+        name: "PostgresError",
+        code,
+      }),
+    });
+  }
+
+  /**
+   * A database whose every table answers with the seeded rows (a clause is
+   * not read — the point is what the command prints about them), whose
+   * `users` answers with `accounts`, and which throws `failure` from the
+   * statement named in `failOn`.
+   */
+  function addressDb(
+    over: { accounts?: unknown[]; failOn?: "select" | "delete"; failure?: unknown } = {},
+  ) {
+    const rowsOf = (table: PgTable) => {
+      const name = getTableName(table);
+      if (name === "users") return over.accounts ?? [];
+      return name === "show_reminders" ? [reminderRow] : [ideaRow];
+    };
+    const db = {
+      select: () => ({
+        from: (table: PgTable) => ({
+          where: async () => {
+            if (over.failOn === "select" && getTableName(table) !== "users") throw over.failure;
+            return rowsOf(table);
+          },
+        }),
+      }),
+      delete: (table: PgTable) => ({
+        where: () => ({
+          returning: async () => {
+            if (over.failOn === "delete") throw over.failure;
+            return rowsOf(table);
+          },
+        }),
+      }),
+      transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
+    };
+    return db as unknown as AddressDb;
+  }
+
+  function run(db: AddressDb) {
+    const out: string[] = [];
+    const err: string[] = [];
+    const written: { path: string; content: string }[] = [];
+    const deps = {
+      getDb: async () => db,
+      io: { out: (l: string) => out.push(l), err: (l: string) => err.push(l) },
+      now: new Date("2026-10-03T12:00:00Z"),
+      tmpDir: "/tmp/audit",
+      writeFile: (path: string, content: string) => {
+        written.push({ path, content });
+      },
+    };
+    return { out, err, written, deps };
+  }
+
+  /** Markers found in what would leave the process: console, stdout, stderr, every Sentry call. */
+  function leaked(logged: () => string, r: { out: string[]; err: string[] }): string[] {
+    const outputs = [
+      logged(),
+      r.out.join("\n"),
+      r.err.join("\n"),
+      sentryMessage.mock.calls.map(render).join("\n"),
+    ];
+    return MARKERS.filter((marker) => outputs.some((o) => o.includes(marker)));
+  }
+
+  it("export: the summary and the path carry counts and the reference — the file holds the address, stdout never does", async () => {
+    const logged = captureConsole();
+    const r = run(addressDb());
+
+    const code = await runExportEmail([MARKER_EMAIL], ENV, r.deps);
+
+    expect(code).toBe(0);
+    // The detector sees what it must: the person's file DOES hold the
+    // address, the name and the story — so a clean stdout is a real result.
+    expect(r.written).toHaveLength(1);
+    expect(r.written[0].content).toContain(MARKER_EMAIL);
+    expect(r.written[0].content).toContain(MARKER_NAME);
+    expect(r.written[0].content).toContain(MARKER_STORY);
+    // …but not another person's account id, and not in the file name either.
+    expect(r.written[0].content).not.toContain(MARKER_OTHER_ACCOUNT);
+    expect(r.written[0].path).not.toContain(MARKER_EMAIL.split("@")[0]);
+    expect(r.out.join("\n")).toContain("show_reminders=1 idea_submissions=1");
+    expect(leaked(logged, r)).toEqual([]);
+  });
+
+  it("export: a database failure whose driver error quotes the address is reported by class and SQLSTATE only", async () => {
+    const logged = captureConsole();
+    const r = run(addressDb({ failOn: "select", failure: driverError("57014") }));
+
+    const code = await runExportEmail([MARKER_EMAIL], ENV, r.deps);
+
+    expect(code).toBe(1);
+    expect(r.err).toEqual(["export-email failed (DrizzleQueryError/57014)"]);
+    expect(r.written).toEqual([]);
+    expect(leaked(logged, r)).toEqual([]);
+  });
+
+  it("export: a failed file write is reported by class and code — the path it quotes may name the address", async () => {
+    const logged = captureConsole();
+    const r = run(addressDb());
+    r.deps.writeFile = () => {
+      throw Object.assign(new Error(`EACCES: permission denied, open '/tmp/${MARKER_EMAIL}.json'`), {
+        code: "EACCES",
+      });
+    };
+
+    const code = await runExportEmail([MARKER_EMAIL, "--out", `/tmp/${MARKER_EMAIL}.json`], ENV, r.deps);
+
+    expect(code).toBe(1);
+    expect(r.err).toEqual(["export-email failed (Error/EACCES)"]);
+    expect(leaked(logged, r)).toEqual([]);
+  });
+
+  it("export: a path the operator named after the address is elided from stdout", async () => {
+    const logged = captureConsole();
+    const r = run(addressDb());
+
+    await runExportEmail([MARKER_EMAIL, "--out", `/tmp/${MARKER_EMAIL}.json`], ENV, r.deps);
+
+    expect(r.out.at(-1)).toContain("<path elided");
+    expect(leaked(logged, r)).toEqual([]);
+  });
+
+  it("erase: the dry run and the --apply summary are counts and row ids — rows seeded with the person's words never show", async () => {
+    const logged = captureConsole();
+    const dry = run(addressDb());
+    const applied = run(addressDb());
+
+    expect(await runEraseEmail([MARKER_EMAIL], ENV, dry.deps)).toBe(0);
+    expect(await runEraseEmail([MARKER_EMAIL, "--apply"], ENV, applied.deps)).toBe(0);
+
+    expect(dry.out.join("\n")).toContain("would delete: show_reminders=1 idea_submissions=1");
+    expect(dry.out.join("\n")).toContain("ids idea_submissions: idea_marker");
+    expect(applied.out.join("\n")).toContain("deleted: show_reminders=1 idea_submissions=1");
+    expect(applied.out.join("\n")).toContain("ids show_reminders: rem_marker");
+    expect(leaked(logged, dry)).toEqual([]);
+    expect(leaked(logged, applied)).toEqual([]);
+  });
+
+  it("erase: a failure inside the transaction whose driver error quotes the address is reported by class and SQLSTATE only", async () => {
+    const logged = captureConsole();
+    const r = run(addressDb({ failOn: "delete", failure: driverError("40P01") }));
+
+    const code = await runEraseEmail([MARKER_EMAIL, "--apply"], ENV, r.deps);
+
+    expect(code).toBe(1);
+    expect(r.err).toEqual(["erase-email failed (DrizzleQueryError/40P01)"]);
+    expect(leaked(logged, r)).toEqual([]);
+  });
+
+  it("a refusal for an address with an account names the account by id — never the address or the name", async () => {
+    const logged = captureConsole();
+    const accounts = [{ id: "user_marker_account", email: MARKER_EMAIL, stripeCustomerId: "cus_marker" }];
+    const exporting = run(addressDb({ accounts }));
+    const erasing = run(addressDb({ accounts }));
+
+    expect(await runExportEmail([MARKER_EMAIL], ENV, exporting.deps)).toBe(4);
+    expect(await runEraseEmail([MARKER_EMAIL, "--apply"], ENV, erasing.deps)).toBe(4);
+
+    expect(exporting.err.join("\n")).toContain("user_marker_account");
+    expect(erasing.err.join("\n")).toContain("user_marker_account");
+    expect(exporting.written).toEqual([]);
+    expect(leaked(logged, exporting)).toEqual([]);
+    expect(leaked(logged, erasing)).toEqual([]);
+  });
+
+  it("refused arguments are never echoed — a second positional or a mistyped address may be one", async () => {
+    const logged = captureConsole();
+    const cases = [
+      [MARKER_EMAIL, "second.address@example.invalid"],
+      [`${MARKER_NAME} <${MARKER_EMAIL}>`],
+      [MARKER_EMAIL, `-${MARKER_EMAIL}`],
+      [],
+    ];
+    for (const argv of cases) {
+      const exporting = run(addressDb());
+      const erasing = run(addressDb());
+
+      expect(await runExportEmail(argv, ENV, exporting.deps), argv.join(" ")).toBe(2);
+      expect(await runEraseEmail(argv, ENV, erasing.deps), argv.join(" ")).toBe(2);
+
+      for (const r of [exporting, erasing]) {
+        expect(leaked(logged, r)).toEqual([]);
+        expect(r.err.join("\n")).not.toContain("second.address");
+      }
+    }
+  });
+
+  it("without DATABASE_URL both commands say how to pass it and print nothing about the address", async () => {
+    const logged = captureConsole();
+    const exporting = run(addressDb());
+    const erasing = run(addressDb());
+
+    expect(await runExportEmail([MARKER_EMAIL], {}, exporting.deps)).toBe(2);
+    expect(await runEraseEmail([MARKER_EMAIL, "--apply"], {}, erasing.deps)).toBe(2);
+
+    expect(exporting.err.join("\n")).toContain("DATABASE_URL must be passed explicitly");
+    expect(erasing.err.join("\n")).toContain("DATABASE_URL must be passed explicitly");
+    expect(leaked(logged, exporting)).toEqual([]);
+    expect(leaked(logged, erasing)).toEqual([]);
   });
 });

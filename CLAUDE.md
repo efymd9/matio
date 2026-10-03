@@ -958,6 +958,18 @@ lib/
   posthog-config.ts        # server-only: getPosthogQueryConfig() — the ONE
                            #   env read of the personal key + project id;
                            #   re-exported by posthog-query.ts
+  address-requests.ts      # universal (no server-only — the two scripts run
+                           #   it under tsx): art. 15/17/20 for an ADDRESS
+                           #   WITHOUT an account (#339) — show_reminders +
+                           #   idea_submissions by the lowercased address:
+                           #   arg parsing, the reads, ONE-transaction erase,
+                           #   the export document (another account's user_id
+                           #   left out), stdout (`address#<hash>`, counts,
+                           #   ids — never the address), exit codes; an
+                           #   address that belongs to an account is refused
+                           #   with its id (exit 4). runExportEmail /
+                           #   runEraseEmail ARE the scripts; the log audit
+                           #   runs them
   i18n/                    # dictionaries.ts + server.ts + client.tsx (optimistic
                            #   LocaleProvider) + actions.ts + shared.ts +
                            #   negotiate.ts (pure Accept-Language/geo locale
@@ -1056,6 +1068,13 @@ scripts/
                            #   --apply = the webhook's eraseUser; vendors
                            #   opt-in by key; exit 3 = a step left by hand.
                            #   Runbook: docs/runbooks/gdpr-requests.md §4
+  export-email.ts          # pnpm export-email <address> [--out <file>] —
+  erase-email.ts           # pnpm erase-email <address> [--apply] — #339, art.
+                           #   15/20 and 17 for an address WITHOUT an
+                           #   account; thin glue over lib/address-requests.ts
+                           #   (DATABASE_URL explicit → exit 2; JSON 0600;
+                           #   dry-run by default; refuses an account's
+                           #   address, exit 4). Runbook: gdpr-requests.md §2
   check-subscription-dupes.ts # pnpm db:check-sub-dupes — pre-flight for 0008
                            #   (locale tests moved to lib/i18n/negotiate.test.ts
                            #    + lib/seo.test.ts — vitest, `pnpm test:locale`)
