@@ -25,6 +25,9 @@ const h = vi.hoisted(() => ({
   sign: vi.fn(),
   captureMessage: vi.fn(),
   FakeRateLimit: class FakeRateLimit extends Error {},
+  // true = the REAL getClientIp/hashClientIp (the #351 bucket cases); every
+  // other case keeps the constant IP and the constant hash.
+  realIp: false,
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -73,29 +76,38 @@ vi.mock("@/lib/attribution", () => ({
 vi.mock("@/lib/visitor", () => ({
   stampVisitorWallSeen: h.stampVisitorWallSeen,
 }));
-vi.mock("@/lib/trial", () => ({
-  TRIAL_COOKIE: "trial_session",
-  TRIAL_DURATION_SECONDS: 60,
-  TrialRateLimitError: h.FakeRateLimit,
-  findTrialSession: h.findTrialSession,
-  mintTrialSession: h.mintTrialSession,
-  stampSignupWall: h.stampSignupWall,
-  getClientIp: () => "203.0.113.7",
-  hashClientIp: () => "hashed-ip",
-}));
+vi.mock("@/lib/trial", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/trial")>();
+  return {
+    TRIAL_COOKIE: "trial_session",
+    TRIAL_DURATION_SECONDS: 60,
+    TrialRateLimitError: h.FakeRateLimit,
+    findTrialSession: h.findTrialSession,
+    mintTrialSession: h.mintTrialSession,
+    stampSignupWall: h.stampSignupWall,
+    getClientIp: (req: Parameters<typeof actual.getClientIp>[0]) =>
+      h.realIp ? actual.getClientIp(req) : "203.0.113.7",
+    hashClientIp: (ip: string) => (h.realIp ? actual.hashClientIp(ip) : "hashed-ip"),
+  };
+});
 
 import { GET } from "./route";
 
 const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const SHOW = "show-1";
 
-function get(episodeId: string | null = EPISODE): Parameters<typeof GET>[0] {
+function get(
+  episodeId: string | null = EPISODE,
+  clientIp?: string,
+): Parameters<typeof GET>[0] {
   const url = new URL("https://matio.tv/api/playback-token");
   if (episodeId) url.searchParams.set("episode_id", episodeId);
+  const headers = new Headers();
+  if (clientIp) headers.set("x-vercel-forwarded-for", clientIp);
   return {
     nextUrl: url,
     cookies: { get: () => undefined },
-    headers: new Headers(),
+    headers,
   } as unknown as Parameters<typeof GET>[0];
 }
 
@@ -107,6 +119,7 @@ function gateMode() {
 
 beforeEach(() => {
   h.userId = null;
+  h.realIp = false;
   h.cookie = undefined;
   h.row = { playbackId: "pb-1", showId: SHOW, access: "free" };
   h.hasActiveSubscription.mockReset().mockResolvedValue(false);
@@ -160,8 +173,14 @@ describe("signup gate (REQUIRE_SIGNUP=1) — the episode's tier decides (#198)",
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ token: "signed-jwt", mode: "free" });
-    // The anonymous funnel row is minted on this first free play.
+    // The anonymous funnel row is minted on this first free play — as a WEB
+    // row, the only kind the IP fallback of the account link may claim (#349).
     expect(h.mintTrialSession).toHaveBeenCalledTimes(1);
+    expect(h.mintTrialSession.mock.calls[0][0]).toMatchObject({
+      showId: SHOW,
+      kind: "episodes",
+      client: "web",
+    });
   });
 
   it.each([["member"], ["subscriber"]])(
@@ -195,6 +214,36 @@ describe("signup gate (REQUIRE_SIGNUP=1) — the episode's tier decides (#198)",
       expect(await res.json()).toMatchObject({ mode: "member" });
     },
   );
+});
+
+// #351: the per-IP trial brake counts rows by this hash, so two source
+// addresses of one IPv6 /64 must hand the mint the SAME hash — a client that
+// rotates inside its prefix would otherwise open a fresh bucket every time.
+// The real getClientIp/hashClientIp here, not the constant stand-ins.
+describe("the trial mint's IP bucket (#351)", () => {
+  async function mintedHash(clientIp: string): Promise<string> {
+    gateMode();
+    h.realIp = true;
+    h.mintTrialSession.mockClear();
+    await GET(get(EPISODE, clientIp));
+    expect(h.mintTrialSession).toHaveBeenCalledTimes(1);
+    return h.mintTrialSession.mock.calls[0][0].ipHash;
+  }
+
+  it("two addresses of one /64 share a bucket; the next /64 does not", async () => {
+    const a = await mintedHash("2001:db8:abcd:12:1::1");
+    const b = await mintedHash("2001:db8:abcd:12:ffff:ffff:ffff:fffe");
+    const other = await mintedHash("2001:db8:abcd:13::1");
+
+    expect(a).toBe(b);
+    expect(other).not.toBe(a);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("IPv4 and its IPv4-mapped spelling share a bucket", async () => {
+    expect(await mintedHash("::ffff:203.0.113.7")).toBe(await mintedHash("203.0.113.7"));
+    expect(await mintedHash("203.0.113.8")).not.toBe(await mintedHash("203.0.113.7"));
+  });
 });
 
 describe("open free mode — everything plays", () => {
@@ -275,6 +324,7 @@ describe("paid mode — the legacy 60s preview (all-subscriber show)", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ mode: "trial", expiresIn: 60 });
     expect(res.cookies.get("trial_session")?.value).toBeTruthy();
+    expect(h.mintTrialSession.mock.calls[0][0]).toMatchObject({ client: "web" });
   });
 
   it("answers 429 with Retry-After when the IP bucket is full", async () => {

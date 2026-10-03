@@ -186,6 +186,7 @@ export async function GET(req: NextRequest) {
           sessionToken,
           showId: row.showId,
           ipHash: hashClientIp(getClientIp(req)),
+          client: "web",
           attribution: readAttributionCookiesFromRequest(req),
           kind: "episodes",
         });
@@ -343,6 +344,7 @@ export async function GET(req: NextRequest) {
       sessionToken,
       showId: row.showId,
       ipHash,
+      client: "web",
       attribution,
     });
     mintedExpiresAt = fresh.expiresAt;

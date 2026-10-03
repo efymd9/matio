@@ -1,7 +1,6 @@
 "use server";
 
 import crypto from "node:crypto";
-import { isIP } from "node:net";
 import * as Sentry from "@sentry/nextjs";
 import { and, eq, isNull } from "drizzle-orm";
 import { headers } from "next/headers";
@@ -42,38 +41,6 @@ import { getClientIp, hashClientIp } from "@/lib/trial";
 // response or a retry of the same pitch lands on ON CONFLICT DO NOTHING and
 // gets the same `ok: true` a new row gets.
 
-// What the hourly brake counts per. An IPv6 client usually holds a whole /64
-// (often a /56 or a /48) and can rotate its source address inside it at
-// will — keyed per address, every rotation would open a fresh bucket of ten,
-// and the brake is this form's only defence against a script (a headless
-// bot never fills the honeypot). So an IPv6 address counts by its /64;
-// IPv4 — and an IPv4-mapped IPv6 address — by the address itself, and
-// anything unparseable ("unknown") as it is.
-function brakeSubject(ip: string): string {
-  if (isIP(ip) !== 6) return ip;
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
-  if (mapped) return mapped[1];
-  const [head, tail] = ip.split("%")[0].split("::");
-  const left = head ? head.split(":") : [];
-  const right = tail ? tail.split(":") : [];
-  // An embedded dotted IPv4 tail is two 16-bit groups wide.
-  const width = (groups: string[]) =>
-    groups.reduce((n, g) => n + (g.includes(".") ? 2 : 1), 0);
-  const groups =
-    tail === undefined
-      ? left
-      : [
-          ...left,
-          ...Array<string>(Math.max(0, 8 - width(left) - width(right))).fill("0"),
-          ...right,
-        ];
-  const prefix = groups
-    .slice(0, 4)
-    .map((g) => parseInt(g, 16).toString(16))
-    .join(":");
-  return `${prefix}::/64`;
-}
-
 export async function submitIdea(
   input: IdeaSubmissionInput,
 ): Promise<IdeaSubmissionResult> {
@@ -94,14 +61,17 @@ export async function submitIdea(
     const errors = validateIdeaInput(v);
     if (errors.length > 0) return { ok: false, reason: "invalid", errors };
 
-    // The hourly brake per hashed client IP — an IPv6 client per /64
-    // (brakeSubject) — fail-open on a DB error, like the checkout brakes.
-    // The raw IP goes nowhere; the key is `idea:` + HMAC of it, so it never
-    // collides with the checkout keys.
+    // The hourly brake per hashed client IP bucket — an IPv6 client per /64,
+    // because it can rotate its address inside the prefix at will and this
+    // brake is the form's only defence against a script (a headless bot never
+    // fills the honeypot); hashClientIp buckets, lib/ip-bucket.ts — fail-open
+    // on a DB error, like the checkout brakes. The raw IP goes nowhere; the
+    // key is `idea:` + HMAC of the bucket, so it never collides with the
+    // checkout keys.
     const ip = getClientIp({ headers: await headers() });
     if (
       await checkoutRateLimited(
-        "idea:" + hashClientIp(brakeSubject(ip)),
+        "idea:" + hashClientIp(ip),
         IDEA_RATELIMIT_PER_HOUR,
       )
     ) {

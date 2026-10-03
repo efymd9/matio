@@ -11,17 +11,19 @@ import {
   toFirstColumns,
   toLastColumns,
 } from "@/lib/attribution";
+import { ipBucket } from "@/lib/ip-bucket";
 
 export const TRIAL_DURATION_SECONDS = 60;
 export const TRIAL_COOKIE = "trial_session";
 
-// Cap on trial-row creations per (client-IP, show) per hour. Stops the
-// "clear cookies → fresh 60s" loop without disrupting households on a
+// Cap on trial-row creations per (client-IP bucket, show) per hour — the
+// bucket is lib/ip-bucket.ts:ipBucket (an IPv6 client counts per /64). Stops
+// the "clear cookies → fresh 60s" loop without disrupting households on a
 // shared IP watching different shows. Raised 3 → 10 with autoplay-on-land
 // (2026-06-09): rows now mint per cookie-less LAND, not per play press, so
 // the old cap punished CGNAT/ad-webview traffic that never pressed
 // anything. 10 still bounds the cookie-clear loop at ~10 preview-minutes
-// per (IP, show) hour.
+// per (IP bucket, show) hour.
 export const TRIAL_RATELIMIT_PER_HOUR = 10;
 const RATELIMIT_WINDOW_MS = 60 * 60 * 1000;
 
@@ -66,16 +68,23 @@ export async function findTrialSession(
 // work. Persisted to attribution_{first,last}_{source,medium,campaign}
 // columns; null entries leave the columns null.
 // Optional kind='episodes' marks episode-gated free-tier rows (expiresAt becomes a startedAt sentinel).
+//
+// `client` says who minted the row — 'web' (the trial_session cookie) or 'app'
+// (the device id). REQUIRED, with no default, so a new call site has to decide:
+// the IP fallback of linkTrialSessionsToCurrentUser links only 'web' rows, and
+// a silently-'web' app row would be handed to a stranger's account (#349).
 export async function mintTrialSession({
   sessionToken,
   showId,
   ipHash,
+  client,
   attribution,
   kind = "preview",
 }: {
   sessionToken: string;
   showId: string;
   ipHash: string;
+  client: "web" | "app";
   attribution?: { first: AttributionPayload; last: AttributionPayload };
   // 'preview' = legacy 60s trial; 'episodes' = episode-gated free tier
   // (expiresAt becomes a startedAt sentinel — gated shows never read it).
@@ -109,6 +118,7 @@ export async function mintTrialSession({
       showId,
       expiresAt,
       ipHash,
+      client,
       kind,
       ...toFirstColumns(first),
       ...toLastColumns(last),
@@ -135,11 +145,19 @@ export async function mintTrialSession({
 // have broken JWT signing upstream, so we fall back to a constant only
 // to keep the type non-nullable; in any healthy deployment the env var
 // is present.
+//
+// What is hashed is the IP's BUCKET (lib/ip-bucket.ts:ipBucket), not the
+// address: IPv4 as it is, IPv6 by its /64 — so no limiter keyed by this hash
+// (trial mint, reminder capture, guest checkout, the /ideas brake) can be
+// reset by rotating the source address inside a prefix (#351). The bucketing
+// lives HERE, in the one function every such limiter already calls, so a new
+// one cannot forget it. The link fallback below hashes through it too, so it
+// keeps matching the rows the mint wrote.
 const TRIAL_HASH_FALLBACK_SALT = "matio-trial-fallback-salt";
 
 export function hashClientIp(ip: string): string {
   const salt = process.env.MUX_SIGNING_KEY_PRIVATE_KEY ?? TRIAL_HASH_FALLBACK_SALT;
-  return crypto.createHmac("sha256", salt).update(ip).digest("hex");
+  return crypto.createHmac("sha256", salt).update(ipBucket(ip)).digest("hex");
 }
 
 // Resolve the client IP for rate-limit bucketing. We deliberately only
@@ -196,7 +214,16 @@ export async function linkTrialSessionsToCurrentUser(): Promise<void> {
   // user had 39 orphaned rows). The IP fallback is coarser (a shared NAT could
   // attach a neighbour's anonymous preview), hence the LINK_IP_WINDOW_MS bound;
   // and these columns are analytics-only (playback gating never reads them), so
-  // minor over-attribution is acceptable.
+  // minor over-attribution is acceptable — for WEB rows. It is not for the
+  // app's (#349): an app row is a device id, nothing ties that device to this
+  // browser (the app never builds a device→account link), and behind a carrier
+  // CGNAT the same-IP match would put a stranger's phone into this account —
+  // out of the retention cron's reach (`user_id IS NULL`) and into the art. 15
+  // export. So the fallback links ONLY rows minted as 'web'; a NULL `client`
+  // (a row from before the column, web/app unknowable) is left alone too — the
+  // privacy-safe side, costing at most the first six hours after the deploy.
+  // The cookie match above is untouched: it is an exact-token proof, not a
+  // guess by network.
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   const matchers = [];
   if (sessionToken) {
@@ -211,6 +238,7 @@ export async function linkTrialSessionsToCurrentUser(): Promise<void> {
         and(
           eq(trialSessions.ipHash, hashClientIp(ip)),
           gt(trialSessions.startedAt, new Date(Date.now() - LINK_IP_WINDOW_MS)),
+          eq(trialSessions.client, "web"),
         ),
       );
     }

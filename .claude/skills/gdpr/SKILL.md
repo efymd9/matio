@@ -22,7 +22,8 @@ PR: данные не размножаются бесконтрольно, ст�
 регион, DPA, механизм трансфера, дата сверки).
 
 Что уже есть в кодовой базе по теме (не изобретать заново): HMAC-хеш IP
-вместо сырого (`lib/trial.ts:hashClientIp`, тот же приём в
+вместо сырого (`lib/trial.ts:hashClientIp` от бакета `lib/ip-bucket.ts` — IPv6
+по /64, #351; тот же приём в
 `show_reminders.ip_hash`, `guest_checkout_attempts` — там же с #227 HMAC
 Clerk id вместо самого id для лимита авторизованного чекаута — и HMAC значения cookie
 вместо самого значения — `guest_checkout_sessions.claim_token_hash`,

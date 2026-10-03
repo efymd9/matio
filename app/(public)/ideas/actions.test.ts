@@ -416,7 +416,9 @@ describe("submitIdea — the hourly brake", () => {
     const c = await keyFor("2001:db8:abcd:13::1");
 
     expect(a).toBe(b);
-    expect(a).toBe(`idea:${hashClientIp("2001:db8:abcd:12::/64")}`);
+    // The same key as any other address of that prefix — the shared bucket
+    // (lib/ip-bucket.ts), not a per-form rule.
+    expect(a).toBe(`idea:${hashClientIp("2001:db8:abcd:12::")}`);
     expect(c).not.toBe(a);
     for (const key of [a, c]) {
       expect(key).toMatch(/^idea:[0-9a-f]{64}$/);
@@ -426,7 +428,7 @@ describe("submitIdea — the hourly brake", () => {
 
   it("a compressed prefix expands before it is cut; IPv4 and IPv4-mapped stay per address", async () => {
     expect(await keyFor("2001:db8::7")).toBe(await keyFor("2001:db8:0:0:5::"));
-    expect(await keyFor("2001:db8::7")).toBe(`idea:${hashClientIp("2001:db8:0:0::/64")}`);
+    expect(await keyFor("2001:db8::7")).toBe(`idea:${hashClientIp("2001:db8:0:0:9::")}`);
     expect(await keyFor("::ffff:203.0.113.7")).toBe(`idea:${hashClientIp(CLIENT_IP)}`);
     expect(await keyFor("203.0.113.8")).not.toBe(await keyFor(CLIENT_IP));
   });

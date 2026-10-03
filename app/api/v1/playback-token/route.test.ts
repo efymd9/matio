@@ -22,6 +22,9 @@ const h = vi.hoisted(() => ({
   // top-level statement, so a class declared normally is still in its temporal
   // dead zone when the trial mock is built.
   FakeRateLimit: class FakeRateLimit extends Error {},
+  // true = the REAL getClientIp/hashClientIp (the #351 bucket cases); every
+  // other case keeps the constant IP and the constant hash.
+  realIp: false,
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({
@@ -57,15 +60,19 @@ vi.mock("@/lib/subscription-access", () => ({
 vi.mock("@/lib/mux-token", () => ({ signMuxPlaybackToken: h.sign }));
 vi.mock("@/lib/attribution", () => ({ EMPTY_ATTRIBUTION: {} }));
 
-vi.mock("@/lib/trial", () => ({
-  TRIAL_DURATION_SECONDS: 60,
-  TrialRateLimitError: h.FakeRateLimit,
-  findTrialSession: h.findTrialSession,
-  mintTrialSession: h.mintTrialSession,
-  stampSignupWall: h.stampSignupWall,
-  getClientIp: () => "203.0.113.7",
-  hashClientIp: () => "hashed-ip",
-}));
+vi.mock("@/lib/trial", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/trial")>();
+  return {
+    TRIAL_DURATION_SECONDS: 60,
+    TrialRateLimitError: h.FakeRateLimit,
+    findTrialSession: h.findTrialSession,
+    mintTrialSession: h.mintTrialSession,
+    stampSignupWall: h.stampSignupWall,
+    getClientIp: (req: Parameters<typeof actual.getClientIp>[0]) =>
+      h.realIp ? actual.getClientIp(req) : "203.0.113.7",
+    hashClientIp: (ip: string) => (h.realIp ? actual.hashClientIp(ip) : "hashed-ip"),
+  };
+});
 
 import { DEVICE_ID_HEADER } from "@/lib/api/v1";
 import { POST } from "./route";
@@ -77,11 +84,12 @@ const SHOW = "show-1";
 
 function post(
   body: unknown,
-  opts: { device?: string | null } = {},
+  opts: { device?: string | null; clientIp?: string } = {},
 ): Parameters<typeof POST>[0] {
   const headers = new Headers();
   const device = opts.device === undefined ? DEVICE : opts.device;
   if (device) headers.set(DEVICE_ID_HEADER, device);
+  if (opts.clientIp) headers.set("x-vercel-forwarded-for", opts.clientIp);
   return {
     headers,
     json: async () => body,
@@ -90,6 +98,7 @@ function post(
 
 beforeEach(() => {
   h.userId = null;
+  h.realIp = false;
   h.row = { playbackId: "pb-1", showId: SHOW, access: "free" };
   h.hasActiveSubscription.mockReset().mockResolvedValue(false);
   h.orderedEpisodeIds.mockReset().mockResolvedValue([EPISODE, OTHER_EPISODE]);
@@ -223,6 +232,11 @@ describe("POST /api/v1/playback-token — legacy 60s preview (paid mode)", () =>
     expect(body.mode).toBe("trial");
     // Ten minutes of clock remaining must not become a ten-minute token.
     expect(body.expiresIn).toBe(60);
+    // A device row, whichever mint made it (#349).
+    expect(h.mintTrialSession.mock.calls[0][0]).toMatchObject({
+      sessionToken: DEVICE,
+      client: "app",
+    });
   });
 
   it("serves the remainder of an existing preview", async () => {
@@ -326,6 +340,8 @@ describe("POST /api/v1/playback-token — tracking never blocks playback", () =>
       sessionToken: DEVICE,
       showId: SHOW,
       kind: "episodes",
+      // A device row: the web's IP fallback must never link it (#349).
+      client: "app",
     });
 
     h.findTrialSession.mockResolvedValue({ expiresAt: new Date() });
@@ -337,6 +353,29 @@ describe("POST /api/v1/playback-token — tracking never blocks playback", () =>
     await POST(post({ episodeId: EPISODE }));
     expect(h.mintTrialSession.mock.calls[0][0].ipHash).toBe("hashed-ip");
     expect(JSON.stringify(h.mintTrialSession.mock.calls[0][0])).not.toContain("203.0.113.7");
+  });
+
+  // #351: the per-IP trial brake counts rows by this hash, so two source
+  // addresses of one IPv6 /64 must hand the mint the SAME hash — a client
+  // that rotates inside its prefix would otherwise open a fresh bucket every
+  // time. The real getClientIp/hashClientIp here, not the constant stand-ins.
+  it("hands the mint one IP bucket per IPv6 /64", async () => {
+    h.realIp = true;
+    async function mintedHash(clientIp: string): Promise<string> {
+      h.mintTrialSession.mockClear();
+      await POST(post({ episodeId: EPISODE }, { clientIp }));
+      expect(h.mintTrialSession).toHaveBeenCalledTimes(1);
+      return h.mintTrialSession.mock.calls[0][0].ipHash;
+    }
+
+    const a = await mintedHash("2001:db8:abcd:12:1::1");
+    const b = await mintedHash("2001:db8:abcd:12:ffff:ffff:ffff:fffe");
+    const other = await mintedHash("2001:db8:abcd:13::1");
+
+    expect(a).toBe(b);
+    expect(other).not.toBe(a);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(await mintedHash("::ffff:203.0.113.7")).toBe(await mintedHash("203.0.113.7"));
   });
 
   it("still plays free content when the rate limit trips", async () => {
