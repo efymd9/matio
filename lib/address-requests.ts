@@ -13,7 +13,7 @@ import {
   type IdeaSubmission,
   type ShowReminder,
 } from "@/db/schema";
-import { errorLabel } from "@/lib/user-export";
+import { describeDbError } from "@/lib/db-errors";
 
 // Subject requests (GDPR art. 15 / 17 / 20) for an ADDRESS that has no
 // account — `pnpm export-email <address>` and `pnpm erase-email <address>`
@@ -102,6 +102,16 @@ export function addressRef(address: string): string {
 
 /** The label every message uses for the subject. */
 const subjectLabel = (address: string) => `address#${addressRef(address)}`;
+
+/**
+ * A failure as the operator sees it: the error's class and the driver's
+ * SQLSTATE (or the file system's code), never its message — the driver
+ * quotes the statement, and the statement carries the address.
+ */
+function failureLabel(err: unknown): string {
+  const { name, code } = describeDbError(err);
+  return code ? `${name}/${code}` : name;
+}
 
 // ── Database half ───────────────────────────────────────────────────────
 // `db` is a parameter: the scripts hand in the client they opened AFTER the
@@ -509,7 +519,7 @@ export async function runExportEmail(
   } catch (err) {
     // Never the message: the postgres driver quotes the statement, and the
     // statement carries the address.
-    io.err(`export-email failed (${errorLabel(err)})`);
+    io.err(`export-email failed (${failureLabel(err)})`);
     return EXIT_FAILED;
   }
 }
@@ -562,7 +572,7 @@ export async function runEraseEmail(
     }
     return EXIT_OK;
   } catch (err) {
-    io.err(`erase-email failed (${errorLabel(err)})`);
+    io.err(`erase-email failed (${failureLabel(err)})`);
     return EXIT_FAILED;
   }
 }

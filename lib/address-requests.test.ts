@@ -28,7 +28,6 @@ import {
   type AddressRows,
 } from "./address-requests";
 import { previewErasure, type EraseDb } from "./erase-user";
-import { errorLabel } from "./user-export";
 
 // erase-user.ts reports to Sentry on its failure paths; the predicate
 // cross-check below never reaches one — the mock only keeps the SDK out.
@@ -428,6 +427,22 @@ describe("runExportEmail", () => {
     expect(writeFile).not.toHaveBeenCalled();
   });
 
+  it("a failure with no SQLSTATE is named by class alone — the message is never read", async () => {
+    const failing = {
+      select: () => ({
+        from: () => ({
+          where: async () => {
+            throw new Error(`connect ECONNREFUSED for ${ADDRESS}`);
+          },
+        }),
+      }),
+    } as unknown as AddressDb;
+    const sink = io();
+
+    expect(await runExportEmail([MIXED], ENV, deps(failing, sink))).toBe(EXIT_FAILED);
+    expect(sink.err).toEqual(["export-email failed (Error)"]);
+  });
+
   it("a file the operator names after the address is not echoed on stdout", async () => {
     const { db } = fakeDb(seed());
     const sink = io();
@@ -647,27 +662,5 @@ describe("the by-address predicates match the account erasure's own (lib/erase-u
     expect(found("show_reminders")).toEqual([`email=${ADDRESS}`]);
     expect(erased("show_reminders")).toContain(`email=${ADDRESS}`);
     expect(found("idea_submissions")).toEqual([`email=${ADDRESS}`]);
-  });
-});
-
-// ── the failure label ───────────────────────────────────────────────────
-
-describe("errorLabel finds the SQLSTATE down the cause chain", () => {
-  it("names a Drizzle-wrapped driver error by class and code — the message is never read", () => {
-    const wrapped = Object.assign(new Error(`Failed query: … '${ADDRESS}'`), {
-      name: "DrizzleQueryError",
-      cause: Object.assign(new Error(`row ${ADDRESS}`), { name: "PostgresError", code: "23505" }),
-    });
-    expect(errorLabel(wrapped)).toBe("DrizzleQueryError/23505");
-    expect(errorLabel(wrapped)).not.toContain(ADDRESS);
-  });
-
-  it("keeps the old shape when the code is on the error itself, and stops a cause loop", () => {
-    expect(errorLabel(Object.assign(new Error("x"), { name: "StripeError", code: "rate_limit", statusCode: 429 }))).toBe(
-      "StripeError/rate_limit/429",
-    );
-    const loop: Error & { cause?: unknown } = new Error("loop");
-    loop.cause = loop;
-    expect(errorLabel(loop)).toBe("Error");
   });
 });

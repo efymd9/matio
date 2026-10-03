@@ -397,28 +397,16 @@ async function fetchPosthog(
 
 // ── Best-effort wrapper ─────────────────────────────────────────────────
 
-/**
- * name / code / status only — vendor messages quote the request, and a
- * database error's message quotes the statement with its parameters. The
- * code is searched down the `cause` chain: Drizzle 0.44+ wraps the driver's
- * PostgresError (the SQLSTATE) in a DrizzleQueryError, so the thrown error
- * itself has none (lib/db-errors.ts walks it the same way).
- */
+/** name / code / status only — vendor messages quote the request. */
 export function errorLabel(err: unknown): string {
   if (!(err instanceof Error)) return "unknown";
   const parts = [err.name || "Error"];
   const e = err as Error & {
+    code?: unknown;
     status?: unknown;
     statusCode?: unknown;
   };
-  for (let link: unknown = err, depth = 0; link && depth < 5; depth += 1) {
-    const code = (link as { code?: unknown }).code;
-    if (typeof code === "string") {
-      parts.push(code);
-      break;
-    }
-    link = (link as { cause?: unknown }).cause;
-  }
+  if (typeof e.code === "string") parts.push(e.code);
   const status = e.status ?? e.statusCode;
   if (typeof status === "number") parts.push(String(status));
   return parts.join("/");
