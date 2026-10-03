@@ -1,3 +1,4 @@
+import { clerkClient } from "@clerk/nextjs/server";
 import { verifyWebhook } from "@clerk/nextjs/webhooks";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
@@ -5,7 +6,7 @@ import { eraseUser } from "@/lib/erase-user";
 import { describeError } from "@/lib/observability";
 import { getPosthogQueryConfig } from "@/lib/posthog-config";
 import { getStripe } from "@/lib/stripe";
-import { mirrorClerkUser } from "@/lib/user-mirror";
+import { clerkHttpStatus, mirrorClerkUser } from "@/lib/user-mirror";
 
 // Webhooks run on Node, not Edge — verifyWebhook needs the raw request body
 // and we hit Postgres via postgres-js.
@@ -39,6 +40,36 @@ export async function POST(req: NextRequest) {
         id: data.id,
       });
       return new Response("OK (no email, skipped)", { status: 200 });
+    }
+
+    // A late delivery must not resurrect an erased account (#336 (b)). Svix
+    // redelivers a failed `user.created` for hours or days; meanwhile the
+    // account may have got its row through a heal (getOrSyncCurrentUser) and
+    // been deleted — the row erased with it. Inserting now would put the
+    // address back after the erasure. Clerk is the source of truth on whether
+    // the account still exists, so it is asked first — no tombstone of our
+    // own. Sign-ups are rare; one more Clerk read on each costs nothing.
+    //   · 404 — the account is gone: nothing is written, logged by id, 200
+    //     (a redelivery would find the same answer);
+    //   · any other failure — nothing is written, 500 so Svix redelivers.
+    // Only here: getOrSyncCurrentUser already proves the account through
+    // currentUser() before it writes.
+    try {
+      await (await clerkClient()).users.getUser(data.id);
+    } catch (err) {
+      const httpStatus = clerkHttpStatus(err);
+      if (httpStatus === 404) {
+        console.warn("user.created for a deleted account — skipped", {
+          id: data.id,
+        });
+        return new Response("OK (account deleted, skipped)", { status: 200 });
+      }
+      // Never the message: Clerk's errors quote what they are about.
+      console.error(
+        "user.created: Clerk could not say whether the account still exists — nothing written, retry",
+        { id: data.id, httpStatus, error: describeError(err) },
+      );
+      return new Response("Clerk unavailable — retry", { status: 500 });
     }
 
     // Idempotent (ON CONFLICT (id) DO NOTHING — Clerk retries failed

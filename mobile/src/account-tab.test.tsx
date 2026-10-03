@@ -49,6 +49,12 @@ const deleteAccount = vi.fn(async () => {
   h.steps.push("api.deleteAccount");
   return { ok: true as const };
 });
+// Clerk's word on the session, asked only after a failed deletion (#336):
+// a live session unless a case says otherwise.
+const getToken = vi.fn(async (_options?: { skipCache?: boolean }): Promise<string | null> => {
+  h.steps.push("getToken");
+  return "jwt_dummy";
+});
 const router = {
   push: vi.fn(),
   replace: vi.fn((href: string) => {
@@ -58,6 +64,7 @@ const router = {
 vi.mock("@clerk/expo", () => ({
   useUser: () => ({ user: { primaryEmailAddress: { emailAddress: "member@example.com" } } }),
   useClerk: () => ({ signOut }),
+  useAuth: () => ({ getToken }),
 }));
 vi.mock("@/auth/clerk", () => ({
   CLERK_PUBLISHABLE_KEY: "pk_test_dummy",
@@ -108,6 +115,7 @@ vi.mock("expo-glass-effect", () => ({
 vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
+import { ApiError } from "@/api/client";
 import AccountScreen from "@/app/(tabs)/account";
 import { LocaleProvider } from "@/i18n/locale";
 import { AA_TEXT, contrastRatio, paintedBackground, parseColor } from "@/testing/contrast";
@@ -159,6 +167,10 @@ beforeEach(() => {
   deleteAccount.mockReset().mockImplementation(async () => {
     h.steps.push("api.deleteAccount");
     return { ok: true as const };
+  });
+  getToken.mockReset().mockImplementation(async () => {
+    h.steps.push("getToken");
+    return "jwt_dummy";
   });
   router.replace.mockClear();
   container = document.createElement("div");
@@ -378,6 +390,135 @@ describe("Account tab — «Delete account» (#309)", () => {
       "Cancelar",
       "Eliminar definitivamente",
     ]);
+  });
+});
+
+// #336 (d) — a failed request is not proof the deletion failed: the server may
+// have finished while its answer was lost (the 45s deadline, a dropped
+// connection), or a retry went out with no token because Clerk had no session
+// left (401). The tab asks Clerk about the session before it says anything.
+describe("Account tab — a failed deletion asks Clerk about the session first (#336)", () => {
+  const timedOut = () => new ApiError("network", "The request timed out.", 0);
+
+  async function confirmDeletion() {
+    render();
+    press("Delete account");
+    await choose("Delete account");
+    await choose("Delete permanently");
+  }
+
+  function expectHonestFailure() {
+    expect(alerts.calls).toHaveLength(3);
+    expect(alerts.calls[2].title).toBe("Couldn't delete your account");
+    expect(alerts.calls[2].message).toBe("Check your connection and try again.");
+    expect(signOut).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+  }
+
+  it("a timeout, and Clerk has no session any more → the account is gone: sign out and go Home, as on success", async () => {
+    deleteAccount.mockImplementationOnce(async () => {
+      h.steps.push("api.deleteAccount");
+      throw timedOut();
+    });
+    getToken.mockImplementationOnce(async () => {
+      h.steps.push("getToken");
+      return null;
+    });
+
+    await confirmDeletion();
+
+    expect(getToken).toHaveBeenCalledWith({ skipCache: true });
+    expect(h.steps).toEqual(["api.deleteAccount", "getToken", "signOut", "replace /"]);
+    expect(alerts.calls).toHaveLength(2); // no failure dialog
+  });
+
+  it("a dropped connection, and Clerk refuses the session itself (401) → gone: sign out and go Home", async () => {
+    deleteAccount.mockRejectedValueOnce(new ApiError("network", "Couldn't reach Matio.", 0));
+    getToken.mockRejectedValueOnce(
+      Object.assign(new Error("Unauthorized"), { name: "ClerkAPIResponseError", status: 401 }),
+    );
+
+    await confirmDeletion();
+
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith("/");
+    expect(alerts.calls).toHaveLength(2);
+  });
+
+  it("a retry that went out with no token (401) after the account was deleted → gone: sign out and go Home", async () => {
+    deleteAccount.mockRejectedValueOnce(
+      new ApiError("unauthorized", "Sign in to delete your account.", 401),
+    );
+    getToken.mockResolvedValueOnce(null);
+
+    await confirmDeletion();
+
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith("/");
+    expect(alerts.calls).toHaveLength(2);
+  });
+
+  it("a timeout while the session is still alive → the honest failure as before, no sign-out", async () => {
+    deleteAccount.mockRejectedValueOnce(timedOut());
+
+    await confirmDeletion();
+
+    expect(getToken).toHaveBeenCalledWith({ skipCache: true });
+    expectHonestFailure();
+  });
+
+  it("Clerk unreachable too (offline — no HTTP status) is not an answer → the honest failure, no sign-out", async () => {
+    deleteAccount.mockRejectedValueOnce(timedOut());
+    getToken.mockRejectedValueOnce(
+      Object.assign(new Error("Network request failed while offline"), {
+        name: "ClerkRuntimeError",
+        code: "network_error",
+      }),
+    );
+
+    await confirmDeletion();
+
+    expectHonestFailure();
+  });
+
+  it("Clerk failing with another status (5xx) is not an answer either → the honest failure", async () => {
+    deleteAccount.mockRejectedValueOnce(timedOut());
+    getToken.mockRejectedValueOnce(
+      Object.assign(new Error("Service Unavailable"), { name: "ClerkAPIResponseError", status: 503 }),
+    );
+
+    await confirmDeletion();
+
+    expectHonestFailure();
+  });
+
+  it("Clerk never answering → «Please wait» while it is asked, then the honest failure — silence is not «deleted»", async () => {
+    deleteAccount.mockRejectedValueOnce(timedOut());
+    getToken.mockImplementationOnce(() => new Promise<string | null>(() => undefined));
+    render();
+    press("Delete account");
+    await choose("Delete account");
+
+    vi.useFakeTimers();
+    try {
+      const final = alerts.calls.at(-1)?.buttons?.find((b) => b.text === "Delete permanently");
+      await act(async () => {
+        final?.onPress?.();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(getToken).toHaveBeenCalledTimes(1);
+      expect(text()).toContain("Please wait…");
+      expect(alerts.calls).toHaveLength(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expectHonestFailure();
+    expect(text()).not.toContain("Please wait…");
   });
 });
 
