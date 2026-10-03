@@ -35,5 +35,14 @@ Sentry.init({
   // release tag silently vanishes (caught live on staging, issue #81).
   release: resolveRelease({ APP_VERSION: process.env.APP_VERSION }),
   tracesSampleRate: 0.1,
-  ...sentryPrivacyOptions(),
+  // Replaces the default tracing integration of the same name — the SDK's own
+  // Next.js one, so router instrumentation stays — with INP measurement OFF
+  // (#394). An INP span is named after the touched element's selector, aria-
+  // label / title / alt included, and is sent ON ITS OWN: after the pageload
+  // span has ended it is its own root, and the SDK copies its name into the
+  // envelope header (`trace.transaction`, dynamic sampling), which no hook can
+  // reach. Trimming the span would leave that copy; not measuring INP leaves
+  // nothing. Re-enable only with that header solved.
+  integrations: [Sentry.browserTracingIntegration({ enableInp: false })],
+  ...sentryPrivacyOptions(Sentry.withStaticSpan),
 });

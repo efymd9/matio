@@ -349,7 +349,16 @@ cut a failed Drizzle query's `\nparams:` tail (the trial cookie / device id and
 IP hash it quotes) from exception values, messages and breadcrumbs (#326), and
 drop console breadcrumbs wholesale. URL keys are cleaned in breadcrumb and
 span data AND in the root span's `contexts.trace.data`, where Next records
-`http.target` with its query (#346). Proven by `lib/observability.test.ts`
+`http.target` with its query (#346); a span description that is a URL
+(`browser.*` / `resource.*` / `http.*` / pageload / navigation — never `db`),
+`lcp.url` and `contexts.nextjs.request_path` lose theirs too, and the
+`lcp.element` / `cls.source.*` selectors are cut to bare tags (#394). The
+same span scrub runs as `beforeSendSpan` behind `Sentry.withStaticSpan` — the
+one hook that sees a span the static lifecycle sends on its own. The browser's
+INP measurement is switched off (`browserTracingIntegration({ enableInp:
+false })` in `sentry-client-init.ts`): the INP span is named after the touched
+element's selector and that name is copied into the envelope header, which no
+hook reaches (#394). Proven by `lib/observability.test.ts`
 and by the log audit in `lib/log-audit.test.ts`.
 
 **No tunnel route**: Sentry events go straight to Sentry. We already proxy

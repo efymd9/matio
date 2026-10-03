@@ -6,8 +6,10 @@ import {
   redactEmails,
   resolveRelease,
   resolveStage,
+  elementTags,
   scrubSentryBreadcrumb,
   scrubSentryEvent,
+  scrubSentrySpan,
   scrubUrl,
   sentryAppPrivacyOptions,
   sentryPrivacyOptions,
@@ -17,6 +19,11 @@ import {
   type SentryHintLike,
   type SentryStackFrameLike,
 } from "./observability";
+
+// `withStaticSpan` stand-in: the SDK's only marks the callback so the static
+// lifecycle calls it — irrelevant to what the hooks do to a payload, and
+// lib/observability.sdk.test.ts proves the real one.
+const asIs = <T,>(callback: T): T => callback;
 
 // These are not "does the function run" tests. The scrubbers are the only thing
 // standing between a viewer's session and a third-party service, so every case
@@ -333,6 +340,57 @@ describe("scrubSentryEvent", () => {
     expect(event.spans?.[0]?.data).toEqual({});
   });
 
+  it("cuts the query from Next's contexts.nextjs.request_path (#394)", () => {
+    // `captureRequestError` copies Next's `req.url` here on every unhandled
+    // server error — for the unsubscribe link, the address and its HMAC.
+    const e = Buffer.from("viewer@example.invalid").toString("base64url");
+    const event: SentryEventLike = {
+      contexts: { nextjs: { request_path: `/unsubscribe?e=${e}&t=dummy-hmac` } },
+    };
+
+    scrubSentryEvent(event);
+
+    expect(event.contexts?.nextjs?.request_path).toBe("/unsubscribe");
+  });
+
+  it("cuts lcp.url's query and the page text of lcp.element / cls.source.* (#394)", () => {
+    const event: SentryEventLike = {
+      transaction: "/watch/fallen",
+      contexts: {
+        trace: {
+          data: {
+            "lcp.url": "https://image.mux.com/pb/thumbnail.webp?token=dummy-mux-token",
+            "lcp.element": 'main > img.poster[alt="Fallen, episode 1"]',
+            "cls.source.1": 'div#rail > a.card[title="Resume Fallen"]',
+            "lcp.size": 120000,
+          },
+        },
+      },
+    };
+
+    scrubSentryEvent(event);
+
+    expect(event.contexts?.trace?.data).toEqual({
+      "lcp.url": "https://image.mux.com/pb/thumbnail.webp",
+      "lcp.element": "main > img",
+      "cls.source.1": "div > a",
+      "lcp.size": 120000,
+    });
+  });
+
+  it("runs every child span of a transaction through the span scrub (#394)", () => {
+    const event: SentryEventLike = {
+      transaction: "/unsubscribe",
+      spans: [
+        { op: "browser.request", description: "https://matio.tv/unsubscribe?e=dummy&t=dummy" },
+      ],
+    };
+
+    scrubSentryEvent(event);
+
+    expect(event.spans?.[0]?.description).toBe("https://matio.tv/unsubscribe");
+  });
+
   it("removes cookies, the request body and the parsed query", () => {
     const event = seededEvent();
 
@@ -500,26 +558,89 @@ function fetchFailure(
   };
 }
 
+describe("scrubSentrySpan (#394)", () => {
+  it("cuts the query from a description that is a URL, by op", () => {
+    const urlOps = {
+      "browser.request": "https://matio.tv/unsubscribe?e=dummy&t=dummy",
+      "resource.img": "https://image.mux.com/pb/thumbnail.webp?token=dummy-mux-token",
+      "http.client": "GET https://matio.tv/api/v1/shows/fallen?email=dummy#frag",
+      pageload: "/welcome?session_id=cs_test_dummy",
+      navigation: "/watch/fallen?ep=2",
+    };
+
+    for (const [op, description] of Object.entries(urlOps)) {
+      expect(scrubSentrySpan({ op, description }).description).not.toMatch(/[?#]/);
+    }
+    expect(scrubSentrySpan({ op: "http.client", description: urlOps["http.client"] })).toEqual({
+      op: "http.client",
+      description: "GET https://matio.tv/api/v1/shows/fallen",
+    });
+  });
+
+  it("leaves a database statement and an unknown op's description alone", () => {
+    // In SQL a `?` is a placeholder, and the statement is what a fix starts from.
+    const sql = 'select "id" from "shows" where "slug" = ? and "status" = ?';
+
+    expect(scrubSentrySpan({ op: "db", description: sql }).description).toBe(sql);
+    expect(scrubSentrySpan({ op: "db.query", description: sql }).description).toBe(sql);
+    expect(scrubSentrySpan({ op: "mark", description: "a?b" }).description).toBe("a?b");
+    expect(scrubSentrySpan({ description: "no op?" }).description).toBe("no op?");
+  });
+
+  it("scrubs the span's data bag like a root span's, and returns the span itself", () => {
+    const span = {
+      op: "http.client",
+      data: {
+        "url.full": "https://matio.tv/api/t?aid=dummy",
+        "url.query": "aid=dummy",
+        "http.request.header.cookie": ["matio_aid=dummy"],
+        "client.address": "203.0.113.7",
+        "user.email": "viewer@example.invalid",
+      },
+    };
+
+    expect(scrubSentrySpan(span)).toBe(span);
+    expect(span.data).toEqual({ "url.full": "https://matio.tv/api/t" });
+  });
+});
+
+describe("elementTags (#394)", () => {
+  it("keeps the tags of a selector, nothing the page said", () => {
+    expect(elementTags('div.card > button#play.cta[aria-label="Resume"][title="Fallen"]')).toBe(
+      "div > button",
+    );
+    expect(elementTags("img")).toBe("img");
+  });
+
+  it("does not split on a ` > ` inside a quoted attribute value", () => {
+    expect(elementTags('section > a.link[title="Watch > Fallen > now"]')).toBe("section > a");
+  });
+
+  it("keeps a data-sentry-component name — code, not page text", () => {
+    expect(elementTags("main > PlayButton")).toBe("main > PlayButton");
+  });
+});
+
 describe("blocked Mux Data beacons (#265)", () => {
   // The point of every case but the first: `Failed to fetch` for OUR host is a
   // real incident (#259 read exactly like this family), so the filter must
   // never widen into "drop by text".
 
   it("drops an unhandled network failure of a litix beacon", () => {
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
 
     expect(beforeSend(fetchFailure(`Failed to fetch (${BEACON_HOST})`))).toBeNull();
   });
 
   it("lets the very same failure through when the host is ours", () => {
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const event = fetchFailure("Failed to fetch (matio.tv)");
 
     expect(beforeSend(event)).toBe(event);
   });
 
   it("lets a HANDLED litix failure through — someone reported it on purpose", () => {
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const event = fetchFailure(`Failed to fetch (${BEACON_HOST})`, {
       mechanism: { handled: true },
     });
@@ -528,7 +649,7 @@ describe("blocked Mux Data beacons (#265)", () => {
   });
 
   it("lets a non-TypeError through, whatever its text says", () => {
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const event = fetchFailure(`Failed to fetch (${BEACON_HOST})`, {
       type: "Error",
     });
@@ -539,7 +660,7 @@ describe("blocked Mux Data beacons (#265)", () => {
   it("survives events with no exception to look at", () => {
     // beforeSend is shared by Node, edge and the browser: message-only events,
     // an empty `exception`, an empty chain — none may throw, all must pass.
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const shapes: SentryEventLike[] = [
       {},
       { message: `Failed to fetch (${BEACON_HOST})` },
@@ -608,7 +729,7 @@ describe("blocked Mux Data beacons (#265)", () => {
   it("ignores a litix breadcrumb behind a failure of our own host", () => {
     // Every playback session has beacon fetches in its trail, so a breadcrumb
     // proves nothing about which request failed.
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const event: SentryEventLike = {
       ...fetchFailure("Failed to fetch (matio.tv)"),
       breadcrumbs: [
@@ -693,7 +814,7 @@ describe("scripts injected into the page (#271)", () => {
     // the SDK normalises its frames to `app:///…` exactly like ours.
     ["a Chromium extension", "chrome-extension://abcdefghijklmnop"],
   ])("drops an unhandled error thrown wholly by a stray script on %s", (_name, origin) => {
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     // The raw stack also holds the SDK's own XHR wrapper (in our chunk), which
     // the SDK strips from the frames — only the frames' locations are looked up.
     const hint = thrownAt(
@@ -705,7 +826,7 @@ describe("scripts injected into the page (#271)", () => {
   });
 
   it("keeps it the moment one frame is ours — our code may have called theirs", () => {
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const event = thrownFrom([
       ...EXECUTOR_FRAMES,
       frame("app:///_next/static/chunks/x.js", 1, 900),
@@ -726,7 +847,7 @@ describe("scripts injected into the page (#271)", () => {
   ])("drops a stack made only of extension frames: %s", (filename) => {
     // Firefox and Safari report an extension's origin as `null`, so the scheme
     // survives normalisation and the frame proves itself — no hint needed.
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
 
     expect(beforeSend(thrownFrom([frame(filename), frame(filename, 2, 7)]))).toBeNull();
   });
@@ -739,7 +860,7 @@ describe("scripts injected into the page (#271)", () => {
     // …and the remote config, a script of its own.
     "ingest/array/phc_dummy/config.js",
   ])("keeps PostHog's scripts, served from our own origin through /ingest: %s", (path) => {
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const event = thrownFrom([frame(`app:///${path}`, 1, 800), frame(`app:///${path}`, 1, 90)]);
     const hint = thrownAt(
       `https://matio.tv/${path}:1:90`,
@@ -757,7 +878,7 @@ describe("scripts injected into the page (#271)", () => {
     // scheme every offset of a long letter run restarts the match — tens of
     // seconds here, synchronously on the page's main thread. The 1 s ceiling
     // is loose on purpose: it tells linear from quadratic, not fast from slow.
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const columns = Array.from({ length: 50 }, (_, i) => 10 * i + 1);
     const event = thrownFrom(columns.map((col) => frame("app:///executors/200.js", 1, col)));
     const hint = thrownWithMessage(
@@ -774,7 +895,7 @@ describe("scripts injected into the page (#271)", () => {
   });
 
   it("keeps an inline script of the page — its frame is the page, not a .js file", () => {
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const event = thrownFrom([frame("app:///watch/the-scarlet-oath", 12, 5)]);
 
     expect(beforeSend(event, thrownAt(`${PAGE_URL}:12:5`))).toBe(event);
@@ -783,7 +904,7 @@ describe("scripts injected into the page (#271)", () => {
   it("keeps a vendor's script, both as a raw URL and as the SDK really sends it", () => {
     // Normalisation turns clerk.matio.tv's script into `app:///npm/…` too —
     // only the raw stack still says it is not ours.
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const clerk = "https://clerk.matio.tv/npm/@clerk/clerk-js@6/dist/clerk.browser.js";
     const raw = thrownFrom([frame(clerk, 1, 500)]);
     const normalised = thrownFrom([
@@ -796,7 +917,7 @@ describe("scripts injected into the page (#271)", () => {
 
   it("survives events with no stack to look at", () => {
     // Shared by Node, edge and the browser: none of these may throw or drop.
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const shapes: SentryEventLike[] = [
       {},
       { message: M_ID },
@@ -829,7 +950,7 @@ describe("scripts injected into the page (#271)", () => {
   ])("never matches a server frame: %s", (filename) => {
     // Node and edge rewrite the dist dir to `app:///_next/…`, and a server
     // stack names file paths — there is no `scheme://host` to prove anything.
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const event = thrownFrom([frame(filename)]);
     const hint = thrownAt(
       "/var/task/.next/server/chunks/x.js:1:1",
@@ -843,7 +964,7 @@ describe("scripts injected into the page (#271)", () => {
   it("reports an app:/// stack whose origin the raw stack does not confirm", () => {
     // `app:///x.js` alone is any origin at all: without the thrown error's own
     // stack, or when that stack does not hold the frame, it is doubt.
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const event = thrownFrom(EXECUTOR_FRAMES);
     const noPage: SentryEventLike = { ...thrownFrom(EXECUTOR_FRAMES), request: undefined };
 
@@ -860,7 +981,7 @@ describe("scripts injected into the page (#271)", () => {
     ["an <anonymous> frame", frame("<anonymous>")],
     ["a native frame", frame("native")],
   ])("keeps the stray stack when it also holds %s", (_name, doubt) => {
-    const { beforeSend } = sentryPrivacyOptions();
+    const { beforeSend } = sentryPrivacyOptions(asIs);
     const event = thrownFrom([...EXECUTOR_FRAMES, doubt]);
 
     expect(beforeSend(event, thrownAt(...executorLocations("https://matio.tv")))).toBe(event);
@@ -886,7 +1007,7 @@ describe("sentryPrivacyOptions", () => {
     // SDK 11 removed `sendDefaultPii` and collects by default; a category
     // missing here is a category the SDK collects. lib/observability.sdk.test.ts
     // proves the real client reads these names.
-    const options = sentryPrivacyOptions();
+    const options = sentryPrivacyOptions(asIs);
 
     expect(options.dataCollection).toEqual({
       userInfo: false,
@@ -905,16 +1026,18 @@ describe("sentryPrivacyOptions", () => {
     });
     // Streamed spans never reach beforeSendTransaction.
     expect(options.traceLifecycle).toBe("static");
+    // The span scrub, through whatever withStaticSpan the caller passed (#394).
+    expect(options.beforeSendSpan).toBe(scrubSentrySpan);
     // Dead in SDK 11 — a value here would only look like protection.
     expect(options).not.toHaveProperty("sendDefaultPii");
     expect(options).not.toHaveProperty("enableLogs");
   });
 
   it("hands each init its own dataCollection, so one runtime cannot edit another's", () => {
-    const first = sentryPrivacyOptions();
+    const first = sentryPrivacyOptions(asIs);
     first.dataCollection.httpHeaders.request.allow.push("cookie");
 
-    expect(sentryPrivacyOptions().dataCollection.httpHeaders.request.allow).not.toContain(
+    expect(sentryPrivacyOptions(asIs).dataCollection.httpHeaders.request.allow).not.toContain(
       "cookie",
     );
   });
@@ -932,7 +1055,7 @@ describe("sentryPrivacyOptions", () => {
   });
 
   it("scrubs through beforeSend and beforeSendTransaction alike", () => {
-    const options = sentryPrivacyOptions();
+    const options = sentryPrivacyOptions(asIs);
 
     const error = options.beforeSend(seededEvent());
     const transaction = options.beforeSendTransaction(seededEvent());
@@ -944,7 +1067,7 @@ describe("sentryPrivacyOptions", () => {
   });
 
   it("cuts a failed query's params through beforeSend and beforeBreadcrumb (#326)", () => {
-    const options = sentryPrivacyOptions();
+    const options = sentryPrivacyOptions(asIs);
 
     const error = options.beforeSend({
       exception: { values: [{ type: "DrizzleQueryError", value: DRIZZLE_MESSAGE }] },
@@ -959,7 +1082,7 @@ describe("sentryPrivacyOptions", () => {
   });
 
   it("scrubs the root span's http.target in a transaction (#346)", () => {
-    const options = sentryPrivacyOptions();
+    const options = sentryPrivacyOptions(asIs);
     const transaction = options.beforeSendTransaction({
       transaction: "POST /api/email/unsubscribe",
       contexts: {
@@ -973,14 +1096,14 @@ describe("sentryPrivacyOptions", () => {
   });
 
   it("returns the event itself, so nothing else in the pipeline is lost", () => {
-    const options = sentryPrivacyOptions();
+    const options = sentryPrivacyOptions(asIs);
     const event = seededEvent();
 
     expect(options.beforeSend(event)).toBe(event);
   });
 
   it("drops console breadcrumbs at capture time", () => {
-    const options = sentryPrivacyOptions();
+    const options = sentryPrivacyOptions(asIs);
 
     expect(options.beforeBreadcrumb({ category: "console" })).toBeNull();
     expect(options.beforeBreadcrumb({ category: "fetch" })).not.toBeNull();

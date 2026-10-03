@@ -14,11 +14,25 @@ import { sentryPrivacyOptions } from "./observability";
 // The configs live at the repository root (Next requires it), so they are
 // imported through the `@/` alias from here, where the unit project looks.
 
-const { init, captureRequestError } = vi.hoisted(() => ({
+const { init, captureRequestError, withStaticSpan, browserTracingIntegration } = vi.hoisted(() => ({
   init: vi.fn(),
   captureRequestError: vi.fn(),
+  // Tags what it wraps, so a test can tell the config handed the SDK's
+  // wrapper — not the bare scrubber, which "static" would never call (#394).
+  withStaticSpan: vi.fn((callback: unknown) => ({ staticSpan: callback })),
+  browserTracingIntegration: vi.fn((options: unknown) => ({ name: "BrowserTracing", options })),
 }));
-vi.mock("@sentry/nextjs", () => ({ init, captureRequestError }));
+vi.mock("@sentry/nextjs", () => ({
+  init,
+  captureRequestError,
+  withStaticSpan,
+  browserTracingIntegration,
+}));
+
+const asIs = <T,>(callback: T): T => callback;
+// The configs load their own copy of lib/observability (resetModules), so the
+// wrapped scrubber is matched by shape here and by behaviour below.
+const WRAPPED_SPAN_SCRUB = { staticSpan: expect.any(Function) };
 
 const DUMMY_DSN = "https://dummy00000000000000000000000000@o0.ingest.de.sentry.io/0";
 
@@ -59,14 +73,21 @@ describe("sentry.server.config", () => {
       tracesSampleRate: 0.1,
       // SDK 11's switches (#390): no data category collected at the source,
       // and transactions kept, so beforeSendTransaction still runs.
-      dataCollection: sentryPrivacyOptions().dataCollection,
+      dataCollection: sentryPrivacyOptions(asIs).dataCollection,
       traceLifecycle: "static",
+      beforeSendSpan: WRAPPED_SPAN_SCRUB,
       // Frame locals would ship the contents of every variable at the throw.
       includeLocalVariables: false,
     });
     expect(typeof options.beforeSend).toBe("function");
     expect(typeof options.beforeSendTransaction).toBe("function");
     expect(typeof options.beforeBreadcrumb).toBe("function");
+    // What the SDK's withStaticSpan was handed is the span scrub itself.
+    const span = options.beforeSendSpan.staticSpan({
+      op: "resource.img",
+      description: "https://image.mux.com/pb/thumbnail.webp?token=dummy-mux-token",
+    });
+    expect(span.description).toBe("https://image.mux.com/pb/thumbnail.webp");
   });
 
   it("hands the SDK a beforeSend that really scrubs", async () => {
@@ -106,8 +127,9 @@ describe("sentry.edge.config", () => {
     expect(init).toHaveBeenCalledTimes(1);
     expect(init.mock.calls[0][0]).toMatchObject({
       environment: "production",
-      dataCollection: sentryPrivacyOptions().dataCollection,
+      dataCollection: sentryPrivacyOptions(asIs).dataCollection,
       traceLifecycle: "static",
+      beforeSendSpan: WRAPPED_SPAN_SCRUB,
     });
   });
 });
@@ -124,14 +146,19 @@ describe("sentry-client-init", () => {
     expect(options).toMatchObject({
       dsn: DUMMY_DSN,
       environment: "staging",
-      dataCollection: sentryPrivacyOptions().dataCollection,
+      dataCollection: sentryPrivacyOptions(asIs).dataCollection,
       traceLifecycle: "static",
+      beforeSendSpan: WRAPPED_SPAN_SCRUB,
     });
     expect(typeof options.beforeSend).toBe("function");
     expect(typeof options.beforeBreadcrumb).toBe("function");
-    // No Session Replay and no feedback widget: the integrations are the SDK's
-    // defaults, never a list of ours.
-    expect(options).not.toHaveProperty("integrations");
+    // The one integration of ours: the SDK's Next.js tracing with INP off
+    // (#394) — an INP span is named after the element's selector, and the
+    // envelope header carries that name past every hook. No Session Replay,
+    // no feedback widget: nothing else is ever listed.
+    expect(options.integrations).toEqual([
+      { name: "BrowserTracing", options: { enableInp: false } },
+    ]);
     expect(options).not.toHaveProperty("replaysSessionSampleRate");
     expect(options).not.toHaveProperty("replaysOnErrorSampleRate");
   });
@@ -181,5 +208,24 @@ describe("instrumentation", () => {
     const instrumentation = await import("@/instrumentation");
 
     expect(instrumentation.onRequestError).toBe(captureRequestError);
+  });
+});
+
+describe("next.config — the build wrapper", () => {
+  it("deletes the browser source maps it makes, token or no token (#394)", async () => {
+    // Under Turbopack `withSentryConfig` turns `productionBrowserSourceMaps`
+    // on; without SENTRY_AUTH_TOKEN nothing is uploaded, and only this flag
+    // keeps the maps (our source, served at a guessable path) out of
+    // `.next/static`. Checked on a real build: 0 `*.map` there with it.
+    const withSentryConfig = vi.fn((config: unknown, options: unknown) => ({ config, options }));
+    vi.doMock("@sentry/nextjs/config", () => ({ withSentryConfig }));
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", DUMMY_DSN);
+
+    await import("@/next.config");
+
+    expect(withSentryConfig).toHaveBeenCalledTimes(1);
+    expect(withSentryConfig.mock.calls[0]![1]).toMatchObject({
+      sourcemaps: { deleteSourcemapsAfterUpload: true },
+    });
   });
 });
