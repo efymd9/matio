@@ -513,6 +513,26 @@ describe("createGuestCheckoutSession — refusals reach Stripe as silence", () =
     expect(h.rateLimitCalls[0]).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  // #351: the brake is per IP bucket — an IPv6 client counts per /64, so
+  // rotating its source address inside the prefix does not open a fresh bucket.
+  it("counts an IPv6 client per /64 — two addresses of one prefix share the bucket", async () => {
+    async function brakeKey(ip: string): Promise<string> {
+      h.clientIp = ip;
+      h.rateLimitCalls = [];
+      await createGuestCheckoutSession(INPUT);
+      expect(h.rateLimitCalls).toHaveLength(1);
+      return h.rateLimitCalls[0];
+    }
+
+    const a = await brakeKey("2001:db8:abcd:12:1::1");
+    const b = await brakeKey("2001:db8:abcd:12:ffff:ffff:ffff:fffe");
+    const other = await brakeKey("2001:db8:abcd:13::1");
+
+    expect(a).toBe(b);
+    expect(other).not.toBe(a);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+  });
+
   it("routes a browser whose trial is linked to a live subscriber into the auth flow", async () => {
     h.cookies.trial_session = "trial-token-1";
     h.selects = [[{ id: "sub_existing" }]];
