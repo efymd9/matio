@@ -404,9 +404,19 @@ posthog.capture('$pageview');
 
 SDK 11 sends spans in batches as they finish; no transaction event is produced, so `beforeSendTransaction` (our scrub of request URLs, span data and the root span's `contexts.trace.data`) never runs and span attributes reach Sentry raw. We pin `traceLifecycle: "static"`. SDK 12 removes that lifecycle — then the scrub moves to `beforeSendSpan` over streamed `attributes` (registry). Attribute names moved to OpenTelemetry conventions too: `http.target` → `url.path` + `url.query`, headers as `http.request.header.<name>` (string arrays), `client.address` for the IP.
 
+### Event hooks never see a standalone span — and nothing sees the envelope header
+
+Under `traceLifecycle: "static"` the browser SDK still sends some spans ON THEIR OWN (web vitals — `_emitWebVitalSpan` with `standalone: true`; INP is the one that does it in static mode). They never become an event, so `beforeSend` / `beforeSendTransaction` never run on them; only a `beforeSendSpan` wrapped in `Sentry.withStaticSpan` does (unwrapped, the static lifecycle ignores it — and a bare callback in streaming mode gets a different span shape). Worse, when such a span is its own root (an INP after the pageload span ended), the SDK copies its NAME into the envelope header's dynamic sampling context (`trace.transaction`), built after every callback. INP names its span after the touched element's `htmlTreeAsString` selector — `aria-label`, `title`, `alt` included — so we run with `browserTracingIntegration({ enableInp: false })` (#394); the other web vitals (LCP, CLS) are attributes on the pageload transaction in static mode and go through the normal scrub.
+
+### Span descriptions and `contexts.nextjs` carry URLs too
+
+The event scrub used to walk only `span.data`, `contexts.trace.data` and `request`. A span's `description` is a URL for `browser.*` (the page itself), `resource.*` (each asset, Mux `?token=` stills included) and `http.*` spans; `captureRequestError` copies Next's `req.url` — query included — into `contexts.nextjs.request_path`; `lcp.url` on the pageload root is the largest image's URL. All three are scrubbed now (#394). A `db` span's description is left alone: there `?` is a SQL placeholder.
+
 ### `withSentryConfig` lives at `@sentry/nextjs/config`
 
 The package root no longer exports it — `tsc` catches this one. Its options we use (`org`, `project`, `silent`, `telemetry`, `sourcemaps.deleteSourcemapsAfterUpload`) are unchanged.
+
+Under Turbopack it also switches `productionBrowserSourceMaps` ON, token or not. With no `SENTRY_AUTH_TOKEN` nothing is uploaded, but the plugin's `deleteArtifacts` still runs and `sourceMappingURL` comments are stripped — a build with a DSN and no token leaves 0 `*.map` files in `.next/static` (checked #394). That rests on `sourcemaps.deleteSourcemapsAfterUpload: true`; set it to `false` and our source is served publicly. `lib/sentry-init.test.ts` pins it.
 
 ### The app is still on JavaScript SDK 10
 

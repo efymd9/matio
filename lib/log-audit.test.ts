@@ -1,8 +1,16 @@
+import { createRequire } from "node:module";
+import path from "node:path";
+
+import type * as SentrySdk from "@sentry/nextjs";
 import { getTableName } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { sentryPrivacyOptions, type SentryEventLike } from "./observability";
+
+// `withStaticSpan` stand-in (the SDK's only marks the callback for the static
+// lifecycle); the scrub itself is what this audit reads.
+const asIs = <T,>(callback: T): T => callback;
 
 // ТЕСТ-АУДИТ ЛОГОВ.
 //
@@ -469,7 +477,7 @@ describe("log audit · Sentry payloads", () => {
   });
 
   it("lets none of them through beforeSend", () => {
-    const scrubbed = JSON.stringify(sentryPrivacyOptions().beforeSend(seededEvent()));
+    const scrubbed = JSON.stringify(sentryPrivacyOptions(asIs).beforeSend(seededEvent()));
 
     for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET]) {
       expect(scrubbed).not.toContain(marker);
@@ -478,7 +486,7 @@ describe("log audit · Sentry payloads", () => {
 
   it("lets none of them through beforeSendTransaction", () => {
     const scrubbed = JSON.stringify(
-      sentryPrivacyOptions().beforeSendTransaction(seededEvent()),
+      sentryPrivacyOptions(asIs).beforeSendTransaction(seededEvent()),
     );
 
     for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET]) {
@@ -517,7 +525,7 @@ describe("log audit · Sentry payloads", () => {
   });
 
   it("cuts a failed query's params from the exception, the message and the breadcrumbs — through beforeSend", () => {
-    const event = sentryPrivacyOptions().beforeSend(drizzleEvent());
+    const event = sentryPrivacyOptions(asIs).beforeSend(drizzleEvent());
     const scrubbed = JSON.stringify(event);
 
     for (const marker of QUOTED) expect(scrubbed).not.toContain(marker);
@@ -530,7 +538,7 @@ describe("log audit · Sentry payloads", () => {
   });
 
   it("cuts them through beforeSendTransaction and beforeBreadcrumb too", () => {
-    const options = sentryPrivacyOptions();
+    const options = sentryPrivacyOptions(asIs);
     const transaction = JSON.stringify(options.beforeSendTransaction(drizzleEvent()));
     const crumb = JSON.stringify(
       options.beforeBreadcrumb({ category: "sentry.event", message: DRIZZLE_TEXT }),
@@ -540,6 +548,92 @@ describe("log audit · Sentry payloads", () => {
       expect(transaction).not.toContain(marker);
       expect(crumb).not.toContain(marker);
     }
+  });
+});
+
+// #394: the two paths the unsubscribe link's query took to Sentry past the
+// event scrub — a browser span NAMED by the page URL, and Next's
+// `contexts.nextjs.request_path` on an unhandled server error. Audited at the
+// transport: the real SDK clients, our options, and the bytes they would send.
+// `@sentry/nextjs` is mocked above for the modules under audit, so the real
+// builds are required by file, which the mock does not see.
+describe("log audit · Sentry transport — the unsubscribe link (#394)", () => {
+  const E = Buffer.from(MARKER_EMAIL).toString("base64url");
+  const LINK_PATH = `/unsubscribe?e=${E}&t=${MARKER_SECRET}`;
+  const MARKERS = [MARKER_EMAIL, E, MARKER_SECRET];
+  const DSN = "https://dummy00000000000000000000000000@o0.ingest.de.sentry.io/0";
+
+  /** A client of either build, as far as this audit drives it. */
+  interface ClientLike {
+    init(): void;
+    flush(timeout?: number): PromiseLike<boolean>;
+    close(timeout?: number): PromiseLike<boolean>;
+  }
+  type ClientClass = new (options: Record<string, unknown>) => ClientLike;
+  type Sdk = typeof SentrySdk & { BrowserClient: ClientClass };
+  const load = (build: "client" | "server"): Sdk => {
+    const require = createRequire(import.meta.url);
+    const root = path.dirname(require.resolve("@sentry/nextjs/package.json"));
+    return require(path.join(root, `build/cjs/index.${build}.js`)) as Sdk;
+  };
+
+  let started: ClientLike | undefined;
+
+  afterEach(async () => {
+    await started?.close(0);
+    started = undefined;
+  });
+
+  function record(sdk: Sdk, Client: ClientClass): string[] {
+    const sent: string[] = [];
+    const client = new Client({
+      dsn: DSN,
+      stackParser: sdk.defaultStackParser,
+      integrations: [],
+      tracesSampleRate: 1,
+      transport: (options: Parameters<typeof sdk.createTransport>[0]) =>
+        sdk.createTransport(options, async (request) => {
+          sent.push(
+            typeof request.body === "string" ? request.body : new TextDecoder().decode(request.body),
+          );
+          return { statusCode: 200 };
+        }),
+      ...sentryPrivacyOptions(sdk.withStaticSpan),
+    });
+    sdk.getCurrentScope().setClient(client as unknown as SentrySdk.NodeClient);
+    client.init();
+    started = client;
+    return sent;
+  }
+
+  it("H1: a pageload span named by the link reaches the transport without the address", async () => {
+    const sdk = load("client");
+    const sent = record(sdk, sdk.BrowserClient);
+
+    sdk.startSpan({ name: "/unsubscribe", op: "pageload", forceTransaction: true }, () => {
+      sdk.startInactiveSpan({ name: `https://matio.tv${LINK_PATH}`, op: "browser.request" }).end();
+    });
+    await started!.flush(2000);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("https://matio.tv/unsubscribe"); // the span did go out
+    for (const marker of MARKERS) expect(sent[0]).not.toContain(marker);
+  });
+
+  it("H2: an unhandled server error on the link reaches the transport without the address", async () => {
+    const sdk = load("server");
+    const sent = record(sdk, sdk.NodeClient as unknown as ClientClass);
+
+    sdk.captureRequestError(
+      new Error("unsubscribe failed"),
+      { path: LINK_PATH, method: "GET", headers: {} },
+      { routerKind: "App Router", routePath: "/unsubscribe", routeType: "render" },
+    );
+    await started!.flush(2000);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('"request_path":"/unsubscribe"');
+    for (const marker of MARKERS) expect(sent[0]).not.toContain(marker);
   });
 });
 

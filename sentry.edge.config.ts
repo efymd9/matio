@@ -21,6 +21,6 @@ if (dsn) {
     environment: resolveStage(process.env),
     release: resolveRelease(process.env),
     tracesSampleRate: 0.1,
-    ...sentryPrivacyOptions(),
+    ...sentryPrivacyOptions(Sentry.withStaticSpan),
   });
 }

@@ -32,6 +32,6 @@ if (dsn) {
     // scope at the throw — request bodies, email addresses, tokens. Off by
     // default in the SDK; stated here so nobody turns it on "for debugging".
     includeLocalVariables: false,
-    ...sentryPrivacyOptions(),
+    ...sentryPrivacyOptions(Sentry.withStaticSpan),
   });
 }

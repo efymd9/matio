@@ -425,10 +425,14 @@ urgent — it costs one command.
   (streamed spans would skip `beforeSendTransaction`) and
   `includeLocalVariables: false`, in the app (RN SDK 8, JS core 10)
   `sendDefaultPii: false` + `enableLogs: false`, and `beforeSend` /
-  `beforeSendTransaction` / `beforeBreadcrumb` that strip query strings and URL
-  credentials, delete cookies / request bodies / parsed query params, cut
-  headers to an allowlist, reduce the user to an id, redact email-shaped
-  strings, and drop console breadcrumbs wholesale. All of it in
+  `beforeSendTransaction` / `beforeSendSpan` (behind `withStaticSpan` — the
+  only hook that sees a span sent on its own, #394) / `beforeBreadcrumb` that
+  strip query strings and URL credentials (span descriptions, `lcp.url` and
+  `contexts.nextjs.request_path` too), delete cookies / request bodies /
+  parsed query params, cut headers to an allowlist, reduce the user to an id,
+  redact email-shaped strings, and drop console breadcrumbs wholesale. The
+  browser's INP measurement is OFF (its selector-named span lands in the
+  envelope header, beyond every hook — #394). All of it in
   `lib/observability.ts`, one contract shared by the Node, edge and browser
   configs — change it and prove it with a test.
 - **`environment` and `release` are the same answers `/api/healthz` gives**

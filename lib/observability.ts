@@ -67,7 +67,13 @@ export interface SentryBreadcrumbLike {
   data?: Record<string, unknown>;
 }
 
+/**
+ * A span as the static (transaction) lifecycle hands it over — inside a
+ * transaction event's `spans` and to a `withStaticSpan` callback alike.
+ */
 export interface SentrySpanLike {
+  description?: string;
+  op?: string;
   data?: Record<string, unknown>;
 }
 
@@ -99,8 +105,11 @@ export interface SentryEventLike {
   spans?: SentrySpanLike[];
   user?: { id?: string | number };
   exception?: { values?: SentryExceptionValueLike[] };
-  /** Only the one bag that is walked — see `scrubSentryEvent`. */
-  contexts?: { trace?: { data?: Record<string, unknown> } };
+  /** Only the two named spots that are walked — see `scrubSentryEvent`. */
+  contexts?: {
+    trace?: { data?: Record<string, unknown> };
+    nextjs?: { request_path?: unknown };
+  };
 }
 
 /**
@@ -122,9 +131,11 @@ const ALLOWED_REQUEST_HEADERS = new Set([
  * reach the tracker. `url.full` is the full href browser fetch/XHR spans and
  * Node's undici spans carry (#346); `http.target` is the raw request path WITH
  * its query that Next puts on the server's root span — for `/unsubscribe` that
- * query is the base64 address and its HMAC (#346).
+ * query is the base64 address and its HMAC (#346). `lcp.url` is the page's
+ * largest image on the pageload root span: next/image parameters, or the
+ * `?token=` of a signed Mux still (#394).
  */
-const URL_DATA_KEYS = ["url", "http.url", "url.full", "http.target", "to", "from"];
+const URL_DATA_KEYS = ["url", "http.url", "url.full", "http.target", "to", "from", "lcp.url"];
 
 /**
  * Keys that hold a URL's query string or fragment ON THEIR OWN, split off next
@@ -154,8 +165,30 @@ const VIEWER_DATA_KEYS = [
   "client.address",
   "network.peer.address",
   "user.ip_address",
+  "user.email",
+  "user.username",
   "http.request.body.data",
 ];
+
+/**
+ * Attributes holding an element selector the browser SDK built with
+ * `htmlTreeAsString` — `button#play.cta[aria-label="…"][title="…"]`, i.e. the
+ * text of the page the viewer was on (#394): the LCP element and each CLS
+ * source (`cls.source.<n>`, matched by prefix) on the pageload root. Cut to
+ * bare tags. (INP's selector does not get here: INP is off, see
+ * sentry-client-init.ts.)
+ */
+const SELECTOR_DATA_KEYS = ["lcp.element"];
+const SELECTOR_DATA_PREFIX = "cls.source.";
+
+/**
+ * Span ops whose `description` is a URL with its query (#394): the pageload's
+ * own `browser.*` phases (the page URL), `resource.*` (each script / image /
+ * stylesheet URL), `http.*` (`GET <url>`), the `pageload` / `navigation` roots.
+ * NOT `db*` — there a `?` is a SQL placeholder, and the statement is what an
+ * incident is fixed from.
+ */
+const URL_DESCRIPTION_OPS = ["browser.", "resource.", "http.", "pageload", "navigation"];
 
 // Conservative: local part, @, dotted host. Deliberately not RFC-complete —
 // this is a net under the "no user text in errors" rule, not a validator.
@@ -210,6 +243,22 @@ function scrubText(value: string): string {
   return redactEmails(stripQueryParams(value));
 }
 
+/**
+ * An `htmlTreeAsString` selector cut to its tags: `div > button#play.cta[aria-
+ * label="Watch Fallen"]` becomes `div > button`. Quoted attribute values go
+ * first, so a ` > ` inside one cannot split off a fragment of its text; what
+ * is left of each part is its leading tag (or a `data-sentry-component` name,
+ * which is code, not page text).
+ */
+export function elementTags(selector: string): string {
+  return selector
+    .replace(/"[^"]*"/g, "")
+    .split(" > ")
+    .map((part) => /^[A-Za-z][\w-]*/.exec(part)?.[0])
+    .filter((tag): tag is string => tag !== undefined)
+    .join(" > ");
+}
+
 function scrubDataBag(data: Record<string, unknown> | undefined): void {
   if (!data) return;
   for (const key of URL_DATA_KEYS) {
@@ -219,11 +268,36 @@ function scrubDataBag(data: Record<string, unknown> | undefined): void {
   for (const key of URL_PART_DATA_KEYS) delete data[key];
   for (const key of VIEWER_DATA_KEYS) delete data[key];
   for (const key of Object.keys(data)) {
+    const value = data[key];
     const prefix = HEADER_ATTRIBUTE_PREFIXES.find((p) => key.startsWith(p));
     if (prefix && !ALLOWED_REQUEST_HEADERS.has(key.slice(prefix.length).toLowerCase())) {
       delete data[key];
+    } else if (
+      typeof value === "string" &&
+      (SELECTOR_DATA_KEYS.includes(key) || key.startsWith(SELECTOR_DATA_PREFIX))
+    ) {
+      data[key] = elementTags(value);
     }
   }
+}
+
+/**
+ * One span, in place — a transaction's child spans (through `scrubSentryEvent`
+ * and `beforeSendSpan`) and every span the static lifecycle sends ON ITS OWN,
+ * which no event hook ever sees (#394; INP's span was one — it is off now). A
+ * description the op says is a URL loses its query, and the `data` bag goes
+ * through the same scrub as a root span's.
+ */
+export function scrubSentrySpan<S extends SentrySpanLike>(span: S): S {
+  const op = span.op ?? "";
+  if (
+    typeof span.description === "string" &&
+    URL_DESCRIPTION_OPS.some((prefix) => op.startsWith(prefix))
+  ) {
+    span.description = scrubUrl(span.description);
+  }
+  scrubDataBag(span.data);
+  return span;
 }
 
 function scrubRequest(request: SentryRequestLike): void {
@@ -266,12 +340,14 @@ export function scrubSentryBreadcrumb(
  * Scrub an event in place — errors and transactions alike (both carry
  * `request`, both can carry URLs in span data).
  *
- * `contexts` is NOT walked, with one named exception: `contexts.trace.data`,
+ * `contexts` is NOT walked, with two named exceptions: `contexts.trace.data`,
  * the root span's attributes — a flat bag of the same keys a span's `data`
- * holds, where Next records `http.target` with the query (#346). The rest of
- * `contexts` stays untouched: the HTTP data that matters is on `request`, the
- * spans and that one bag, and a blind recursive walk over an arbitrary
- * context bag is the kind of clever code that mangles stack frames.
+ * holds, where Next records `http.target` with the query (#346) — and
+ * `contexts.nextjs.request_path`, which `captureRequestError` fills with
+ * Next's `req.url`, query included, on every unhandled server error (#394).
+ * The rest of `contexts` stays untouched: the HTTP data that matters is on
+ * `request`, the spans and those two spots, and a blind recursive walk over an
+ * arbitrary context bag is the kind of clever code that mangles stack frames.
  */
 export function scrubSentryEvent(event: SentryEventLike): void {
   if (event.request) scrubRequest(event.request);
@@ -292,8 +368,12 @@ export function scrubSentryEvent(event: SentryEventLike): void {
       .map(scrubSentryBreadcrumb)
       .filter((crumb): crumb is SentryBreadcrumbLike => crumb !== null);
   }
-  for (const span of event.spans ?? []) scrubDataBag(span.data);
+  for (const span of event.spans ?? []) scrubSentrySpan(span);
   scrubDataBag(event.contexts?.trace?.data);
+  const nextjs = event.contexts?.nextjs;
+  if (typeof nextjs?.request_path === "string") {
+    nextjs.request_path = scrubUrl(nextjs.request_path);
+  }
   // Whatever else was attached to the user, only the id survives. Nothing in
   // the app calls `Sentry.setUser`, and this is what keeps that true.
   if (event.user) event.user = { id: event.user.id };
@@ -494,10 +574,14 @@ export interface SentryDataCollection {
   stackFrameVariables: false;
 }
 
-/** The web's whole contract: @sentry/nextjs 11, on Node, edge and browser. */
-export interface SentryPrivacyOptions extends SentryPrivacyHooks {
+/**
+ * The web's whole contract: @sentry/nextjs 11, on Node, edge and browser.
+ * `T` is whatever the SDK's `withStaticSpan` returns for `scrubSentrySpan`.
+ */
+export interface SentryPrivacyOptions<T = unknown> extends SentryPrivacyHooks {
   dataCollection: SentryDataCollection;
   traceLifecycle: "static";
+  beforeSendSpan: T;
 }
 
 /** The app's whole contract: @sentry/react-native 8, on JavaScript SDK 10. */
@@ -565,17 +649,27 @@ function privacyHooks(): SentryPrivacyHooks {
  * streamed trace never becomes a transaction event — so `beforeSendTransaction`
  * (the scrub of request URLs, span data and the root span's attributes) would
  * silently stop running. "static" keeps the transactions it scrubs; v12 drops
- * that lifecycle, and the move to `beforeSendSpan` is in docs/registry.md.
+ * that lifecycle, and the move to a streamed `beforeSendSpan` is in
+ * docs/registry.md.
+ *
+ * `beforeSendSpan` is `scrubSentrySpan` behind the SDK's `withStaticSpan`,
+ * which the caller passes in (this module imports nothing — the app bundles it
+ * too). Under "static" it runs on every span of a transaction AND on the spans
+ * sent on their own, which reach Sentry past every other hook here (#394).
+ * Unwrapped, the SDK would never call it under "static".
  *
  * No log channel to shut: v11 removed `enableLogs`, and Sentry Logs open only
  * when code calls `Sentry.logger.*` or adds `consoleLoggingIntegration` —
  * nothing here does either.
  */
-export function sentryPrivacyOptions(): SentryPrivacyOptions {
+export function sentryPrivacyOptions<T>(
+  withStaticSpan: (callback: typeof scrubSentrySpan) => T,
+): SentryPrivacyOptions<T> {
   return {
     dataCollection: webDataCollection(),
     traceLifecycle: "static",
     ...privacyHooks(),
+    beforeSendSpan: withStaticSpan(scrubSentrySpan),
   };
 }
 
