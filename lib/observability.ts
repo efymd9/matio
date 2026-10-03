@@ -91,6 +91,8 @@ export interface SentryHintLike {
 
 export interface SentryEventLike {
   message?: string;
+  /** `captureMessage`'s parameterised form — `message` is the template text. */
+  logentry?: { message?: string; params?: unknown[] };
   transaction?: string;
   request?: SentryRequestLike;
   breadcrumbs?: SentryBreadcrumbLike[];
@@ -160,6 +162,33 @@ export function redactEmails(value: string): string {
   return value.replace(EMAIL_PATTERN, EMAIL_PLACEHOLDER);
 }
 
+/**
+ * Where Drizzle starts quoting a failed statement's PARAMETERS. A
+ * `DrizzleQueryError` (drizzle-orm 0.45, `errors.js`) builds its message as
+ * `Failed query: <sql>\nparams: <params>`: the SQL is the same for every
+ * caller and is what an incident is fixed from, the params are whatever the
+ * request bound — a trial cookie, a device UUID, an IP hash, an account id
+ * (#326).
+ */
+const QUERY_PARAMS_MARKER = "\nparams:";
+
+/**
+ * Cut everything from the `\nparams:` Drizzle appends to a failed query to the
+ * end of the text; the class, the SQL and (on the cause that carries it) the
+ * SQLSTATE stay. Keyed on the TEXT, not on the error class: the same message
+ * reaches the tracker as an exception value, as a captured message and inside
+ * a breadcrumb, and whichever wrapper re-throws it keeps the text.
+ */
+export function stripQueryParams(value: string): string {
+  const cut = value.indexOf(QUERY_PARAMS_MARKER);
+  return cut === -1 ? value : value.slice(0, cut);
+}
+
+/** The free-text scrub every message-shaped field goes through. */
+function scrubText(value: string): string {
+  return redactEmails(stripQueryParams(value));
+}
+
 function scrubDataUrls(data: Record<string, unknown> | undefined): void {
   if (!data) return;
   for (const key of URL_DATA_KEYS) {
@@ -199,7 +228,7 @@ export function scrubSentryBreadcrumb(
 ): SentryBreadcrumbLike | null {
   if (breadcrumb.category === "console") return null;
   if (typeof breadcrumb.message === "string") {
-    breadcrumb.message = redactEmails(scrubUrl(breadcrumb.message));
+    breadcrumb.message = scrubText(scrubUrl(breadcrumb.message));
   }
   scrubDataUrls(breadcrumb.data);
   return breadcrumb;
@@ -222,10 +251,13 @@ export function scrubSentryEvent(event: SentryEventLike): void {
     event.transaction = scrubUrl(event.transaction);
   }
   if (typeof event.message === "string") {
-    event.message = redactEmails(event.message);
+    event.message = scrubText(event.message);
+  }
+  if (typeof event.logentry?.message === "string") {
+    event.logentry.message = scrubText(event.logentry.message);
   }
   for (const value of event.exception?.values ?? []) {
-    if (typeof value.value === "string") value.value = redactEmails(value.value);
+    if (typeof value.value === "string") value.value = scrubText(value.value);
   }
   if (event.breadcrumbs) {
     event.breadcrumbs = event.breadcrumbs
