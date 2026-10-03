@@ -1,0 +1,26 @@
+# osv-scanner config for the ROOT lock (pnpm-lock.yaml).
+#
+# WHERE THIS FILE LIVES MATTERS: osv-scanner reads `osv-scanner.toml` from the
+# directory of the lockfile it is scanning, and the config does NOT propagate to
+# child directories — this file covers pnpm-lock.yaml only; the app's lock has
+# its own mobile/osv-scanner.toml.
+#
+# RULES (#256, same as mobile/osv-scanner.toml): an entry here is the LAST
+# resort — first move the lock (in the web: override -> `pnpm install` -> drop
+# the override -> `pnpm install`), then a scoped `pnpm.overrides` entry when the
+# consumer is API-compatible. What remains is what cannot be fixed today. Every
+# entry carries a truthful `reason` and an `ignoreUntil`: on that date the
+# scanner starts reporting it again and the nightly run goes red — that is the
+# review reminder, do not push the date out without re-checking upstream.
+# Mirror every entry in docs/registry.md.
+# Cap: 5 packages. Re-check: 2026-12-20 (one review date for both files).
+
+# braces 3.0.3 <- micromatch 4.0.8 <- fast-glob 3.3.1 <- @next/eslint-plugin-next
+#   <- eslint-config-next (devDependency, lint only)
+# braces 3.0.3 <- micromatch 4.0.8 <- fast-glob 3.3.3 <- shadcn 4.21.0 (+ via
+#   ts-morph 26 -> @ts-morph/common) — the shadcn CLI.
+# No fixed release exists (advisory: last_affected 3.0.3; 3.0.3 is the latest).
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+ignoreUntil = 2026-12-20
+reason = "No fixed version exists upstream (all releases through 3.0.3 affected). Tooling only: braces expands GLOB PATTERNS for eslint-plugin-next (settings.next.rootDir from our own eslint config) and for the shadcn CLI (its own patterns over our project files); a crafted pattern can only crash that local lint/CLI process. The app imports nothing from shadcn but the CSS file shadcn/tailwind.css (app/globals.css), and no braces / micromatch / fast-glob / ts-morph code is in the production build: absent from every .nft.json trace and from .next/server + .next/static (#379). Unblocks when braces ships a fix or micromatch/fast-glob drop it."
