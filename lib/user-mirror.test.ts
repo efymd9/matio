@@ -88,6 +88,8 @@ const USER_ID = "user_new";
 const STALE_ID = "user_stale";
 const EMAIL = "someone@example.invalid";
 const CURRENT = "moved@example.invalid";
+/** When Clerk created the NEW account. */
+const CREATED = new Date("2026-10-01T05:56:00Z");
 
 /** What postgres-js throws, wrapped the way Drizzle 0.44+ wraps it. */
 function uniqueViolation(constraint: string) {
@@ -147,7 +149,7 @@ afterEach(() => {
 
 describe("mirrorClerkUser · no conflict", () => {
   it("inserts the row ON CONFLICT (id) DO NOTHING and asks Clerk nothing", async () => {
-    const result = await mirrorClerkUser(USER_ID, EMAIL);
+    const result = await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     expect(result).toEqual({ status: "mirrored" });
     expect(h.ops).toEqual(["insert users"]);
@@ -160,8 +162,8 @@ describe("mirrorClerkUser · no conflict", () => {
   it("a repeat after a successful run is the same plain insert — no lookup, no Clerk, no erasure", async () => {
     // The row is there after the first run, so ON CONFLICT (id) DO NOTHING
     // absorbs the second one: the address branch is never reached.
-    await mirrorClerkUser(USER_ID, EMAIL);
-    await mirrorClerkUser(USER_ID, EMAIL);
+    await mirrorClerkUser(USER_ID, EMAIL, CREATED);
+    await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     expect(h.ops).toEqual(["insert users", "insert users"]);
     expect(h.eraseUser).not.toHaveBeenCalled();
@@ -170,7 +172,7 @@ describe("mirrorClerkUser · no conflict", () => {
   it("a unique violation on another constraint is not this conflict — it propagates and Clerk is not asked", async () => {
     h.insertResults.push(uniqueViolation("users_stripe_customer_id_unique"));
 
-    await expect(mirrorClerkUser(USER_ID, EMAIL)).rejects.toThrow("Failed query");
+    await expect(mirrorClerkUser(USER_ID, EMAIL, CREATED)).rejects.toThrow("Failed query");
     expect(h.ops).toEqual(["insert users"]);
   });
 });
@@ -184,7 +186,7 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
   it("looks the holder up by the address and asks Clerk about THAT id", async () => {
     h.getUser.mockResolvedValue(account(CURRENT));
 
-    await mirrorClerkUser(USER_ID, EMAIL);
+    await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     const lookup = render(h.selects[0]);
     expect(lookup.sql).toBe('"users"."email" = $1');
@@ -192,10 +194,10 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
     expect(h.getUser).toHaveBeenCalledWith(STALE_ID);
   });
 
-  it("Clerk 404 → the stale row is erased by eraseUser with the webhook's deps, then the row is inserted", async () => {
+  it("Clerk 404 → the stale row is erased by eraseUser with the webhook's deps as a LATE erasure (the address passed to the new account at its creation), then the row is inserted", async () => {
     h.getUser.mockRejectedValue(clerkError(404));
 
-    const result = await mirrorClerkUser(USER_ID, EMAIL);
+    const result = await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     expect(result).toEqual({ status: "mirrored", resolved: "stale_row_erased" });
     expect(h.ops).toEqual([
@@ -206,9 +208,12 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
       "insert users",
     ]);
     // The same deps the user.deleted webhook hands it.
-    const [erasedId, deps] = h.eraseUser.mock.calls[0];
+    const [erasedId, deps, options] = h.eraseUser.mock.calls[0];
     expect(erasedId).toBe(STALE_ID);
     expect(deps).toMatchObject({ getStripe: stripeGetter, posthog: null });
+    // Late: nothing searched or deleted by the address that the new account
+    // may already own (lib/erase-user.ts:EraseUserOptions).
+    expect(options).toEqual({ addressReassignedAt: CREATED });
     expect(h.inserts).toEqual([
       { values: { id: USER_ID, email: EMAIL }, target: users.id },
     ]);
@@ -232,14 +237,14 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
     h.getUser.mockRejectedValue(clerkError(404));
     h.eraseUser.mockRejectedValue(new Error("connection reset"));
 
-    await expect(mirrorClerkUser(USER_ID, EMAIL)).rejects.toThrow("connection reset");
+    await expect(mirrorClerkUser(USER_ID, EMAIL, CREATED)).rejects.toThrow("connection reset");
     expect(h.inserts).toEqual([]);
   });
 
   it("alive with another address → its row gets its current primary address, guarded by the old one, then the row is inserted", async () => {
     h.getUser.mockResolvedValue(account(CURRENT));
 
-    const result = await mirrorClerkUser(USER_ID, EMAIL);
+    const result = await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     expect(result).toEqual({ status: "mirrored", resolved: "stale_address_corrected" });
     expect(h.ops).toEqual([
@@ -268,7 +273,7 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
   it("alive and still holding the address (case aside, secondary included) → nothing erased or written, unresolved", async () => {
     h.getUser.mockResolvedValue(account(CURRENT, ["SomeOne@Example.INVALID"]));
 
-    const result = await mirrorClerkUser(USER_ID, EMAIL);
+    const result = await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     expect(result).toEqual({ status: "unresolved", reason: "address_still_owned" });
     expect(h.eraseUser).not.toHaveBeenCalled();
@@ -288,7 +293,7 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
   it("alive with no address at all → nothing written, unresolved", async () => {
     h.getUser.mockResolvedValue(account(null));
 
-    const result = await mirrorClerkUser(USER_ID, EMAIL);
+    const result = await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     expect(result).toEqual({ status: "unresolved", reason: "holder_has_no_address" });
     expect(h.updates).toEqual([]);
@@ -300,7 +305,7 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
     h.getUser.mockResolvedValue(account(CURRENT));
     h.updateFails = emailTaken();
 
-    const result = await mirrorClerkUser(USER_ID, EMAIL);
+    const result = await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     expect(result).toEqual({ status: "unresolved", reason: "current_address_taken" });
     expect(h.ops).toEqual([
@@ -317,7 +322,7 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
     h.getUser.mockResolvedValue(account(CURRENT));
     h.updateFails = new Error("connection reset");
 
-    await expect(mirrorClerkUser(USER_ID, EMAIL)).rejects.toThrow("connection reset");
+    await expect(mirrorClerkUser(USER_ID, EMAIL, CREATED)).rejects.toThrow("connection reset");
     expect(h.inserts).toEqual([]);
   });
 
@@ -328,7 +333,7 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
   ])("Clerk failing with %s → nothing erased or written, clerk_unavailable, reported by status", async (_label, status) => {
     h.getUser.mockRejectedValue(clerkError(status));
 
-    const result = await mirrorClerkUser(USER_ID, EMAIL);
+    const result = await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     expect(result).toEqual({ status: "clerk_unavailable" });
     expect(h.eraseUser).not.toHaveBeenCalled();
@@ -347,7 +352,7 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
   it("the holder left between the insert and the lookup → the insert is simply repeated", async () => {
     h.holder = undefined;
 
-    const result = await mirrorClerkUser(USER_ID, EMAIL);
+    const result = await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     expect(result).toEqual({ status: "mirrored" });
     expect(h.ops).toEqual(["insert users", "select holder", "insert users"]);
@@ -357,7 +362,7 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
   it("the holder is this very account (the webhook and a sync at once) → done, Clerk not asked", async () => {
     h.holder = { id: USER_ID };
 
-    const result = await mirrorClerkUser(USER_ID, EMAIL);
+    const result = await mirrorClerkUser(USER_ID, EMAIL, CREATED);
 
     expect(result).toEqual({ status: "mirrored" });
     expect(h.getUser).not.toHaveBeenCalled();
@@ -368,7 +373,7 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
     h.getUser.mockRejectedValue(clerkError(404));
     h.insertResults.push(emailTaken());
 
-    await expect(mirrorClerkUser(USER_ID, EMAIL)).rejects.toThrow("Failed query");
+    await expect(mirrorClerkUser(USER_ID, EMAIL, CREATED)).rejects.toThrow("Failed query");
     expect(h.ops.filter((op) => op === "insert users")).toHaveLength(2);
   });
 });

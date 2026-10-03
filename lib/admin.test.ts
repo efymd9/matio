@@ -88,7 +88,11 @@ const emailTaken = () =>
     ),
   });
 
+/** When Clerk created the signed-in (new) account, ms — Backend `User.createdAt`. */
+const CREATED_MS = Date.parse("2026-10-01T05:56:00Z");
+
 const signedIn = (email: string) => ({
+  createdAt: CREATED_MS,
   primaryEmailAddress: { emailAddress: email },
   emailAddresses: [{ emailAddress: email }],
 });
@@ -151,7 +155,7 @@ describe("getOrSyncCurrentUser × the address held by another row (#380)", () =>
     h.holder = { id: STALE_ID };
   });
 
-  it("Clerk 404 for the holder → eraseUser(holder), then the row is inserted and returned", async () => {
+  it("Clerk 404 for the holder → eraseUser(holder) as a late erasure from this account's creation, then the row is inserted and returned", async () => {
     h.getUser.mockRejectedValue(
       Object.assign(new Error("Not Found"), { name: "ClerkAPIResponseError", status: 404 }),
     );
@@ -161,6 +165,11 @@ describe("getOrSyncCurrentUser × the address held by another row (#380)", () =>
     expect(user).toMatchObject({ id: USER_ID, email: EMAIL });
     expect(h.getUser).toHaveBeenCalledWith(STALE_ID);
     expect(h.writes).toEqual([`erase ${STALE_ID}`, "insert users"]);
+    // The address is this account's since Clerk created it — the bound the
+    // erasure applies to everything it matches by address.
+    expect(h.eraseUser.mock.calls[0][2]).toEqual({
+      addressReassignedAt: new Date(CREATED_MS),
+    });
   });
 
   it("alive with another address → the stale row is corrected, then the row is inserted and returned", async () => {

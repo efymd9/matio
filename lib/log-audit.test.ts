@@ -994,10 +994,10 @@ describe("log audit · Clerk user.created × the address held by another row (#3
     select
       // The holder of the address…
       .mockImplementationOnce(() => selectChain([{ id: STALE_ID }]))
-      // …and, should it be erased, the row eraseUser reads (address and all),
-      // then no subscription of any kind.
+      // …and, should it be erased, the row eraseUser reads (address and all,
+      // a paid-once customer id), then no live subscription.
       .mockImplementationOnce(() =>
-        selectChain([{ email: MARKER_EMAIL, stripeCustomerId: null }]),
+        selectChain([{ email: MARKER_EMAIL, stripeCustomerId: "cus_dummy" }]),
       )
       .mockImplementation(() => selectChain([]));
     update.mockImplementation(() => ({ set: () => ({ where: async () => undefined }) }));
@@ -1033,6 +1033,11 @@ describe("log audit · Clerk user.created × the address held by another row (#3
     expect(logged()).toContain('"outcome":"stale_row_erased"');
     expect(logged()).toContain("erase user: local data erased");
     expect(sentryCalls()).toContain(STALE_ID);
+    // A late erasure: the address never goes to Stripe as a query; the row's
+    // own customer is tombstoned and named by id.
+    expect(stripeSearch).not.toHaveBeenCalled();
+    expect(logged()).toContain('"stripeSearch":"skipped_address_reassigned"');
+    expect(logged()).toContain('"stripeCustomersTombstoned":["cus_dummy"]');
   });
 
   it("a live account's stale address is corrected — neither address nor its name is logged", async () => {

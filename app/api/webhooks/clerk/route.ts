@@ -46,7 +46,11 @@ export async function POST(req: NextRequest) {
     // (#380, lib/user-mirror.ts). A conflict that cannot be resolved is
     // reported by id and acknowledged — a redelivery would change nothing;
     // Clerk being unreachable is a 500, so Svix redelivers.
-    const result = await mirrorClerkUser(data.id, email);
+    // Clerk always sends created_at; "now" is a safe stand-in otherwise —
+    // no row can be newer than the moment it is used as a bound.
+    const createdAt =
+      typeof data.created_at === "number" ? new Date(data.created_at) : new Date();
+    const result = await mirrorClerkUser(data.id, email, createdAt);
     if (result.status === "clerk_unavailable") {
       return new Response("Clerk unavailable — retry", { status: 500 });
     }

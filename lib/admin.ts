@@ -42,10 +42,11 @@ export async function getOrSyncCurrentUser(): Promise<User | null> {
   // held by another row is resolved there (#380). Unresolvable → null (the
   // conflict is already reported by id); Clerk unreachable → throw, nothing
   // was touched and the next request tries again.
-  const email = clerkPrimaryEmail(await currentUser());
-  if (!email) return null; // Shouldn't happen — Clerk requires email on signup
+  const clerk = await currentUser();
+  const email = clerkPrimaryEmail(clerk);
+  if (!clerk || !email) return null; // Shouldn't happen — Clerk requires email on signup
 
-  const mirrored = await mirrorClerkUser(userId, email);
+  const mirrored = await mirrorClerkUser(userId, email, new Date(clerk.createdAt));
   if (mirrored.status === "clerk_unavailable") {
     throw new Error("users mirror: Clerk unavailable — the address conflict is left for a retry");
   }

@@ -157,7 +157,10 @@ const userDeleted = (id?: string) => ({
   data: { object: "user", deleted: true, ...(id ? { id } : {}) },
 });
 
-const userCreated = (emails: { id: string; email_address: string }[]) => ({
+const userCreated = (
+  emails: { id: string; email_address: string }[],
+  extra: Record<string, unknown> = {},
+) => ({
   type: "user.created",
   object: "event",
   data: {
@@ -165,6 +168,7 @@ const userCreated = (emails: { id: string; email_address: string }[]) => ({
     object: "user",
     primary_email_address_id: emails[0]?.id ?? null,
     email_addresses: emails,
+    ...extra,
   },
 });
 
@@ -672,7 +676,10 @@ describe("Clerk webhook · user.created × the address held by another row (#380
         { code: "23505", constraint_name: "users_email_unique" },
       ),
     });
-  const created = () => signed(userCreated([{ id: "idn_1", email_address: EMAIL }]));
+  // When Clerk created the NEW account (user.created's created_at, ms).
+  const CREATED_MS = Date.parse("2026-10-01T05:56:00Z");
+  const created = () =>
+    signed(userCreated([{ id: "idn_1", email_address: EMAIL }], { created_at: CREATED_MS }));
 
   beforeEach(() => {
     h.usersInsertResults.push(emailTaken());
@@ -681,7 +688,12 @@ describe("Clerk webhook · user.created × the address held by another row (#380
     h.userRow = { email: EMAIL, stripeCustomerId: null };
   });
 
-  it("Clerk 404 for the holder → its row is erased exactly as user.deleted would erase it, then the new row is inserted", async () => {
+  it("Clerk 404 for the holder → its row is erased as a LATE erasure, then the new row is inserted", async () => {
+    // The stale row had paid once — the very case where a Stripe search by
+    // the address would run on user.deleted. The address belongs to the new
+    // account now, so the late erasure must not search by it: the new
+    // account's own guest-checkout customer would be tombstoned forever.
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_old" };
     h.clerkGetUser.mockRejectedValue(
       Object.assign(new Error("Not Found"), { name: "ClerkAPIResponseError", status: 404 }),
     );
@@ -690,19 +702,42 @@ describe("Clerk webhook · user.created × the address held by another row (#380
 
     expect(res.status).toBe(200);
     expect(h.clerkGetUser).toHaveBeenCalledWith(STALE_ID);
-    // eraseUser's own sequence, keyed on the STALE id, before the insert.
+    // No search by the address; the customer the OLD row names is still
+    // tombstoned, before the deletes.
+    expect(h.stripeSearch).not.toHaveBeenCalled();
     expect(h.writes).toEqual([
+      "insert erased_customers",
       "delete show_reminders",
       "delete idea_submissions",
       "delete users",
       "insert users",
     ]);
+    expect(h.inserts[0]).toEqual({
+      table: "erased_customers",
+      values: [{ stripeCustomerId: "cus_old" }],
+    });
+    // Address-matched rows only from before the new account existed; the
+    // reminders linked to the old account by user_id regardless.
+    const reminders = render(h.deletes[0].where);
+    expect(reminders.sql).toBe(
+      '(("show_reminders"."email" = $1 and "show_reminders"."created_at" < $2) or "show_reminders"."user_id" = $3)',
+    );
+    expect(reminders.params).toEqual([
+      EMAIL,
+      new Date(CREATED_MS).toISOString(),
+      STALE_ID,
+    ]);
+    const ideas = render(h.deletes[1].where);
+    expect(ideas.sql).toBe(
+      '("idea_submissions"."email" = $1 and "idea_submissions"."created_at" < $2)',
+    );
     const erased = render(h.deletes[2].where);
     expect(erased.sql).toBe('"users"."id" = $1');
     expect(erased.params).toEqual([STALE_ID]);
-    expect(h.inserts).toEqual([
-      { table: "users", values: { id: USER_ID, email: EMAIL } },
-    ]);
+    expect(h.inserts[1]).toEqual({
+      table: "users",
+      values: { id: USER_ID, email: EMAIL },
+    });
   });
 
   it("alive with another address → the stale row gets that address, the new row is inserted, nothing is erased", async () => {

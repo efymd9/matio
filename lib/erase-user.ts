@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
-import { and, count, eq, gt, inArray, or } from "drizzle-orm";
+import { and, count, eq, gt, inArray, lt, or } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/db/schema";
 import {
@@ -35,7 +35,8 @@ import { isSubjectId } from "@/lib/user-export";
 // erased (docs/runbooks/db-restore.md §7). A fourth caller runs it late:
 // the users mirror (lib/user-mirror.ts, #380), when a new account's address
 // is held by the row of an account Clerk no longer knows (404) — the
-// erasure user.deleted would have run, had it been delivered. Clerk is the
+// erasure user.deleted would have run, minus what is found BY THE ADDRESS,
+// which by then is the new account's (EraseUserOptions). Clerk is the
 // source of truth for the account: deleting it there (UserProfile → "Delete
 // account", the dashboard, or our own hand-run erasure request) is the
 // trigger; the script repeats the effect, it does not replace the trigger.
@@ -116,6 +117,30 @@ export type EraseUserDeps = {
   posthog: PosthogQueryConfig | null;
 };
 
+export type EraseUserOptions = {
+  /**
+   * LATE erasure (#380, lib/user-mirror.ts): the account is already gone at
+   * Clerk, and its address has since passed to ANOTHER, newer account — the
+   * one whose sign-up found this row still holding it — created at this
+   * moment. Almost certainly the same person, back with a new account; so
+   * what the erasure finds BY ADDRESS is no longer only the old account's:
+   *   · the Stripe customer search by address is skipped
+   *     (`skipped_address_reassigned`): it would also find — and tombstone
+   *     forever — a customer the NEW account's own checkout created (a guest
+   *     checkout mints its customer before the account exists), i.e. "paid,
+   *     no account". The customer id the row itself names is still
+   *     tombstoned, and a live subscription still set to cancel;
+   *   · reminders and story ideas matched by the address are only those
+   *     created BEFORE this moment — later ones were written while the
+   *     address belonged to the new account. Reminder rows linked to the old
+   *     account by user_id go regardless.
+   * Every other step is unchanged. The webhook `user.deleted`, the script and
+   * the app's «Delete account» never pass it: they erase at deletion time,
+   * when the address is still the account's own.
+   */
+  addressReassignedAt?: Date;
+};
+
 export type EraseUserResult =
   | {
       /** Already erased or never mirrored — nothing written locally. */
@@ -190,6 +215,8 @@ export type StripeSearchStatus =
   | "ok"
   | "skipped_no_stripe_footprint"
   | "skipped_unconfigured"
+  /** A late erasure: the address belongs to a newer account (EraseUserOptions). */
+  | "skipped_address_reassigned"
   | "failed";
 
 export type StripeCustomerSearch = {
@@ -307,10 +334,14 @@ function liveSubscriptionWhere(userId: string) {
   );
 }
 
-/** Reminder rows the account owns: by its (lowercased) address OR by user_id. */
-function reminderRowsWhere(userId: string, email: string) {
+/**
+ * Reminder rows the account owns: by its (lowercased) address OR by user_id.
+ * `before` (a late erasure, EraseUserOptions) bounds the address arm only.
+ */
+function reminderRowsWhere(userId: string, email: string, before?: Date) {
+  const byAddress = eq(showReminders.email, email.toLowerCase());
   return or(
-    eq(showReminders.email, email.toLowerCase()),
+    before ? and(byAddress, lt(showReminders.createdAt, before)) : byAddress,
     eq(showReminders.userId, userId),
   );
 }
@@ -321,15 +352,18 @@ function reminderRowsWhere(userId: string, email: string) {
  * (app/(public)/ideas/actions.ts), `users.email` is mirrored from Clerk as
  * typed, so the account's side is lowercased here.
  */
-function ideaSubmissionRowsWhere(email: string) {
-  return eq(ideaSubmissions.email, email.toLowerCase());
+function ideaSubmissionRowsWhere(email: string, before?: Date) {
+  const byAddress = eq(ideaSubmissions.email, email.toLowerCase());
+  return before ? and(byAddress, lt(ideaSubmissions.createdAt, before)) : byAddress;
 }
 
 export async function eraseUser(
   userId: string,
   deps: EraseUserDeps,
+  options: EraseUserOptions = {},
 ): Promise<EraseUserResult> {
   const { db } = deps;
+  const reassignedAt = options.addressReassignedAt;
 
   const [user] = await db
     .select({ email: users.email, stripeCustomerId: users.stripeCustomerId })
@@ -424,13 +458,18 @@ export async function eraseUser(
   // where the address already is (the footprint rule in the module
   // comment): a customer id on the row, the live subscription found
   // above, or — one cheap read — any subscriptions row at all.
+  // A late erasure never searches by the address (EraseUserOptions).
   const hasStripeFootprint =
-    user.stripeCustomerId !== null ||
-    liveSub !== undefined ||
-    (await hasAnySubscription(db, userId));
-  const search = hasStripeFootprint
-    ? await searchStripeCustomersAndReport(userId, user.email, deps.getStripe)
-    : skippedSearch("skipped_no_stripe_footprint");
+    reassignedAt === undefined &&
+    (user.stripeCustomerId !== null ||
+      liveSub !== undefined ||
+      (await hasAnySubscription(db, userId)));
+  const search =
+    reassignedAt !== undefined
+      ? skippedSearch("skipped_address_reassigned")
+      : hasStripeFootprint
+        ? await searchStripeCustomersAndReport(userId, user.email, deps.getStripe)
+        : skippedSearch("skipped_no_stripe_footprint");
   const stripeCustomersTombstoned = [
     ...new Set([
       ...(user.stripeCustomerId ? [user.stripeCustomerId] : []),
@@ -462,7 +501,7 @@ export async function eraseUser(
   // would drop that link first. Reminder addresses are stored lowercased.
   const reminders = await db
     .delete(showReminders)
-    .where(reminderRowsWhere(userId, user.email))
+    .where(reminderRowsWhere(userId, user.email, reassignedAt))
     .returning({ id: showReminders.id });
 
   // "Delete my account" erases the story ideas sent from the account's
@@ -471,7 +510,7 @@ export async function eraseUser(
   // no user_id, so this explicit step is the whole mechanism.
   const ideas = await db
     .delete(ideaSubmissions)
-    .where(ideaSubmissionRowsWhere(user.email))
+    .where(ideaSubmissionRowsWhere(user.email, reassignedAt))
     .returning({ id: ideaSubmissions.id });
 
   await db.delete(users).where(eq(users.id, userId));

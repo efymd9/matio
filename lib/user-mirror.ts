@@ -28,9 +28,13 @@ import { getStripe } from "@/lib/stripe";
 //
 // So a conflict asks Clerk about the row's own id, and only Clerk decides:
 //   · 404 — that account is gone; the row is what an erasure that never ran
-//     left behind. It is erased with lib/erase-user.ts:eraseUser — the very
-//     code `user.deleted` would have run, every step and every log line by id
-//     (ст. 17) — and the insert is repeated.
+//     left behind. It is erased with lib/erase-user.ts:eraseUser — the code
+//     `user.deleted` would have run, every log line by id (ст. 17) — as a
+//     LATE erasure (`addressReassignedAt` = the new account's creation): the
+//     address now belongs to the new account, so nothing is looked up or
+//     deleted by it that the new account may own (no Stripe customer search;
+//     address-matched reminders and ideas only from before its creation).
+//     Then the insert is repeated.
 //   · alive, and the address is no longer among its addresses — the mirror is
 //     stale (path 2): the row gets the account's CURRENT primary address,
 //     guarded by the old one in the WHERE, and the insert is repeated. If that
@@ -153,6 +157,8 @@ async function insertAgain(userId: string, email: string) {
 export async function mirrorClerkUser(
   userId: string,
   email: string,
+  /** When Clerk created this account — from then on the address is its own. */
+  accountCreatedAt: Date,
 ): Promise<MirrorUserResult> {
   if (await insertMirrorRow(userId, email)) return { status: "mirrored" };
 
@@ -183,11 +189,11 @@ export async function mirrorClerkUser(
   }
 
   if (account === null) {
-    const erased = await eraseUser(holder.id, {
-      db,
-      getStripe,
-      posthog: getPosthogQueryConfig(),
-    });
+    const erased = await eraseUser(
+      holder.id,
+      { db, getStripe, posthog: getPosthogQueryConfig() },
+      { addressReassignedAt: accountCreatedAt },
+    );
     report("stale_row_erased", ids, { erase: erased.status });
     await insertAgain(userId, email);
     return { status: "mirrored", resolved: "stale_row_erased" };
