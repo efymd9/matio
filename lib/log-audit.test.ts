@@ -25,6 +25,11 @@ const MARKER_DATABASE_URL = `postgres://matio:${MARKER_SECRET}@db.example.invali
 // Free text a fan wrote (the /ideas story, #297) — the one marker that is
 // not an identifier but a person's own words.
 const MARKER_STORY = "Storymarker: the banished postman delivers his last letter";
+// The anonymous identity (the app's device UUID, the web's trial cookie) and the
+// HMAC of the viewer's IP — what a failed trial_sessions statement binds, and
+// so what Drizzle's error quotes after `params:` (#305, #326).
+const MARKER_IDENTITY = "1eaf0000-dead-4bee-8f00-00000000beef";
+const MARKER_IP_HASH = "dummy-ip-hash-leak-marker";
 
 const {
   execute,
@@ -416,6 +421,62 @@ describe("log audit · Sentry payloads", () => {
 
     for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_SECRET]) {
       expect(scrubbed).not.toContain(marker);
+    }
+  });
+
+  // #326: an error a route does not catch reaches Sentry through
+  // `onRequestError`, and a DrizzleQueryError's message is the statement AND
+  // its params (`Failed query: <sql>\nparams: <params>` — drizzle-orm
+  // errors.js), which is where the trial cookie / device id and the IP hash
+  // of a failed trial_sessions write sit. The class is irrelevant: the text is
+  // cut wherever it travels.
+  const SQL = 'select "id" from "trial_sessions" where "session_token" = $1';
+  const DRIZZLE_TEXT = `Failed query: ${SQL}\nparams: ${MARKER_IDENTITY},show_1,${MARKER_IP_HASH}`;
+  const QUOTED = [MARKER_IDENTITY, MARKER_IP_HASH];
+
+  function drizzleEvent(): SentryEventLike {
+    return {
+      message: DRIZZLE_TEXT,
+      logentry: { message: DRIZZLE_TEXT },
+      breadcrumbs: [{ category: "sentry.event", message: DRIZZLE_TEXT }],
+      exception: {
+        values: [
+          { type: "PostgresError", value: "terminating connection due to administrator command" },
+          { type: "DrizzleQueryError", value: DRIZZLE_TEXT },
+        ],
+      },
+    };
+  }
+
+  it("carries the quoted params before scrubbing", () => {
+    const raw = JSON.stringify(drizzleEvent());
+
+    for (const marker of QUOTED) expect(raw).toContain(marker);
+  });
+
+  it("cuts a failed query's params from the exception, the message and the breadcrumbs — through beforeSend", () => {
+    const event = sentryPrivacyOptions().beforeSend(drizzleEvent());
+    const scrubbed = JSON.stringify(event);
+
+    for (const marker of QUOTED) expect(scrubbed).not.toContain(marker);
+    // What an incident is fixed from stays: the class and the statement.
+    expect(event?.exception?.values?.[1]).toEqual({
+      type: "DrizzleQueryError",
+      value: `Failed query: ${SQL}`,
+    });
+    expect(event?.message).toBe(`Failed query: ${SQL}`);
+  });
+
+  it("cuts them through beforeSendTransaction and beforeBreadcrumb too", () => {
+    const options = sentryPrivacyOptions();
+    const transaction = JSON.stringify(options.beforeSendTransaction(drizzleEvent()));
+    const crumb = JSON.stringify(
+      options.beforeBreadcrumb({ category: "sentry.event", message: DRIZZLE_TEXT }),
+    );
+
+    for (const marker of QUOTED) {
+      expect(transaction).not.toContain(marker);
+      expect(crumb).not.toContain(marker);
     }
   });
 });
@@ -1313,12 +1374,11 @@ describe("log audit · the playback-token routes' funnel writes (#305)", () => {
   // episode ids may come out.
   const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
   const SHOW = "show_1";
-  const MARKER_IDENTITY = "1eaf0000-dead-4bee-8f00-00000000beef";
-  const MARKER_IP_HASH = "dummy-ip-hash-leak-marker";
   const MARKERS = [MARKER_IDENTITY, MARKER_IP_HASH, MARKER_SECRET, "db.example.invalid"];
 
   function driverError(statement: string) {
-    const text = `${statement} params: ${MARKER_IDENTITY},${SHOW},${MARKER_IP_HASH} — ${MARKER_DATABASE_URL}`;
+    // Drizzle's own layout: the statement, a newline, then `params: <list>`.
+    const text = `${statement}\nparams: ${MARKER_IDENTITY},${SHOW},${MARKER_IP_HASH} — ${MARKER_DATABASE_URL}`;
     const cause = Object.assign(new Error(text), { name: "PostgresError", code: "57P01" });
     return Object.assign(new Error(`Failed query: ${text}`), {
       name: "DrizzleQueryError",
@@ -1327,6 +1387,7 @@ describe("log audit · the playback-token routes' funnel writes (#305)", () => {
   }
   const MINT = 'insert into "trial_sessions" ("session_token", "show_id", "ip_hash") values ($1, $2, $3)';
   const STAMP = 'update "trial_sessions" set "signup_wall_at" = now() where "session_token" = $1 and "show_id" = $2';
+  const FIND = 'select "expires_at" from "trial_sessions" where ("session_token" = $1 and "show_id" = $2)';
 
   /** The episode lookup both routes open with: a ready episode of a published show. */
   function episodeRow(access: "free" | "member") {
@@ -1432,6 +1493,85 @@ describe("log audit · the playback-token routes' funnel writes (#305)", () => {
       `[playback-token] signup-wall stamp skipped {"showId":"${SHOW}","episodeId":"${EPISODE}"}`,
     );
   });
+
+  // #326 — the legacy 60-second preview (an all-subscriber show, paid mode).
+  // Unlike the best-effort writes above, its trial_sessions read and write
+  // are the access decision, so a failure there used to be thrown to the
+  // framework — which prints an unhandled error's message, i.e. the statement
+  // WITH its params, to the runtime log. Both routes now catch it at the
+  // boundary, answer 503 and report the class and SQLSTATE only.
+  function legacyPreviewRows() {
+    // The episode lookup, then showHasTierGating's probe: no free / member
+    // episode on the show, so the request falls through to the 60s preview.
+    const answers: unknown[][] = [[{ playbackId: "pb_dummy", showId: SHOW, access: "subscriber" }], []];
+    const chain = {
+      from: () => chain,
+      innerJoin: () => chain,
+      where: () => chain,
+      limit: async () => answers.shift() ?? [],
+    };
+    select.mockImplementation(() => chain);
+  }
+
+  const PREVIEW_ROUTES = [
+    {
+      name: "app",
+      tag: "[v1/playback-token]",
+      call: () => appPlaybackToken(appRequest()),
+    },
+    {
+      name: "web",
+      tag: "[playback-token]",
+      call: () => webPlaybackToken(webRequest(EPISODE)),
+    },
+  ] as const;
+
+  it.each(PREVIEW_ROUTES)(
+    "$name, legacy preview: a failed trial lookup answers 503 and logs the class and SQLSTATE — never the identity, the IP hash or the database URL",
+    async ({ tag, call }) => {
+      legacyPreviewRows();
+      tokenAudit.find.mockRejectedValue(driverError(FIND));
+      const logged = captureConsole();
+
+      const res = await call();
+      const body = JSON.stringify(await res.json());
+
+      expect(res.status).toBe(503);
+      // The fixture is honest: the identity really was in the failed read.
+      expect(tokenAudit.find).toHaveBeenCalledWith(MARKER_IDENTITY, SHOW);
+      expect(logged()).toContain(`${tag} trial store failed {"name":"DrizzleQueryError","code":"57P01"}`);
+      for (const marker of MARKERS) {
+        expect(logged()).not.toContain(marker);
+        expect(body).not.toContain(marker);
+        expect(JSON.stringify(sentryMessage.mock.calls)).not.toContain(marker);
+      }
+      expect(sentryMessage).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(PREVIEW_ROUTES)(
+    "$name, legacy preview: a failed trial mint answers 503 and logs the class and SQLSTATE only",
+    async ({ tag, call }) => {
+      legacyPreviewRows();
+      tokenAudit.mint.mockRejectedValue(driverError(MINT));
+      const logged = captureConsole();
+
+      const res = await call();
+      const body = JSON.stringify(await res.json());
+
+      expect(res.status).toBe(503);
+      expect(tokenAudit.mint).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionToken: MARKER_IDENTITY }),
+      );
+      expect(logged()).toContain(`${tag} trial store failed {"name":"DrizzleQueryError","code":"57P01"}`);
+      for (const marker of MARKERS) {
+        expect(logged()).not.toContain(marker);
+        expect(body).not.toContain(marker);
+        expect(JSON.stringify(sentryMessage.mock.calls)).not.toContain(marker);
+      }
+      expect(sentryMessage).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("web: an episode_id that is not an id is refused before the query — Postgres would quote it back, and the framework logs that", async () => {
     // What the driver does with text bound for a uuid column: refuse it,

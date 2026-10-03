@@ -21,7 +21,6 @@ import {
   cutoffFor,
   DAY_MS,
   deleteBatchSql,
-  describeDbError,
   expiredWhere,
   policyOrder,
   RETENTION_BATCH_SIZE,
@@ -238,29 +237,6 @@ describe("deleteBatchSql — the shape of one batch", () => {
       const left = p.keyColumns.length > 1 ? `(${expected})` : expected;
       expect(sql, p.name).toContain(`DELETE FROM "${p.name}" WHERE ${left} IN (SELECT`);
     }
-  });
-});
-
-describe("describeDbError — what a failure may be described by", () => {
-  it("reads the SQLSTATE through Drizzle's wrapper and reports the thrown error's class", () => {
-    expect(describeDbError(driverError("40P01"))).toEqual({
-      name: "DrizzleQueryError",
-      code: "40P01",
-    });
-  });
-
-  it("reads a bare driver error too", () => {
-    const bare = Object.assign(new Error("relation does not exist"), {
-      name: "PostgresError",
-      code: "42P01",
-    });
-    expect(describeDbError(bare)).toEqual({ name: "PostgresError", code: "42P01" });
-  });
-
-  it("answers with no code when there is none, and survives a non-Error throw", () => {
-    expect(describeDbError(new TypeError("boom"))).toEqual({ name: "TypeError", code: null });
-    expect(describeDbError("string thrown")).toEqual({ name: "string", code: null });
-    expect(describeDbError(undefined)).toEqual({ name: "undefined", code: null });
   });
 });
 

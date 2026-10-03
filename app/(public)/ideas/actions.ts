@@ -23,7 +23,7 @@ import {
   type IdeaSubmissionInput,
   type IdeaSubmissionResult,
 } from "@/lib/idea-submission";
-import { describeDbError } from "@/lib/retention";
+import { describeDbError } from "@/lib/db-errors";
 import { getClientIp, hashClientIp } from "@/lib/trial";
 
 // A fan's story idea from the public /ideas landing (#297). Anonymous — no
