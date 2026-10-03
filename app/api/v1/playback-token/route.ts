@@ -176,6 +176,9 @@ export async function POST(req: NextRequest) {
             sessionToken: deviceId,
             showId: row.showId,
             ipHash: hashClientIp(getClientIp(req)),
+            // A device row — never linked to an account by the web's IP
+            // fallback (#349).
+            client: "app",
             // No UTM cookies exist for a native client; install attribution is
             // a separate, coarser system (see docs/mobile-app-plan.md §10).
             attribution: { first: EMPTY_ATTRIBUTION, last: EMPTY_ATTRIBUTION },
@@ -265,6 +268,7 @@ export async function POST(req: NextRequest) {
       sessionToken: deviceId,
       showId: row.showId,
       ipHash: hashClientIp(getClientIp(req)),
+      client: "app",
       attribution: { first: EMPTY_ATTRIBUTION, last: EMPTY_ATTRIBUTION },
     });
     const remaining = Math.floor((fresh.expiresAt.getTime() - Date.now()) / 1000);

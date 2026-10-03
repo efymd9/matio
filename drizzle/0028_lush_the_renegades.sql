@@ -1,0 +1,21 @@
+-- trial_sessions.client (#349): which client minted the row — 'web' (the
+-- trial_session cookie) or 'app' (the Expo app's device id). The two
+-- session_token values are both random canonical UUIDs, so the token cannot
+-- tell them apart; the IP fallback of linkTrialSessionsToCurrentUser links
+-- only 'web' rows, so a stranger's phone behind a shared IP (carrier CGNAT)
+-- never lands in someone else's account.
+--
+-- EXPAND-ONLY, no contract phase: one nullable column with no default, no
+-- backfill and no index. ADD COLUMN of a nullable column without a default is
+-- a catalog-only change — no table rewrite, an instantaneous lock. NULL means
+-- "minted before this column existed"; the new code treats it as not-web
+-- (privacy-safe: such a row is simply not IP-linkable, it stays cookie-
+-- linkable). The previous version of the code never names the column — its
+-- inserts leave it NULL and its selects list their own columns — so the
+-- migration is safe BEFORE the deploy. Order: staging first, merge, then
+-- production BEFORE the release that carries the code; the code writes the
+-- column on every mint, so a release without it fails the mint with 42703.
+--
+-- No index: the one reader filters on client only after the ip_hash index has
+-- narrowed the rows to a few.
+ALTER TABLE "trial_sessions" ADD COLUMN "client" text;

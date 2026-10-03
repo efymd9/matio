@@ -52,6 +52,18 @@ export const trialSessions = pgTable(
       .$type<"preview" | "episodes">()
       .notNull()
       .default("preview"),
+    // Which client minted the row: 'web' (the trial_session cookie) or 'app'
+    // (the Expo app's device id). The two session_token values are the same
+    // shape — both a random canonical UUID — so the token cannot tell them
+    // apart; this column does (#349). Its one reader is the IP fallback of
+    // linkTrialSessionsToCurrentUser, which links ONLY 'web' rows: an app row
+    // belongs to a device that nothing ties to a signed-in browser, and behind
+    // a shared IP (carrier CGNAT) the "same network" match would hand a
+    // stranger's phone to someone else's account. Nullable and unbackfilled on
+    // purpose (expand-only): NULL = a row minted before the column existed —
+    // the web/app split is unknowable for it, so the fallback treats it as
+    // not-web, which is the privacy-safe side.
+    client: text("client").$type<"web" | "app">(),
     // Deepest 1-based episode POSITION started on this session (ordering as
     // in lib/episode-access.ts) — powers the funnel depth distribution.
     // Always 0 for kind='preview'.

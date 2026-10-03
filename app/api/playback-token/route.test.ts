@@ -173,8 +173,14 @@ describe("signup gate (REQUIRE_SIGNUP=1) — the episode's tier decides (#198)",
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ token: "signed-jwt", mode: "free" });
-    // The anonymous funnel row is minted on this first free play.
+    // The anonymous funnel row is minted on this first free play — as a WEB
+    // row, the only kind the IP fallback of the account link may claim (#349).
     expect(h.mintTrialSession).toHaveBeenCalledTimes(1);
+    expect(h.mintTrialSession.mock.calls[0][0]).toMatchObject({
+      showId: SHOW,
+      kind: "episodes",
+      client: "web",
+    });
   });
 
   it.each([["member"], ["subscriber"]])(
@@ -318,6 +324,7 @@ describe("paid mode — the legacy 60s preview (all-subscriber show)", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ mode: "trial", expiresIn: 60 });
     expect(res.cookies.get("trial_session")?.value).toBeTruthy();
+    expect(h.mintTrialSession.mock.calls[0][0]).toMatchObject({ client: "web" });
   });
 
   it("answers 429 with Retry-After when the IP bucket is full", async () => {

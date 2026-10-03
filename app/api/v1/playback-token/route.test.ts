@@ -232,6 +232,11 @@ describe("POST /api/v1/playback-token — legacy 60s preview (paid mode)", () =>
     expect(body.mode).toBe("trial");
     // Ten minutes of clock remaining must not become a ten-minute token.
     expect(body.expiresIn).toBe(60);
+    // A device row, whichever mint made it (#349).
+    expect(h.mintTrialSession.mock.calls[0][0]).toMatchObject({
+      sessionToken: DEVICE,
+      client: "app",
+    });
   });
 
   it("serves the remainder of an existing preview", async () => {
@@ -335,6 +340,8 @@ describe("POST /api/v1/playback-token — tracking never blocks playback", () =>
       sessionToken: DEVICE,
       showId: SHOW,
       kind: "episodes",
+      // A device row: the web's IP fallback must never link it (#349).
+      client: "app",
     });
 
     h.findTrialSession.mockResolvedValue({ expiresAt: new Date() });
