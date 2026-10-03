@@ -11,6 +11,7 @@ import {
   visitors,
   watchDays,
 } from "@/db/schema";
+import { describeDbError } from "@/lib/db-errors";
 
 // Data retention — the code behind /privacy §6 "How long we keep it".
 //
@@ -255,24 +256,6 @@ export function policyOrder(now: Date): readonly RetentionPolicy[] {
   const n = RETENTION_POLICIES.length;
   const start = Math.floor(now.getTime() / DAY_MS) % n;
   return RETENTION_POLICIES.map((_, i) => RETENTION_POLICIES[(start + i) % n]);
-}
-
-/**
- * What can be said about a failed statement without quoting it: the error's
- * class and the driver's SQLSTATE (42P01 undefined_table, 40P01 deadlock,
- * 57014 query_canceled, …). Drizzle 0.44+ wraps the PostgresError in a
- * DrizzleQueryError with the original on `.cause` — walked the same way as
- * lib/db-errors.ts. The message is deliberately NOT read: the driver quotes
- * the statement in it, and a constraint error can quote the row.
- */
-export function describeDbError(e: unknown): { name: string; code: string | null } {
-  const name = e instanceof Error ? e.name : typeof e;
-  for (let err = e, depth = 0; err && depth < 5; depth++) {
-    const code = (err as { code?: unknown }).code;
-    if (typeof code === "string") return { name, code };
-    err = (err as { cause?: unknown }).cause;
-  }
-  return { name, code: null };
 }
 
 export interface RetentionRunResult {

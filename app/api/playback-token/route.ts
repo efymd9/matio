@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import * as Sentry from "@sentry/nextjs";
 import { and, eq, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
@@ -7,6 +8,7 @@ import crypto from "node:crypto";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { readAttributionCookiesFromRequest } from "@/lib/attribution";
+import { describeDbError } from "@/lib/db-errors";
 import {
   resolveRequestTier,
   showHasTierGating,
@@ -47,6 +49,29 @@ function logToken(fields: {
   episodeId?: string | null;
 }) {
   console.info(`[playback-token] ${JSON.stringify(fields)}`);
+}
+
+// The legacy 60-second preview's own trial_sessions read/write failed — the one
+// path of this route whose failure used to be thrown to the framework (#326).
+// Drizzle's wrapper repeats the statement WITH its params (`Failed query: …
+// \nparams: <trial cookie>,<show>,<ip hash>`) and Next prints an unhandled
+// error's message to the runtime log, so the failure is caught HERE and only
+// its class and SQLSTATE leave (`describeDbError`, the `submitIdea` /
+// retention precedent). The viewer gets a plain 503 — the player reads any 5xx
+// as «Playback unavailable» with a retry, not as a paywall. Sentry still hears
+// of it, by class and code, so a broken table does not go quiet.
+function trialStoreFailed(err: unknown, showId: string, episodeId: string) {
+  const { name, code } = describeDbError(err);
+  console.error("[playback-token] trial store failed", { name, code });
+  Sentry.captureMessage("playback-token: trial store failed", {
+    level: "error",
+    tags: { code: code ?? "none", name },
+  });
+  logToken({ result: 503, mode: "trial", showId, episodeId });
+  return NextResponse.json(
+    { error: "Playback temporarily unavailable" },
+    { status: 503, headers: NO_CACHE },
+  );
 }
 
 export async function GET(req: NextRequest) {
@@ -273,9 +298,14 @@ export async function GET(req: NextRequest) {
   // unpublished / not-ready show — the gate above already rejected those.
   const cookieStore = await cookies();
   const existingToken = cookieStore.get(TRIAL_COOKIE)?.value;
-  const trial = existingToken
-    ? await findTrialSession(existingToken, row.showId)
-    : null;
+  let trial: Awaited<ReturnType<typeof findTrialSession>> = null;
+  if (existingToken) {
+    try {
+      trial = await findTrialSession(existingToken, row.showId);
+    } catch (err) {
+      return trialStoreFailed(err, row.showId, episodeId);
+    }
+  }
 
   // Active row → mint trial token with TTL capped at the row's remaining.
   if (trial) {
@@ -330,7 +360,7 @@ export async function GET(req: NextRequest) {
         },
       );
     }
-    throw err;
+    return trialStoreFailed(err, row.showId, episodeId);
   }
 
   const remaining = Math.floor(
