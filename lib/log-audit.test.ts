@@ -79,7 +79,13 @@ vi.mock("@/lib/stripe", () => ({
     // session sweep that follows every create (#217) is spied, so its failure
     // text can be seeded with a marker. `search` is the erasure's customer
     // lookup by address (#223) — a spy for the same reason.
-    customers: { create: async () => ({ id: "cus_dummy" }), search: stripeSearch },
+    customers: {
+      create: async () => ({ id: "cus_dummy" }),
+      search: stripeSearch,
+      retrieve: guestClaimAudit.customerRetrieve,
+    },
+    // The Stripe webhook route's signature check (#385 drives the real route).
+    webhooks: { constructEvent: guestClaimAudit.constructEvent },
     checkout: {
       sessions: {
         create: async () => ({
@@ -100,9 +106,9 @@ vi.mock("@/lib/guest-checkout", () => ({
   isGuestSubscription: (sub: { metadata?: Record<string, string> }) =>
     (sub.metadata ?? {}).guest === "1",
   isErasedCustomer: erasedCustomer,
-  claimGuestCheckout: async () => {
-    throw new Error("claim must not run for an erased customer");
-  },
+  // Refuses by default (the erased-customer case: it must never run); the #385
+  // cases point the spy at the real claim.
+  claimGuestCheckout: guestClaimAudit.claim,
   // The guest checkout builder's constants (#224 cases) — the real values.
   CHECKOUT_CLAIM_COOKIE: "checkout_claim",
   GUEST_METADATA_KEYS: {
@@ -128,12 +134,30 @@ const accountAudit = vi.hoisted(() => ({
   clerkDelete: vi.fn(),
   clerkGetUser: vi.fn(),
 }));
+// The guest claim cases (#385) run the REAL claimGuestCheckout, which looks the
+// buyer up at Clerk (getUserList / createUser) and, from the webhook, reads the
+// address off the Stripe customer (customers.retrieve) — spies, so the address
+// can be seeded where the vendors really answer with it.
+const guestClaimAudit = vi.hoisted(() => {
+  const refuse = async (): Promise<unknown> => {
+    throw new Error("claim must not run for an erased customer");
+  };
+  return {
+    claim: vi.fn<(...args: unknown[]) => Promise<unknown>>(refuse),
+    getUserList: vi.fn(),
+    createUser: vi.fn(),
+    customerRetrieve: vi.fn(),
+    constructEvent: vi.fn(),
+  };
+});
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: walletAudit.authUserId }),
   clerkClient: async () => ({
     users: {
       deleteUser: accountAudit.clerkDelete,
       getUser: accountAudit.clerkGetUser,
+      getUserList: guestClaimAudit.getUserList,
+      createUser: guestClaimAudit.createUser,
     },
   }),
 }));
@@ -288,6 +312,7 @@ import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as retentionCron } from "@/app/api/cron/retention/route";
 import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
+import { POST as stripeWebhook } from "@/app/api/webhooks/stripe/route";
 import { POST as deleteAccount } from "@/app/api/v1/account/delete/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
@@ -299,6 +324,7 @@ import {
   summarizeErasePreview,
   summarizeEraseResult,
 } from "@/lib/erase-user";
+import { stripeEvents } from "@/db/schema";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
 import { assembleUserExport, summarizeExport } from "@/lib/user-export";
 import {
@@ -357,6 +383,12 @@ beforeEach(() => {
   stripeSessionList.mockReset().mockResolvedValue({ data: [] });
   stripeSessionExpire.mockReset().mockResolvedValue({ id: "cs_test_dummy" });
   erasedCustomer.mockReset().mockResolvedValue(false);
+  // mockReset puts back the refusing implementation the claim spy was built with.
+  guestClaimAudit.claim.mockReset();
+  guestClaimAudit.getUserList.mockReset();
+  guestClaimAudit.createUser.mockReset();
+  guestClaimAudit.customerRetrieve.mockReset();
+  guestClaimAudit.constructEvent.mockReset();
   sentryMessage.mockReset();
   walletAudit.authUserId = "user_1";
   walletAudit.claimCookie = "";
@@ -1349,6 +1381,171 @@ describe("log audit · Stripe mirror refusing an erased customer", () => {
     expect(logged()).not.toContain(MARKER_NAME);
     expect(logged()).toContain("cus_marker");
     expect(logged()).toContain("sub_marker");
+  });
+});
+
+describe("log audit · guest checkout claim hitting a stale users row (#385)", () => {
+  // The pay-first claim creates the buyer's users row from the address typed
+  // at Stripe. When a row for that address already sits under ANOTHER id (a
+  // deleted-and-recreated Clerk user), the insert's email-unique violation is
+  // turned into a PAY_FIRST_ALERT error for the operator. That text is printed
+  // to the runtime log (the webhook route's `handler error` line, /welcome's
+  // `claim/mirror failed` line) and sent to Sentry — `redactEmails` covers
+  // Sentry events only, not the runtime log, so the text itself must not carry
+  // the address. The stale and the live id stay: they are what the operator
+  // re-keys by.
+  const STALE_ID = "user_stale_marker";
+  const LIVE_ID = "user_live_marker";
+  const CUSTOMER_ID = "cus_marker";
+
+  const guestSub = {
+    id: "sub_marker",
+    object: "subscription",
+    status: "active",
+    metadata: { guest: "1" },
+    customer: CUSTOMER_ID,
+    items: { data: [] },
+  };
+
+  // The users insert loses to the email-unique index; the driver's error quotes
+  // the address twice (the failed statement's params and the constraint detail).
+  const uniqueViolation = () =>
+    Object.assign(
+      new Error(
+        `Failed query: insert into "users" ("id", "email") values ($1, $2)\nparams: ${LIVE_ID},${MARKER_EMAIL}`,
+      ),
+      {
+        cause: Object.assign(
+          new Error(`duplicate key value violates unique constraint "users_email_unique"`),
+          {
+            name: "PostgresError",
+            code: "23505",
+            detail: `Key (email)=(${MARKER_EMAIL}) already exists.`,
+          },
+        ),
+      },
+    );
+
+  // Every `select(...).from(...).where(...).limit(1)` of the run, in order:
+  // the answers are what each lookup finds.
+  function selectAnswers(...answers: unknown[][]) {
+    let call = 0;
+    select.mockImplementation(() => ({
+      from: () => ({
+        where: () => ({ limit: async () => answers[call++] ?? [] }),
+      }),
+    }));
+  }
+
+  function usersInsertLosesToStaleRow() {
+    insert.mockImplementation((table: unknown) =>
+      table === stripeEvents
+        ? {
+            values: () => ({
+              onConflictDoNothing: () => ({
+                returning: async () => [{ eventId: "evt_marker" }],
+              }),
+            }),
+          }
+        : {
+            values: () => ({
+              onConflictDoUpdate: async () => {
+                throw uniqueViolation();
+              },
+              onConflictDoNothing: async () => {
+                throw uniqueViolation();
+              },
+            }),
+          },
+    );
+  }
+
+  async function realClaim() {
+    const actual = await vi.importActual<typeof import("@/lib/guest-checkout")>(
+      "@/lib/guest-checkout",
+    );
+    return actual.claimGuestCheckout;
+  }
+
+  beforeEach(() => {
+    // Clerk already knows the address under the live id.
+    guestClaimAudit.getUserList.mockResolvedValue({ data: [{ id: LIVE_ID }] });
+    usersInsertLosesToStaleRow();
+  });
+
+  it("throws the operator's alert by ids — the stale row's id and the live Clerk id — never by the buyer's address", async () => {
+    // /welcome's path: the address arrives as the checkout session's email.
+    // Lookups: (1) the customer-bound row, (2) the live id's own mirror row,
+    // (3) the row holding the address, which is the stale one.
+    selectAnswers([], [], [{ id: STALE_ID }]);
+    const claim = await realClaim();
+
+    const error = await claim(guestSub as never, { emailHint: MARKER_EMAIL }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    // The address really did flow through the real claim (the fixture is dirty).
+    expect(guestClaimAudit.getUserList).toHaveBeenCalledWith({
+      emailAddress: [MARKER_EMAIL],
+    });
+    expect(render(error)).not.toContain(MARKER_EMAIL);
+    const message = (error as Error).message;
+    expect(message).toContain("PAY_FIRST_ALERT");
+    expect(message).toContain(STALE_ID);
+    expect(message).toContain(LIVE_ID);
+    expect(message).toContain("manual re-key needed");
+  });
+
+  it("the Stripe webhook route prints and reports that failure without the address the Stripe customer carries", async () => {
+    // The webhook's path: no hint — the claim reads the address off the Stripe
+    // customer. Lookups: (1) mirrorSubscription's user by customer, then the
+    // claim's three as above.
+    vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_dummy");
+    guestClaimAudit.claim.mockImplementation(
+      (await realClaim()) as (...args: unknown[]) => Promise<unknown>,
+    );
+    guestClaimAudit.customerRetrieve.mockResolvedValue({
+      id: CUSTOMER_ID,
+      object: "customer",
+      email: MARKER_EMAIL,
+      name: MARKER_NAME,
+    });
+    guestClaimAudit.constructEvent.mockReturnValue({
+      id: "evt_marker",
+      type: "customer.subscription.created",
+      data: { object: guestSub },
+    });
+    selectAnswers([], [], [], [{ id: STALE_ID }]);
+    del.mockImplementation(() => ({ where: async () => undefined }));
+    const logged = captureConsole();
+
+    const res = await stripeWebhook(
+      new Request("https://matio.test/api/webhooks/stripe", {
+        method: "POST",
+        headers: { "stripe-signature": "t=1,v1=dummy" },
+        body: "{}",
+      }) as never,
+    );
+
+    // The event is handed back to Stripe for a retry (the claim is rolled back).
+    expect(res.status).toBe(500);
+    expect(del).toHaveBeenCalledTimes(1);
+    // The claim did reach the address through the Stripe customer.
+    expect(guestClaimAudit.customerRetrieve).toHaveBeenCalledWith(CUSTOMER_ID);
+    expect(guestClaimAudit.getUserList).toHaveBeenCalledWith({
+      emailAddress: [MARKER_EMAIL],
+    });
+    const sentry = sentryMessage.mock.calls.map(render).join("\n");
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+      expect(sentry).not.toContain(marker);
+    }
+    expect(logged()).toContain("Stripe webhook handler error");
+    expect(logged()).toContain("PAY_FIRST_ALERT");
+    expect(logged()).toContain(STALE_ID);
+    expect(logged()).toContain(LIVE_ID);
   });
 });
 
