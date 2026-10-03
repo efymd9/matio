@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+import path from "node:path";
+
 import * as Sentry from "@sentry/nextjs";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -11,7 +14,8 @@ import { sentryPrivacyOptions } from "./observability";
 // are spread in, so an unknown key is not an excess property) and turned every
 // data category on by default, and it streams spans, where
 // `beforeSendTransaction` never runs. Here the server SDK's own client takes
-// `sentryPrivacyOptions()` and an envelope is read off a fake transport.
+// `sentryPrivacyOptions()` and an envelope is read off a fake transport; the
+// browser client is asked the one thing only it decides (`infer_ip`).
 
 const DUMMY_DSN = "https://dummy00000000000000000000000000@o0.ingest.de.sentry.io/0";
 
@@ -77,6 +81,26 @@ function attachRequest(scope: Sentry.Scope): void {
   });
 }
 
+/** The slice of the browser build this file touches. */
+interface BrowserSdk {
+  BrowserClient: new (options: Record<string, unknown>) => {
+    getOptions(): { _metadata?: { sdk?: { settings?: { infer_ip?: string } } } };
+  };
+  defaultStackParser: unknown;
+  createTransport: typeof Sentry.createTransport;
+}
+
+/**
+ * The client a viewer's browser runs. Under node `@sentry/nextjs` resolves to
+ * its server build, and the exports map lists no subpath for the client one —
+ * so it is loaded by file, from the package the app itself installs.
+ */
+function loadBrowserSdk(): BrowserSdk {
+  const require = createRequire(import.meta.url);
+  const root = path.dirname(require.resolve("@sentry/nextjs/package.json"));
+  return require(path.join(root, "build/cjs/index.client.js")) as BrowserSdk;
+}
+
 /** Envelope items, header line by payload line, as one array of objects. */
 function items(envelope: string): Array<Record<string, unknown>> {
   return envelope
@@ -106,6 +130,27 @@ describe("@sentry/nextjs with sentryPrivacyOptions()", () => {
       stackFrameVariables: false,
     });
     expect(client!.getOptions().traceLifecycle).toBe("static");
+  });
+
+  it("tells Sentry never to infer the viewer's IP from a browser's connection", () => {
+    // `infer_ip` rides the envelope header: Relay derives the IP from the
+    // request itself, after every hook of ours has run. Only the SDK setting
+    // stops it, and SDK 11 sets it from `dataCollection.userInfo`.
+    const { BrowserClient, defaultStackParser, createTransport } = loadBrowserSdk();
+    const base = {
+      dsn: DUMMY_DSN,
+      stackParser: defaultStackParser,
+      integrations: [],
+      transport: (options: Parameters<typeof createTransport>[0]) =>
+        createTransport(options, async () => ({ statusCode: 200 })),
+    };
+
+    const ours = new BrowserClient({ ...base, ...sentryPrivacyOptions() });
+    // The SDK's own default — so the assertion above it is not vacuous.
+    const bare = new BrowserClient(base);
+
+    expect(ours.getOptions()._metadata?.sdk?.settings?.infer_ip).toBe("never");
+    expect(bare.getOptions()._metadata?.sdk?.settings?.infer_ip).toBe("auto");
   });
 
   it("sends an error with no cookie, header, IP, body, query or address in it", async () => {

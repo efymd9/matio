@@ -511,8 +511,11 @@ export interface SentryAppPrivacyOptions extends SentryPrivacyHooks {
  * REMOVED `sendDefaultPii` and FLIPPED the defaults: with no `dataCollection`
  * it attaches the viewer's IP (and lets Sentry infer it from a browser's
  * connection — a setting no `beforeSend` can take back), cookies, every
- * header, request and response bodies, query strings, database query
- * parameters and frame-local variables. Every category is named, so no
+ * header, request and response bodies and query strings. Two categories are
+ * inert for us today and pinned anyway: `stackFrameVariables` acts only with
+ * `includeLocalVariables` on (the Node config keeps it off), and
+ * `databaseQueryData` is read only by the Supabase integration (postgres-js
+ * spans carry sanitized SQL). Every category is named, so no
  * default decides. The SDK's header allowlist matches by substring
  * (`content-type` also admits `x-content-type-options`) — the hooks below cut
  * to the exact names.
