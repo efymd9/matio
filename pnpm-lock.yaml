@@ -1265,9 +1265,6 @@ packages:
   '@neoconfetti/react@1.0.0':
     resolution: {integrity: sha512-klcSooChXXOzIm+SE5IISIAn3bYzYfPjbX7D7HoqZL84oAfgREeSg5vSIaSFH+DaGzzvImTyWe1OyrJ67vik4A==}
 
-  '@next/env@16.3.5':
-    resolution: {integrity: sha512-NWEXVDMqoEo0ktmU6u0sE2Vg0LOcsD7NnOTJNo3/fEaTfsg+F1bMIxuDmQbda4e3yTIQwVdUREF2yIuMOusKtg==}
-
   '@next/env@16.3.7':
     resolution: {integrity: sha512-/HuhBN1CorqNTmewTIh81yXOQri6B8Ye/c9D7+830XqwVaf8qMnJNrgNxDn6dLtihq8YzBbI6NSAuMKvpr+DvQ==}
 
@@ -7156,8 +7153,6 @@ snapshots:
 
   '@neoconfetti/react@1.0.0': {}
 
-  '@next/env@16.3.5': {}
-
   '@next/env@16.3.7': {}
 
   '@next/eslint-plugin-next@16.3.7(eslint@10.11.0(jiti@2.7.0))':
@@ -11827,7 +11822,7 @@ snapshots:
 
   vite-plugin-storybook-nextjs@10.6.0(next@16.3.7(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.13.6)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(rollup@4.63.4)(storybook@10.6.0(@types/react@19.3.0)(react@19.3.0))(typescript@6.0.3)(vite@8.3.0(@types/node@24.13.6)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)):
     dependencies:
-      '@next/env': 16.3.5
+      '@next/env': 16.3.7
       '@rollup/pluginutils': 5.4.0(rollup@4.63.4)
       magic-string: 0.30.21
       module-alias: 2.3.4
