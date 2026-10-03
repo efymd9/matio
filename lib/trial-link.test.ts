@@ -54,6 +54,7 @@ const h = vi.hoisted(() => ({
   cookie: undefined as string | undefined,
   clientIp: "203.0.113.7",
   rows: [] as Row[],
+  inserted: [] as Record<string, unknown>[],
 }));
 
 vi.mock("@clerk/nextjs/server", () => ({ auth: async () => ({ userId: h.userId }) }));
@@ -90,11 +91,21 @@ vi.mock("@/lib/attribution", () => ({
 }));
 vi.mock("@/db", () => ({
   db: {
-    // The users-mirror probe: select().from().where().limit().
+    // The users-mirror probe is select().from().where().limit(); the mint's
+    // rate-limit count is the same chain awaited without a limit (0 rows).
     select: () => ({
       from: () => ({
-        where: () => ({ limit: async () => (h.mirror ? [{ id: h.userId }] : []) }),
+        where: () => ({
+          limit: async () => (h.mirror ? [{ id: h.userId }] : []),
+          then: (resolve: (v: unknown) => unknown) => resolve([{ value: 0 }]),
+        }),
       }),
+    }),
+    insert: () => ({
+      values: (v: Record<string, unknown>) => {
+        h.inserted.push(v);
+        return { onConflictDoNothing: () => ({ returning: async () => [v] }) };
+      },
     }),
     update: () => ({
       set: (values: { userId: string }) => ({
@@ -106,7 +117,7 @@ vi.mock("@/db", () => ({
   },
 }));
 
-import { hashClientIp, linkTrialSessionsToCurrentUser } from "./trial";
+import { hashClientIp, linkTrialSessionsToCurrentUser, mintTrialSession } from "./trial";
 
 const HOUR = 60 * 60 * 1000;
 // Both session_token shapes are a random canonical UUID — the web cookie
@@ -136,6 +147,7 @@ beforeEach(() => {
   h.cookie = undefined;
   h.clientIp = "203.0.113.7";
   h.rows = [];
+  h.inserted = [];
 });
 
 afterEach(() => {
@@ -229,5 +241,27 @@ describe("linkTrialSessionsToCurrentUser — the IP fallback and the app's devic
     await linkTrialSessionsToCurrentUser();
 
     expect(web.userId).toBeNull();
+  });
+});
+
+// The column the fallback reads has to be WRITTEN, by whoever mints: a mint
+// that dropped `client` would leave every new row NULL, and the fallback would
+// never link anything again.
+describe("mintTrialSession — records who minted the row (#349)", () => {
+  it.each(["web", "app"] as const)("persists client=%s on the inserted row", async (client) => {
+    await mintTrialSession({
+      sessionToken: DEVICE,
+      showId: "show-1",
+      ipHash: "ip-hash-1",
+      client,
+    });
+
+    expect(h.inserted).toHaveLength(1);
+    expect(h.inserted[0]).toMatchObject({
+      sessionToken: DEVICE,
+      showId: "show-1",
+      ipHash: "ip-hash-1",
+      client,
+    });
   });
 });
