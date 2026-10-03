@@ -342,7 +342,9 @@ Session Replay, no feedback widget, and `beforeSend` / `beforeSendTransaction` /
 `beforeBreadcrumb` that strip query strings and URL credentials, delete
 cookies / request bodies / parsed query params, reduce request headers to an
 allowlist, reduce the user to an id, redact email-shaped strings from messages,
-and drop console breadcrumbs wholesale. URL keys are cleaned in breadcrumb and
+cut a failed Drizzle query's `\nparams:` tail (the trial cookie / device id and
+IP hash it quotes) from exception values, messages and breadcrumbs (#326), and
+drop console breadcrumbs wholesale. URL keys are cleaned in breadcrumb and
 span data AND in the root span's `contexts.trace.data`, where Next records
 `http.target` with its query (#346). Proven by `lib/observability.test.ts`
 and by the log audit in `lib/log-audit.test.ts`.

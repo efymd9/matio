@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   mintTrialSession: vi.fn(),
   stampSignupWall: vi.fn(),
   sign: vi.fn(),
+  captureMessage: vi.fn(),
   // Declared inside vi.hoisted: `vi.mock` factories are lifted above every
   // top-level statement, so a class declared normally is still in its temporal
   // dead zone when the trial mock is built.
@@ -26,6 +27,7 @@ const h = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: h.userId }),
 }));
+vi.mock("@sentry/nextjs", () => ({ captureMessage: h.captureMessage }));
 vi.mock("@/db", () => ({
   db: {
     select: () => ({
@@ -98,6 +100,7 @@ beforeEach(() => {
   });
   h.stampSignupWall.mockReset().mockResolvedValue(undefined);
   h.sign.mockReset().mockReturnValue("signed-jwt");
+  h.captureMessage.mockReset();
   vi.stubEnv("PAYMENTS_ENABLED", "");
   vi.stubEnv("REQUIRE_SIGNUP", "");
   vi.spyOn(console, "info").mockImplementation(() => {});
@@ -253,9 +256,65 @@ describe("POST /api/v1/playback-token — legacy 60s preview (paid mode)", () =>
     expect(JSON.stringify(body)).not.toMatch(/ip|network|bucket/i);
   });
 
-  it("lets an unexpected failure surface instead of silently denying access", async () => {
-    h.mintTrialSession.mockRejectedValue(new Error("db down"));
-    await expect(POST(post({ episodeId: EPISODE }))).rejects.toThrow("db down");
+  // #326: a trial_sessions failure on this path used to be thrown to the
+  // framework, which prints the Drizzle error — statement AND params, the
+  // device id and the IP hash among them — to the runtime log. It is caught at
+  // the route now: a plain 503 (never a 403 that would read as «your preview
+  // ended»), and only the class and SQLSTATE are reported.
+  const DRIVER_PARAMS = `${DEVICE},${SHOW},hashed-ip`;
+  function driverError(statement: string): Error {
+    const cause = Object.assign(new Error("terminating connection"), {
+      name: "PostgresError",
+      code: "57P01",
+    });
+    return Object.assign(new Error(`Failed query: ${statement}\nparams: ${DRIVER_PARAMS}`), {
+      name: "DrizzleQueryError",
+      cause,
+    });
+  }
+
+  it.each([
+    ["the lookup", "findTrialSession"],
+    ["the mint", "mintTrialSession"],
+  ] as const)(
+    "answers 503 `unavailable` when %s fails — not a throw, not a 403",
+    async (_what, failing) => {
+      h[failing].mockRejectedValue(driverError('select … from "trial_sessions"'));
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const res = await POST(post({ episodeId: EPISODE }));
+      const body = await res.json();
+
+      expect(res.status).toBe(503);
+      expect(body.error.code).toBe("unavailable");
+      expect(h.sign).not.toHaveBeenCalled();
+      expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+      // Class and SQLSTATE — nothing the driver quoted.
+      expect(error).toHaveBeenCalledWith("[v1/playback-token] trial store failed", {
+        name: "DrizzleQueryError",
+        code: "57P01",
+      });
+      expect(JSON.stringify([body, error.mock.calls, h.captureMessage.mock.calls])).not.toContain(
+        DEVICE,
+      );
+      expect(h.captureMessage).toHaveBeenCalledWith("v1/playback-token: trial store failed", {
+        level: "error",
+        tags: { code: "57P01", name: "DrizzleQueryError" },
+      });
+    },
+  );
+
+  it("reports a failure with no SQLSTATE as code `none`", async () => {
+    h.findTrialSession.mockRejectedValue(new Error("db down"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(post({ episodeId: EPISODE }));
+
+    expect(res.status).toBe(503);
+    expect(h.captureMessage).toHaveBeenCalledWith("v1/playback-token: trial store failed", {
+      level: "error",
+      tags: { code: "none", name: "Error" },
+    });
   });
 });
 
