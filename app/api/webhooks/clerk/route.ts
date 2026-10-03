@@ -1,11 +1,11 @@
 import { verifyWebhook } from "@clerk/nextjs/webhooks";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
-import { users } from "@/db/schema";
 import { eraseUser } from "@/lib/erase-user";
 import { describeError } from "@/lib/observability";
 import { getPosthogQueryConfig } from "@/lib/posthog-config";
 import { getStripe } from "@/lib/stripe";
+import { mirrorClerkUser } from "@/lib/user-mirror";
 
 // Webhooks run on Node, not Edge — verifyWebhook needs the raw request body
 // and we hit Postgres via postgres-js.
@@ -41,11 +41,22 @@ export async function POST(req: NextRequest) {
       return new Response("OK (no email, skipped)", { status: 200 });
     }
 
-    // onConflictDoNothing makes this idempotent — Clerk retries failed webhooks.
-    await db
-      .insert(users)
-      .values({ id: data.id, email })
-      .onConflictDoNothing({ target: users.id });
+    // Idempotent (ON CONFLICT (id) DO NOTHING — Clerk retries failed
+    // webhooks); an address already held by another row is resolved there
+    // (#380, lib/user-mirror.ts). A conflict that cannot be resolved is
+    // reported by id and acknowledged — a redelivery would change nothing;
+    // Clerk being unreachable is a 500, so Svix redelivers.
+    // Clerk always sends created_at; "now" is a safe stand-in otherwise —
+    // no row can be newer than the moment it is used as a bound.
+    const createdAt =
+      typeof data.created_at === "number" ? new Date(data.created_at) : new Date();
+    const result = await mirrorClerkUser(data.id, email, createdAt);
+    if (result.status === "clerk_unavailable") {
+      return new Response("Clerk unavailable — retry", { status: 500 });
+    }
+    if (result.status === "unresolved") {
+      return new Response("OK (address conflict unresolved)", { status: 200 });
+    }
   }
 
   if (evt.type === "user.deleted") {

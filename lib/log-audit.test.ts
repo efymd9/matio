@@ -128,7 +128,12 @@ vi.mock("@clerk/nextjs/webhooks", () => ({ verifyWebhook: clerkVerify }));
 // is bounced to the auth flow before anything is logged.
 // The app's «Delete account» (#309) deletes the account at Clerk after the
 // erasure — a spy, so its refusal can be seeded with a marker.
-const accountAudit = vi.hoisted(() => ({ clerkDelete: vi.fn() }));
+// The users mirror (#380) asks Clerk about the row holding a new account's
+// address — a spy, so its answers and refusals can carry a marker.
+const accountAudit = vi.hoisted(() => ({
+  clerkDelete: vi.fn(),
+  clerkGetUser: vi.fn(),
+}));
 // The guest claim cases (#385) run the REAL claimGuestCheckout, which looks the
 // buyer up at Clerk (getUserList / createUser) and, from the webhook, reads the
 // address off the Stripe customer (customers.retrieve) — spies, so the address
@@ -150,6 +155,7 @@ vi.mock("@clerk/nextjs/server", () => ({
   clerkClient: async () => ({
     users: {
       deleteUser: accountAudit.clerkDelete,
+      getUser: accountAudit.clerkGetUser,
       getUserList: guestClaimAudit.getUserList,
       createUser: guestClaimAudit.createUser,
     },
@@ -1016,6 +1022,173 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     );
     expect(logged()).not.toContain(MARKER_EMAIL);
     expect(logged()).not.toContain(MARKER_NAME);
+  });
+});
+
+describe("log audit · Clerk user.created × the address held by another row (#380)", () => {
+  // The mirror write meets a row under another Clerk id holding the address
+  // and asks Clerk about it. Four places the address could leak: the
+  // driver's refusal (its message carries the params, its `detail` the key),
+  // the stale row eraseUser reads, Clerk's answer (the account's current
+  // address and name) and Clerk's refusal (it quotes what it is about).
+  const NEW_ID = "user_new_marker";
+  const STALE_ID = "user_stale_marker";
+  const MOVED = "moved.leak.marker@example.invalid";
+
+  beforeEach(() => {
+    vi.stubEnv("POSTHOG_PERSONAL_API_KEY", "");
+    vi.stubEnv("POSTHOG_PROJECT_ID", "");
+    accountAudit.clerkGetUser.mockReset();
+  });
+
+  function selectChain(rows: unknown[]) {
+    const chain = { from: () => chain, where: () => chain, limit: async () => rows };
+    return chain;
+  }
+
+  /** The new account's user.created, the insert refused on the address. */
+  function createdOnTakenAddress() {
+    clerkVerify.mockResolvedValue({
+      type: "user.created",
+      object: "event",
+      data: {
+        id: NEW_ID,
+        object: "user",
+        primary_email_address_id: "idn_1",
+        email_addresses: [{ id: "idn_1", email_address: MARKER_EMAIL }],
+      },
+    });
+    const refused = Object.assign(
+      new Error(
+        `Failed query: insert into "users" ("id", "email") values ($1, $2)\nparams: ${NEW_ID},${MARKER_EMAIL}`,
+      ),
+      {
+        cause: Object.assign(
+          new Error('duplicate key value violates unique constraint "users_email_unique"'),
+          {
+            code: "23505",
+            constraint_name: "users_email_unique",
+            detail: `Key (email)=(${MARKER_EMAIL}) already exists.`,
+          },
+        ),
+      },
+    );
+    insert
+      .mockImplementationOnce(() => ({
+        values: () => ({
+          onConflictDoNothing: async () => {
+            throw refused;
+          },
+        }),
+      }))
+      .mockImplementation(() => ({
+        values: () => ({ onConflictDoNothing: async () => undefined }),
+      }));
+    select
+      // The holder of the address…
+      .mockImplementationOnce(() => selectChain([{ id: STALE_ID }]))
+      // …and, should it be erased, the row eraseUser reads (address and all,
+      // a paid-once customer id), then no live subscription.
+      .mockImplementationOnce(() =>
+        selectChain([{ email: MARKER_EMAIL, stripeCustomerId: "cus_dummy" }]),
+      )
+      .mockImplementation(() => selectChain([]));
+    update.mockImplementation(() => ({ set: () => ({ where: async () => undefined }) }));
+    del.mockImplementation(() => ({
+      where: () =>
+        Object.assign(Promise.resolve(undefined), { returning: async () => [] }),
+    }));
+    return new Request("https://matio.tv/api/webhooks/clerk", { method: "POST" }) as never;
+  }
+
+  function sentryCalls() {
+    return sentryMessage.mock.calls.map(render).join("\n");
+  }
+
+  it("a stale row of a deleted Clerk account is erased by id — the address appears in no log line and no Sentry event", async () => {
+    accountAudit.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error(`No user was found with email ${MARKER_EMAIL}`), {
+        name: "ClerkAPIResponseError",
+        status: 404,
+      }),
+    );
+    const req = createdOnTakenAddress();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(sentryCalls()).not.toContain(MARKER_EMAIL);
+    // What it DOES say: both ids and the outcome, and eraseUser's own line.
+    expect(logged()).toContain(NEW_ID);
+    expect(logged()).toContain(STALE_ID);
+    expect(logged()).toContain('"outcome":"stale_row_erased"');
+    expect(logged()).toContain("erase user: local data erased");
+    expect(sentryCalls()).toContain(STALE_ID);
+    // A late erasure: the address never goes to Stripe as a query; the row's
+    // own customer is tombstoned and named by id.
+    expect(stripeSearch).not.toHaveBeenCalled();
+    expect(logged()).toContain('"stripeSearch":"skipped_address_reassigned"');
+    expect(logged()).toContain('"stripeCustomersTombstoned":["cus_dummy"]');
+  });
+
+  it("a live account's stale address is corrected — neither address nor its name is logged", async () => {
+    accountAudit.clerkGetUser.mockResolvedValue({
+      firstName: MARKER_NAME,
+      primaryEmailAddress: { emailAddress: MOVED },
+      emailAddresses: [{ emailAddress: MOVED }],
+    });
+    const req = createdOnTakenAddress();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    for (const marker of [MARKER_EMAIL, MOVED, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+      expect(sentryCalls()).not.toContain(marker);
+    }
+    expect(logged()).toContain('"outcome":"stale_address_corrected"');
+  });
+
+  it("an address still owned by a live account is reported by ids alone", async () => {
+    accountAudit.clerkGetUser.mockResolvedValue({
+      firstName: MARKER_NAME,
+      primaryEmailAddress: { emailAddress: MARKER_EMAIL },
+      emailAddresses: [{ emailAddress: MARKER_EMAIL }],
+    });
+    const req = createdOnTakenAddress();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(200);
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+      expect(sentryCalls()).not.toContain(marker);
+    }
+    expect(logged()).toContain('"outcome":"address_still_owned"');
+    expect(sentryCalls()).toContain(NEW_ID);
+  });
+
+  it("Clerk's refusal is logged by status and class — never the text that quotes the address", async () => {
+    accountAudit.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error(`Upstream failure looking up ${MARKER_EMAIL}`), {
+        name: "ClerkAPIResponseError",
+        status: 503,
+      }),
+    );
+    const req = createdOnTakenAddress();
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req);
+
+    expect(res.status).toBe(500);
+    expect(logged()).not.toContain(MARKER_EMAIL);
+    expect(sentryCalls()).not.toContain(MARKER_EMAIL);
+    expect(logged()).toContain('"httpStatus":503');
+    expect(logged()).toContain("ClerkAPIResponseError");
   });
 });
 

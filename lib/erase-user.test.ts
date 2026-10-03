@@ -565,6 +565,80 @@ describe("eraseUser · the customers behind the address (#223)", () => {
   });
 });
 
+describe("eraseUser · a LATE erasure — the address already belongs to a newer account (#380)", () => {
+  // lib/user-mirror.ts erases the row of an account Clerk no longer knows when
+  // a NEW account's sign-up finds it holding the address. Everything keyed on
+  // the old account still goes; what is matched BY ADDRESS may be the new
+  // account's own and is left alone.
+  const REASSIGNED = new Date("2026-10-01T05:56:00Z");
+  const late = { addressReassignedAt: REASSIGNED };
+
+  it("never searches Stripe by the address — even with a footprint — yet tombstones the row's own customer and cancels a live subscription", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_old" };
+    h.liveSub = { stripeSubscriptionId: "sub_live" };
+    h.anySub = true;
+
+    const result = await eraseUser(USER_ID, deps(), late);
+
+    expect(stripeSearch).not.toHaveBeenCalled();
+    expect(stripeUpdate).toHaveBeenCalledWith(
+      "sub_live",
+      { cancel_at_period_end: true },
+      { timeout: STRIPE_CANCEL_TIMEOUT_MS, maxNetworkRetries: STRIPE_CANCEL_RETRIES },
+    );
+    expect(h.inserts).toEqual([
+      { table: "erased_customers", values: [{ stripeCustomerId: "cus_old" }] },
+    ]);
+    expect(h.writes).toEqual([
+      "insert erased_customers",
+      "delete show_reminders",
+      "delete idea_submissions",
+      "delete users",
+    ]);
+    // No footprint probe either: only the live-subscription read.
+    expect(h.selects.filter((s) => s.table === "subscriptions")).toHaveLength(1);
+    expect(result).toMatchObject({
+      status: "erased",
+      stripeSearch: "skipped_address_reassigned",
+      stripeCustomersTombstoned: ["cus_old"],
+    });
+    expect(summarizeEraseResult(USER_ID, result)).toContain(
+      "search=skipped_address_reassigned",
+    );
+  });
+
+  it("deletes address-matched reminders and ideas only from before the address changed hands; reminders linked by user_id regardless", async () => {
+    await eraseUser(USER_ID, deps(), late);
+
+    const reminders = render(h.deletes[0].where);
+    expect(reminders.sql).toBe(
+      '(("show_reminders"."email" = $1 and "show_reminders"."created_at" < $2) or "show_reminders"."user_id" = $3)',
+    );
+    expect(reminders.params).toEqual([
+      "someone@example.invalid",
+      REASSIGNED.toISOString(),
+      USER_ID,
+    ]);
+    const ideas = render(h.deletes[1].where);
+    expect(ideas.sql).toBe(
+      '("idea_submissions"."email" = $1 and "idea_submissions"."created_at" < $2)',
+    );
+    expect(ideas.params).toEqual(["someone@example.invalid", REASSIGNED.toISOString()]);
+  });
+
+  it("without the option nothing changes: the address is searched and matched unbounded (user.deleted, the script, «Delete account»)", async () => {
+    h.userRow = { email: EMAIL, stripeCustomerId: "cus_old" };
+
+    await eraseUser(USER_ID, deps());
+
+    expect(stripeSearch).toHaveBeenCalledTimes(1);
+    expect(render(h.deletes[0].where).sql).toBe(
+      '("show_reminders"."email" = $1 or "show_reminders"."user_id" = $2)',
+    );
+    expect(render(h.deletes[1].where).sql).toBe('"idea_submissions"."email" = $1');
+  });
+});
+
 describe("eraseUser · PostHog (#180)", () => {
   it("is asked AFTER the local rows are gone, and its result rides the info line", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
