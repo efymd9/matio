@@ -25,8 +25,9 @@ import type { UserExportRows } from "@/lib/user-export";
 //   trial_sessions   user_id  (SET NULL on erasure — anonymous rows are not
 //                              the subject's by any key we hold)
 //   visitors         user_id  → visitor_days by the visitors found (aid)
-//   show_reminders   user_id OR email — the two can disagree: the row is
-//                    keyed by address, user_id is a coalesce-backfill
+//   show_reminders   user_id OR email (lowercased, #340) — the two can
+//                    disagree: the row is keyed by address, user_id is a
+//                    coalesce-backfill
 //   idea_submissions email ALONE, lowercased (#297) — the table has no
 //                    user_id; ideas are stored lowercased while users.email
 //                    is Clerk's address as typed, so the account's side is
@@ -79,18 +80,24 @@ export async function loadUserExportRows(
       ? await db.select().from(visitorDays).where(inArray(visitorDays.aid, aids))
       : [];
 
+  // `.toLowerCase()` is load-bearing (#340): reminder addresses are stored
+  // lowercased (subscribeToShowReminder), `users.email` is Clerk's address as
+  // typed. Without it a mixed-case address would be ERASED (lib/erase-user.ts
+  // lowercases) but an anonymous reminder row (user_id NULL) not EXPORTED.
   const reminderRows = await db
     .select()
     .from(showReminders)
     .where(
       email
-        ? or(eq(showReminders.userId, userId), eq(showReminders.email, email))
+        ? or(
+            eq(showReminders.userId, userId),
+            eq(showReminders.email, email.toLowerCase()),
+          )
         : eq(showReminders.userId, userId),
     );
 
-  // Story ideas sent from the account's address. `.toLowerCase()` is
-  // load-bearing: without it a mixed-case Clerk address would be ERASED
-  // (lib/erase-user.ts lowercases) but not EXPORTED.
+  // Story ideas sent from the account's address — the same lowercasing, for
+  // the same reason (#297).
   const ideaRows = email
     ? await db
         .select()
