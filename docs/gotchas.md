@@ -210,6 +210,10 @@ The classic example: a fresh signup goes straight from Clerk's hosted signup →
 
 Fix: anywhere a missing mirror would block the flow, use `getOrSyncCurrentUser()` from `lib/admin.ts` instead of a raw query. It reads the row, and if it's missing, upserts from Clerk's `currentUser()` (idempotent with the webhook via `onConflictDoNothing`).
 
+### `onConflictDoNothing({ target: users.id })` does not absorb `users_email_unique`
+
+`ON CONFLICT (id) DO NOTHING` swallows a conflict on the arbiter index only; a row under ANOTHER Clerk id holding the same address still raises 23505 on `users_email_unique` (Sentry JAVASCRIPT-NEXTJS-14, #380). It happens when an account was deleted at Clerk without our erasure (the prod endpoint is not subscribed to `user.deleted`) or changed its address there (`user.updated` is not mirrored), and someone signs up with that address. Both mirror writers — the `user.created` webhook and `getOrSyncCurrentUser` — go through `lib/user-mirror.ts:mirrorClerkUser`, which asks Clerk about the holder's id and only then erases (404), corrects (alive, address changed) or reports (anything else). Never write a third `insert(users)` for a Clerk account outside it; tell this conflict apart with `isUniqueViolation(e, "users_email_unique")` (`lib/db-errors.ts` — postgres-js names the constraint as `constraint_name` on the wrapped cause), never `e.code`.
+
 ### Signal-based `useSignIn` — and never gate its `setState` on effect cleanup
 
 `useSignIn` from `@clerk/nextjs` (v7) returns the NEW signal-based surface — `{ signIn, errors, fetchStatus }` — not the legacy `{ isLoaded, signIn, setActive }` (that one moved to `@clerk/nextjs/legacy`). Ticket sign-in is `await signIn.ticket({ ticket })` then `await signIn.finalize()` (promotes the completed sign-in to the active session); both return `{ error }` instead of throwing.

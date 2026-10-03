@@ -45,3 +45,38 @@ describe("isUniqueViolation (23505) — unchanged by the shared walk", () => {
     expect(isUniqueViolation(drizzleWrapped(pgError("23503")))).toBe(false);
   });
 });
+
+describe("isUniqueViolation with a constraint name (#380)", () => {
+  // postgres-js reports the violated constraint as `constraint_name`; the
+  // users mirror must tell "the address is taken" from any other unique key.
+  const onConstraint = (name: string) =>
+    Object.assign(pgError("23505"), { constraint_name: name });
+
+  it("matches only the named constraint, bare or wrapped", () => {
+    expect(
+      isUniqueViolation(onConstraint("users_email_unique"), "users_email_unique"),
+    ).toBe(true);
+    expect(
+      isUniqueViolation(
+        drizzleWrapped(onConstraint("users_email_unique")),
+        "users_email_unique",
+      ),
+    ).toBe(true);
+    expect(
+      isUniqueViolation(
+        drizzleWrapped(onConstraint("users_stripe_customer_id_unique")),
+        "users_email_unique",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not match a violation that names no constraint, or another SQLSTATE", () => {
+    expect(isUniqueViolation(pgError("23505"), "users_email_unique")).toBe(false);
+    expect(
+      isUniqueViolation(
+        Object.assign(pgError("23503"), { constraint_name: "users_email_unique" }),
+        "users_email_unique",
+      ),
+    ).toBe(false);
+  });
+});

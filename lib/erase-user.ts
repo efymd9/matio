@@ -32,10 +32,13 @@ import { isSubjectId } from "@/lib/user-export";
 // FIRST and deletes the Clerk account only after it) and
 // `pnpm erase-user <id> --apply` (scripts/erase-user.ts) for the day the
 // webhook did not arrive or a restore from backup resurrected what it had
-// erased (docs/runbooks/db-restore.md §7). Clerk is the source of truth for
-// the account: deleting it there (UserProfile → "Delete account", the
-// dashboard, or our own hand-run erasure request) is the trigger; the
-// script repeats the effect, it does not replace the trigger.
+// erased (docs/runbooks/db-restore.md §7). A fourth caller runs it late:
+// the users mirror (lib/user-mirror.ts, #380), when a new account's address
+// is held by the row of an account Clerk no longer knows (404) — the
+// erasure user.deleted would have run, had it been delivered. Clerk is the
+// source of truth for the account: deleting it there (UserProfile → "Delete
+// account", the dashboard, or our own hand-run erasure request) is the
+// trigger; the script repeats the effect, it does not replace the trigger.
 //
 // Order, since #161/#179 (step 4 since #297) and pinned by the tests:
 //   1. a live Stripe subscription is set to cancel at period end

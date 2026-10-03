@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { db } from "@/db";
 import { users, type User } from "@/db/schema";
+import { clerkPrimaryEmail, mirrorClerkUser } from "@/lib/user-mirror";
 
 export async function getCurrentUser(): Promise<User | null> {
   const { userId } = await auth();
@@ -35,18 +36,20 @@ export async function getOrSyncCurrentUser(): Promise<User | null> {
     .limit(1);
   if (existing) return existing;
 
-  // Local row missing — pull from Clerk and upsert. onConflictDoNothing lets
-  // a concurrent webhook landing first win the race without us erroring.
-  const clerk = await currentUser();
-  const email =
-    clerk?.primaryEmailAddress?.emailAddress ??
-    clerk?.emailAddresses[0]?.emailAddress;
+  // Local row missing — pull from Clerk and write it the way the webhook
+  // does (lib/user-mirror.ts): ON CONFLICT (id) DO NOTHING lets a concurrent
+  // webhook landing first win the race without us erroring, and an address
+  // held by another row is resolved there (#380). Unresolvable → null (the
+  // conflict is already reported by id); Clerk unreachable → throw, nothing
+  // was touched and the next request tries again.
+  const email = clerkPrimaryEmail(await currentUser());
   if (!email) return null; // Shouldn't happen — Clerk requires email on signup
 
-  await db
-    .insert(users)
-    .values({ id: userId, email })
-    .onConflictDoNothing({ target: users.id });
+  const mirrored = await mirrorClerkUser(userId, email);
+  if (mirrored.status === "clerk_unavailable") {
+    throw new Error("users mirror: Clerk unavailable — the address conflict is left for a retry");
+  }
+  if (mirrored.status === "unresolved") return null;
 
   const [synced] = await db
     .select()
