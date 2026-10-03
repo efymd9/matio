@@ -22,6 +22,11 @@ import {
   type UserExportRows,
 } from "./user-export";
 import { loadUserExportRows, type ExportDb } from "./user-export-db";
+import { previewErasure, type EraseDb } from "./erase-user";
+
+// erase-user.ts reports to Sentry on its failure paths; the cross-check below
+// never reaches one, the mock only keeps the SDK out of this suite.
+vi.mock("@sentry/nextjs", () => ({ captureMessage: vi.fn() }));
 
 // The art. 15/20 export. Three things are under test: the SHAPE of the
 // document (which tables, which vendors, what happens when one is missing),
@@ -224,6 +229,27 @@ describe("loadUserExportRows · every table by its own key", () => {
     expect(rows.idea_submissions).toEqual([{ id: "idea_1" }]);
   });
 
+  it("finds the anonymous reminder row of an account whose Clerk address is mixed-case — reminder rows are stored lowercased (#340)", async () => {
+    // users.email is Clerk's address as typed (Ana.Perez@Example.com);
+    // subscribeToShowReminder lowercases. The anonymous row (user_id NULL)
+    // is reachable by the address alone, and `=` on text is exact — so the
+    // export has to lowercase the account's side, as the erasure does.
+    const mixed = { ...account, email: "Ana.Perez@Example.com" };
+    const { db, calls } = recorderDb({
+      users: [mixed],
+      show_reminders: (params) =>
+        params.includes("ana.perez@example.com") ? [{ id: "rem_anon" }] : [],
+    });
+
+    const rows = await loadUserExportRows(db, USER_ID);
+
+    expect(calls.find((c) => c.table === "show_reminders")).toMatchObject({
+      sql: '("show_reminders"."user_id" = $1 or "show_reminders"."email" = $2)',
+      params: [USER_ID, "ana.perez@example.com"],
+    });
+    expect(rows.show_reminders).toEqual([{ id: "rem_anon" }]);
+  });
+
   it("skips visitor_days when no visitor row is linked, keys reminders by user_id alone and reads no story ideas without an account row", async () => {
     const { db, calls } = recorderDb({});
 
@@ -240,6 +266,99 @@ describe("loadUserExportRows · every table by its own key", () => {
       sql: '"show_reminders"."user_id" = $1',
       params: [USER_ID],
     });
+  });
+});
+
+/**
+ * A predicate rendered to SQL, read back as the equalities it ORs together:
+ * `"table"."col" = $n` → `col=<bound value>`. Both the export's and the
+ * erasure's clauses are flat `a = x or b = y` lists, so this is the whole of
+ * what they ask of a row.
+ */
+function equalitiesOf(table: string, q: { sql: string; params: unknown[] }) {
+  const out: [string, unknown][] = [];
+  for (const m of q.sql.matchAll(new RegExp(`"${table}"\\."(\\w+)" = \\$(\\d+)`, "g"))) {
+    out.push([m[1], q.params[Number(m[2]) - 1]]);
+  }
+  return out.sort(([a], [b]) => a.localeCompare(b));
+}
+
+/** The rows a predicate keeps: a row matches when ANY of its equalities holds. */
+function keptBy(rows: Record<string, unknown>[], eqs: [string, unknown][]) {
+  return rows.filter((row) => eqs.some(([col, value]) => row[col] === value));
+}
+
+describe("export and erasure find the same rows (#340)", () => {
+  const MIXED = "Ana.Perez@Example.com";
+  const mixedAccount = { ...account, email: MIXED };
+
+  // What the tables hold: addresses lowercased, as the capture paths write
+  // them. `rem_linked_elsewhere` is a row the account linked under another
+  // address (user_id branch); `rem_other` and `idea_other` are somebody else's.
+  const reminders = [
+    { id: "rem_anon", email: "ana.perez@example.com", user_id: null },
+    { id: "rem_linked", email: "ana.perez@example.com", user_id: USER_ID },
+    { id: "rem_linked_elsewhere", email: "other@example.invalid", user_id: USER_ID },
+    { id: "rem_other", email: "other@example.invalid", user_id: null },
+  ];
+  const ideas = [
+    { id: "idea_mine", email: "ana.perez@example.com" },
+    { id: "idea_other", email: "other@example.invalid" },
+  ];
+
+  /** The select recorder previewErasure needs: counts, and the one users row. */
+  function eraseRecorder() {
+    const wheres: { table: string; q: { sql: string; params: unknown[] } }[] = [];
+    const dialect = new PgDialect();
+    const db = {
+      select: () => ({
+        from: (table: PgTable) => ({
+          where: (clause: SQL) => {
+            const name = getTableName(table);
+            wheres.push({ table: name, q: dialect.sqlToQuery(clause) });
+            return Object.assign(Promise.resolve([{ n: 0 }]), {
+              limit: async () =>
+                name === "users" ? [{ email: MIXED, stripeCustomerId: null }] : [],
+            });
+          },
+        }),
+      }),
+    } as unknown as EraseDb;
+    return { db, wheres };
+  }
+
+  it("a mixed-case account address selects the same reminder and idea rows in the export and in the dry run of the erasure", async () => {
+    const exportSide = recorderDb({ users: [mixedAccount] });
+    await loadUserExportRows(exportSide.db, USER_ID);
+    const erase = eraseRecorder();
+    await previewErasure(USER_ID, {
+      db: erase.db,
+      getStripe: () => ({ subscriptions: { update: vi.fn() }, customers: { search: vi.fn(async () => ({ data: [], has_more: false })) } }),
+      posthog: null,
+    });
+
+    for (const [table, stored, expected] of [
+      ["show_reminders", reminders, ["rem_anon", "rem_linked", "rem_linked_elsewhere"]],
+      ["idea_submissions", ideas, ["idea_mine"]],
+    ] as const) {
+      const exported = equalitiesOf(
+        table,
+        exportSide.calls.find((c) => c.table === table)!,
+      );
+      const erased = equalitiesOf(
+        table,
+        erase.wheres.find((w) => w.table === table)!.q,
+      );
+      // Same equalities, same bound values — only the clause's order may differ.
+      expect(exported, table).toEqual(erased);
+      expect(exported.length, table).toBeGreaterThan(0);
+      // And, applied to what the table holds, the same rows — the anonymous
+      // one (user_id NULL) included.
+      const ids = (eqs: [string, unknown][]) =>
+        keptBy(stored as unknown as Record<string, unknown>[], eqs).map((r) => r.id);
+      expect(ids(exported), table).toEqual(expected);
+      expect(ids(erased), table).toEqual(expected);
+    }
   });
 });
 
