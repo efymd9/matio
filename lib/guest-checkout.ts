@@ -300,8 +300,11 @@ export async function claimGuestCheckout(
       .where(eq(users.email, email))
       .limit(1);
     if (byEmail && byEmail.id !== userId) {
+      // Ids only, never the address: this text is printed to the runtime log
+      // by the webhook route and /welcome and sent to Sentry (#385). The
+      // operator finds the row by the stale id.
       throw new Error(
-        `PAY_FIRST_ALERT guest checkout: users row for ${email} exists under stale id ${byEmail.id} (live Clerk id ${userId}) — manual re-key needed`,
+        `PAY_FIRST_ALERT guest checkout: users row for this address exists under stale id ${byEmail.id} (live Clerk id ${userId}) — manual re-key needed`,
       );
     }
     throw err;

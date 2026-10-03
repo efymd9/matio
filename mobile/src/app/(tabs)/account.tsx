@@ -1,4 +1,4 @@
-import { useClerk, useUser } from "@clerk/expo";
+import { useAuth, useClerk, useUser } from "@clerk/expo";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useCallback, useState } from "react";
@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "@/api/client";
+import { api, settleOr } from "@/api/client";
 import { useOptionalAuth } from "@/auth/clerk";
 import { AuthStalled } from "@/components/auth-stalled";
 import { useTabBarClearance } from "@/components/glass-tab-bar";
@@ -75,6 +75,32 @@ function StalledAccount({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+// How long a failed deletion waits for Clerk's word on the session (#336)
+// before it settles for the honest failure. Clerk on its own keeps retrying a
+// network failure for far longer than a viewer should stare at «Please wait».
+const SESSION_CHECK_TIMEOUT_MS = 5_000;
+
+type SessionState = "live" | "gone" | "unknown";
+
+// Clerk's answer about the session, fetched fresh (skipCache — a cached token
+// would outlive the account by up to a minute). No session or no token, or
+// Clerk refusing the session itself (401 / 404 from its API: the session
+// ended with the account) → gone. A token → live. Anything else — offline, a
+// 5xx, a 429, no answer in time — is not an answer, and nothing is concluded
+// from it.
+function sessionState(getToken: ReturnType<typeof useAuth>["getToken"]): Promise<SessionState> {
+  const probe = Promise.resolve()
+    .then(() => getToken({ skipCache: true }))
+    .then(
+      (token): SessionState => (token ? "live" : "gone"),
+      (err: unknown): SessionState => {
+        const status = (err as { status?: unknown } | null)?.status;
+        return status === 401 || status === 404 ? "gone" : "unknown";
+      },
+    );
+  return settleOr(probe, SESSION_CHECK_TIMEOUT_MS, "unknown" as const);
+}
+
 // Rendered only under a live session, so Clerk's hooks are safe here: the
 // provider is mounted whenever isSignedIn can be true.
 function SignedInAccount() {
@@ -84,6 +110,7 @@ function SignedInAccount() {
   const clearance = useTabBarClearance();
   const { user } = useUser();
   const { signOut } = useClerk();
+  const { getToken } = useAuth();
   const { items: resume } = useContinueWatching(true);
   const [deleting, setDeleting] = useState(false);
 
@@ -123,19 +150,28 @@ function SignedInAccount() {
   // «Delete account» (#309, App Store 5.1.1(v)). Nothing comes back, so two
   // system dialogs ask first: what is erased and what happens to a
   // subscription (cancelled at the end of its period), then that it is final.
-  // The server erases our side and then the Clerk account; only its {ok:true}
-  // signs the app out and goes Home. A failure keeps the session and says so,
-  // like a failed sign-out — the row can simply be tapped again, because both
-  // halves on the server are idempotent.
+  // The server erases our side and then the Clerk account; its {ok:true}
+  // signs the app out and goes Home.
+  //
+  // A failed request is not proof the deletion failed (#336): the server may
+  // have finished while its answer was lost (the 45s deadline, a dropped
+  // connection), or a retry went out with no token because Clerk had no
+  // session left to give (401). So a failure asks Clerk about the session
+  // before saying anything. Gone → the account is gone, as asked: sign out
+  // and go Home, exactly as on success. Live, or no answer → the honest
+  // failure as before: the session is kept, and the row can simply be tapped
+  // again, because both halves on the server are idempotent.
   const confirmDelete = useCallback(() => {
     const deleteOrSay = async () => {
       setDeleting(true);
       try {
         await api.deleteAccount();
       } catch {
-        setDeleting(false);
-        Alert.alert(t.app.account.deleteFailed, t.app.account.stalledBody);
-        return;
+        if ((await sessionState(getToken)) !== "gone") {
+          setDeleting(false);
+          Alert.alert(t.app.account.deleteFailed, t.app.account.stalledBody);
+          return;
+        }
       }
       // The account no longer exists at Clerk: the local sign-out only tidies
       // up. One that fails leaves a dead session Clerk drops on its next token
@@ -160,7 +196,7 @@ function SignedInAccount() {
       { text: t.app.common.cancel, style: "cancel" },
       { text: t.app.account.deleteAccount, style: "destructive", onPress: confirmFinal },
     ]);
-  }, [router, signOut, t]);
+  }, [getToken, router, signOut, t]);
 
   return (
     <ScrollView

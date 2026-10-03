@@ -68,16 +68,23 @@ export async function findTrialSession(
 // work. Persisted to attribution_{first,last}_{source,medium,campaign}
 // columns; null entries leave the columns null.
 // Optional kind='episodes' marks episode-gated free-tier rows (expiresAt becomes a startedAt sentinel).
+//
+// `client` says who minted the row — 'web' (the trial_session cookie) or 'app'
+// (the device id). REQUIRED, with no default, so a new call site has to decide:
+// the IP fallback of linkTrialSessionsToCurrentUser links only 'web' rows, and
+// a silently-'web' app row would be handed to a stranger's account (#349).
 export async function mintTrialSession({
   sessionToken,
   showId,
   ipHash,
+  client,
   attribution,
   kind = "preview",
 }: {
   sessionToken: string;
   showId: string;
   ipHash: string;
+  client: "web" | "app";
   attribution?: { first: AttributionPayload; last: AttributionPayload };
   // 'preview' = legacy 60s trial; 'episodes' = episode-gated free tier
   // (expiresAt becomes a startedAt sentinel — gated shows never read it).
@@ -111,6 +118,7 @@ export async function mintTrialSession({
       showId,
       expiresAt,
       ipHash,
+      client,
       kind,
       ...toFirstColumns(first),
       ...toLastColumns(last),
@@ -206,7 +214,16 @@ export async function linkTrialSessionsToCurrentUser(): Promise<void> {
   // user had 39 orphaned rows). The IP fallback is coarser (a shared NAT could
   // attach a neighbour's anonymous preview), hence the LINK_IP_WINDOW_MS bound;
   // and these columns are analytics-only (playback gating never reads them), so
-  // minor over-attribution is acceptable.
+  // minor over-attribution is acceptable — for WEB rows. It is not for the
+  // app's (#349): an app row is a device id, nothing ties that device to this
+  // browser (the app never builds a device→account link), and behind a carrier
+  // CGNAT the same-IP match would put a stranger's phone into this account —
+  // out of the retention cron's reach (`user_id IS NULL`) and into the art. 15
+  // export. So the fallback links ONLY rows minted as 'web'; a NULL `client`
+  // (a row from before the column, web/app unknowable) is left alone too — the
+  // privacy-safe side, costing at most the first six hours after the deploy.
+  // The cookie match above is untouched: it is an exact-token proof, not a
+  // guess by network.
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   const matchers = [];
   if (sessionToken) {
@@ -221,6 +238,7 @@ export async function linkTrialSessionsToCurrentUser(): Promise<void> {
         and(
           eq(trialSessions.ipHash, hashClientIp(ip)),
           gt(trialSessions.startedAt, new Date(Date.now() - LINK_IP_WINDOW_MS)),
+          eq(trialSessions.client, "web"),
         ),
       );
     }

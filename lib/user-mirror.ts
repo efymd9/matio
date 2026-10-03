@@ -123,7 +123,8 @@ function report(
 
 // Clerk's Backend API errors (ClerkAPIResponseError) carry the HTTP status as
 // `status` — read structurally, like app/api/v1/account/delete/route.ts.
-function clerkHttpStatus(err: unknown): number | undefined {
+// Also read by the Clerk webhook's own existence check (#336).
+export function clerkHttpStatus(err: unknown): number | undefined {
   const status = (err as { status?: unknown } | null)?.status;
   return typeof status === "number" ? status : undefined;
 }

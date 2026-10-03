@@ -79,7 +79,13 @@ vi.mock("@/lib/stripe", () => ({
     // session sweep that follows every create (#217) is spied, so its failure
     // text can be seeded with a marker. `search` is the erasure's customer
     // lookup by address (#223) — a spy for the same reason.
-    customers: { create: async () => ({ id: "cus_dummy" }), search: stripeSearch },
+    customers: {
+      create: async () => ({ id: "cus_dummy" }),
+      search: stripeSearch,
+      retrieve: guestClaimAudit.customerRetrieve,
+    },
+    // The Stripe webhook route's signature check (#385 drives the real route).
+    webhooks: { constructEvent: guestClaimAudit.constructEvent },
     checkout: {
       sessions: {
         create: async () => ({
@@ -100,9 +106,9 @@ vi.mock("@/lib/guest-checkout", () => ({
   isGuestSubscription: (sub: { metadata?: Record<string, string> }) =>
     (sub.metadata ?? {}).guest === "1",
   isErasedCustomer: erasedCustomer,
-  claimGuestCheckout: async () => {
-    throw new Error("claim must not run for an erased customer");
-  },
+  // Refuses by default (the erased-customer case: it must never run); the #385
+  // cases point the spy at the real claim.
+  claimGuestCheckout: guestClaimAudit.claim,
   // The guest checkout builder's constants (#224 cases) — the real values.
   CHECKOUT_CLAIM_COOKIE: "checkout_claim",
   GUEST_METADATA_KEYS: {
@@ -128,12 +134,30 @@ const accountAudit = vi.hoisted(() => ({
   clerkDelete: vi.fn(),
   clerkGetUser: vi.fn(),
 }));
+// The guest claim cases (#385) run the REAL claimGuestCheckout, which looks the
+// buyer up at Clerk (getUserList / createUser) and, from the webhook, reads the
+// address off the Stripe customer (customers.retrieve) — spies, so the address
+// can be seeded where the vendors really answer with it.
+const guestClaimAudit = vi.hoisted(() => {
+  const refuse = async (): Promise<unknown> => {
+    throw new Error("claim must not run for an erased customer");
+  };
+  return {
+    claim: vi.fn<(...args: unknown[]) => Promise<unknown>>(refuse),
+    getUserList: vi.fn(),
+    createUser: vi.fn(),
+    customerRetrieve: vi.fn(),
+    constructEvent: vi.fn(),
+  };
+});
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: walletAudit.authUserId }),
   clerkClient: async () => ({
     users: {
       deleteUser: accountAudit.clerkDelete,
       getUser: accountAudit.clerkGetUser,
+      getUserList: guestClaimAudit.getUserList,
+      createUser: guestClaimAudit.createUser,
     },
   }),
 }));
@@ -288,6 +312,7 @@ import { sendShowReminders } from "@/app/admin/reminder-actions";
 import { GET as retentionCron } from "@/app/api/cron/retention/route";
 import { GET as readyz } from "@/app/api/readyz/route";
 import { POST as clerkWebhook } from "@/app/api/webhooks/clerk/route";
+import { POST as stripeWebhook } from "@/app/api/webhooks/stripe/route";
 import { POST as deleteAccount } from "@/app/api/v1/account/delete/route";
 import { POST as saveProgress } from "@/app/api/v1/progress/route";
 import { POST as saveSegments } from "@/app/api/v1/watch-segments/route";
@@ -299,8 +324,14 @@ import {
   summarizeErasePreview,
   summarizeEraseResult,
 } from "@/lib/erase-user";
+import { stripeEvents } from "@/db/schema";
 import { mirrorSubscription } from "@/lib/subscription-mirror";
 import { assembleUserExport, summarizeExport } from "@/lib/user-export";
+import {
+  runEraseEmail,
+  runExportEmail,
+  type AddressDb,
+} from "@/lib/address-requests";
 import {
   createAuthCheckoutSession,
   reportWalletCheckoutStarted,
@@ -352,6 +383,12 @@ beforeEach(() => {
   stripeSessionList.mockReset().mockResolvedValue({ data: [] });
   stripeSessionExpire.mockReset().mockResolvedValue({ id: "cs_test_dummy" });
   erasedCustomer.mockReset().mockResolvedValue(false);
+  // mockReset puts back the refusing implementation the claim spy was built with.
+  guestClaimAudit.claim.mockReset();
+  guestClaimAudit.getUserList.mockReset();
+  guestClaimAudit.createUser.mockReset();
+  guestClaimAudit.customerRetrieve.mockReset();
+  guestClaimAudit.constructEvent.mockReset();
   sentryMessage.mockReset();
   walletAudit.authUserId = "user_1";
   walletAudit.claimCookie = "";
@@ -1088,13 +1125,30 @@ describe("log audit · Clerk user.created × the address held by another row (#3
     return sentryMessage.mock.calls.map(render).join("\n");
   }
 
+  // Clerk's answer about the HOLDER; the new account itself is alive — the
+  // webhook asks about it first (#336) — and its answer carries the marker
+  // too, so nothing read from Clerk can reach a log unnoticed.
+  function holderIs(answer: { rejects: unknown } | { resolves: unknown }) {
+    accountAudit.clerkGetUser.mockImplementation(async (id: string) => {
+      if (id !== STALE_ID) {
+        return {
+          firstName: MARKER_NAME,
+          primaryEmailAddress: { emailAddress: MARKER_EMAIL },
+          emailAddresses: [{ emailAddress: MARKER_EMAIL }],
+        };
+      }
+      if ("rejects" in answer) throw answer.rejects;
+      return answer.resolves;
+    });
+  }
+
   it("a stale row of a deleted Clerk account is erased by id — the address appears in no log line and no Sentry event", async () => {
-    accountAudit.clerkGetUser.mockRejectedValue(
-      Object.assign(new Error(`No user was found with email ${MARKER_EMAIL}`), {
+    holderIs({
+      rejects: Object.assign(new Error(`No user was found with email ${MARKER_EMAIL}`), {
         name: "ClerkAPIResponseError",
         status: 404,
       }),
-    );
+    });
     const req = createdOnTakenAddress();
     const logged = captureConsole();
 
@@ -1117,10 +1171,12 @@ describe("log audit · Clerk user.created × the address held by another row (#3
   });
 
   it("a live account's stale address is corrected — neither address nor its name is logged", async () => {
-    accountAudit.clerkGetUser.mockResolvedValue({
-      firstName: MARKER_NAME,
-      primaryEmailAddress: { emailAddress: MOVED },
-      emailAddresses: [{ emailAddress: MOVED }],
+    holderIs({
+      resolves: {
+        firstName: MARKER_NAME,
+        primaryEmailAddress: { emailAddress: MOVED },
+        emailAddresses: [{ emailAddress: MOVED }],
+      },
     });
     const req = createdOnTakenAddress();
     const logged = captureConsole();
@@ -1136,10 +1192,12 @@ describe("log audit · Clerk user.created × the address held by another row (#3
   });
 
   it("an address still owned by a live account is reported by ids alone", async () => {
-    accountAudit.clerkGetUser.mockResolvedValue({
-      firstName: MARKER_NAME,
-      primaryEmailAddress: { emailAddress: MARKER_EMAIL },
-      emailAddresses: [{ emailAddress: MARKER_EMAIL }],
+    holderIs({
+      resolves: {
+        firstName: MARKER_NAME,
+        primaryEmailAddress: { emailAddress: MARKER_EMAIL },
+        emailAddresses: [{ emailAddress: MARKER_EMAIL }],
+      },
     });
     const req = createdOnTakenAddress();
     const logged = captureConsole();
@@ -1156,12 +1214,12 @@ describe("log audit · Clerk user.created × the address held by another row (#3
   });
 
   it("Clerk's refusal is logged by status and class — never the text that quotes the address", async () => {
-    accountAudit.clerkGetUser.mockRejectedValue(
-      Object.assign(new Error(`Upstream failure looking up ${MARKER_EMAIL}`), {
+    holderIs({
+      rejects: Object.assign(new Error(`Upstream failure looking up ${MARKER_EMAIL}`), {
         name: "ClerkAPIResponseError",
         status: 503,
       }),
-    );
+    });
     const req = createdOnTakenAddress();
     const logged = captureConsole();
 
@@ -1170,6 +1228,73 @@ describe("log audit · Clerk user.created × the address held by another row (#3
     expect(res.status).toBe(500);
     expect(logged()).not.toContain(MARKER_EMAIL);
     expect(sentryCalls()).not.toContain(MARKER_EMAIL);
+    expect(logged()).toContain('"httpStatus":503');
+    expect(logged()).toContain("ClerkAPIResponseError");
+  });
+});
+
+describe("log audit · Clerk user.created delivered after the account was deleted (#336 (b))", () => {
+  // Before the insert the webhook asks Clerk whether the account still
+  // exists. Two places the address could leak: the payload it skips (the
+  // address and the name in it) and Clerk's refusal, which quotes what it is
+  // about.
+  const GONE_ID = "user_gone_marker";
+
+  beforeEach(() => {
+    accountAudit.clerkGetUser.mockReset();
+    clerkVerify.mockResolvedValue({
+      type: "user.created",
+      object: "event",
+      data: {
+        id: GONE_ID,
+        object: "user",
+        first_name: MARKER_NAME,
+        primary_email_address_id: "idn_1",
+        email_addresses: [{ id: "idn_1", email_address: MARKER_EMAIL }],
+      },
+    });
+  });
+
+  const req = () =>
+    new Request("https://matio.tv/api/webhooks/clerk", { method: "POST" }) as never;
+
+  it("the skipped delivery for a deleted account is logged by id alone", async () => {
+    accountAudit.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error(`No user was found for ${MARKER_EMAIL}`), {
+        name: "ClerkAPIResponseError",
+        status: 404,
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req());
+
+    expect(res.status).toBe(200);
+    expect(insert).not.toHaveBeenCalled();
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain("user.created for a deleted account — skipped");
+    expect(logged()).toContain(GONE_ID);
+  });
+
+  it("Clerk's refusal is logged by status and class — never the text that quotes the address", async () => {
+    accountAudit.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error(`Upstream failure looking up ${MARKER_EMAIL}`), {
+        name: "ClerkAPIResponseError",
+        status: 503,
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req());
+
+    expect(res.status).toBe(500);
+    expect(insert).not.toHaveBeenCalled();
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain(GONE_ID);
     expect(logged()).toContain('"httpStatus":503');
     expect(logged()).toContain("ClerkAPIResponseError");
   });
@@ -1359,6 +1484,171 @@ describe("log audit · Stripe mirror refusing an erased customer", () => {
     expect(logged()).not.toContain(MARKER_NAME);
     expect(logged()).toContain("cus_marker");
     expect(logged()).toContain("sub_marker");
+  });
+});
+
+describe("log audit · guest checkout claim hitting a stale users row (#385)", () => {
+  // The pay-first claim creates the buyer's users row from the address typed
+  // at Stripe. When a row for that address already sits under ANOTHER id (a
+  // deleted-and-recreated Clerk user), the insert's email-unique violation is
+  // turned into a PAY_FIRST_ALERT error for the operator. That text is printed
+  // to the runtime log (the webhook route's `handler error` line, /welcome's
+  // `claim/mirror failed` line) and sent to Sentry — `redactEmails` covers
+  // Sentry events only, not the runtime log, so the text itself must not carry
+  // the address. The stale and the live id stay: they are what the operator
+  // re-keys by.
+  const STALE_ID = "user_stale_marker";
+  const LIVE_ID = "user_live_marker";
+  const CUSTOMER_ID = "cus_marker";
+
+  const guestSub = {
+    id: "sub_marker",
+    object: "subscription",
+    status: "active",
+    metadata: { guest: "1" },
+    customer: CUSTOMER_ID,
+    items: { data: [] },
+  };
+
+  // The users insert loses to the email-unique index; the driver's error quotes
+  // the address twice (the failed statement's params and the constraint detail).
+  const uniqueViolation = () =>
+    Object.assign(
+      new Error(
+        `Failed query: insert into "users" ("id", "email") values ($1, $2)\nparams: ${LIVE_ID},${MARKER_EMAIL}`,
+      ),
+      {
+        cause: Object.assign(
+          new Error(`duplicate key value violates unique constraint "users_email_unique"`),
+          {
+            name: "PostgresError",
+            code: "23505",
+            detail: `Key (email)=(${MARKER_EMAIL}) already exists.`,
+          },
+        ),
+      },
+    );
+
+  // Every `select(...).from(...).where(...).limit(1)` of the run, in order:
+  // the answers are what each lookup finds.
+  function selectAnswers(...answers: unknown[][]) {
+    let call = 0;
+    select.mockImplementation(() => ({
+      from: () => ({
+        where: () => ({ limit: async () => answers[call++] ?? [] }),
+      }),
+    }));
+  }
+
+  function usersInsertLosesToStaleRow() {
+    insert.mockImplementation((table: unknown) =>
+      table === stripeEvents
+        ? {
+            values: () => ({
+              onConflictDoNothing: () => ({
+                returning: async () => [{ eventId: "evt_marker" }],
+              }),
+            }),
+          }
+        : {
+            values: () => ({
+              onConflictDoUpdate: async () => {
+                throw uniqueViolation();
+              },
+              onConflictDoNothing: async () => {
+                throw uniqueViolation();
+              },
+            }),
+          },
+    );
+  }
+
+  async function realClaim() {
+    const actual = await vi.importActual<typeof import("@/lib/guest-checkout")>(
+      "@/lib/guest-checkout",
+    );
+    return actual.claimGuestCheckout;
+  }
+
+  beforeEach(() => {
+    // Clerk already knows the address under the live id.
+    guestClaimAudit.getUserList.mockResolvedValue({ data: [{ id: LIVE_ID }] });
+    usersInsertLosesToStaleRow();
+  });
+
+  it("throws the operator's alert by ids — the stale row's id and the live Clerk id — never by the buyer's address", async () => {
+    // /welcome's path: the address arrives as the checkout session's email.
+    // Lookups: (1) the customer-bound row, (2) the live id's own mirror row,
+    // (3) the row holding the address, which is the stale one.
+    selectAnswers([], [], [{ id: STALE_ID }]);
+    const claim = await realClaim();
+
+    const error = await claim(guestSub as never, { emailHint: MARKER_EMAIL }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    // The address really did flow through the real claim (the fixture is dirty).
+    expect(guestClaimAudit.getUserList).toHaveBeenCalledWith({
+      emailAddress: [MARKER_EMAIL],
+    });
+    expect(render(error)).not.toContain(MARKER_EMAIL);
+    const message = (error as Error).message;
+    expect(message).toContain("PAY_FIRST_ALERT");
+    expect(message).toContain(STALE_ID);
+    expect(message).toContain(LIVE_ID);
+    expect(message).toContain("manual re-key needed");
+  });
+
+  it("the Stripe webhook route prints and reports that failure without the address the Stripe customer carries", async () => {
+    // The webhook's path: no hint — the claim reads the address off the Stripe
+    // customer. Lookups: (1) mirrorSubscription's user by customer, then the
+    // claim's three as above.
+    vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_dummy");
+    guestClaimAudit.claim.mockImplementation(
+      (await realClaim()) as (...args: unknown[]) => Promise<unknown>,
+    );
+    guestClaimAudit.customerRetrieve.mockResolvedValue({
+      id: CUSTOMER_ID,
+      object: "customer",
+      email: MARKER_EMAIL,
+      name: MARKER_NAME,
+    });
+    guestClaimAudit.constructEvent.mockReturnValue({
+      id: "evt_marker",
+      type: "customer.subscription.created",
+      data: { object: guestSub },
+    });
+    selectAnswers([], [], [], [{ id: STALE_ID }]);
+    del.mockImplementation(() => ({ where: async () => undefined }));
+    const logged = captureConsole();
+
+    const res = await stripeWebhook(
+      new Request("https://matio.test/api/webhooks/stripe", {
+        method: "POST",
+        headers: { "stripe-signature": "t=1,v1=dummy" },
+        body: "{}",
+      }) as never,
+    );
+
+    // The event is handed back to Stripe for a retry (the claim is rolled back).
+    expect(res.status).toBe(500);
+    expect(del).toHaveBeenCalledTimes(1);
+    // The claim did reach the address through the Stripe customer.
+    expect(guestClaimAudit.customerRetrieve).toHaveBeenCalledWith(CUSTOMER_ID);
+    expect(guestClaimAudit.getUserList).toHaveBeenCalledWith({
+      emailAddress: [MARKER_EMAIL],
+    });
+    const sentry = sentryMessage.mock.calls.map(render).join("\n");
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+      expect(sentry).not.toContain(marker);
+    }
+    expect(logged()).toContain("Stripe webhook handler error");
+    expect(logged()).toContain("PAY_FIRST_ALERT");
+    expect(logged()).toContain(STALE_ID);
+    expect(logged()).toContain(LIVE_ID);
   });
 });
 
@@ -2528,5 +2818,245 @@ describe("log audit · idea submission (/ideas, #297)", () => {
     expect(leaked(logged, result)).toEqual([]);
     expect(logged()).toBe('submitIdea: failed {"name":"DrizzleQueryError","code":"57014"}');
     expect(render(sentryMessage.mock.calls)).toContain('"code":"57014"');
+  });
+});
+
+describe("log audit · subject requests by address (pnpm export-email / erase-email, #339)", () => {
+  // The address is the whole key of these two commands, so it is the one
+  // thing they must never print: stdout and stderr of a terminal end up in
+  // shell history, CI logs and chat pastes. The export FILE is the person's
+  // data and holds the address by definition; what the commands SAY is the
+  // reference `address#<hash>`, counts, row ids, an account's id and — on a
+  // failure — the error's class and SQLSTATE. The worst cases seed the
+  // markers into the rows and INTO the thrown text, the way the driver
+  // quotes the statement's parameters.
+  const MARKER_OTHER_ACCOUNT = "user_marker_other_account";
+  const MARKERS = [MARKER_EMAIL, MARKER_NAME, MARKER_STORY, MARKER_OTHER_ACCOUNT];
+  const ENV = { DATABASE_URL: "postgres://invalid.example.invalid/matio" };
+
+  const reminderRow = {
+    id: "rem_marker",
+    email: MARKER_EMAIL,
+    // Another account's id on a row of THIS address — the export drops it.
+    userId: MARKER_OTHER_ACCOUNT,
+  };
+  const ideaRow = {
+    id: "idea_marker",
+    email: MARKER_EMAIL,
+    authorName: MARKER_NAME,
+    logline: "What if a banished postman had one last letter to deliver?",
+    story: MARKER_STORY,
+  };
+
+  /** What Drizzle 0.44+ throws: its wrapper quoting the query, the PostgresError on `.cause`. */
+  function driverError(code: string) {
+    const statement = `delete from "idea_submissions" where "email" = '${MARKER_EMAIL}' -- ${MARKER_NAME}`;
+    return Object.assign(new Error(`Failed query: ${statement}`), {
+      name: "DrizzleQueryError",
+      cause: Object.assign(new Error(`${statement} — ${MARKER_STORY}`), {
+        name: "PostgresError",
+        code,
+      }),
+    });
+  }
+
+  /**
+   * A database whose every table answers with the seeded rows (a clause is
+   * not read — the point is what the command prints about them), whose
+   * `users` answers with `accounts`, and which throws `failure` from the
+   * statement named in `failOn`.
+   */
+  function addressDb(
+    over: { accounts?: unknown[]; failOn?: "select" | "delete"; failure?: unknown } = {},
+  ) {
+    const rowsOf = (table: PgTable) => {
+      const name = getTableName(table);
+      if (name === "users") return over.accounts ?? [];
+      return name === "show_reminders" ? [reminderRow] : [ideaRow];
+    };
+    const db = {
+      select: () => ({
+        from: (table: PgTable) => ({
+          where: async () => {
+            if (over.failOn === "select" && getTableName(table) !== "users") throw over.failure;
+            return rowsOf(table);
+          },
+        }),
+      }),
+      delete: (table: PgTable) => ({
+        where: () => ({
+          returning: async () => {
+            if (over.failOn === "delete") throw over.failure;
+            return rowsOf(table);
+          },
+        }),
+      }),
+      transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn(db),
+    };
+    return db as unknown as AddressDb;
+  }
+
+  function run(db: AddressDb) {
+    const out: string[] = [];
+    const err: string[] = [];
+    const written: { path: string; content: string }[] = [];
+    const deps = {
+      getDb: async () => db,
+      io: { out: (l: string) => out.push(l), err: (l: string) => err.push(l) },
+      now: new Date("2026-10-03T12:00:00Z"),
+      tmpDir: "/tmp/audit",
+      writeFile: (path: string, content: string) => {
+        written.push({ path, content });
+      },
+    };
+    return { out, err, written, deps };
+  }
+
+  /** Markers found in what would leave the process: console, stdout, stderr, every Sentry call. */
+  function leaked(logged: () => string, r: { out: string[]; err: string[] }): string[] {
+    const outputs = [
+      logged(),
+      r.out.join("\n"),
+      r.err.join("\n"),
+      sentryMessage.mock.calls.map(render).join("\n"),
+    ];
+    return MARKERS.filter((marker) => outputs.some((o) => o.includes(marker)));
+  }
+
+  it("export: the summary and the path carry counts and the reference — the file holds the address, stdout never does", async () => {
+    const logged = captureConsole();
+    const r = run(addressDb());
+
+    const code = await runExportEmail([MARKER_EMAIL], ENV, r.deps);
+
+    expect(code).toBe(0);
+    // The detector sees what it must: the person's file DOES hold the
+    // address, the name and the story — so a clean stdout is a real result.
+    expect(r.written).toHaveLength(1);
+    expect(r.written[0].content).toContain(MARKER_EMAIL);
+    expect(r.written[0].content).toContain(MARKER_NAME);
+    expect(r.written[0].content).toContain(MARKER_STORY);
+    // …but not another person's account id, and not in the file name either.
+    expect(r.written[0].content).not.toContain(MARKER_OTHER_ACCOUNT);
+    expect(r.written[0].path).not.toContain(MARKER_EMAIL.split("@")[0]);
+    expect(r.out.join("\n")).toContain("show_reminders=1 idea_submissions=1");
+    expect(leaked(logged, r)).toEqual([]);
+  });
+
+  it("export: a database failure whose driver error quotes the address is reported by class and SQLSTATE only", async () => {
+    const logged = captureConsole();
+    const r = run(addressDb({ failOn: "select", failure: driverError("57014") }));
+
+    const code = await runExportEmail([MARKER_EMAIL], ENV, r.deps);
+
+    expect(code).toBe(1);
+    expect(r.err).toEqual(["export-email failed (DrizzleQueryError/57014)"]);
+    expect(r.written).toEqual([]);
+    expect(leaked(logged, r)).toEqual([]);
+  });
+
+  it("export: a failed file write is reported by class and code — the path it quotes may name the address", async () => {
+    const logged = captureConsole();
+    const r = run(addressDb());
+    r.deps.writeFile = () => {
+      throw Object.assign(new Error(`EACCES: permission denied, open '/tmp/${MARKER_EMAIL}.json'`), {
+        code: "EACCES",
+      });
+    };
+
+    const code = await runExportEmail([MARKER_EMAIL, "--out", `/tmp/${MARKER_EMAIL}.json`], ENV, r.deps);
+
+    expect(code).toBe(1);
+    expect(r.err).toEqual(["export-email failed (Error/EACCES)"]);
+    expect(leaked(logged, r)).toEqual([]);
+  });
+
+  it("export: a path the operator named after the address is elided from stdout", async () => {
+    const logged = captureConsole();
+    const r = run(addressDb());
+
+    await runExportEmail([MARKER_EMAIL, "--out", `/tmp/${MARKER_EMAIL}.json`], ENV, r.deps);
+
+    expect(r.out.at(-1)).toContain("<path elided");
+    expect(leaked(logged, r)).toEqual([]);
+  });
+
+  it("erase: the dry run and the --apply summary are counts and row ids — rows seeded with the person's words never show", async () => {
+    const logged = captureConsole();
+    const dry = run(addressDb());
+    const applied = run(addressDb());
+
+    expect(await runEraseEmail([MARKER_EMAIL], ENV, dry.deps)).toBe(0);
+    expect(await runEraseEmail([MARKER_EMAIL, "--apply"], ENV, applied.deps)).toBe(0);
+
+    expect(dry.out.join("\n")).toContain("would delete: show_reminders=1 idea_submissions=1");
+    expect(dry.out.join("\n")).toContain("ids idea_submissions: idea_marker");
+    expect(applied.out.join("\n")).toContain("deleted: show_reminders=1 idea_submissions=1");
+    expect(applied.out.join("\n")).toContain("ids show_reminders: rem_marker");
+    expect(leaked(logged, dry)).toEqual([]);
+    expect(leaked(logged, applied)).toEqual([]);
+  });
+
+  it("erase: a failure inside the transaction whose driver error quotes the address is reported by class and SQLSTATE only", async () => {
+    const logged = captureConsole();
+    const r = run(addressDb({ failOn: "delete", failure: driverError("40P01") }));
+
+    const code = await runEraseEmail([MARKER_EMAIL, "--apply"], ENV, r.deps);
+
+    expect(code).toBe(1);
+    expect(r.err).toEqual(["erase-email failed (DrizzleQueryError/40P01)"]);
+    expect(leaked(logged, r)).toEqual([]);
+  });
+
+  it("a refusal for an address with an account names the account by id — never the address or the name", async () => {
+    const logged = captureConsole();
+    const accounts = [{ id: "user_marker_account", email: MARKER_EMAIL, stripeCustomerId: "cus_marker" }];
+    const exporting = run(addressDb({ accounts }));
+    const erasing = run(addressDb({ accounts }));
+
+    expect(await runExportEmail([MARKER_EMAIL], ENV, exporting.deps)).toBe(4);
+    expect(await runEraseEmail([MARKER_EMAIL, "--apply"], ENV, erasing.deps)).toBe(4);
+
+    expect(exporting.err.join("\n")).toContain("user_marker_account");
+    expect(erasing.err.join("\n")).toContain("user_marker_account");
+    expect(exporting.written).toEqual([]);
+    expect(leaked(logged, exporting)).toEqual([]);
+    expect(leaked(logged, erasing)).toEqual([]);
+  });
+
+  it("refused arguments are never echoed — a second positional or a mistyped address may be one", async () => {
+    const logged = captureConsole();
+    const cases = [
+      [MARKER_EMAIL, "second.address@example.invalid"],
+      [`${MARKER_NAME} <${MARKER_EMAIL}>`],
+      [MARKER_EMAIL, `-${MARKER_EMAIL}`],
+      [],
+    ];
+    for (const argv of cases) {
+      const exporting = run(addressDb());
+      const erasing = run(addressDb());
+
+      expect(await runExportEmail(argv, ENV, exporting.deps), argv.join(" ")).toBe(2);
+      expect(await runEraseEmail(argv, ENV, erasing.deps), argv.join(" ")).toBe(2);
+
+      for (const r of [exporting, erasing]) {
+        expect(leaked(logged, r)).toEqual([]);
+        expect(r.err.join("\n")).not.toContain("second.address");
+      }
+    }
+  });
+
+  it("without DATABASE_URL both commands say how to pass it and print nothing about the address", async () => {
+    const logged = captureConsole();
+    const exporting = run(addressDb());
+    const erasing = run(addressDb());
+
+    expect(await runExportEmail([MARKER_EMAIL], {}, exporting.deps)).toBe(2);
+    expect(await runEraseEmail([MARKER_EMAIL, "--apply"], {}, erasing.deps)).toBe(2);
+
+    expect(exporting.err.join("\n")).toContain("DATABASE_URL must be passed explicitly");
+    expect(erasing.err.join("\n")).toContain("DATABASE_URL must be passed explicitly");
+    expect(leaked(logged, exporting)).toEqual([]);
+    expect(leaked(logged, erasing)).toEqual([]);
   });
 });

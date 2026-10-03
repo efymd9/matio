@@ -154,7 +154,9 @@ psql "$RESTORE_URL" -tAc "select count(*) from users"
   строк реестра заявок (`docs/runbooks/gdpr-requests.md` §6, колонка «Id
   строк») со статусом `erased`, исполненных позже даты дампа — карточкой
   `/admin/ideas/<id>` или в SQL-редакторе Neon на восстановленной базе:
-  `DELETE FROM idea_submissions WHERE id IN ('…', '…');`. `pnpm erase-user`
+  `DELETE FROM idea_submissions WHERE id IN ('…', '…');` — или, если адрес
+  заявки под рукой (письмо), `pnpm erase-email <адрес> --apply` на
+  восстановленной базе (обе таблицы по адресу, #339). `pnpm erase-user`
   такие строки не находит, если аккаунта не было: идея хранит только адрес,
   без `user_id`. Идеи аккаунта, стёртые вместе с ним, `erase-user --apply`
   выше удаляет сам (по адресу из вернувшейся строки `users`); отписки,

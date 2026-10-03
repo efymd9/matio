@@ -87,7 +87,7 @@ function isErrorBody(value: unknown): value is ApiErrorBody {
 // bounds the network, not the lookups.
 const PREFLIGHT_TIMEOUT_MS = 3_000;
 
-async function settleOr<T, F>(p: Promise<T>, ms: number, fallback: F): Promise<T | F> {
+export async function settleOr<T, F>(p: Promise<T>, ms: number, fallback: F): Promise<T | F> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([

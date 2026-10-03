@@ -688,20 +688,36 @@ describe("Clerk webhook · user.created × the address held by another row (#380
     h.userRow = { email: EMAIL, stripeCustomerId: null };
   });
 
+  // Clerk's answer about the HOLDER. The new account itself is alive: the
+  // webhook asks about it first (#336), before the insert meets the address.
+  function holderIs(answer: { rejects: unknown } | { resolves: unknown }) {
+    h.clerkGetUser.mockImplementation(async (id: string) => {
+      if (id !== STALE_ID) {
+        return {
+          primaryEmailAddress: { emailAddress: EMAIL },
+          emailAddresses: [{ emailAddress: EMAIL }],
+        };
+      }
+      if ("rejects" in answer) throw answer.rejects;
+      return answer.resolves;
+    });
+  }
+  const notFound = () =>
+    Object.assign(new Error("Not Found"), { name: "ClerkAPIResponseError", status: 404 });
+
   it("Clerk 404 for the holder → its row is erased as a LATE erasure, then the new row is inserted", async () => {
     // The stale row had paid once — the very case where a Stripe search by
     // the address would run on user.deleted. The address belongs to the new
     // account now, so the late erasure must not search by it: the new
     // account's own guest-checkout customer would be tombstoned forever.
     h.userRow = { email: EMAIL, stripeCustomerId: "cus_old" };
-    h.clerkGetUser.mockRejectedValue(
-      Object.assign(new Error("Not Found"), { name: "ClerkAPIResponseError", status: 404 }),
-    );
+    holderIs({ rejects: notFound() });
 
     const res = await POST(created());
 
     expect(res.status).toBe(200);
-    expect(h.clerkGetUser).toHaveBeenCalledWith(STALE_ID);
+    // The new account first (#336), then the holder.
+    expect(h.clerkGetUser.mock.calls).toEqual([[USER_ID], [STALE_ID]]);
     // No search by the address; the customer the OLD row names is still
     // tombstoned, before the deletes.
     expect(h.stripeSearch).not.toHaveBeenCalled();
@@ -741,9 +757,11 @@ describe("Clerk webhook · user.created × the address held by another row (#380
   });
 
   it("alive with another address → the stale row gets that address, the new row is inserted, nothing is erased", async () => {
-    h.clerkGetUser.mockResolvedValue({
-      primaryEmailAddress: { emailAddress: "moved@example.invalid" },
-      emailAddresses: [{ emailAddress: "moved@example.invalid" }],
+    holderIs({
+      resolves: {
+        primaryEmailAddress: { emailAddress: "moved@example.invalid" },
+        emailAddresses: [{ emailAddress: "moved@example.invalid" }],
+      },
     });
 
     const res = await POST(created());
@@ -759,9 +777,11 @@ describe("Clerk webhook · user.created × the address held by another row (#380
   });
 
   it("alive and still holding the address → nothing erased or written, acknowledged with 200 (a retry would change nothing)", async () => {
-    h.clerkGetUser.mockResolvedValue({
-      primaryEmailAddress: { emailAddress: EMAIL },
-      emailAddresses: [{ emailAddress: EMAIL }],
+    holderIs({
+      resolves: {
+        primaryEmailAddress: { emailAddress: EMAIL },
+        emailAddresses: [{ emailAddress: EMAIL }],
+      },
     });
 
     const res = await POST(created());
@@ -776,12 +796,12 @@ describe("Clerk webhook · user.created × the address held by another row (#380
   });
 
   it("Clerk failing with anything but 404 → nothing erased or written, 500 so Svix redelivers", async () => {
-    h.clerkGetUser.mockRejectedValue(
-      Object.assign(new Error("Service Unavailable"), {
+    holderIs({
+      rejects: Object.assign(new Error("Service Unavailable"), {
         name: "ClerkAPIResponseError",
         status: 503,
       }),
-    );
+    });
 
     const res = await POST(created());
 
@@ -790,17 +810,16 @@ describe("Clerk webhook · user.created × the address held by another row (#380
     expect(h.deletes).toEqual([]);
   });
 
-  it("the redelivery after a successful run is a plain ON CONFLICT (id) DO NOTHING — Clerk is not asked again", async () => {
-    h.clerkGetUser.mockRejectedValue(
-      Object.assign(new Error("Not Found"), { name: "ClerkAPIResponseError", status: 404 }),
-    );
+  it("the redelivery after a successful run is a plain ON CONFLICT (id) DO NOTHING — Clerk is not asked about the holder again", async () => {
+    holderIs({ rejects: notFound() });
     await POST(created());
     h.clerkGetUser.mockClear();
 
     const res = await POST(created());
 
     expect(res.status).toBe(200);
-    expect(h.clerkGetUser).not.toHaveBeenCalled();
+    // Only the new account's own existence check (#336).
+    expect(h.clerkGetUser.mock.calls).toEqual([[USER_ID]]);
     expect(h.writes.slice(4)).toEqual(["insert users"]);
   });
 });
@@ -822,11 +841,84 @@ describe("Clerk webhook · user.created", () => {
     ]);
   });
 
-  it("acknowledges an emailless user (Clerk's Send Example) without inserting", async () => {
+  it("acknowledges an emailless user (Clerk's Send Example) without inserting — and without asking Clerk", async () => {
     const res = await POST(signed(userCreated([])));
 
     expect(res.status).toBe(200);
     expect(h.inserts).toEqual([]);
+    expect(h.clerkGetUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("Clerk webhook · user.created delivered after the account was deleted (#336 (b))", () => {
+  // Svix redelivers a failed user.created for hours or days. By then the
+  // account may have had its row healed in and been deleted — the row erased
+  // with it. Clerk, asked before the insert, decides whether it still exists.
+  const created = () => signed(userCreated([{ id: "idn_1", email_address: EMAIL }]));
+
+  it("Clerk 404 for the account → nothing is written, 200, logged by id", async () => {
+    h.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error("Not Found"), { name: "ClerkAPIResponseError", status: 404 }),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const res = await POST(created());
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("OK (account deleted, skipped)");
+    expect(h.clerkGetUser.mock.calls).toEqual([[USER_ID]]);
+    expect(h.inserts).toEqual([]);
+    expect(h.writes).toEqual([]);
+    expect(h.selects).toEqual([]);
+    expect(warn).toHaveBeenCalledWith("user.created for a deleted account — skipped", {
+      id: USER_ID,
+    });
+  });
+
+  it("the account alive at Clerk → the row is inserted as usual", async () => {
+    h.clerkGetUser.mockResolvedValue({
+      primaryEmailAddress: { emailAddress: EMAIL },
+      emailAddresses: [{ emailAddress: EMAIL }],
+    });
+
+    const res = await POST(created());
+
+    expect(res.status).toBe(200);
+    expect(h.clerkGetUser.mock.calls).toEqual([[USER_ID]]);
+    expect(h.inserts).toEqual([
+      { table: "users", values: { id: USER_ID, email: EMAIL } },
+    ]);
+  });
+
+  it("Clerk failing with anything but 404 → nothing is written, 500 so Svix redelivers", async () => {
+    h.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error("Service Unavailable"), {
+        name: "ClerkAPIResponseError",
+        status: 503,
+      }),
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const res = await POST(created());
+
+    expect(res.status).toBe(500);
+    expect(h.inserts).toEqual([]);
+    expect(h.writes).toEqual([]);
+    expect(error.mock.calls[0][1]).toEqual({
+      id: USER_ID,
+      httpStatus: 503,
+      error: { name: "ClerkAPIResponseError", code: undefined, statusCode: undefined },
+    });
+  });
+
+  it("a Clerk call that fails with no HTTP status (the network) is not read as «deleted» → 500, nothing written", async () => {
+    h.clerkGetUser.mockRejectedValue(new TypeError("fetch failed"));
+
+    const res = await POST(created());
+
+    expect(res.status).toBe(500);
+    expect(h.inserts).toEqual([]);
+    expect(h.writes).toEqual([]);
   });
 });
 

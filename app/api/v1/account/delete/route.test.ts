@@ -25,6 +25,9 @@ const h = vi.hoisted(() => ({
   // Every read of `users` throws from now on — the database gone mid-request.
   usersSelectFails: false,
   clerkDelete: vi.fn(),
+  // The account is gone at Clerk — set by a deleteUser that went through;
+  // from then on Clerk answers 404 about it (the late user.created, #336).
+  clerkGone: false,
   stripeUpdate: vi.fn(),
   stripeSearch: vi.fn(),
   sentryMessage: vi.fn(),
@@ -93,7 +96,18 @@ vi.mock("@clerk/nextjs/server", () => ({
       users: {
         deleteUser: async (id: string) => {
           h.writes.push(`clerk deleteUser ${id}`);
-          return h.clerkDelete(id);
+          const deleted = await h.clerkDelete(id);
+          h.clerkGone = true;
+          return deleted;
+        },
+        getUser: async (id: string) => {
+          if (h.clerkGone) {
+            throw Object.assign(new Error("Not Found"), {
+              name: "ClerkAPIResponseError",
+              status: 404,
+            });
+          }
+          return { id };
         },
       },
     };
@@ -145,6 +159,7 @@ beforeEach(() => {
   h.clerkClientFails = false;
   h.usersSelectFails = false;
   h.clerkDelete.mockReset().mockResolvedValue({ id: USER_ID });
+  h.clerkGone = false;
   h.stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
   h.stripeSearch.mockReset().mockResolvedValue({ data: [], has_more: false });
   h.sentryMessage.mockReset();
@@ -410,5 +425,35 @@ describe("the later Clerk `user.deleted` webhook", () => {
     expect(await res.text()).toBe("OK (already erased)");
     expect(h.writes).toEqual([]);
     expect(h.stripeUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe("a late Clerk `user.created` redelivery (#336 (b))", () => {
+  // Svix retried a failed user.created for hours; it lands after the app's
+  // deletion. Clerk answers 404 about the account, so nothing is put back.
+  it("after the deletion it writes nothing — the users row stays gone", async () => {
+    await POST(deleteRequest());
+    h.writes = [];
+
+    const res = await clerkWebhook(
+      new Request("https://matio.tv/api/webhooks/clerk", {
+        method: "POST",
+        body: JSON.stringify({
+          type: "user.created",
+          object: "event",
+          data: {
+            id: USER_ID,
+            object: "user",
+            primary_email_address_id: "idn_1",
+            email_addresses: [{ id: "idn_1", email_address: EMAIL }],
+          },
+        }),
+      }) as unknown as Parameters<typeof clerkWebhook>[0],
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("OK (account deleted, skipped)");
+    expect(h.writes).toEqual([]);
+    expect(h.userRow).toBeUndefined();
   });
 });
