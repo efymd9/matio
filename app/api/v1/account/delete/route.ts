@@ -44,11 +44,13 @@ import { getStripe } from "@/lib/stripe";
 //      heal can no longer write (Clerk answers 404 to its read), so a row
 //      found now is erased again by the same eraseUser. A sweep that fails
 //      does not undo the deletion the viewer asked for — it is shouted by id
-//      for the operator (`pnpm erase-user <id> --apply`, runbook §4). What
-//      is left — a heal that read Clerk before step 2 and inserts after this
-//      look (milliseconds), a late `user.created` redelivery, a Stripe cancel
-//      that failed under an `ok`, a client timeout after the server finished —
-//      is tracked in #336.
+//      for the operator (`pnpm erase-user <id> --apply`, runbook §4). A late
+//      `user.created` redelivery writes nothing — the webhook asks Clerk
+//      first and a 404 skips it — and the app asks Clerk about its session
+//      when this answer is lost (#336). What is left — a heal that read Clerk
+//      before step 2 and inserts after this look (milliseconds; closed by the
+//      `user.deleted` webhook, #172) and a Stripe cancel that failed under an
+//      `ok` — is tracked in #336.
 //   4. Where Clerk's `user.deleted` webhook is subscribed, it arrives after
 //      step 2 and takes eraseUser's same not-found path: a 200 no-op.
 //

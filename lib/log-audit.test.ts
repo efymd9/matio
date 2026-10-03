@@ -1073,13 +1073,30 @@ describe("log audit · Clerk user.created × the address held by another row (#3
     return sentryMessage.mock.calls.map(render).join("\n");
   }
 
+  // Clerk's answer about the HOLDER; the new account itself is alive — the
+  // webhook asks about it first (#336) — and its answer carries the marker
+  // too, so nothing read from Clerk can reach a log unnoticed.
+  function holderIs(answer: { rejects: unknown } | { resolves: unknown }) {
+    accountAudit.clerkGetUser.mockImplementation(async (id: string) => {
+      if (id !== STALE_ID) {
+        return {
+          firstName: MARKER_NAME,
+          primaryEmailAddress: { emailAddress: MARKER_EMAIL },
+          emailAddresses: [{ emailAddress: MARKER_EMAIL }],
+        };
+      }
+      if ("rejects" in answer) throw answer.rejects;
+      return answer.resolves;
+    });
+  }
+
   it("a stale row of a deleted Clerk account is erased by id — the address appears in no log line and no Sentry event", async () => {
-    accountAudit.clerkGetUser.mockRejectedValue(
-      Object.assign(new Error(`No user was found with email ${MARKER_EMAIL}`), {
+    holderIs({
+      rejects: Object.assign(new Error(`No user was found with email ${MARKER_EMAIL}`), {
         name: "ClerkAPIResponseError",
         status: 404,
       }),
-    );
+    });
     const req = createdOnTakenAddress();
     const logged = captureConsole();
 
@@ -1102,10 +1119,12 @@ describe("log audit · Clerk user.created × the address held by another row (#3
   });
 
   it("a live account's stale address is corrected — neither address nor its name is logged", async () => {
-    accountAudit.clerkGetUser.mockResolvedValue({
-      firstName: MARKER_NAME,
-      primaryEmailAddress: { emailAddress: MOVED },
-      emailAddresses: [{ emailAddress: MOVED }],
+    holderIs({
+      resolves: {
+        firstName: MARKER_NAME,
+        primaryEmailAddress: { emailAddress: MOVED },
+        emailAddresses: [{ emailAddress: MOVED }],
+      },
     });
     const req = createdOnTakenAddress();
     const logged = captureConsole();
@@ -1121,10 +1140,12 @@ describe("log audit · Clerk user.created × the address held by another row (#3
   });
 
   it("an address still owned by a live account is reported by ids alone", async () => {
-    accountAudit.clerkGetUser.mockResolvedValue({
-      firstName: MARKER_NAME,
-      primaryEmailAddress: { emailAddress: MARKER_EMAIL },
-      emailAddresses: [{ emailAddress: MARKER_EMAIL }],
+    holderIs({
+      resolves: {
+        firstName: MARKER_NAME,
+        primaryEmailAddress: { emailAddress: MARKER_EMAIL },
+        emailAddresses: [{ emailAddress: MARKER_EMAIL }],
+      },
     });
     const req = createdOnTakenAddress();
     const logged = captureConsole();
@@ -1141,12 +1162,12 @@ describe("log audit · Clerk user.created × the address held by another row (#3
   });
 
   it("Clerk's refusal is logged by status and class — never the text that quotes the address", async () => {
-    accountAudit.clerkGetUser.mockRejectedValue(
-      Object.assign(new Error(`Upstream failure looking up ${MARKER_EMAIL}`), {
+    holderIs({
+      rejects: Object.assign(new Error(`Upstream failure looking up ${MARKER_EMAIL}`), {
         name: "ClerkAPIResponseError",
         status: 503,
       }),
-    );
+    });
     const req = createdOnTakenAddress();
     const logged = captureConsole();
 
@@ -1155,6 +1176,73 @@ describe("log audit · Clerk user.created × the address held by another row (#3
     expect(res.status).toBe(500);
     expect(logged()).not.toContain(MARKER_EMAIL);
     expect(sentryCalls()).not.toContain(MARKER_EMAIL);
+    expect(logged()).toContain('"httpStatus":503');
+    expect(logged()).toContain("ClerkAPIResponseError");
+  });
+});
+
+describe("log audit · Clerk user.created delivered after the account was deleted (#336 (b))", () => {
+  // Before the insert the webhook asks Clerk whether the account still
+  // exists. Two places the address could leak: the payload it skips (the
+  // address and the name in it) and Clerk's refusal, which quotes what it is
+  // about.
+  const GONE_ID = "user_gone_marker";
+
+  beforeEach(() => {
+    accountAudit.clerkGetUser.mockReset();
+    clerkVerify.mockResolvedValue({
+      type: "user.created",
+      object: "event",
+      data: {
+        id: GONE_ID,
+        object: "user",
+        first_name: MARKER_NAME,
+        primary_email_address_id: "idn_1",
+        email_addresses: [{ id: "idn_1", email_address: MARKER_EMAIL }],
+      },
+    });
+  });
+
+  const req = () =>
+    new Request("https://matio.tv/api/webhooks/clerk", { method: "POST" }) as never;
+
+  it("the skipped delivery for a deleted account is logged by id alone", async () => {
+    accountAudit.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error(`No user was found for ${MARKER_EMAIL}`), {
+        name: "ClerkAPIResponseError",
+        status: 404,
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req());
+
+    expect(res.status).toBe(200);
+    expect(insert).not.toHaveBeenCalled();
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain("user.created for a deleted account — skipped");
+    expect(logged()).toContain(GONE_ID);
+  });
+
+  it("Clerk's refusal is logged by status and class — never the text that quotes the address", async () => {
+    accountAudit.clerkGetUser.mockRejectedValue(
+      Object.assign(new Error(`Upstream failure looking up ${MARKER_EMAIL}`), {
+        name: "ClerkAPIResponseError",
+        status: 503,
+      }),
+    );
+    const logged = captureConsole();
+
+    const res = await clerkWebhook(req());
+
+    expect(res.status).toBe(500);
+    expect(insert).not.toHaveBeenCalled();
+    for (const marker of [MARKER_EMAIL, MARKER_NAME]) {
+      expect(logged()).not.toContain(marker);
+    }
+    expect(logged()).toContain(GONE_ID);
     expect(logged()).toContain('"httpStatus":503');
     expect(logged()).toContain("ClerkAPIResponseError");
   });
