@@ -404,6 +404,21 @@ describe("log audit · Sentry payloads", () => {
         { category: "fetch", data: { url: `/api/t?email=${MARKER_EMAIL}` } },
       ],
       exception: { values: [{ value: `no row for ${MARKER_EMAIL}` }] },
+      // @sentry/nextjs 11 (#390) records the request on the spans too, as
+      // OpenTelemetry attributes: one per header, the body, the client's IP.
+      contexts: {
+        trace: {
+          data: {
+            "url.query": `email=${MARKER_EMAIL}`,
+            "http.request.header.cookie": [`__session=${MARKER_SECRET}`],
+            "http.request.header.authorization": [`Bearer ${MARKER_SECRET}`],
+            "http.request.body.data": JSON.stringify({ name: MARKER_NAME }),
+          },
+        },
+      },
+      spans: [
+        { data: { "http.request.header.x-matio-device-id": [MARKER_SECRET] } },
+      ],
     };
   }
 

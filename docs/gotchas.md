@@ -394,6 +394,24 @@ posthog.init(key, { capture_pageview: false, ... });
 posthog.capture('$pageview');
 ```
 
+## Sentry 11 (web) / `@sentry/react-native` 8 (app)
+
+### SDK 11 removed `sendDefaultPii` AND flipped the defaults — silently
+
+`sendDefaultPii` and `enableLogs` are gone from `@sentry/core` 11, and the configs spread `sentryPrivacyOptions()` in, so a dead key is not an excess-property error: `tsc` stays green while the SDK, with no `dataCollection`, collects the IP (and tells Relay to infer it from a browser's connection — `infer_ip: auto`, beyond any `beforeSend`), cookies, every header, request/response bodies, query strings, database query parameters and frame-local variables. The web's contract is a `dataCollection` naming every category, each off (`lib/observability.ts`); `lib/observability.sdk.test.ts` hands it to the real `NodeClient` and reads `getDataCollectionOptions()` back, which is what catches the next rename (#390).
+
+### Span streaming is the default — `beforeSendTransaction` no-ops
+
+SDK 11 sends spans in batches as they finish; no transaction event is produced, so `beforeSendTransaction` (our scrub of request URLs, span data and the root span's `contexts.trace.data`) never runs and span attributes reach Sentry raw. We pin `traceLifecycle: "static"`. SDK 12 removes that lifecycle — then the scrub moves to `beforeSendSpan` over streamed `attributes` (registry). Attribute names moved to OpenTelemetry conventions too: `http.target` → `url.path` + `url.query`, headers as `http.request.header.<name>` (string arrays), `client.address` for the IP.
+
+### `withSentryConfig` lives at `@sentry/nextjs/config`
+
+The package root no longer exports it — `tsc` catches this one. Its options we use (`org`, `project`, `silent`, `telemetry`, `sourcemaps.deleteSourcemapsAfterUpload`) are unchanged.
+
+### The app is still on JavaScript SDK 10
+
+`@sentry/react-native` 8 runs on `@sentry/core` 10, where `sendDefaultPii` is deprecated but LIVE (it gates IP inference, deep-link and route parameters in the RN SDK itself) and `enableLogs` still opens console capture — so the app keeps both (`sentryAppPrivacyOptions()`). Never add a `dataCollection` there: SDK 10's core ignores `sendDefaultPii` once one is present, and every category left out falls back to "collect". The day the RN SDK moves to core 11, the app takes the web's `dataCollection`.
+
 ## Vercel platform
 
 ### Trusted client IP comes from `x-vercel-forwarded-for`, not leftmost `x-forwarded-for`

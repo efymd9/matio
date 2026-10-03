@@ -444,8 +444,12 @@ Sentry (ошибки сервера, edge и браузера + 10% трейсо
 
 Визард Sentry ставит Session Replay и виджет обратной связи: первый пишет DOM
 (экран зрителя, поля форм), второй собирает имя и адрес. У нас нет ни того, ни
-другого, плюс `sendDefaultPii: false`, `includeLocalVariables: false`,
-`enableLogs: false` и хуки `beforeSend` / `beforeSendTransaction` /
+другого, плюс на вебе (SDK 11, #390) `dataCollection` со всеми категориями
+выключенными (SDK 11 убрал `sendDefaultPii` и по умолчанию собирает IP, куки,
+заголовки, тела и query) и `traceLifecycle: "static"` (стриминговые спаны
+мимо `beforeSendTransaction`), `includeLocalVariables: false`, в приложении
+(RN SDK 8 на ядре JS 10) — `sendDefaultPii: false` и `enableLogs: false`,
+и хуки `beforeSend` / `beforeSendTransaction` /
 `beforeBreadcrumb`, которые срезают query-строки и креды из URL, удаляют куки,
 тело запроса и разобранный query, оставляют из заголовков только белый список,
 сводят пользователя к id, вымарывают адреса из текстов, отрезают у значения

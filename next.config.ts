@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { withSentryConfig } from "@sentry/nextjs";
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 
 import { ARTWORK_BLOB_HOSTS, ARTWORK_BLOB_PREFIXES } from "./lib/blob-artwork";
@@ -95,6 +95,8 @@ const nextConfig: NextConfig = {
 
 // Sentry's build-time wrapper: source-map upload (so a stack trace names our
 // code instead of a minified chunk) and the SDK's build instrumentation.
+// Imported from `@sentry/nextjs/config` — since SDK 11 the package root no
+// longer exports it (#390).
 //
 // APPLIED ONLY WHEN A DSN EXISTS. Without one the export is the plain config
 // above — byte for byte the build we had before Sentry — which is what makes

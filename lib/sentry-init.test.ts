@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { sentryPrivacyOptions } from "./observability";
+
 // The wiring, as opposed to the scrubbers (lib/observability.test.ts). Two
 // promises are made about these three files and both are load-bearing:
 //
@@ -55,8 +57,10 @@ describe("sentry.server.config", () => {
       environment: "staging",
       release: "0.3.0",
       tracesSampleRate: 0.1,
-      sendDefaultPii: false,
-      enableLogs: false,
+      // SDK 11's switches (#390): no data category collected at the source,
+      // and transactions kept, so beforeSendTransaction still runs.
+      dataCollection: sentryPrivacyOptions().dataCollection,
+      traceLifecycle: "static",
       // Frame locals would ship the contents of every variable at the throw.
       includeLocalVariables: false,
     });
@@ -102,9 +106,34 @@ describe("sentry.edge.config", () => {
     expect(init).toHaveBeenCalledTimes(1);
     expect(init.mock.calls[0][0]).toMatchObject({
       environment: "production",
-      sendDefaultPii: false,
-      enableLogs: false,
+      dataCollection: sentryPrivacyOptions().dataCollection,
+      traceLifecycle: "static",
     });
+  });
+});
+
+describe("sentry-client-init", () => {
+  it("gives the browser the same contract, with the stage from its public twin", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SENTRY_DSN", DUMMY_DSN);
+    vi.stubEnv("NEXT_PUBLIC_APP_ENV", "staging");
+
+    await import("@/sentry-client-init");
+
+    expect(init).toHaveBeenCalledTimes(1);
+    const options = init.mock.calls[0][0];
+    expect(options).toMatchObject({
+      dsn: DUMMY_DSN,
+      environment: "staging",
+      dataCollection: sentryPrivacyOptions().dataCollection,
+      traceLifecycle: "static",
+    });
+    expect(typeof options.beforeSend).toBe("function");
+    expect(typeof options.beforeBreadcrumb).toBe("function");
+    // No Session Replay and no feedback widget: the integrations are the SDK's
+    // defaults, never a list of ours.
+    expect(options).not.toHaveProperty("integrations");
+    expect(options).not.toHaveProperty("replaysSessionSampleRate");
+    expect(options).not.toHaveProperty("replaysOnErrorSampleRate");
   });
 });
 

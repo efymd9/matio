@@ -337,7 +337,10 @@ without that export App Router route/server-action errors never reach Sentry),
 plus the `environment`/`release` resolution shared with `/api/healthz`.
 
 **Privacy** (the reason this is configured by hand):
-`sendDefaultPii: false`, `includeLocalVariables: false`, `enableLogs: false`, no
+a `dataCollection` with every category off (SDK 11 removed `sendDefaultPii`
+and collects IPs, cookies, headers, bodies and query parameters by default —
+#390), `traceLifecycle: "static"` (a streamed trace never reaches
+`beforeSendTransaction`), `includeLocalVariables: false`, no
 Session Replay, no feedback widget, and `beforeSend` / `beforeSendTransaction` /
 `beforeBreadcrumb` that strip query strings and URL credentials, delete
 cookies / request bodies / parsed query params, reduce request headers to an
@@ -384,8 +387,10 @@ project is an option if the app ever needs its own rate limit. Then the next
 `eas build` reports; verify with a crash on that build (below, registry row).
 
 **Privacy**: the same `beforeSend` / `beforeBreadcrumb` from
-`lib/observability.ts` (re-exported by `mobile/src/shared/observability.ts`),
-`sendDefaultPii: false`, `enableLogs: false`, no Session Replay, no feedback
+`lib/observability.ts` (`sentryAppPrivacyOptions()`, re-exported by
+`mobile/src/shared/observability.ts`), `sendDefaultPii: false`,
+`enableLogs: false` (both still read by `@sentry/react-native` 8, whose
+JavaScript core is SDK 10 — #390), no Session Replay, no feedback
 widget, no screenshots or view hierarchy, no tracing, no `Sentry.wrap` (it
 would add touch breadcrumbs and the feedback widget's provider). The app sets
 no user; native events carry the SDK's own random installation id. A NATIVE
