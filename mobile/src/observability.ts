@@ -1,6 +1,6 @@
 import type * as SentryModule from "@sentry/react-native";
 import type { ReactNativeOptions } from "@sentry/react-native";
-import { sentryPrivacyOptions } from "@/shared/observability";
+import { sentryAppPrivacyOptions } from "@/shared/observability";
 
 // The app's error tracker (#317): the same Sentry project as the web (EU
 // region), with the web's privacy contract — and, like the web, DSN-optional
@@ -72,31 +72,20 @@ export function resolveAppRelease(env: Pick<ObservabilityEnv, "version" | "build
  */
 const EXCLUDED_INTEGRATIONS = new Set([
   "MobileReplay",
+  "MobileReplayNetworkDetails",
+  "MobileReplayNetworkBodies",
   "Replay",
   "MobileFeedback",
   "AutoInjectMobileFeedback",
   "AutoInjectMobileFeedbackButton",
   "AutoInjectMobileScreenshotButton",
+  "ShakeToReport",
   "Screenshot",
   "ViewHierarchy",
 ]);
 
-/**
- * Read by sentry-cocoa from the options dictionary the RN SDK hands to native
- * (it passes everything but the callbacks), though not in the SDK's TypeScript
- * surface. A NATIVE crash is reported by the native SDK and never passes the
- * JavaScript `beforeSend` below, so what native records on its own must be
- * clean at the source: its network breadcrumbs carry each request's query
- * string (a signed thumbnail URL's `?token=`). The app's own requests are
- * still in the trail — as the JavaScript XHR breadcrumbs, which are scrubbed
- * before they are synced to native.
- */
-const NATIVE_ONLY_OPTIONS = { enableNetworkBreadcrumbs: false } as const;
-
 /** Everything `Sentry.init` gets — pure, so the contract is testable. */
-export function buildSentryOptions(
-  env: ObservabilityEnv & { dsn: string },
-): ReactNativeOptions & typeof NATIVE_ONLY_OPTIONS {
+export function buildSentryOptions(env: ObservabilityEnv & { dsn: string }): ReactNativeOptions {
   return {
     dsn: env.dsn,
     environment: resolveAppEnvironment(env),
@@ -104,7 +93,7 @@ export function buildSentryOptions(
     dist: String(env.build),
     // sendDefaultPii: false, enableLogs: false, and the scrubbing
     // beforeSend / beforeSendTransaction / beforeBreadcrumb.
-    ...sentryPrivacyOptions(),
+    ...sentryAppPrivacyOptions(),
     attachScreenshot: false,
     attachViewHierarchy: false,
     enableAutoPerformanceTracing: false,
@@ -113,9 +102,16 @@ export function buildSentryOptions(
     // every return to the foreground — from every device, crash or no crash.
     // #317 is crash and error reporting; those are untouched by this.
     enableAutoSessionTracking: false,
+    // A NATIVE crash is reported by sentry-cocoa and never passes the
+    // JavaScript `beforeSend`, so what native records on its own must be clean
+    // at the source: its network breadcrumbs carry each request's query string
+    // (a signed thumbnail URL's `?token=`). The app's own requests stay in the
+    // trail as the JavaScript XHR breadcrumbs, scrubbed before they are synced
+    // to native. A typed option since @sentry/react-native 8 (#390); before
+    // that it rode the options dictionary untyped.
+    enableNetworkBreadcrumbs: false,
     integrations: (defaults) =>
       defaults.filter((integration) => !EXCLUDED_INTEGRATIONS.has(integration.name)),
-    ...NATIVE_ONLY_OPTIONS,
   };
 }
 

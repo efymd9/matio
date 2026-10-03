@@ -136,6 +136,27 @@ const URL_DATA_KEYS = ["url", "http.url", "url.full", "http.target", "to", "from
  */
 const URL_PART_DATA_KEYS = ["http.query", "http.fragment", "url.query", "url.fragment"];
 
+/**
+ * Where @sentry/nextjs 11 puts headers as span attributes (OpenTelemetry
+ * semantic conventions, #390): `http.request.header.<name>`, one per header,
+ * the cookie header included. Cut to the same allowlist as `request.headers`.
+ */
+const HEADER_ATTRIBUTE_PREFIXES = ["http.request.header.", "http.response.header."];
+
+/**
+ * Span attributes that ARE the viewer: their IP (`client.address` and
+ * `network.peer.address` on a server span, `user.ip_address`) and a request
+ * body (`http.request.body.data`). @sentry/nextjs 11 attaches them when
+ * `dataCollection` allows it — ours does not (`webDataCollection`); deleted
+ * here so a future SDK default cannot bring them back (#390).
+ */
+const VIEWER_DATA_KEYS = [
+  "client.address",
+  "network.peer.address",
+  "user.ip_address",
+  "http.request.body.data",
+];
+
 // Conservative: local part, @, dotted host. Deliberately not RFC-complete —
 // this is a net under the "no user text in errors" rule, not a validator.
 const EMAIL_PATTERN = /[^\s"'<>@,;:]+@[^\s"'<>@,;:]+\.[a-z]{2,}/gi;
@@ -189,13 +210,20 @@ function scrubText(value: string): string {
   return redactEmails(stripQueryParams(value));
 }
 
-function scrubDataUrls(data: Record<string, unknown> | undefined): void {
+function scrubDataBag(data: Record<string, unknown> | undefined): void {
   if (!data) return;
   for (const key of URL_DATA_KEYS) {
     const value = data[key];
     if (typeof value === "string") data[key] = scrubUrl(value);
   }
   for (const key of URL_PART_DATA_KEYS) delete data[key];
+  for (const key of VIEWER_DATA_KEYS) delete data[key];
+  for (const key of Object.keys(data)) {
+    const prefix = HEADER_ATTRIBUTE_PREFIXES.find((p) => key.startsWith(p));
+    if (prefix && !ALLOWED_REQUEST_HEADERS.has(key.slice(prefix.length).toLowerCase())) {
+      delete data[key];
+    }
+  }
 }
 
 function scrubRequest(request: SentryRequestLike): void {
@@ -230,7 +258,7 @@ export function scrubSentryBreadcrumb(
   if (typeof breadcrumb.message === "string") {
     breadcrumb.message = scrubText(scrubUrl(breadcrumb.message));
   }
-  scrubDataUrls(breadcrumb.data);
+  scrubDataBag(breadcrumb.data);
   return breadcrumb;
 }
 
@@ -264,8 +292,8 @@ export function scrubSentryEvent(event: SentryEventLike): void {
       .map(scrubSentryBreadcrumb)
       .filter((crumb): crumb is SentryBreadcrumbLike => crumb !== null);
   }
-  for (const span of event.spans ?? []) scrubDataUrls(span.data);
-  scrubDataUrls(event.contexts?.trace?.data);
+  for (const span of event.spans ?? []) scrubDataBag(span.data);
+  scrubDataBag(event.contexts?.trace?.data);
   // Whatever else was attached to the user, only the id survives. Nothing in
   // the app calls `Sentry.setUser`, and this is what keeps that true.
   if (event.user) event.user = { id: event.user.id };
@@ -435,9 +463,8 @@ export function isInjectedScriptNoise(
   return frames.every((frame) => isStrayFrame(frame, rawStack, pageHost));
 }
 
-export interface SentryPrivacyOptions {
-  sendDefaultPii: false;
-  enableLogs: false;
+/** The scrubbing half of `Sentry.init` — the same for every SDK we run. */
+export interface SentryPrivacyHooks {
   beforeSend: <E extends SentryEventLike>(
     event: E,
     hint?: SentryHintLike,
@@ -449,20 +476,67 @@ export interface SentryPrivacyOptions {
 }
 
 /**
- * The privacy half of `Sentry.init`, as one value the three runtime configs
- * spread in — so "the server scrubs but the browser does not" cannot happen by
- * editing one file, and so the contract itself is unit-testable.
- *
- * `sendDefaultPii: false` keeps the SDK from attaching IPs, cookies and request
- * bodies at the source; the `beforeSend*` hooks are the belt to that braces,
- * because integrations and future SDK versions add fields on their own.
- * `enableLogs: false` keeps the SDK's log-forwarding channel shut — our logs
- * carry ids and statuses, but they are not written for an external service.
+ * @sentry/nextjs 11's `dataCollection`, restated structurally (this module
+ * imports nothing) with every category pinned to "off". `lib/observability.
+ * sdk.test.ts` hands it to the real SDK client, so a renamed or dropped key
+ * fails there instead of silently falling back to a default.
  */
-export function sentryPrivacyOptions(): SentryPrivacyOptions {
+export interface SentryDataCollection {
+  userInfo: false;
+  cookies: false;
+  httpHeaders: { request: { allow: string[] }; response: false };
+  httpBodies: [];
+  urlQueryParams: false;
+  graphQL: { document: false; variables: false };
+  genAI: { inputs: false; outputs: false };
+  databaseQueryData: false;
+  queues: false;
+  stackFrameVariables: false;
+}
+
+/** The web's whole contract: @sentry/nextjs 11, on Node, edge and browser. */
+export interface SentryPrivacyOptions extends SentryPrivacyHooks {
+  dataCollection: SentryDataCollection;
+  traceLifecycle: "static";
+}
+
+/** The app's whole contract: @sentry/react-native 8, on JavaScript SDK 10. */
+export interface SentryAppPrivacyOptions extends SentryPrivacyHooks {
+  sendDefaultPii: false;
+  enableLogs: false;
+}
+
+/**
+ * What @sentry/nextjs 11 may collect on its own, at the source (#390). v11
+ * REMOVED `sendDefaultPii` and FLIPPED the defaults: with no `dataCollection`
+ * it attaches the viewer's IP (and lets Sentry infer it from a browser's
+ * connection — a setting no `beforeSend` can take back), cookies, every
+ * header, request and response bodies and query strings. Two categories are
+ * inert for us today and pinned anyway: `stackFrameVariables` acts only with
+ * `includeLocalVariables` on (the Node config keeps it off), and
+ * `databaseQueryData` is read only by the Supabase integration (postgres-js
+ * spans carry sanitized SQL). Every category is named, so no
+ * default decides. The SDK's header allowlist matches by substring
+ * (`content-type` also admits `x-content-type-options`) — the hooks below cut
+ * to the exact names.
+ */
+function webDataCollection(): SentryDataCollection {
   return {
-    sendDefaultPii: false,
-    enableLogs: false,
+    userInfo: false,
+    cookies: false,
+    httpHeaders: { request: { allow: [...ALLOWED_REQUEST_HEADERS] }, response: false },
+    httpBodies: [],
+    urlQueryParams: false,
+    graphQL: { document: false, variables: false },
+    genAI: { inputs: false, outputs: false },
+    databaseQueryData: false,
+    queues: false,
+    stackFrameVariables: false,
+  };
+}
+
+function privacyHooks(): SentryPrivacyHooks {
+  return {
     beforeSend: (event, hint) => {
       if (isBlockedBeaconNoise(event) || isInjectedScriptNoise(event, hint)) {
         return null;
@@ -475,6 +549,49 @@ export function sentryPrivacyOptions(): SentryPrivacyOptions {
       return event;
     },
     beforeBreadcrumb: (breadcrumb) => scrubSentryBreadcrumb(breadcrumb),
+  };
+}
+
+/**
+ * The privacy half of the web's `Sentry.init`, as one value the three runtime
+ * configs spread in — so "the server scrubs but the browser does not" cannot
+ * happen by editing one file, and so the contract itself is unit-testable.
+ *
+ * `dataCollection` keeps the SDK from attaching IPs, cookies, headers and
+ * bodies at the source; the `beforeSend*` hooks are the belt to that braces,
+ * because integrations and future SDK versions add fields on their own.
+ *
+ * `traceLifecycle: "static"` because v11 STREAMS spans by default, and a
+ * streamed trace never becomes a transaction event — so `beforeSendTransaction`
+ * (the scrub of request URLs, span data and the root span's attributes) would
+ * silently stop running. "static" keeps the transactions it scrubs; v12 drops
+ * that lifecycle, and the move to `beforeSendSpan` is in docs/registry.md.
+ *
+ * No log channel to shut: v11 removed `enableLogs`, and Sentry Logs open only
+ * when code calls `Sentry.logger.*` or adds `consoleLoggingIntegration` —
+ * nothing here does either.
+ */
+export function sentryPrivacyOptions(): SentryPrivacyOptions {
+  return {
+    dataCollection: webDataCollection(),
+    traceLifecycle: "static",
+    ...privacyHooks(),
+  };
+}
+
+/**
+ * The same hooks for the app (#317), with the switches ITS SDK still reads:
+ * @sentry/react-native 8 runs on JavaScript SDK 10, where `sendDefaultPii`
+ * still gates IP inference, deep-link and route parameters, and `enableLogs`
+ * still opens console capture. No `dataCollection` here on purpose: SDK 10's
+ * core ignores `sendDefaultPii` the moment one is present, and every category
+ * left out of it falls back to "collect".
+ */
+export function sentryAppPrivacyOptions(): SentryAppPrivacyOptions {
+  return {
+    sendDefaultPii: false,
+    enableLogs: false,
+    ...privacyHooks(),
   };
 }
 

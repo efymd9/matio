@@ -99,8 +99,12 @@ describe("with a DSN", () => {
     const options = started();
 
     expect(options.dsn).toBe(DSN);
+    // Still live in @sentry/react-native 8 (JavaScript SDK 10): it gates IP
+    // inference, deep-link and route parameters — unlike the web's SDK 11.
     expect(options.sendDefaultPii).toBe(false);
     expect(options.enableLogs).toBe(false);
+    // SDK 10's core drops sendDefaultPii once a dataCollection is present.
+    expect(options).not.toHaveProperty("dataCollection");
     expect(options.attachScreenshot).toBe(false);
     expect(options.attachViewHierarchy).toBe(false);
     // Tracing off: no sample rate at all — the SDK counts ANY number, `0`
@@ -124,6 +128,11 @@ describe("with a DSN", () => {
     const defaults = [
       "ReactNativeErrorHandlers",
       "MobileReplay",
+      // @sentry/react-native 8's replay network capture and shake-to-report
+      // feedback form (#390) — never enabled by us, filtered if a default ever is.
+      "MobileReplayNetworkDetails",
+      "MobileReplayNetworkBodies",
+      "ShakeToReport",
       "Breadcrumbs",
       "MobileFeedback",
       "AutoInjectMobileFeedback",

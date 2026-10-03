@@ -25,7 +25,7 @@ The app imports a few genuinely universal modules straight from the web app's `l
 |---|---|---|
 | `src/shared/design.ts` | `../../../lib/design` | brand tokens — colours must not drift between surfaces |
 | `src/shared/api-types.ts` | `../../../lib/api/types` | the `/api/v1` wire contract, so a DTO change fails compilation instead of failing on a user's phone |
-| `src/shared/observability.ts` | `../../../lib/observability` | the Sentry privacy contract (scrubbers + `sentryPrivacyOptions()`) — the app's error reports are scrubbed by the same code as the site's (#317) |
+| `src/shared/observability.ts` | `../../../lib/observability` | the Sentry privacy contract (scrubbers + `sentryAppPrivacyOptions()`) — the app's error reports are scrubbed by the same code as the site's (#317) |
 | `src/shared/i18n.ts` | `../../../lib/i18n/dictionaries`, `…/app-dictionaries`, `…/negotiate` | the site's es/en copy (rails, walls, player labels) — the app never re-types a string; `app-dictionaries.ts` holds the app-only copy (sign-in steps, the update wall); `negotiate.ts` is the tag-matching rule the device language goes through |
 
 The files in `src/shared/` are the **only** places holding a path across the project boundary. Import
@@ -110,8 +110,10 @@ test lives next to the hook or component it exercises.
 ## Error tracking
 
 `@sentry/react-native` (#317, approved by the owner 27.09) — the web's Sentry project, EU
-region, and the web's privacy contract: `src/observability.ts` spreads the same
-`sentryPrivacyOptions()` from `lib/observability.ts` (via `src/shared/observability.ts`), with
+region, and the web's privacy contract: `src/observability.ts` spreads
+`sentryAppPrivacyOptions()` from `lib/observability.ts` (via `src/shared/observability.ts`) —
+the web's scrubbing hooks with the `sendDefaultPii: false` / `enableLogs: false` this SDK still
+reads (#390) — with
 no Session Replay, no feedback widget, no screenshots, no tracing and no `Sentry.wrap`. It is
 **DSN-optional**: `EXPO_PUBLIC_SENTRY_DSN` unset (today — it belongs in EAS env, see
 `docs/services.md` → Sentry → The app) means no `Sentry.init`, and the SDK's JavaScript is only

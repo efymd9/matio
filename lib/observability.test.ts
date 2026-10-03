@@ -9,6 +9,7 @@ import {
   scrubSentryBreadcrumb,
   scrubSentryEvent,
   scrubUrl,
+  sentryAppPrivacyOptions,
   sentryPrivacyOptions,
   stripQueryParams,
   type SentryEventLike,
@@ -291,6 +292,45 @@ describe("scrubSentryEvent", () => {
       "http.status_code": 200,
     });
     expect(JSON.stringify(event)).not.toContain(e);
+  });
+
+  it("cuts the headers, the IP and the body @sentry/nextjs 11 puts on spans (#390)", () => {
+    // SDK 11 records a request the OpenTelemetry way: one attribute per
+    // header (cookie included), the client's address, the body.
+    const event: SentryEventLike = {
+      transaction: "POST /api/email/unsubscribe",
+      contexts: {
+        trace: {
+          data: {
+            "http.request.header.cookie": ["__session=dummy-session"],
+            "http.request.header.authorization": ["Bearer dummy-token"],
+            "http.request.header.x-forwarded-for": ["203.0.113.7"],
+            "http.request.header.user-agent": ["Mozilla/5.0"],
+            "http.request.header.Content-Type": ["application/json"],
+            "http.response.header.set-cookie": ["__session=dummy-session"],
+            "http.response.header.content-length": ["12"],
+            "client.address": "203.0.113.7",
+            "network.peer.address": "203.0.113.7",
+            "user.ip_address": "203.0.113.7",
+            "http.request.body.data": '{"email":"viewer@example.invalid"}',
+            "http.request.method": "POST",
+          },
+        },
+      },
+      spans: [
+        { data: { "http.request.header.cookie": ["__session=dummy-session"] } },
+      ],
+    };
+
+    scrubSentryEvent(event);
+
+    expect(event.contexts?.trace?.data).toEqual({
+      "http.request.header.user-agent": ["Mozilla/5.0"],
+      "http.request.header.Content-Type": ["application/json"],
+      "http.response.header.content-length": ["12"],
+      "http.request.method": "POST",
+    });
+    expect(event.spans?.[0]?.data).toEqual({});
   });
 
   it("removes cookies, the request body and the parsed query", () => {
@@ -842,11 +882,53 @@ describe("scripts injected into the page (#271)", () => {
 });
 
 describe("sentryPrivacyOptions", () => {
-  it("states the two settings that must never drift", () => {
+  it("names every @sentry/nextjs 11 data category, each one off (#390)", () => {
+    // SDK 11 removed `sendDefaultPii` and collects by default; a category
+    // missing here is a category the SDK collects. lib/observability.sdk.test.ts
+    // proves the real client reads these names.
     const options = sentryPrivacyOptions();
 
-    expect(options.sendDefaultPii).toBe(false);
-    expect(options.enableLogs).toBe(false);
+    expect(options.dataCollection).toEqual({
+      userInfo: false,
+      cookies: false,
+      httpHeaders: {
+        request: { allow: ["content-type", "content-length", "user-agent"] },
+        response: false,
+      },
+      httpBodies: [],
+      urlQueryParams: false,
+      graphQL: { document: false, variables: false },
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      stackFrameVariables: false,
+    });
+    // Streamed spans never reach beforeSendTransaction.
+    expect(options.traceLifecycle).toBe("static");
+    // Dead in SDK 11 — a value here would only look like protection.
+    expect(options).not.toHaveProperty("sendDefaultPii");
+    expect(options).not.toHaveProperty("enableLogs");
+  });
+
+  it("hands each init its own dataCollection, so one runtime cannot edit another's", () => {
+    const first = sentryPrivacyOptions();
+    first.dataCollection.httpHeaders.request.allow.push("cookie");
+
+    expect(sentryPrivacyOptions().dataCollection.httpHeaders.request.allow).not.toContain(
+      "cookie",
+    );
+  });
+
+  it("gives the app the switches its SDK 10 core still reads, and the same hooks", () => {
+    const app = sentryAppPrivacyOptions();
+
+    expect(app.sendDefaultPii).toBe(false);
+    expect(app.enableLogs).toBe(false);
+    // A dataCollection would make SDK 10's core ignore sendDefaultPii.
+    expect(app).not.toHaveProperty("dataCollection");
+    expect(app.beforeSend(seededEvent())?.request?.url).toBe("https://matio.tv/welcome");
+    expect(app.beforeSendTransaction(seededEvent()).request).not.toHaveProperty("cookies");
+    expect(app.beforeBreadcrumb({ category: "console" })).toBeNull();
   });
 
   it("scrubs through beforeSend and beforeSendTransaction alike", () => {

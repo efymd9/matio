@@ -420,8 +420,11 @@ urgent — it costs one command.
   *before* the deploy that should report.
 - **The privacy configuration is the whole point of wiring it by hand.** No
   Session Replay, no feedback widget (the wizard adds both — they record the
-  viewer's screen and collect an address), `sendDefaultPii: false`,
-  `includeLocalVariables: false`, `enableLogs: false`, and `beforeSend` /
+  viewer's screen and collect an address), on the web (SDK 11 — #390) a
+  `dataCollection` with every category off plus `traceLifecycle: "static"`
+  (streamed spans would skip `beforeSendTransaction`) and
+  `includeLocalVariables: false`, in the app (RN SDK 8, JS core 10)
+  `sendDefaultPii: false` + `enableLogs: false`, and `beforeSend` /
   `beforeSendTransaction` / `beforeBreadcrumb` that strip query strings and URL
   credentials, delete cookies / request bodies / parsed query params, cut
   headers to an allowlist, reduce the user to an id, redact email-shaped
