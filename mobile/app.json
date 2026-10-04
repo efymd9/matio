@@ -12,6 +12,7 @@
     "ios": {
       "bundleIdentifier": "tv.matio.app",
       "supportsTablet": false,
+      "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "CFBundleLocalizations": ["en", "es"]
@@ -44,12 +45,9 @@
           "imageWidth": 76
         }
       ],
-      [
-        "@clerk/expo",
-        {
-          "appleSignIn": false
-        }
-      ],
+      "@clerk/expo",
+      "expo-apple-authentication",
+      "@clerk/expo-google-signin",
       [
         "expo-secure-store",
         {

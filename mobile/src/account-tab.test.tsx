@@ -71,6 +71,13 @@ vi.mock("@clerk/expo", () => ({
   useClerk: () => ({ signOut }),
   useAuth: () => ({ getToken }),
 }));
+// #277 — the Google sign-in SDK keeps its own session in the keychain, which
+// Clerk's signOut does not end; the tab ends it first on every sign-out
+// (auth/google-session.ts has its own suite).
+const endGoogleSession = vi.fn(async () => {
+  h.steps.push("google.signOut");
+});
+vi.mock("@/auth/google-session", () => ({ endGoogleSession: () => endGoogleSession() }));
 vi.mock("@/auth/clerk", () => ({
   CLERK_PUBLISHABLE_KEY: "pk_test_dummy",
   useOptionalAuth: () => ({
@@ -227,12 +234,13 @@ describe("Account tab — «Sign out» asks first (#292 item 8)", () => {
     expect(alerts.calls).toHaveLength(1);
   });
 
-  it("confirming signs out", async () => {
+  it("confirming signs out — the Google SDK's own session first, then Clerk's (#277)", async () => {
     render();
     press("Sign out");
     await choose("Sign out");
 
     expect(signOut).toHaveBeenCalledTimes(1);
+    expect(h.steps).toEqual(["google.signOut", "signOut"]);
     expect(alerts.calls).toHaveLength(1);
   });
 
@@ -331,7 +339,7 @@ describe("Account tab — «Delete account» (#309)", () => {
     await choose("Delete permanently");
 
     expect(deleteAccount).toHaveBeenCalledTimes(1);
-    expect(h.steps).toEqual(["api.deleteAccount", "signOut", "replace /"]);
+    expect(h.steps).toEqual(["api.deleteAccount", "google.signOut", "signOut", "replace /"]);
     expect(alerts.calls).toHaveLength(2); // no failure dialog
   });
 
@@ -443,7 +451,7 @@ describe("Account tab — a failed deletion asks Clerk about the session first (
     await confirmDeletion();
 
     expect(getToken).toHaveBeenCalledWith({ skipCache: true });
-    expect(h.steps).toEqual(["api.deleteAccount", "getToken", "signOut", "replace /"]);
+    expect(h.steps).toEqual(["api.deleteAccount", "getToken", "google.signOut", "signOut", "replace /"]);
     expect(alerts.calls).toHaveLength(2); // no failure dialog
   });
 
@@ -576,7 +584,7 @@ describe("Account tab — a session that ended before anything was sent is not a
 
     await confirmDeletion();
 
-    expect(h.steps).toEqual(["api.deleteAccount", "getToken", "signOut"]);
+    expect(h.steps).toEqual(["api.deleteAccount", "getToken", "google.signOut", "signOut"]);
     expect(router.replace).not.toHaveBeenCalled();
     expect(alerts.calls).toHaveLength(3);
     expect(alerts.calls[2].title).toBe("Your session has ended");

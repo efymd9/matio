@@ -1,6 +1,6 @@
 import type { AppConfig } from "@/lib/api/types";
 import { API_VERSION } from "@/lib/api/types";
-import { apiOk, envInt, resolveSignupGate } from "@/lib/api/v1";
+import { apiOk, envInt, resolveSignupGate, resolveSocialSignIn } from "@/lib/api/v1";
 import { withAppEmbed } from "@/lib/app-embed";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { SITE_URL } from "@/lib/seo";
@@ -41,6 +41,10 @@ export async function GET() {
       castEnabled: process.env.APP_CAST_ENABLED === "1",
     },
     signupGate: resolveSignupGate(),
+    // Apple / Google under the app's email form (#277): off until the owner
+    // has set up the consoles and flips APP_SOCIAL_SIGNIN — then on for the
+    // builds already installed, with no store release.
+    socialSignIn: resolveSocialSignIn(),
     locales: ["en", "es"],
     urls: {
       web: SITE_URL,

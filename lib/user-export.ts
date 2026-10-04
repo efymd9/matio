@@ -81,6 +81,19 @@ export type ClerkUserLike = {
   /** Epoch milliseconds (Clerk's Backend API convention). */
   createdAt: number;
   lastSignInAt: number | null;
+  /**
+   * The Google / Apple profiles linked to the account (#277 — the app's
+   * Sign in with Apple and Google; the web's Google). Clerk's `ExternalAccount`
+   * carries more; these are the fields that are about the person.
+   */
+  externalAccounts?: {
+    provider: string;
+    providerUserId: string;
+    emailAddress: string;
+    firstName: string | null;
+    lastName: string | null;
+    imageUrl: string | null;
+  }[];
 };
 
 export type ClerkClientLike = {
@@ -160,6 +173,15 @@ export type ClerkExport = {
   lastName: string | null;
   createdAt: string;
   lastSignInAt: string | null;
+  /** Sign-in providers' profiles: provider, their user id, address (Apple's may be a relay), name, picture. */
+  externalAccounts: {
+    provider: string;
+    providerUserId: string;
+    emailAddress: string;
+    firstName: string | null;
+    lastName: string | null;
+    imageUrl: string | null;
+  }[];
 };
 
 export type StripeExport = {
@@ -322,6 +344,15 @@ async function fetchClerk(
     lastName: user.lastName,
     createdAt: isoFromMillis(user.createdAt) ?? "",
     lastSignInAt: isoFromMillis(user.lastSignInAt),
+    // Clerk answers "" for a field the provider did not share.
+    externalAccounts: (user.externalAccounts ?? []).map((a) => ({
+      provider: a.provider,
+      providerUserId: a.providerUserId,
+      emailAddress: a.emailAddress,
+      firstName: a.firstName || null,
+      lastName: a.lastName || null,
+      imageUrl: a.imageUrl || null,
+    })),
   };
 }
 

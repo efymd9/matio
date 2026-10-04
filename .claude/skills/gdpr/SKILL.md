@@ -324,7 +324,8 @@ Clerk id вместо самого id для лимита авторизован
   `show_reminders` по `user_id` **или** `email`; `idea_submissions` — только
   по адресу аккаунта в нижнем регистре, #297) — только Drizzle, без сырого
   SQL; `stripe_events` и `watch_segments` не входят. Вендоры best-effort и
-  только при явной переменной: `CLERK_SECRET_KEY` → профиль,
+  только при явной переменной: `CLERK_SECRET_KEY` → профиль (с #277 — и
+  `externalAccounts`: профили Google / Apple, через которые входил человек),
   `STRIPE_SECRET_KEY` → Customer + инвойсы, `POSTHOG_PERSONAL_API_KEY` +
   `POSTHOG_PROJECT_ID` → персона + события по `distinct_id` = Clerk id (транспорт
   `lib/posthog-hogql.ts`, тот же, что у админки); нет переменной или вендор

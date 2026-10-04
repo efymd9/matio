@@ -262,9 +262,12 @@ would add license-server complexity and cost for no benefit here.
       inline and then deletes the Clerk user (server-side, not a client `user.delete()` — no
       dependency on the `user.deleted` webhook or the dashboard toggle). Still no web page for it
       (`docs/registry.md`).
-- [ ] **Sign in with Apple** is required **only if** any third-party social login is offered.
-      Clerk email-code only → exempt. Adding "Continue with Google" for mobile convenience
-      would drag SIWA in with it. Decide before building the auth screen.
+- [x] **Sign in with Apple** (4.8) — required once Google is offered; built together in #277:
+      native Apple + native Google under the email form (board variant B), behind the
+      `APP_SOCIAL_SIGNIN` lever, and on iOS Google never shows without Apple
+      (`mobile/src/auth/social.ts`). Off until the owner's console steps are done
+      (`docs/registry.md`); token revocation on deletion (5.1.1(v)) is #407 — it blocks
+      the public submission and `apple` in the lever while a public build exists.
 - [ ] Privacy nutrition labels (App Store) + Data Safety form (Play) — must match what the
       device id, PostHog, and Meta SDKs actually collect.
 - [ ] ATT prompt if and only if Meta attribution ships (§10).
@@ -465,11 +468,14 @@ pre-flight lookups now have their own 3s deadline and degrade to anonymous.
 1. Adding native modules to an existing generated `ios/` fails `pod install` with
    `undefined method 'package_product_dependencies' for nil` in RN's SPM script. Fix: delete
    `ios/` and `expo prebuild --clean`. Incremental prebuild is not reliable here.
-2. `@clerk/expo`'s config plugin adds a **Sign in with Apple entitlement by default**, which
-   forces a code-signed build and breaks simulator builds with "No code signing certificates".
-   Matio offers no third-party login — which is exactly what makes it **exempt from App Store
-   guideline 4.8** — so the entitlement is both unnecessary and misleading. Disabled with
-   `["@clerk/expo", { "appleSignIn": false }]` in `app.json`.
+2. The **Sign in with Apple entitlement** forces a code-signed build and breaks unsigned
+   simulator builds with "No code signing certificates". Until #277 it was switched off
+   (`["@clerk/expo", { "appleSignIn": false }]` — no third-party login, exempt from 4.8); since
+   #277 the app offers Apple and Google, so the entitlement is ON (`ios.usesAppleSignIn`, the
+   `@clerk/expo` and `expo-apple-authentication` plugins). A simulator build now needs a
+   Development Team (`expo run:ios` with signing), or an EAS build on a device; the first EAS
+   build after the capability appeared re-issues the provisioning profile interactively
+   (`docs/runbooks/mobile-builds.md`).
 
 **Not yet done in the player** (deliberate, next phase): token refresh at expiry−60s (episodes
 are 9–16 min against a 1h TTL, so nothing can currently expire mid-playback), auto-advance,

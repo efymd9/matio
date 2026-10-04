@@ -5,15 +5,22 @@ import { AccessibilityInfo, Pressable, StyleSheet, Text, TextInput, View } from 
 import { useConfig } from "@/api/config-context";
 import { CLERK_PUBLISHABLE_KEY } from "@/auth/clerk";
 import { GlassSurface } from "@/components/glass";
+import { SocialSignIn } from "@/components/social-sign-in";
 import { ErrorState, GoldButton, Pill } from "@/components/ui";
 import { useLocale, useT } from "@/i18n/locale";
 import { legalUrl } from "@/i18n/localized-url";
-import { body, colors, display, radius, space } from "@/theme";
+import { body, colors, display, fonts, radius, space } from "@/theme";
 
 // Passwordless email-code sign-in — the two-step form itself, shared by the
 // modal sign-in screen (app/sign-in.tsx, reached from a locked episode) and
 // the Account tab's signed-out state (#245). The screens own the copy of the
 // first step and what happens on success; the form owns the Clerk dance.
+//
+// Under the email step's CTA: Sign in with Apple and Continue with Google
+// (#277, components/social-sign-in.tsx) — when the server's lever, the
+// device and the build allow them (auth/social.ts). They finish the same
+// way the code does: a live session, then onDone. The code step is the
+// email flow alone.
 //
 // Matio accounts have no password — the web's guest-checkout flow creates them
 // with skipPasswordRequirement, so the email code IS the canonical credential.
@@ -61,6 +68,10 @@ type SignInFormProps = {
   headline: string;
   bodyText: string;
   cta: string;
+  // Beside the kicker on the email step: the locked episode the viewer came
+  // from («Ep. 3 · Sealed in Blood», #277 board B) — the modal screen passes
+  // it once the show has loaded; the tab has none.
+  kickerNote?: string;
   // After the session is live. The modal screen goes back to the episode it
   // came from; the tab stays put — it re-renders as the signed-in account.
   onDone: () => void;
@@ -100,6 +111,7 @@ function ClerkSignInForm({
   headline,
   bodyText,
   cta,
+  kickerNote,
   onDone,
   onCancel,
   signInHint = false,
@@ -317,8 +329,13 @@ function ClerkSignInForm({
 
   return (
     <View style={styles.form}>
-      <View style={{ alignSelf: "flex-start" }}>
+      <View style={styles.kickerRow}>
         <Pill label={step === "email" ? kicker : t.signupWall.kicker} />
+        {step === "email" && kickerNote ? (
+          <Text style={styles.kickerNote} numberOfLines={1}>
+            {kickerNote}
+          </Text>
+        ) : null}
       </View>
       <Text style={styles.title}>
         {step === "code"
@@ -406,6 +423,17 @@ function ClerkSignInForm({
         style={{ alignSelf: "stretch", marginTop: space(5) }}
       />
 
+      {step === "email" ? (
+        <SocialSignIn
+          ready={ready}
+          busy={busy}
+          setBusy={setBusy}
+          clearError={() => setError(null)}
+          fail={fail}
+          onDone={onDone}
+        />
+      ) : null}
+
       {/* The step that collects the address says what it is taken under
           (#312, App Store 5.1.1(i)). The two documents open the way Settings
           opens them — the chosen language's embed page (#310), through the
@@ -481,6 +509,17 @@ function ClerkSignInForm({
 
 const styles = StyleSheet.create({
   form: { gap: space(2) },
+  kickerRow: { flexDirection: "row", alignItems: "center", gap: space(2.5) },
+  // The episode beside the kicker: the board's gold mono label.
+  kickerNote: {
+    fontFamily: fonts.mono,
+    color: colors.gold,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 0.9,
+    textTransform: "uppercase",
+    flexShrink: 1,
+  },
   title: { ...display, color: colors.ink, fontSize: 34, lineHeight: 38, marginTop: space(2) },
   copy: { ...body, color: colors.inkMuted, fontSize: 14, lineHeight: 21 },
   field: {

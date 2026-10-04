@@ -49,6 +49,39 @@ cd mobile && npm ci && EAS_BUILD_NO_EXPO_GO_WARNING=true npx eas-cli@latest buil
 
 История: 15.09.2026 — сборки 1–2 упали (TTY; лок/TypeScript), сборка 3 (0.1.0 (3), `cc0ade74`) ушла в TestFlight.
 
+## Новая capability = новый provisioning profile = одна интерактивная сборка
+
+Capability в entitlements (Sign in with Apple с #277, позже Push — #98) меняет
+App ID, и прежний профиль к сборке не подходит: `--non-interactive` падает на
+credentials. Порядок: владелец включает capability у App ID `tv.matio.app`
+(developer.apple.com → Identifiers → Sign In with Apple → Save), затем —
+команда «Первая сборка» выше в обычном терминале, на вопросы о capabilities и
+перевыпуске профиля — «yes». Следующие сборки снова идут `--non-interactive`.
+Если две capability приходят в одну неделю — одна интерактивная сборка на обе.
+
+**Вход через Google (#277) — переменные EAS до сборки.** Кнопка Google
+попадает в бинарник только с обоими id клиентов в окружении `production`
+(`mobile/app.config.ts` кладёт их в `extra` и выводит URL-схему). Id —
+полностью, с хвостом `.apps.googleusercontent.com`, как его показывает
+консоль Google: без хвоста схема не выводится, и кнопки Google в сборке не
+будет (иначе SDK Google уронил бы приложение на нажатии):
+
+```
+cd mobile
+npx eas-cli@latest env:set --environment production --name EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID --value "<Web client id из Clerk → SSO → Google>" --visibility plaintext --scope project --non-interactive
+npx eas-cli@latest env:set --environment production --name EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID --value "<iOS client id для tv.matio.app>" --visibility plaintext --scope project --non-interactive
+npx eas-cli@latest env:list --environment production   # проверка
+```
+
+Id клиентов публичны (они в любом бинарнике), но в репо их нет — только EAS
+env. Сами кнопки включает серверный рубильник `APP_SOCIAL_SIGNIN` в Vercel
+(`docs/services.md` → Clerk), сборка для этого не нужна. Частичного
+включения нет: TestFlight-сборки тоже читают прод. Поэтому матрица на
+устройстве идёт так — рубильник на проде, пока есть только TestFlight-сборки;
+что-то не так — снять его и передеплоить. Матрица должна пройти до первой
+публичной версии в App Store, а `apple` при живой публичной сборке — только
+после #407 (`docs/registry.md`). И не раньше мержа PR с текстом `/privacy`.
+
   Не запускать одновременно с тяжёлой сборкой веба на этой машине (сборка идёт
   в облаке EAS, но `prebuild` и загрузка проекта — локально).
 - `ios/` и `android/` в репо не коммитятся (CNG): EAS делает `expo prebuild`

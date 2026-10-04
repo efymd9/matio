@@ -34,13 +34,78 @@ const signUp = {
   verifications: { sendEmailCode: vi.fn(ok), verifyEmailCode: vi.fn(ok) },
   finalize: vi.fn(ok),
 };
+const clerk = {
+  status: "ready",
+  on: () => undefined,
+  off: () => undefined,
+  client: { signIn: { id: "sia_before" }, signUp: { id: "sua_before" } },
+  setActive: vi.fn(async (_params: { session: string }) => undefined),
+};
 vi.mock("@clerk/expo", () => ({
   ClerkProvider: ({ children }: { children: unknown }) => children,
   useAuth: () => ({ ...auth, getToken: async () => null }),
-  useClerk: () => ({ status: "ready", on: () => undefined, off: () => undefined }),
+  useClerk: () => clerk,
   useSignIn: () => ({ signIn }),
   useSignUp: () => ({ signUp }),
 }));
+
+// #277 — Sign in with Apple under the form: the server's lever on, the
+// device saying yes, the platform iOS, and Clerk's Apple flow a spy. The
+// system button is drawn as a plain pressable (sign-in-form.test.tsx pins
+// its looks; here only where its success leads matters).
+const social = vi.hoisted(() => ({
+  lever: undefined as undefined | { apple: boolean; google: boolean },
+  appleStart: vi.fn(async (): Promise<{ createdSessionId: string | null }> => ({ createdSessionId: null })),
+}));
+vi.mock("@clerk/expo/apple", () => ({
+  useSignInWithApple: () => ({ startAppleAuthenticationFlow: social.appleStart }),
+}));
+vi.mock("@clerk/expo/google", () => ({
+  useSignInWithGoogle: () => ({ startGoogleAuthenticationFlow: async () => ({ createdSessionId: null }) }),
+}));
+vi.mock("expo-apple-authentication", async () => {
+  const { Pressable, Text } = await import("react-native");
+  return {
+    isAvailableAsync: async () => true,
+    AppleAuthenticationButtonType: { CONTINUE: 1 },
+    AppleAuthenticationButtonStyle: { WHITE: 0 },
+    AppleAuthenticationButton: ({ onPress }: { onPress: () => void }) => (
+      <Pressable onPress={onPress}>
+        <Text>Continue with Apple</Text>
+      </Pressable>
+    ),
+  };
+});
+vi.mock("expo-constants", () => ({ default: { expoConfig: { extra: {} } } }));
+vi.mock("react-native", async (importOriginal) => {
+  const rn = await importOriginal<typeof import("react-native")>();
+  return { ...rn, Platform: { ...rn.Platform, OS: "ios" } };
+});
+
+// The show the frame over the form comes from (#277, board B): the same
+// /v1/shows read the show page makes.
+const showRead = vi.hoisted(() => ({ calls: [] as string[] }));
+vi.mock("@/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/client")>();
+  return {
+    ...actual,
+    api: {
+      show: async (slug: string) => {
+        showRead.calls.push(slug);
+        return {
+          slug,
+          heroImageUrl: null,
+          posterImageUrl: null,
+          episodes: [
+            { id: "ep-1", title: "The Vow" },
+            { id: "ep-2", title: "Ash" },
+            { id: "ep-3", title: "Sealed in Blood" },
+          ],
+        };
+      },
+    },
+  };
+});
 
 vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -70,6 +135,7 @@ vi.mock("@/api/config-context", () => ({
       terms: "https://matio.tv/terms?embed=app",
       privacy: "https://matio.tv/privacy?embed=app",
     },
+    socialSignIn: social.lever,
   }),
 }));
 vi.mock("expo-web-browser", () => ({ openBrowserAsync: async () => ({}) }));
@@ -85,6 +151,8 @@ async function loadScreen() {
 let container: HTMLDivElement;
 let root: Root | null = null;
 let Screen: Awaited<ReturnType<typeof loadScreen>>;
+
+const text = () => container.textContent ?? "";
 
 function render() {
   act(() => root?.render(<Screen />));
@@ -139,6 +207,10 @@ describe("SignInScreen — where success and «Not now» lead (#288)", { timeout
     params = {};
     auth.isLoaded = true;
     auth.isSignedIn = false;
+    social.lever = undefined;
+    social.appleStart.mockReset().mockImplementation(async () => ({ createdSessionId: null }));
+    clerk.setActive.mockClear();
+    showRead.calls = [];
     Screen = await loadScreen();
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -149,6 +221,8 @@ describe("SignInScreen — where success and «Not now» lead (#288)", { timeout
     act(() => root?.unmount());
     root = null;
     container.remove();
+    // Back to jsdom's own (prototype) clientHeight.
+    Reflect.deleteProperty(document.documentElement, "clientHeight");
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -205,6 +279,73 @@ describe("SignInScreen — where success and «Not now» lead (#288)", { timeout
 
     expect(router.back).toHaveBeenCalledTimes(1);
     expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  // Lets the device's Apple answer and the show read land.
+  async function settle() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  // react-native-web's window height is the root element's clientHeight
+  // (jsdom: 0 until told), re-read on `resize`.
+  function setWindowHeight(height: number) {
+    act(() => {
+      Object.defineProperty(document.documentElement, "clientHeight", {
+        value: height,
+        configurable: true,
+      });
+      window.dispatchEvent(new Event("resize"));
+    });
+  }
+
+  it("Sign in with Apple from a locked episode lands IN that episode — the same replace as the code (#277)", async () => {
+    params = EPISODE;
+    social.lever = { apple: true, google: false };
+    social.appleStart.mockResolvedValueOnce({ createdSessionId: "sess_apple" });
+    render();
+    await settle();
+
+    await press("Continue with Apple");
+
+    expect(clerk.setActive).toHaveBeenCalledWith({ session: "sess_apple" });
+    expect(router.replace).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith(WATCH_EPISODE);
+    expect(router.back).not.toHaveBeenCalled();
+  });
+
+  it("a locked episode's screen opens under the show's frame, the episode beside the kicker (#277, board B)", async () => {
+    params = EPISODE;
+    render();
+    await settle();
+
+    expect(container.querySelector('[data-testid="show-frame"]')).not.toBeNull();
+    expect(showRead.calls).toEqual(["the-scarlet-oath"]);
+    expect(text()).toContain("Ep. 3 · Sealed in Blood");
+  });
+
+  it("the player's own wall names no show: no frame, nothing read", async () => {
+    render();
+    await settle();
+
+    expect(container.querySelector('[data-testid="show-frame"]')).toBeNull();
+    expect(showRead.calls).toEqual([]);
+  });
+
+  it("a 375×667 phone gets the smaller frame; a 390×844 phone the board's full one", async () => {
+    params = EPISODE;
+    const frameHeight = () =>
+      getComputedStyle(container.querySelector('[data-testid="show-frame"]') as Element).height;
+
+    setWindowHeight(667);
+    render();
+    await settle();
+    expect(frameHeight()).toBe("160px");
+
+    setWindowHeight(844);
+    await settle();
+    expect(frameHeight()).toBe("262px");
   });
 
   it("«Not now» on a screen that is the stack's only one goes Home instead of nowhere", async () => {
