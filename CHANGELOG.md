@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.18.0](https://github.com/efymd9/matio/compare/matio-v0.17.0...matio-v0.18.0) (2026-10-04)
+
+
+### Features
+
+* pnpm export-email и erase-email — доступ и стирание для адреса без аккаунта ([#339](https://github.com/efymd9/matio/issues/339)) ([#389](https://github.com/efymd9/matio/issues/389)) ([cfa0488](https://github.com/efymd9/matio/commit/cfa048829172c895680c06c3361f7fca0095699d))
+
+
+### Bug fixes
+
+* IP-фолбэк склейки триалов не привязывает строки приложения к аккаунту ([#349](https://github.com/efymd9/matio/issues/349)) ([#391](https://github.com/efymd9/matio/issues/391)) ([4640d81](https://github.com/efymd9/matio/commit/4640d8173095e5ce3bb6cae67490cb1b163ca0b6))
+* безопасность — next 16.3.7 (RCE в next/og), dompurify 3.4.16, ignore braces/node-forge без фикса ([#379](https://github.com/efymd9/matio/issues/379)) ([#381](https://github.com/efymd9/matio/issues/381)) ([465c249](https://github.com/efymd9/matio/commit/465c249929b34d8601fdf94060fb171a3eaae3dd))
+* вебхук Clerk — конфликт адреса в users разбирается, а не роняет user.created ([#380](https://github.com/efymd9/matio/issues/380)) ([#383](https://github.com/efymd9/matio/issues/383)) ([67424f4](https://github.com/efymd9/matio/commit/67424f455ceb28648e6ae209841d0cc51548026c))
+* зависимости — ip-address 10.7.2 в pnpm-lock (ночной security, [#372](https://github.com/efymd9/matio/issues/372)) ([#373](https://github.com/efymd9/matio/issues/373)) ([6192dff](https://github.com/efymd9/matio/commit/6192dffc9a055f70b7a8ec91b729a9897f9d5ab0))
+* зависимости — Sentry 11 (веб) и 8 (приложение) с сохранённым приватным контрактом, группа Dependabot ([#390](https://github.com/efymd9/matio/issues/390)) ([#393](https://github.com/efymd9/matio/issues/393)) ([4a2b7de](https://github.com/efymd9/matio/commit/4a2b7de57942115095c072df9bcd5393ebd5f3e9))
+* лимитеры по хешу IP считают IPv6-клиента по /64 ([#351](https://github.com/efymd9/matio/issues/351)) ([#387](https://github.com/efymd9/matio/issues/387)) ([c7cb4d2](https://github.com/efymd9/matio/commit/c7cb4d2fcfa3d563d845146ccf616a8f3d7fb19f))
+* пред-релизная проверка 0.18.0 — честное «сессия закончилась» вместо ложного удаления, pnpm -s в GDPR-скриптах, дрейф документации ([#398](https://github.com/efymd9/matio/issues/398)) ([#399](https://github.com/efymd9/matio/issues/399)) ([167e993](https://github.com/efymd9/matio/commit/167e993333c73d66270217d8692e3e047a9c44ec))
+* приватность — PAY_FIRST_ALERT гостевого чекаута без адреса покупателя ([#385](https://github.com/efymd9/matio/issues/385)) ([#388](https://github.com/efymd9/matio/issues/388)) ([b795147](https://github.com/efymd9/matio/commit/b795147c2db835b2f297fc50d2a471356eb396be))
+* приватность — query ссылки отписки и текст страницы больше не уходят в Sentry через спаны и contexts.nextjs ([#394](https://github.com/efymd9/matio/issues/394)) ([#395](https://github.com/efymd9/matio/issues/395)) ([d9acae4](https://github.com/efymd9/matio/commit/d9acae4c57857c44e1c67bd4d332b86cc132b845))
+* приватность — параметры запросов Drizzle не уходят в Sentry и лог маршрутов токена ([#326](https://github.com/efymd9/matio/issues/326)) ([#382](https://github.com/efymd9/matio/issues/382)) ([f6a18fd](https://github.com/efymd9/matio/commit/f6a18fd3f82e9d294d02a3d3b817a4a383b6bdbe))
+* стирание — поздний user.created не воскрешает удалённый аккаунт, приложение не врёт после таймаута удаления ([#336](https://github.com/efymd9/matio/issues/336)) ([#392](https://github.com/efymd9/matio/issues/392)) ([19944c4](https://github.com/efymd9/matio/commit/19944c4ce2c48e416e87103c274efa30162c135a))
+* экспорт ст. 15 находит анонимные напоминания адреса в смешанном регистре ([#340](https://github.com/efymd9/matio/issues/340)) ([#384](https://github.com/efymd9/matio/issues/384)) ([3ed1221](https://github.com/efymd9/matio/commit/3ed1221a5e522a67a936f663f5d83b18f9bb1e3b))
+
+
+### Documentation
+
+* релизный ритуал — скрытый chore после сборки Release PR тоже замораживает его ветку ([#402](https://github.com/efymd9/matio/issues/402)) ([2114ea6](https://github.com/efymd9/matio/commit/2114ea6913760975233ec5e08575cbba5b54a6a0))
+
 ## [0.17.0](https://github.com/efymd9/matio/compare/matio-v0.16.1...matio-v0.17.0) (2026-09-29)
 
 
