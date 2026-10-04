@@ -169,10 +169,12 @@ auto-merge is armed by the main session only, only after review.
 ### Skills, watchers and worktree mechanics
 
 - Skills in `.claude/skills/`: `/duty` (the main session's start-of-day ritual
-  — run BOTH queue watchers as Bash `run_in_background` tasks:
-  `tools/claude/pr_watcher.sh` and `issue_watcher.sh`; each exits on its
-  first event and is restarted after handling it — not Monitor, whose
-  30-minute expiry woke the session four times an hour for nothing, #368;
+  — run BOTH queue watchers as Bash `run_in_background` tasks with
+  `timeout: 3600000`: `tools/claude/pr_watcher.sh` and `issue_watcher.sh`;
+  each exits on its first event and is restarted after handling it; the
+  harness also reaps background tasks (~30 min by default, 80 min to a few hours with that
+  timeout — #396), so an idle session still wakes about hourly to restart
+  them — not Monitor, whose 30-minute expiry woke it four times an hour, #368;
   autopilot dispatch; cleanup), `/spec`, `/release`,
   `/devops`, `/review`, `/gdpr` (privacy checklist + `references/data-map.md`
   + `references/processors.md` — stage 10). They are LIVE documents — change
