@@ -122,6 +122,15 @@ export const appEs = {
     consentTerms: "Términos",
     consentMiddle: " y reconoces haber leído la ",
     consentPrivacy: "Política de privacidad",
+    // Apple / Google under the email form (#277, board variant B). The
+    // Apple button's words are drawn by iOS itself; Google's are its brand
+    // guide's own. The two failures are ours: a flow that broke, and an
+    // account the provider created without an address (an Apple ID with no
+    // shared email) — Clerk's own text is never shown.
+    orContinueWith: "o continúa con",
+    continueWithGoogle: "Continuar con Google",
+    socialFailed: "No se pudo iniciar sesión. Inténtalo de nuevo o usa tu correo.",
+    socialIncomplete: "No recibimos tu correo. Continúa con tu correo electrónico.",
   },
   watch: {
     subscribersOnly: "Solo para suscriptores",
@@ -132,6 +141,21 @@ export const appEs = {
   player: {
     playing: "Reproduciendo",
     paused: "En pausa",
+    // The landscape player's glass chrome (#375, board E «Стекло»). Its other
+    // words — Play, ±10 s, Next episode, Episodes, Skip intro, Up next,
+    // Watch now, Cancel, Now playing — are the web player's, read from
+    // dictionaries.ts. `pause` is the gold pill's label while playing.
+    pause: "Pausa",
+    // Spoken only: the picture-in-picture button, and the scrub bar — its
+    // name and its value («6:12 de 16:00»).
+    pip: "Imagen en imagen",
+    position: "Posición de reproducción",
+    positionValue: (elapsed: string, total: string) => `${elapsed} de ${total}`,
+    // Under the ±10 mark a double tap leaves on screen.
+    tenSeconds: "10 s",
+    // Spoken only: the picture's middle once the chrome has hidden itself —
+    // what Switch Control / Full Keyboard Access / Voice Control can reach.
+    showControls: "Mostrar controles del reproductor",
   },
 };
 
@@ -221,6 +245,10 @@ export const appEn: AppDict = {
     consentTerms: "Terms",
     consentMiddle: " and acknowledge the ",
     consentPrivacy: "Privacy Policy",
+    orContinueWith: "or continue with",
+    continueWithGoogle: "Continue with Google",
+    socialFailed: "Couldn't sign you in. Try again or use your email.",
+    socialIncomplete: "We didn't get your email address. Continue with your email instead.",
   },
   watch: {
     subscribersOnly: "Subscribers only",
@@ -229,6 +257,12 @@ export const appEn: AppDict = {
   player: {
     playing: "Playing",
     paused: "Paused",
+    pause: "Pause",
+    pip: "Picture in Picture",
+    position: "Playback position",
+    positionValue: (elapsed: string, total: string) => `${elapsed} of ${total}`,
+    tenSeconds: "10 sec",
+    showControls: "Show player controls",
   },
 };
 

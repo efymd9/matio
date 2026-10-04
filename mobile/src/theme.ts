@@ -28,6 +28,16 @@ export const colors = {
   // the vertical chrome's progress line): black at 45% so the gold fill
   // reads on any still. One value for the three places that draw it.
   scrimTrack: "rgba(0,0,0,0.45)",
+  // Gold at 16% — the current episode's row in the landscape player's
+  // episodes panel (#375, board E «Стекло»: `.e-ep.cur`).
+  goldWash: "rgba(230,179,102,0.16)",
+  // «Continue with Google» under the sign-in form (#277) — NOT Matio tokens:
+  // Google's sign-in brand guide prescribes the button's colours, and its
+  // dark theme (the owner's pick on the board, 04.10) is exactly these three.
+  // Nothing else in the app uses them.
+  googleSurface: "#131314",
+  googleText: "#E3E3E3",
+  googleStroke: "#8E918F",
 } as const;
 
 // The 8a spec's 4px base rhythm.
@@ -37,8 +47,20 @@ export const space = (n: number) => n * 4;
 export const SCREEN_PAD = 20;
 
 // Radii — CTAs and pills are fully rounded (an explicit design decision);
-// cards and posters sit at 14–16.
-export const radius = { pill: 999, card: 16, poster: 14 } as const;
+// cards and posters sit at 14–16. The landscape player's glass pieces (#375,
+// board E «Стекло») add their own: the episodes panel 30, the end-of-episode
+// card 26, the scrub preview 18, a list row's highlight 20, a still inside
+// any of them 12.
+export const radius = {
+  pill: 999,
+  card: 16,
+  poster: 14,
+  panel: 30,
+  float: 26,
+  preview: 18,
+  row: 20,
+  thumb: 12,
+} as const;
 
 // The 8a type system: Anton for display, Geist for UI/body, Geist Mono for
 // timecodes. Loaded in app/_layout.tsx — these names must match the exports

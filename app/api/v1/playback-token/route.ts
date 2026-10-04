@@ -8,7 +8,7 @@ import type { PlaybackMode, PlaybackTokenResponse } from "@/lib/api/types";
 import { apiError, apiOk, readDeviceId, resolveSignupGate } from "@/lib/api/v1";
 import { getOrderedReadyEpisodeIds, showHasTierGating } from "@/lib/episode-access";
 import { paymentsEnabled } from "@/lib/free-mode";
-import { signMuxPlaybackToken } from "@/lib/mux-token";
+import { signMuxPlaybackToken, signMuxStoryboardToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import { EMPTY_ATTRIBUTION } from "@/lib/attribution";
 import { describeDbError } from "@/lib/db-errors";
@@ -127,6 +127,8 @@ export async function POST(req: NextRequest) {
     const payload: PlaybackTokenResponse = {
       playbackId,
       token: signMuxPlaybackToken(playbackId, ttl),
+      // The app's scrub-preview frames (#375): audience `s`, the same ttl.
+      storyboardToken: signMuxStoryboardToken(playbackId, ttl),
       expiresIn: ttl,
       mode,
     };

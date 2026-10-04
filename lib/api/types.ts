@@ -56,6 +56,17 @@ export type SignupGate =
   | { mode: "none" }
   | { mode: "after_episodes"; episodes: number };
 
+// Which third-party sign-in buttons the app may show under its email form
+// (#277). The server REPORTS it (APP_SOCIAL_SIGNIN, lib/api/v1.ts:
+// resolveSocialSignIn) and the app OBEYS it — the lever exists so a build can
+// reach testers before the Clerk / Google / Apple consoles are ready, and be
+// switched on later with no store release. It only ever narrows what the app
+// offers: Google also needs its client ids in the build, and on iOS it never
+// appears without Apple (App Store 4.8 — mobile/src/auth/social.ts).
+// Optional on the wire: a server from before #277 omits it, and the app reads
+// a missing value as both off.
+export type SocialSignIn = { apple: boolean; google: boolean };
+
 export type AppConfig = {
   apiVersion: number;
   // Builds below this must hard-block with an "update required" screen. This
@@ -71,6 +82,7 @@ export type AppConfig = {
     castEnabled: boolean;
   };
   signupGate: SignupGate;
+  socialSignIn?: SocialSignIn;
   locales: readonly string[];
   urls: {
     web: string;
@@ -153,6 +165,12 @@ export type PlaybackTokenResponse = {
   // https://stream.mux.com/<playbackId>.m3u8?token=<token>
   playbackId: string;
   token: string;
+  // Signed Mux storyboard JWT (audience `s` — images only, it cannot play
+  // video), minted with the same lifetime as `token` (#375). The app reads
+  // https://image.mux.com/<playbackId>/storyboard.vtt?token=<storyboardToken>
+  // for the frame over its scrub bar. Optional: a server from before #375
+  // does not send it, and the app then scrubs with the time alone.
+  storyboardToken?: string;
   expiresIn: number;
   mode: PlaybackMode;
 };

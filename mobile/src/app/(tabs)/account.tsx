@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, settleOr } from "@/api/client";
 import { useOptionalAuth } from "@/auth/clerk";
+import { endGoogleSession } from "@/auth/google-session";
 import { AuthStalled } from "@/components/auth-stalled";
 import { useTabBarClearance } from "@/components/glass-tab-bar";
 import { SignInForm } from "@/components/sign-in-form";
@@ -110,7 +111,15 @@ function SignedInAccount() {
   const insets = useSafeAreaInsets();
   const clearance = useTabBarClearance();
   const { user } = useUser();
-  const { signOut } = useClerk();
+  const { signOut: clerkSignOut } = useClerk();
+  // Every sign-out of this tab — «Sign out» and both ways out of «Delete
+  // account» — first ends the Google SDK's own session on the device (#277:
+  // it keeps one in the keychain that Clerk's signOut does not touch).
+  // Best-effort and bounded, so it never decides whether signing out works.
+  const signOut = useCallback(async () => {
+    await endGoogleSession();
+    await clerkSignOut();
+  }, [clerkSignOut]);
   const { getToken } = useAuth();
   const { items: resume } = useContinueWatching(true);
   const [deleting, setDeleting] = useState(false);

@@ -210,8 +210,10 @@ vi.mock("@/lib/reminder-email", () => ({
 vi.mock("@/lib/mux-token", () => ({
   muxThumbnailUrl: () => "https://image.mux.com/dummy/thumbnail.jpg",
   // The playback-token routes (#305) sign on every success; the JWT is not
-  // under audit.
+  // under audit. Nor is the app route's storyboard token (#375), which logs
+  // nothing of its own.
   signMuxPlaybackToken: () => "dummy-playback-jwt",
+  signMuxStoryboardToken: () => "dummy-storyboard-jwt",
 }));
 
 // The playback-token routes' best-effort funnel writes (#305): the trial

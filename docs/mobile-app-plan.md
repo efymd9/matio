@@ -262,9 +262,12 @@ would add license-server complexity and cost for no benefit here.
       inline and then deletes the Clerk user (server-side, not a client `user.delete()` — no
       dependency on the `user.deleted` webhook or the dashboard toggle). Still no web page for it
       (`docs/registry.md`).
-- [ ] **Sign in with Apple** is required **only if** any third-party social login is offered.
-      Clerk email-code only → exempt. Adding "Continue with Google" for mobile convenience
-      would drag SIWA in with it. Decide before building the auth screen.
+- [x] **Sign in with Apple** (4.8) — required once Google is offered; built together in #277:
+      native Apple + native Google under the email form (board variant B), behind the
+      `APP_SOCIAL_SIGNIN` lever, and on iOS Google never shows without Apple
+      (`mobile/src/auth/social.ts`). Off until the owner's console steps are done
+      (`docs/registry.md`); token revocation on deletion (5.1.1(v)) is #407 — it blocks
+      the public submission and `apple` in the lever while a public build exists.
 - [ ] Privacy nutrition labels (App Store) + Data Safety form (Play) — must match what the
       device id, PostHog, and Meta SDKs actually collect.
 - [ ] ATT prompt if and only if Meta attribution ships (§10).
@@ -465,11 +468,14 @@ pre-flight lookups now have their own 3s deadline and degrade to anonymous.
 1. Adding native modules to an existing generated `ios/` fails `pod install` with
    `undefined method 'package_product_dependencies' for nil` in RN's SPM script. Fix: delete
    `ios/` and `expo prebuild --clean`. Incremental prebuild is not reliable here.
-2. `@clerk/expo`'s config plugin adds a **Sign in with Apple entitlement by default**, which
-   forces a code-signed build and breaks simulator builds with "No code signing certificates".
-   Matio offers no third-party login — which is exactly what makes it **exempt from App Store
-   guideline 4.8** — so the entitlement is both unnecessary and misleading. Disabled with
-   `["@clerk/expo", { "appleSignIn": false }]` in `app.json`.
+2. The **Sign in with Apple entitlement** forces a code-signed build and breaks unsigned
+   simulator builds with "No code signing certificates". Until #277 it was switched off
+   (`["@clerk/expo", { "appleSignIn": false }]` — no third-party login, exempt from 4.8); since
+   #277 the app offers Apple and Google, so the entitlement is ON (`ios.usesAppleSignIn`, the
+   `@clerk/expo` and `expo-apple-authentication` plugins). A simulator build now needs a
+   Development Team (`expo run:ios` with signing), or an EAS build on a device; the first EAS
+   build after the capability appeared re-issues the provisioning profile interactively
+   (`docs/runbooks/mobile-builds.md`).
 
 **Not yet done in the player** (deliberate, next phase): token refresh at expiry−60s (episodes
 are 9–16 min against a 1h TTL, so nothing can currently expire mid-playback), auto-advance,
@@ -789,6 +795,23 @@ unsupported on the simulator; the props are untouched from #97); Android; a phys
 - **Tests**: `src/watch/episode-feed.test.tsx` (every case above plus the token refresh — the
   restored playhead after the swap, the 1/2/4s backoff, no refresh off the current page) and
   `src/pushed-screens.test.tsx` (the screen's remount seed).
+
+**Landscape chrome, 2026-10-04 (#375) — board E «Стекло».** The owner picked variant E of two
+board rounds (the board is linked from the issue). The native transport leaves the landscape
+page: `controls={false}` everywhere, and `components/landscape-chrome.tsx` draws three glass
+capsules with no scrims (title + «‹», picture-in-picture, a B1-shaped bar with the gold
+play/pause pill, ±10, the scrub bar, the times, Episodes, Next), the buffering disc, «Skip
+intro» for marked episodes, the end card (last 10 s; a countdown ring with autoplay on, a
+waiting card with it off, Cancel = no advance this time) and the episodes panel
+(`components/episodes-panel.tsx`). Taps: one toggles (auto-hide 4 s while playing), a double
+tap on a side third is ±10. The scrub preview is Mux's storyboard — the app route adds
+`storyboardToken` (aud `s`, same TTL) and `watch/storyboard.ts` crops the tile out of the
+sprite. The #359 «‹» in the pillarbox strip is gone with the transport it was dodging; with
+`controls` off the library plays landscape on its own `AVPlayerLayer`, the one it arms for PiP
+on leave — still to be confirmed on a phone (registry). No new dependencies; AirPlay stays in
+Control Center (an in-chrome route picker is a native module — registry). Tests:
+`src/components/landscape-chrome.test.tsx`, `src/watch/storyboard.test.tsx`, the #375 block of
+`src/watch/episode-feed.test.tsx`, `lib/mux-token.test.ts`, the route test.
 
 ## 15. Traps
 
