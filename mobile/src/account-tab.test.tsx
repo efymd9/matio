@@ -45,8 +45,13 @@ const h = vi.hoisted(() => ({
 const signOut = vi.fn(async () => {
   h.steps.push("signOut");
 });
-const deleteAccount = vi.fn(async () => {
+// The client's own hook (#398): a request carrying the session's Bearer is
+// about to leave. A case whose request never went out (no token, an anonymous
+// 401) simply does not call it.
+type DeleteOptions = { onSentWithToken?: () => void };
+const deleteAccount = vi.fn(async (options?: DeleteOptions) => {
   h.steps.push("api.deleteAccount");
+  options?.onSentWithToken?.();
   return { ok: true as const };
 });
 // Clerk's word on the session, asked only after a failed deletion (#336):
@@ -77,7 +82,10 @@ vi.mock("@/auth/clerk", () => ({
 }));
 vi.mock("@/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/client")>();
-  return { ...actual, api: { ...actual.api, deleteAccount: () => deleteAccount() } };
+  return {
+    ...actual,
+    api: { ...actual.api, deleteAccount: (options?: DeleteOptions) => deleteAccount(options) },
+  };
 });
 // The signed-out tab's email → code form has its own suite.
 vi.mock("@/components/sign-in-form", () => ({ SignInForm: () => null }));
@@ -164,8 +172,9 @@ beforeEach(() => {
   signOut.mockReset().mockImplementation(async () => {
     h.steps.push("signOut");
   });
-  deleteAccount.mockReset().mockImplementation(async () => {
+  deleteAccount.mockReset().mockImplementation(async (options?: DeleteOptions) => {
     h.steps.push("api.deleteAccount");
+    options?.onSentWithToken?.();
     return { ok: true as const };
   });
   getToken.mockReset().mockImplementation(async () => {
@@ -415,11 +424,17 @@ describe("Account tab — a failed deletion asks Clerk about the session first (
     expect(router.replace).not.toHaveBeenCalled();
   }
 
-  it("a timeout, and Clerk has no session any more → the account is gone: sign out and go Home, as on success", async () => {
-    deleteAccount.mockImplementationOnce(async () => {
-      h.steps.push("api.deleteAccount");
-      throw timedOut();
-    });
+  // A request that went out carrying the session, then failed the way `fail`
+  // says — what the client does on a timeout or a connection dropped after
+  // sending.
+  const sentThen = (fail: () => Error) => async (options?: DeleteOptions) => {
+    h.steps.push("api.deleteAccount");
+    options?.onSentWithToken?.();
+    throw fail();
+  };
+
+  it("the request went out, then a timeout, and Clerk has no session any more → the account is gone: sign out and go Home, as on success", async () => {
+    deleteAccount.mockImplementationOnce(sentThen(timedOut));
     getToken.mockImplementationOnce(async () => {
       h.steps.push("getToken");
       return null;
@@ -432,8 +447,10 @@ describe("Account tab — a failed deletion asks Clerk about the session first (
     expect(alerts.calls).toHaveLength(2); // no failure dialog
   });
 
-  it("a dropped connection, and Clerk refuses the session itself (401) → gone: sign out and go Home", async () => {
-    deleteAccount.mockRejectedValueOnce(new ApiError("network", "Couldn't reach Matio.", 0));
+  it("the request went out, the connection dropped, and Clerk refuses the session itself (401) → gone: sign out and go Home", async () => {
+    deleteAccount.mockImplementationOnce(
+      sentThen(() => new ApiError("network", "Couldn't reach Matio.", 0)),
+    );
     getToken.mockRejectedValueOnce(
       Object.assign(new Error("Unauthorized"), { name: "ClerkAPIResponseError", status: 401 }),
     );
@@ -445,17 +462,26 @@ describe("Account tab — a failed deletion asks Clerk about the session first (
     expect(alerts.calls).toHaveLength(2);
   });
 
-  it("a retry that went out with no token (401) after the account was deleted → gone: sign out and go Home", async () => {
+  it("a retry that went out with no token (401) after an earlier tap's request was sent → gone: sign out and go Home", async () => {
+    // First tap: sent, timed out, the session still alive — the honest failure.
+    deleteAccount.mockImplementationOnce(sentThen(timedOut));
+    await confirmDeletion();
+    expect(alerts.calls.at(-1)?.title).toBe("Couldn't delete your account");
+    expect(signOut).not.toHaveBeenCalled();
+
+    // Second tap: the server had finished — Clerk has no session to give, the
+    // retry goes out anonymously into a 401.
     deleteAccount.mockRejectedValueOnce(
       new ApiError("unauthorized", "Sign in to delete your account.", 401),
     );
     getToken.mockResolvedValueOnce(null);
-
-    await confirmDeletion();
+    press("Delete account");
+    await choose("Delete account");
+    await choose("Delete permanently");
 
     expect(signOut).toHaveBeenCalledTimes(1);
     expect(router.replace).toHaveBeenCalledWith("/");
-    expect(alerts.calls).toHaveLength(2);
+    expect(alerts.calls).toHaveLength(5); // 2 + failure + 2 — nothing after the retry
   });
 
   it("a timeout while the session is still alive → the honest failure as before, no sign-out", async () => {
@@ -519,6 +545,88 @@ describe("Account tab — a failed deletion asks Clerk about the session first (
 
     expectHonestFailure();
     expect(text()).not.toContain("Please wait…");
+  });
+});
+
+// #398 — a dead session proves the account is gone only after a deletion
+// request that carried the session went out. A session can end on its own —
+// revoked from another device, at the end of its lifetime — while this tab is
+// still mounted; then nothing that could erase anything was ever sent, and
+// the old «gone → sign out + Home» told the viewer their account was deleted
+// while it and all its data survived.
+describe("Account tab — a session that ended before anything was sent is not a deletion (#398)", () => {
+  async function confirmDeletion(locale: "en" | "es" = "en") {
+    render(locale);
+    press(locale === "en" ? "Delete account" : "Eliminar cuenta");
+    await choose(locale === "en" ? "Delete account" : "Eliminar cuenta");
+    await choose(locale === "en" ? "Delete permanently" : "Eliminar definitivamente");
+  }
+
+  it("refused with a 401 before anything was sent, and Clerk has no session → «your session has ended», signed out, never sent Home as if deleted", async () => {
+    // Clerk answered "nobody is signed in" to the client's own lookup, so the
+    // request went out with no Bearer — the hook never fired.
+    deleteAccount.mockImplementationOnce(async () => {
+      h.steps.push("api.deleteAccount");
+      throw new ApiError("unauthorized", "Sign in to delete your account.", 401);
+    });
+    getToken.mockImplementationOnce(async () => {
+      h.steps.push("getToken");
+      return null;
+    });
+
+    await confirmDeletion();
+
+    expect(h.steps).toEqual(["api.deleteAccount", "getToken", "signOut"]);
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(alerts.calls).toHaveLength(3);
+    expect(alerts.calls[2].title).toBe("Your session has ended");
+    expect(alerts.calls[2].message).toBe("Your account was not deleted. Sign in again to delete it.");
+    expect(JSON.stringify(alerts.calls)).not.toContain("Sign in to delete your account.");
+  });
+
+  it("failed before any fetch (Clerk gave no token in time) and Clerk then refuses the session (401) → the same «session has ended»", async () => {
+    deleteAccount.mockRejectedValueOnce(
+      new ApiError("network", "Couldn't confirm who is signed in.", 0),
+    );
+    getToken.mockRejectedValueOnce(
+      Object.assign(new Error("Unauthorized"), { name: "ClerkAPIResponseError", status: 401 }),
+    );
+
+    await confirmDeletion();
+
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(alerts.calls.at(-1)?.title).toBe("Your session has ended");
+  });
+
+  it("says it in Spanish too", async () => {
+    deleteAccount.mockRejectedValueOnce(
+      new ApiError("unauthorized", "Sign in to delete your account.", 401),
+    );
+    getToken.mockResolvedValueOnce(null);
+
+    await confirmDeletion("es");
+
+    expect(alerts.calls.at(-1)?.title).toBe("Tu sesión ha terminado");
+    expect(alerts.calls.at(-1)?.message).toBe(
+      "Tu cuenta no se ha eliminado. Vuelve a iniciar sesión para eliminarla.",
+    );
+  });
+
+  it("a local sign-out that fails there still says so, and leaves the row pressable", async () => {
+    deleteAccount.mockRejectedValueOnce(
+      new ApiError("unauthorized", "Sign in to delete your account.", 401),
+    );
+    getToken.mockResolvedValueOnce(null);
+    signOut.mockRejectedValueOnce(new Error("Network request failed"));
+
+    await confirmDeletion();
+
+    expect(alerts.calls.at(-1)?.title).toBe("Your session has ended");
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(text()).not.toContain("Please wait…");
+    press("Delete account");
+    expect(alerts.calls.at(-1)?.title).toBe("Delete your account?");
   });
 });
 

@@ -2915,7 +2915,7 @@ describe("log audit · idea submission (/ideas, #297)", () => {
   });
 });
 
-describe("log audit · subject requests by address (pnpm export-email / erase-email, #339)", () => {
+describe("log audit · subject requests by address (pnpm -s export-email / erase-email, #339)", () => {
   // The address is the whole key of these two commands, so it is the one
   // thing they must never print: stdout and stderr of a terminal end up in
   // shell history, CI logs and chat pastes. The export FILE is the person's
@@ -2924,6 +2924,11 @@ describe("log audit · subject requests by address (pnpm export-email / erase-em
   // failure — the error's class and SQLSTATE. The worst cases seed the
   // markers into the rows and INTO the thrown text, the way the driver
   // quotes the statement's parameters.
+  //
+  // What this proves is the SCRIPT's own output: the `run…` functions are
+  // called directly. pnpm's banner (`> tsx scripts/… <address>` on stdout
+  // without `-s` — hence `pnpm -s` in every usage line, #398) and the
+  // command line itself are outside it; the runbook says so.
   const MARKER_OTHER_ACCOUNT = "user_marker_other_account";
   const MARKERS = [MARKER_EMAIL, MARKER_NAME, MARKER_STORY, MARKER_OTHER_ACCOUNT];
   const ENV = { DATABASE_URL: "postgres://invalid.example.invalid/matio" };

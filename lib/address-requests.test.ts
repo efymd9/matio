@@ -33,7 +33,7 @@ import { previewErasure, type EraseDb } from "./erase-user";
 // cross-check below never reaches one — the mock only keeps the SDK out.
 vi.mock("@sentry/nextjs", () => ({ captureMessage: vi.fn() }));
 
-// `pnpm export-email` / `pnpm erase-email` (#339). The commands run here
+// `pnpm -s export-email` / `pnpm -s erase-email` (#339). The commands run here
 // against a STATEFUL fake database: it renders every Drizzle clause through
 // the real Postgres dialect and filters its tables by what the clause says,
 // so «finds the rows», «deletes exactly the found rows» and «the transaction
@@ -401,7 +401,7 @@ describe("runExportEmail", () => {
 
     expect(await runExportEmail([], {}, { ...deps(fakeDb(seed()).db, sink), getDb })).toBe(EXIT_USAGE);
     expect(sink.err.join("\n")).toContain("missing <address>");
-    expect(sink.err.join("\n")).toContain("usage: DATABASE_URL=<host> pnpm export-email <address>");
+    expect(sink.err.join("\n")).toContain("usage: DATABASE_URL=<host> pnpm -s export-email <address>");
     expect(getDb).not.toHaveBeenCalled();
   });
 
@@ -600,7 +600,7 @@ describe("runEraseEmail", () => {
     const sink = io();
 
     expect(await runEraseEmail(["not-an-address"], ENV, { getDb, io: sink.io })).toBe(EXIT_USAGE);
-    expect(sink.err.join("\n")).toContain("usage: DATABASE_URL=<host> pnpm erase-email <address> [--apply]");
+    expect(sink.err.join("\n")).toContain("usage: DATABASE_URL=<host> pnpm -s erase-email <address> [--apply]");
     expect(getDb).not.toHaveBeenCalled();
   });
 });

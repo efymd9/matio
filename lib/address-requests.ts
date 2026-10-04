@@ -16,8 +16,10 @@ import {
 import { describeDbError } from "@/lib/db-errors";
 
 // Subject requests (GDPR art. 15 / 17 / 20) for an ADDRESS that has no
-// account — `pnpm export-email <address>` and `pnpm erase-email <address>`
-// (#339). Runbook: docs/runbooks/gdpr-requests.md §2 «Адрес без аккаунта».
+// account — `pnpm -s export-email <address>` and `pnpm -s erase-email
+// <address>` (#339). Runbook: docs/runbooks/gdpr-requests.md §2 «Адрес без
+// аккаунта». Always `-s`: without it pnpm itself echoes the script line,
+// arguments and so the address included, to stdout before a line of ours.
 //
 // Two tables hold a person who never signed in, both written without a login
 // and keyed by the address ALONE: `show_reminders` (the «remind me» form) and
@@ -31,7 +33,9 @@ import { describeDbError } from "@/lib/db-errors";
 // scripts/erase-email.ts are only the glue that hands in the database, the
 // console and the filesystem — so everything below runs in the tests with a
 // stateful fake, and the log audit (lib/log-audit.test.ts) runs the real
-// `run…` functions to prove no address comes out of either script.
+// `run…` functions to prove no address comes out of either script — of the
+// script's OWN output: pnpm's banner (hence `-s`) and the command line itself,
+// which always carries the address, are outside what it can see.
 //
 // Four rules the shape encodes:
 //   * the address is compared LOWERCASED — both tables store it that way
@@ -312,13 +316,13 @@ export function refusalMessage(
 // positional may be an address, and stderr is a log.
 
 export const EXPORT_EMAIL_USAGE =
-  "usage: DATABASE_URL=<host> pnpm export-email <address> [--out <file>]\n" +
+  "usage: DATABASE_URL=<host> pnpm -s export-email <address> [--out <file>]\n" +
   "  address — the requester's email, any letter case; for an address WITHOUT an account (an account is refused — use export-user-data)\n" +
   "  --out   — where to write the JSON (default: the OS temp dir, export-address-<hash>-<YYYY-MM-DD>.json — outside the repo, the path is printed; mode 0600)\n" +
   "  Covers show_reminders and idea_submissions. Nothing is read from .env.local on purpose — DATABASE_URL is passed explicitly.";
 
 export const ERASE_EMAIL_USAGE =
-  "usage: DATABASE_URL=<host> pnpm erase-email <address> [--apply]\n" +
+  "usage: DATABASE_URL=<host> pnpm -s erase-email <address> [--apply]\n" +
   "  address — the requester's email, any letter case; for an address WITHOUT an account (an account is refused — use erase-user)\n" +
   "  --apply — delete show_reminders and idea_submissions rows of the address in one transaction (default: a dry run — ids and counts, nothing written)\n" +
   "  Nothing is read from .env.local on purpose — DATABASE_URL is passed explicitly.";
@@ -472,7 +476,7 @@ function missingDatabaseMessage(usage: string): string {
 }
 
 /**
- * `pnpm export-email` — exit 2 bad arguments / no DATABASE_URL, 4 the
+ * `pnpm -s export-email` — exit 2 bad arguments / no DATABASE_URL, 4 the
  * address belongs to an account, 1 the database or the file write failed,
  * 0 the file is written.
  */
@@ -525,7 +529,7 @@ export async function runExportEmail(
 }
 
 /**
- * `pnpm erase-email` — dry run unless `--apply`. Exit 2 bad arguments / no
+ * `pnpm -s erase-email` — dry run unless `--apply`. Exit 2 bad arguments / no
  * DATABASE_URL, 4 the address belongs to an account, 1 the database failed
  * (re-run: it converges), 0 done.
  */

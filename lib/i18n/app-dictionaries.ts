@@ -71,6 +71,10 @@ export const appEs = {
       "Tu cuenta se elimina para siempre: no podremos recuperarla y, si vuelves a registrarte, empezarás de cero.",
     deleteFinalCta: "Eliminar definitivamente",
     deleteFailed: "No se pudo eliminar la cuenta",
+    // The session ended on its own before a deletion request could carry it
+    // (#398): nothing was erased, and deleting takes a new sign-in.
+    deleteSessionEndedTitle: "Tu sesión ha terminado",
+    deleteSessionEndedBody: "Tu cuenta no se ha eliminado. Vuelve a iniciar sesión para eliminarla.",
   },
   settings: {
     langHint: "Sigue el idioma del dispositivo hasta que elijas.",
@@ -178,6 +182,8 @@ export const appEn: AppDict = {
       "Your account is deleted for good — we can't restore it, and signing up again starts from scratch.",
     deleteFinalCta: "Delete permanently",
     deleteFailed: "Couldn't delete your account",
+    deleteSessionEndedTitle: "Your session has ended",
+    deleteSessionEndedBody: "Your account was not deleted. Sign in again to delete it.",
   },
   settings: {
     langHint: "Follows your device language until you choose.",
