@@ -97,9 +97,10 @@ export function GoldGlass({ style, interactive = false, children }: SurfaceProps
   );
 }
 
-// The «‹» that is the show page's only chrome over its hero (and the landscape
-// player's, over the video): a 40pt glass disc with the same text glyph the
-// app has always drawn, so both platforms look alike.
+// The «‹» that is the show page's only chrome over its hero (the landscape
+// player's too, until its glass chrome took it into the title capsule —
+// #375): a 40pt glass disc with the same text glyph the app has always
+// drawn, so both platforms look alike.
 export function GlassBackButton({
   onPress,
   accessibilityLabel,

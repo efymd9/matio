@@ -132,6 +132,18 @@ export const appEs = {
   player: {
     playing: "Reproduciendo",
     paused: "En pausa",
+    // The landscape player's glass chrome (#375, board E «Стекло»). Its other
+    // words — Play, ±10 s, Next episode, Episodes, Skip intro, Up next,
+    // Watch now, Cancel, Now playing — are the web player's, read from
+    // dictionaries.ts. `pause` is the gold pill's label while playing.
+    pause: "Pausa",
+    // Spoken only: the picture-in-picture button, and the scrub bar — its
+    // name and its value («6:12 de 16:00»).
+    pip: "Imagen en imagen",
+    position: "Posición de reproducción",
+    positionValue: (elapsed: string, total: string) => `${elapsed} de ${total}`,
+    // Under the ±10 mark a double tap leaves on screen.
+    tenSeconds: "10 s",
   },
 };
 
@@ -229,6 +241,11 @@ export const appEn: AppDict = {
   player: {
     playing: "Playing",
     paused: "Paused",
+    pause: "Pause",
+    pip: "Picture in Picture",
+    position: "Playback position",
+    positionValue: (elapsed: string, total: string) => `${elapsed} of ${total}`,
+    tenSeconds: "10 sec",
   },
 };
 

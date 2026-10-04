@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   mintTrialSession: vi.fn(),
   stampSignupWall: vi.fn(),
   sign: vi.fn(),
+  signStoryboard: vi.fn(),
   captureMessage: vi.fn(),
   // Declared inside vi.hoisted: `vi.mock` factories are lifted above every
   // top-level statement, so a class declared normally is still in its temporal
@@ -57,7 +58,10 @@ vi.mock("@/lib/episode-access", () => ({
 vi.mock("@/lib/subscription-access", () => ({
   hasActiveSubscription: h.hasActiveSubscription,
 }));
-vi.mock("@/lib/mux-token", () => ({ signMuxPlaybackToken: h.sign }));
+vi.mock("@/lib/mux-token", () => ({
+  signMuxPlaybackToken: h.sign,
+  signMuxStoryboardToken: h.signStoryboard,
+}));
 vi.mock("@/lib/attribution", () => ({ EMPTY_ATTRIBUTION: {} }));
 
 vi.mock("@/lib/trial", async (importOriginal) => {
@@ -109,6 +113,7 @@ beforeEach(() => {
   });
   h.stampSignupWall.mockReset().mockResolvedValue(undefined);
   h.sign.mockReset().mockReturnValue("signed-jwt");
+  h.signStoryboard.mockReset().mockReturnValue("signed-storyboard-jwt");
   h.captureMessage.mockReset();
   vi.stubEnv("PAYMENTS_ENABLED", "");
   vi.stubEnv("REQUIRE_SIGNUP", "");
@@ -204,6 +209,44 @@ describe("POST /api/v1/playback-token — who gets a token", () => {
     const res = await POST(post({ episodeId: EPISODE }));
     expect(res.status).toBe(403);
     expect((await res.json()).error.reason).toBe("subscribe_required");
+  });
+});
+
+describe("POST /api/v1/playback-token — the scrub preview's storyboard token (#375)", () => {
+  it("comes with every token, for the same playback id and the same lifetime", async () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    h.userId = "user_1";
+    h.hasActiveSubscription.mockResolvedValue(true);
+
+    const body = await (await POST(post({ episodeId: EPISODE }))).json();
+
+    expect(body.storyboardToken).toBe("signed-storyboard-jwt");
+    expect(h.sign).toHaveBeenCalledWith("pb-1", 3600);
+    expect(h.signStoryboard).toHaveBeenCalledWith("pb-1", 3600);
+  });
+
+  it("a 60s preview's storyboard token runs out with the preview, not an hour later", async () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    h.row = { playbackId: "pb-1", showId: SHOW, access: "subscriber" };
+    h.mintTrialSession.mockResolvedValue({ expiresAt: new Date(Date.now() + 10 * 60_000) });
+
+    const body = await (await POST(post({ episodeId: EPISODE }))).json();
+
+    expect(body.mode).toBe("trial");
+    expect(h.signStoryboard).toHaveBeenCalledWith("pb-1", body.expiresIn);
+    expect(h.sign).toHaveBeenCalledWith("pb-1", body.expiresIn);
+  });
+
+  it("a refusal carries none — no frames of an episode the viewer may not watch", async () => {
+    vi.stubEnv("REQUIRE_SIGNUP", "1");
+    h.row = { playbackId: "pb-1", showId: SHOW, access: "subscriber" };
+
+    const res = await POST(post({ episodeId: OTHER_EPISODE }));
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.storyboardToken).toBeUndefined();
+    expect(h.signStoryboard).not.toHaveBeenCalled();
   });
 });
 

@@ -153,6 +153,12 @@ export type PlaybackTokenResponse = {
   // https://stream.mux.com/<playbackId>.m3u8?token=<token>
   playbackId: string;
   token: string;
+  // Signed Mux storyboard JWT (audience `s` — images only, it cannot play
+  // video), minted with the same lifetime as `token` (#375). The app reads
+  // https://image.mux.com/<playbackId>/storyboard.vtt?token=<storyboardToken>
+  // for the frame over its scrub bar. Optional: a server from before #375
+  // does not send it, and the app then scrubs with the time alone.
+  storyboardToken?: string;
   expiresIn: number;
   mode: PlaybackMode;
 };

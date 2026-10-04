@@ -40,12 +40,17 @@ type VideoProps = {
   onAudioBecomingNoisy?: () => void;
   onPictureInPictureStatusChanged?: (e: { isActive: boolean }) => void;
   muted?: boolean;
+  controls?: boolean;
   playInBackground?: boolean;
   playWhenInactive?: boolean;
   enterPictureInPictureOnLeave?: boolean;
   showNotificationControls?: boolean;
 };
-type VideoInstance = { props: VideoProps; seek: ReturnType<typeof vi.fn> };
+type VideoInstance = {
+  props: VideoProps;
+  seek: ReturnType<typeof vi.fn>;
+  enterPictureInPicture: ReturnType<typeof vi.fn>;
+};
 
 // React Native's global, read by the api client at module load — which the
 // imports below reach before any beforeEach runs.
@@ -54,7 +59,7 @@ vi.hoisted(() => {
 });
 
 const h = vi.hoisted(() => ({
-  videos: new Map<string, { props: unknown; seek: unknown }>(),
+  videos: new Map<string, { props: unknown; seek: unknown; enterPictureInPicture: unknown }>(),
   mounts: [] as string[],
   chrome: new Map<string, { paused: boolean; buffering?: boolean; onTogglePlay: () => void }>(),
   allPages: false,
@@ -86,7 +91,14 @@ vi.mock("react-native", async (importOriginal) => {
       ref,
     });
   });
-  return { ...rn, FlatList };
+  // react-native-web answers «a screen reader is on» to everyone; a phone
+  // usually has none, and the landscape chrome hides itself only then.
+  const AccessibilityInfo = {
+    ...rn.AccessibilityInfo,
+    isScreenReaderEnabled: async () => false,
+    addEventListener: () => ({ remove: () => undefined }),
+  };
+  return { ...rn, FlatList, AccessibilityInfo };
 });
 
 vi.mock("react-native-video", async () => {
@@ -94,11 +106,12 @@ vi.mock("react-native-video", async () => {
   const { vi: vitest } = await import("vitest");
   const Video = React.forwardRef(function Video(props: VideoProps, ref) {
     const seek = React.useRef(vitest.fn()).current;
-    React.useImperativeHandle(ref, () => ({ seek }));
+    const enterPictureInPicture = React.useRef(vitest.fn()).current;
+    React.useImperativeHandle(ref, () => ({ seek, enterPictureInPicture }));
     React.useEffect(() => {
       h.mounts.push(props.source.uri);
     }, [props.source.uri]);
-    h.videos.set(props.source.uri, { props, seek });
+    h.videos.set(props.source.uri, { props, seek, enterPictureInPicture });
     return React.createElement("div", { "data-video": props.source.uri });
   });
   return { default: Video };
@@ -194,6 +207,7 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
 import { ApiError } from "@/api/client";
 import WatchScreen from "@/app/watch/[episodeId]";
+import { setAutoplayNext } from "@/prefs/autoplay";
 import { EpisodeFeed, PAUSE_REPORT_SETTLE_MS } from "./episode-feed";
 
 function makeShow(
@@ -719,15 +733,18 @@ describe("EpisodeFeed — the vertical player's pause follows the player (#288 i
     expect(video("ep1").props.paused).toBe(false);
   });
 
-  it("a landscape page leaves play/pause to the native transport", async () => {
+  it("a landscape page follows the player too — its own chrome owns play/pause since #375", async () => {
     vi.useFakeTimers();
     await renderFeed(makeShow("horizontal", ["free"]));
 
     report(false);
     settle();
-    act(() => video("ep1").props.onAudioBecomingNoisy?.());
+    expect(video("ep1").props.paused).toBe(true);
 
+    report(true);
     expect(video("ep1").props.paused).toBe(false);
+    act(() => video("ep1").props.onAudioBecomingNoisy?.());
+    expect(video("ep1").props.paused).toBe(true);
   });
 
   it("AirPods out pauses instead of going on through the speaker", async () => {
@@ -1549,52 +1566,234 @@ describe("EpisodeFeed — a non-subscriber's 60s preview of an all-subscribers-o
   });
 });
 
-describe("EpisodeFeed — the landscape «‹» stays out of the native transport's top row (#359)", () => {
-  // AVPlayerViewController lays its top row (fullscreen, PiP, AirPlay on the
-  // leading side, volume on the trailing one) inside the safe area; the «‹»
-  // goes in the black strip the leading inset leaves beside the picture.
+describe("EpisodeFeed — the landscape page's glass chrome, board E «Стекло» (#375)", () => {
+  // The chrome itself is pinned in components/landscape-chrome.test.tsx;
+  // these cases pin what the feed does with it — the <Video> it drives.
   const DYNAMIC_ISLAND_LANDSCAPE = { top: 0, bottom: 21, left: 59, right: 59 };
   const backs = () =>
     Array.from(container.querySelectorAll<HTMLElement>('[aria-label="Back to show"]'));
-  const placeOf = (el: HTMLElement) => {
-    const { top, left } = getComputedStyle(el);
-    return { top, left };
+  const byLabel = (label: string) => {
+    const node = container.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+    if (!node) throw new Error(`nothing labelled ${label}`);
+    return node;
+  };
+  const tap = (node: Element) =>
+    act(() => {
+      node.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+  // Loaded and playing at `seconds` of a 600s episode.
+  const playAt = (episodeId: string, seconds: number) => {
+    act(() => video(episodeId).props.onLoad?.({ duration: 600 }));
+    act(() => video(episodeId).props.onProgress?.({ currentTime: seconds }));
   };
 
-  it("a Face ID iPhone: the disc is centred in the leading strip, 44pt down — off the picture, clear of the native row", async () => {
+  beforeEach(() => {
     safeArea.insets = DYNAMIC_ISLAND_LANDSCAPE;
+  });
+
+  it("the native transport is off: three glass capsules over the picture, kept off the Dynamic Island", async () => {
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(video("ep1").props.controls).toBe(false);
+    for (const capsule of ["capsule-title", "capsule-pip", "capsule-bar"]) {
+      expect(container.querySelector(`[data-testid="${capsule}"]`), capsule).not.toBeNull();
+    }
+    const title = container.querySelector<HTMLElement>('[data-testid="capsule-title"]');
+    expect(getComputedStyle(title as HTMLElement).left).toBe("65px");
+    expect(container.innerHTML).not.toMatch(/airplay/i);
+  });
+
+  it("names the show and the episode in its own capsule — the lock screen still gets them from the source", async () => {
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(text()).toContain("The Scarlet Oath");
+    expect(text()).toContain("Ep. 1 · Episode 1");
+    expect(video("ep1").props.source.metadata?.title).toBe("Episode 1");
+  });
+
+  it("«‹» in the title capsule goes back", async () => {
     await renderFeed(makeShow("horizontal", ["free"]));
 
     expect(backs()).toHaveLength(1);
-    // (59 − 40) / 2: the 40pt disc in the middle of the 59pt strip.
-    expect(placeOf(backs()[0])).toEqual({ top: "44px", left: "9.5px" });
     press("‹");
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 
-  it("a phone with no strip (iPhone SE, inset 0): below the native row, at the screen padding", async () => {
-    safeArea.insets = NO_INSETS;
+  it("the gold pill pauses and plays the player", async () => {
     await renderFeed(makeShow("horizontal", ["free"]));
 
-    expect(backs()).toHaveLength(1);
-    expect(placeOf(backs()[0])).toEqual({ top: "64px", left: "20px" });
+    tap(byLabel("Play/Pause"));
+    expect(video("ep1").props.paused).toBe(true);
+    tap(byLabel("Play/Pause"));
+    expect(video("ep1").props.paused).toBe(false);
   });
 
-  it("draws no episode title of its own — the native transport names the episode from the source", async () => {
-    safeArea.insets = DYNAMIC_ISLAND_LANDSCAPE;
+  it("±10 seek the player from the playhead — and a second press counts from where the first landed", async () => {
+    await renderFeed(makeShow("horizontal", ["free"]));
+    playAt("ep1", 100);
+
+    tap(byLabel("Forward 10 seconds"));
+    tap(byLabel("Forward 10 seconds"));
+    tap(byLabel("Back 10 seconds"));
+
+    expect(video("ep1").seek.mock.calls).toEqual([[110], [120], [110]]);
+  });
+
+  it("the picture-in-picture button opens the window; PiP on leave stays with the page in view", async () => {
     await renderFeed(makeShow("horizontal", ["free"]));
 
-    expect(playerEl("ep1")).not.toBeNull();
-    expect(text()).not.toContain("Episode 1");
-    expect(video("ep1").props.source.metadata?.title).toBe("Episode 1");
+    tap(byLabel("Picture in Picture"));
+
+    expect(video("ep1").enterPictureInPicture).toHaveBeenCalledTimes(1);
+    expect(video("ep1").props.enterPictureInPictureOnLeave).toBe(true);
   });
 
-  it("a vertical show is untouched: no «‹» of the feed's, its chrome gets the episode and the way back", async () => {
-    // Pins what did NOT change — it passes before #359 too, by design.
-    safeArea.insets = DYNAMIC_ISLAND_LANDSCAPE;
+  it("the scrub preview reads the storyboard the token route signed for this episode", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 404, text: async () => "" }));
+    vi.stubGlobal("fetch", fetchMock);
+    tokens.answer = async (episodeId) => ({ ...granted(episodeId), storyboardToken: `sb-${episodeId}` });
+
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect((fetchMock.mock.calls[0] as unknown[])[0]).toBe(
+      "https://image.mux.com/pb-ep1/storyboard.vtt?token=sb-ep1",
+    );
+  });
+
+  describe("the end of an episode", () => {
+    beforeEach(() => {
+      h.allPages = true;
+    });
+    afterEach(() => {
+      setAutoplayNext(true);
+    });
+
+    it("autoplay on: the card counts down over the last seconds and `ended` advances", async () => {
+      await renderFeed(makeShow("horizontal", ["free", "free"]));
+      playAt("ep1", 592);
+
+      expect(text()).toContain("Up next");
+      expect(text()).toContain("Ep. 2 · Episode 2");
+      expect(text()).toContain("Watch now · 8");
+
+      act(() => video("ep1").props.onEnd?.());
+      await flush();
+      expect(video("ep2").props.paused).toBe(false);
+    });
+
+    it("Watch now goes at once, before the end", async () => {
+      await renderFeed(makeShow("horizontal", ["free", "free"]));
+      playAt("ep1", 592);
+
+      press("Watch now · 8");
+      await flush();
+
+      expect(video("ep2").props.paused).toBe(false);
+      expect(playerEl("ep1")).toBeNull();
+    });
+
+    it("Cancel keeps this ending from advancing: the page rests, paused, with its chrome back", async () => {
+      await renderFeed(makeShow("horizontal", ["free", "free"]));
+      playAt("ep1", 592);
+
+      press("Cancel");
+      expect(text()).not.toContain("Watch now");
+      act(() => video("ep1").props.onEnd?.());
+      await flush();
+
+      expect(video("ep1").props.paused).toBe(true);
+      expect(video("ep2").props.paused).toBe(true);
+      expect(byLabel("Play/Pause").getAttribute("aria-valuetext")).toBe("Paused");
+    });
+
+    it("a Cancel is for one ending: back out of the window, the card comes again", async () => {
+      await renderFeed(makeShow("horizontal", ["free", "free"]));
+      playAt("ep1", 592);
+      press("Cancel");
+
+      act(() => video("ep1").props.onProgress?.({ currentTime: 100 }));
+      act(() => video("ep1").props.onProgress?.({ currentTime: 595 }));
+
+      expect(text()).toContain("Watch now · 5");
+    });
+
+    it("autoplay off: the card waits without a count; `ended` rests, and Watch now still goes", async () => {
+      setAutoplayNext(false);
+      await renderFeed(makeShow("horizontal", ["free", "free"]));
+      playAt("ep1", 592);
+
+      expect(text()).toContain("Watch now");
+      expect(text()).not.toContain("Watch now ·");
+      act(() => video("ep1").props.onEnd?.());
+      await flush();
+      expect(video("ep2").props.paused).toBe(true);
+
+      press("Watch now");
+      await flush();
+      expect(video("ep2").props.paused).toBe(false);
+    });
+  });
+
+  describe("other episodes", () => {
+    beforeEach(() => {
+      h.allPages = true;
+    });
+
+    it("Next goes to the following episode", async () => {
+      await renderFeed(makeShow("horizontal", ["free", "free", "free"]));
+      playAt("ep1", 30);
+
+      tap(byLabel("Next episode"));
+      await flush();
+
+      expect(video("ep2").props.paused).toBe(false);
+      expect(playerEl("ep1")).toBeNull();
+    });
+
+    it("the episodes panel goes to any episode — back to an earlier one at its playhead", async () => {
+      await renderFeed(makeShow("horizontal", ["free", "free", "free"]));
+      playAt("ep1", 200);
+      tap(byLabel("Next episode"));
+      await flush();
+
+      tap(byLabel("Episodes"));
+      tap(byLabel("1. Episode 1, 10 min"));
+      await flush();
+
+      // A fresh page — the old one left the pool — that lands where the
+      // viewer left it.
+      act(() => video("ep1").props.onLoad?.({ duration: 600 }));
+      expect(video("ep1").seek).toHaveBeenLastCalledWith(200);
+      expect(video("ep1").props.paused).toBe(false);
+    });
+
+    it("a locked episode carries its lock in the panel, and choosing it lands on its answer", async () => {
+      await renderFeed(makeShow("horizontal", ["free", "member"]));
+
+      tap(byLabel("Episodes"));
+      tap(byLabel("2. Episode 2, Locked episode, Create account"));
+      await flush();
+
+      expect(text()).toContain(WALL_CTA);
+      expect(tokens.calls).toEqual(["ep1"]);
+    });
+
+    it("on the last episode there is no Next and no end card", async () => {
+      await renderFeed(makeShow("horizontal", ["free"]));
+      playAt("ep1", 595);
+
+      expect(byLabel("Next episode").getAttribute("aria-disabled")).toBe("true");
+      expect(text()).not.toContain("Up next");
+    });
+  });
+
+  it("a vertical show is untouched: no capsules of the landscape chrome, its own chrome gets the episode and the way back", async () => {
+    // Pins what did NOT change.
     await renderFeed(makeShow("vertical", ["free"]));
 
     expect(backs()).toHaveLength(0);
+    expect(container.querySelector('[data-testid="capsule-bar"]')).toBeNull();
     const chrome = h.chrome.get("Episode 1") as { onBack?: () => void } | undefined;
     expect(chrome).toBeDefined();
     chrome?.onBack?.();
