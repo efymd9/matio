@@ -9,7 +9,10 @@
 // this page (#168); "Contact" moved from §11 to §12 — §1–§10 keep their
 // numbers (lib/retention.ts cites §6).
 // Story ideas (/ideas, #297) added 2026-09-27 in §2/§3/§4/
-// §6/§7/§8 — same DRAFT status (counsel questions: #168). matio.tv/ideas is
+// §6/§7/§8 — same DRAFT status (counsel questions: #168). Sign-in with
+// Google / Apple (#277) added 2026-10-04 in §2, §4 and §11: an agent's draft,
+// merged only on the owner's «да» in the PR thread, counsel review pending
+// with the rest (#168). matio.tv/ideas is
 // plain text on purpose: every internal link here must survive ?embed=app
 // (app/(public)/legal-embed.test.tsx).
 import type { Metadata } from "next";
@@ -94,7 +97,13 @@ function PrivacyEn() {
             <strong>Account data</strong> — email address, name (if you give
             one), authentication tokens. Collected and stored by Clerk on our
             behalf. We also mirror a minimal user record (Clerk id, email,
-            role) in our own database to power authorisation.
+            role) in our own database to power authorisation. If you sign in
+            with Google or Apple, we receive from that provider, through
+            Clerk, what you choose to share with us: your email address (with
+            Apple, possibly a private relay address that forwards to your real
+            one), your name and, from Google, your profile picture, together
+            with the provider&rsquo;s identifier for your account. Clerk keeps
+            them with your account.
           </li>
           <li>
             <strong>Subscription and payment data</strong> — billing name and
@@ -274,6 +283,15 @@ function PrivacyEn() {
             engaged after you accept marketing cookies. We share usage and device
             data (page views, approximate location from IP, browser/device
             details) so we can measure site traffic. US transfers covered by SCCs.
+          </li>
+          <li>
+            <strong>Google and Apple</strong> — only if you choose to sign in
+            with them. Google (Google Ireland Ltd and Google LLC) or Apple
+            (Apple Distribution International Ltd and Apple Inc.) learns that
+            you signed in to Matio and passes us, through Clerk, the details
+            described in section 2. They are not our processors: each acts as
+            the independent controller of your Google or Apple account, under
+            its own privacy policy.
           </li>
           <li>
             <strong>Production partners</strong> — only for an idea we develop
@@ -456,8 +474,12 @@ function PrivacyEn() {
             <strong>If you sign in</strong> — to sign in or create an account,
             you enter your email address in the app, which sends it to Clerk,
             our authentication provider; Clerk emails you a one-time code.
-            When you create an account, the app also passes Clerk the language
-            you use in the app. Your sign-in session is kept in the
+            Instead, you can continue with Apple or Google: the app opens that
+            provider&rsquo;s own sign-in screen, and the provider passes Clerk
+            the details described in section 2 (with Apple you can choose to
+            hide your email address). When you create an account with your
+            email address, the app also passes Clerk the language you use in
+            the app. Your sign-in session is kept in the
             device&rsquo;s secure storage. While you are signed in, the app
             sends us your watch progress — the episode, how far you got,
             whether you finished it and how long you watched — so you can
@@ -473,7 +495,12 @@ function PrivacyEn() {
           <li>
             <strong>Kept only on your device</strong> — the autoplay setting,
             and the language you choose in the app (apart from passing it to
-            Clerk when you create an account, as above).
+            Clerk when you create an account with your email address, as
+            above). If you continue with Google, Google&rsquo;s own sign-in
+            component also keeps your Google session (your Google account
+            details and its sign-in tokens) in the device&rsquo;s secure
+            storage, so it can recognise you next time; the app does not read
+            it, and ends it when you sign out of Matio or delete your account.
           </li>
           <li>
             <strong>Providers</strong> — the app contains no analytics,
@@ -481,7 +508,8 @@ function PrivacyEn() {
             other companies&rsquo; apps or websites. Besides Sentry for error
             reports (below), it uses only providers already listed in section
             4: Vercel and Neon (our servers and database), Clerk (sign-in) and
-            Mux (video and episode images). Like any request to our servers,
+            Mux (video and episode images) — and Apple or Google, only if you
+            choose to sign in with them. Like any request to our servers,
             the app&rsquo;s requests carry your IP address and basic device
             details, handled as &ldquo;Technical data&rdquo; in section 2.
             When you open our Terms, this policy or the Cookie Policy from the
@@ -565,7 +593,13 @@ function PrivacyEs() {
             nombre (si lo facilitas) y tokens de autenticación. Los recoge y
             almacena Clerk por cuenta nuestra. También guardamos un registro
             mínimo (id Clerk, email, rol) en nuestra base de datos para
-            gestionar la autorización.
+            gestionar la autorización. Si inicias sesión con Google o Apple,
+            recibimos de ese proveedor, a través de Clerk, lo que decidas
+            compartir con nosotros: tu dirección de correo electrónico (con
+            Apple, posiblemente una dirección de reenvío privada que remite a
+            la tuya), tu nombre y, de Google, tu foto de perfil, junto con el
+            identificador de tu cuenta en el proveedor. Clerk los conserva con
+            tu cuenta.
           </li>
           <li>
             <strong>Datos de suscripción y pago</strong>: nombre y dirección de
@@ -766,6 +800,15 @@ function PrivacyEs() {
             medir el tráfico del sitio. Transferencias a EE. UU. amparadas por CCT.
           </li>
           <li>
+            <strong>Google y Apple</strong> — solo si decides iniciar sesión
+            con ellos. Google (Google Ireland Ltd y Google LLC) o Apple (Apple
+            Distribution International Ltd y Apple Inc.) sabe que has iniciado
+            sesión en Matio y nos transmite, a través de Clerk, los datos
+            descritos en la sección 2. No son encargados nuestros: cada uno
+            actúa como responsable independiente de tu cuenta de Google o de
+            Apple, con su propia política de privacidad.
+          </li>
+          <li>
             <strong>Socios de producción</strong> — solo para una idea que
             desarrollemos contigo, y solo lo que necesite la producción.
           </li>
@@ -959,7 +1002,11 @@ function PrivacyEs() {
             una cuenta, introduces tu dirección de correo electrónico en la
             aplicación, que la envía a Clerk, nuestro proveedor de
             autenticación; Clerk te envía por correo un código de un solo uso.
-            Al crear una cuenta, la aplicación también comunica a Clerk el
+            También puedes continuar con Apple o Google: la aplicación abre la
+            pantalla de inicio de sesión del propio proveedor, y este transmite
+            a Clerk los datos descritos en la sección 2 (con Apple puedes
+            elegir ocultar tu dirección de correo). Al crear una cuenta con tu
+            dirección de correo, la aplicación también comunica a Clerk el
             idioma que usas en ella. Tu sesión se guarda en el almacenamiento
             seguro del dispositivo. Mientras tienes la sesión iniciada, la
             aplicación nos envía tu progreso de reproducción (el episodio,
@@ -976,8 +1023,14 @@ function PrivacyEs() {
           <li>
             <strong>Solo en tu dispositivo</strong>: el ajuste de
             reproducción automática y el idioma que eliges en la aplicación
-            (salvo cuando se lo comunica a Clerk al crear una cuenta, como se
-            indica arriba).
+            (salvo cuando se lo comunica a Clerk al crear una cuenta con tu
+            dirección de correo, como se indica arriba). Si continúas con
+            Google, el propio componente de inicio de sesión de Google guarda
+            además tu sesión de Google (los datos de tu cuenta de Google y sus
+            tokens de inicio de sesión) en el almacenamiento seguro del
+            dispositivo, para reconocerte la próxima vez; la aplicación no la
+            lee y la cierra cuando cierras sesión en Matio o eliminas tu
+            cuenta.
           </li>
           <li>
             <strong>Proveedores</strong>: la aplicación no contiene
@@ -986,7 +1039,8 @@ function PrivacyEs() {
             Además de Sentry para los informes de errores (véase abajo), solo
             usa proveedores que ya figuran en la sección 4: Vercel y Neon
             (nuestros servidores y base de datos), Clerk (inicio de sesión) y
-            Mux (vídeo e imágenes de los episodios). Como cualquier petición a
+            Mux (vídeo e imágenes de los episodios), y Apple o Google, solo si
+            decides iniciar sesión con ellos. Como cualquier petición a
             nuestros servidores, las de la aplicación llevan tu dirección IP y
             datos básicos del dispositivo, tratados como «Datos técnicos» en
             la sección 2. Cuando abres desde la aplicación nuestros Términos,
