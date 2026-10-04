@@ -1,4 +1,10 @@
 import type { SocialSignIn } from "@/shared/api-types";
+import {
+  GOOGLE_IOS_CLIENT_ID,
+  GOOGLE_IOS_URL_SCHEME,
+  GOOGLE_WEB_CLIENT_ID,
+  googleIosUrlScheme,
+} from "../../google-signin-config";
 
 // The rules of the Apple / Google buttons under the email form (#277) — pure,
 // no React and no native module, so every branch is a unit test
@@ -37,21 +43,28 @@ export function socialProviders({
   return lever.google && googleConfigured ? ["apple", "google"] : ["apple"];
 }
 
-// The two names @clerk/expo's native Google hook looks up — in the app
-// config's `extra` first (app.config.ts copies them there from the build's
-// environment), then in process.env, which Expo does NOT inline inside
-// node_modules, so in a release build `extra` is the only place it finds
-// them. Without both the hook throws on the first tap, so without both
-// there is no button.
-export const GOOGLE_WEB_CLIENT_ID = "EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID";
-export const GOOGLE_IOS_CLIENT_ID = "EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID";
-
+// Whether this build can run the native Google sign-in at all, read from the
+// app config's `extra` — where app.config.ts puts what the build's
+// environment carried, and where @clerk/expo's Google hook looks first
+// (process.env is NOT inlined inside node_modules, so in a release build
+// `extra` is the only place it finds the ids). Three things, all checked:
+//   - the web and the iOS client id — without either the hook throws on the
+//     first tap;
+//   - the URL scheme the plugin registered, and it must be exactly the
+//     reversed iOS id (the same helper app.config.ts derives it with):
+//     without it Google's SDK raises a native exception on the first tap
+//     that no JavaScript catch can stop — the app would crash.
+// Anything short of all three is a build without the Google button.
 export function googleSignInConfigured(extra: Record<string, unknown> | null | undefined): boolean {
-  const filled = (name: string) => {
-    const value = extra?.[name];
-    return typeof value === "string" && value.trim() !== "";
-  };
-  return filled(GOOGLE_WEB_CLIENT_ID) && filled(GOOGLE_IOS_CLIENT_ID);
+  const web = extra?.[GOOGLE_WEB_CLIENT_ID];
+  const ios = extra?.[GOOGLE_IOS_CLIENT_ID];
+  const scheme = googleIosUrlScheme(ios);
+  return (
+    typeof web === "string" &&
+    web.trim() !== "" &&
+    scheme !== undefined &&
+    extra?.[GOOGLE_IOS_URL_SCHEME] === scheme
+  );
 }
 
 // What a finished flow meant. Clerk's legacy hooks (useSignInWithApple,
@@ -66,6 +79,14 @@ export function googleSignInConfigured(extra: Record<string, unknown> | null | u
 // before the tap (their ids unchanged). An id read before the tap is the
 // witness — a status alone is not: the email form's own sign-up sits in
 // `missing_requirements` until its code is verified.
+//
+// «Incomplete» (the provider made an account without an address) is ONLY a
+// new sign-up that stopped short while the sign-in did not move. When both
+// moved, the flow was a transfer — an Apple ID or Google account that
+// already has a Matio account: the sign-up is left `missing_requirements`
+// by design and the transfer sign-in is what stopped short (a second factor,
+// say) — the address WAS shared, so that is a failure, not «we didn't get
+// your email».
 export type SocialOutcome = "signedIn" | "cancelled" | "incomplete" | "failed";
 
 type Attempt = { id?: string | null; status?: string | null } | null | undefined;
@@ -84,7 +105,7 @@ export function classifySocialResult({
   if (createdSessionId) return "signedIn";
   const signUpMoved = Boolean(signUp?.id) && signUp?.id !== before.signUpId;
   const signInMoved = Boolean(signIn?.id) && signIn?.id !== before.signInId;
-  if (signUpMoved && signUp?.status === "missing_requirements") return "incomplete";
+  if (signUpMoved && !signInMoved && signUp?.status === "missing_requirements") return "incomplete";
   if (signUpMoved || signInMoved) return "failed";
   return "cancelled";
 }

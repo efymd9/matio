@@ -168,6 +168,7 @@ vi.mock("expo-web-browser", () => ({ openBrowserAsync: browser.open }));
 const GOOGLE_IDS = {
   EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: "dummy-web.apps.googleusercontent.com",
   EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: "dummy-ios.apps.googleusercontent.com",
+  EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: "com.googleusercontent.apps.dummy-ios",
 };
 
 function resetSocial() {
@@ -962,11 +963,17 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
   // answer land — no button shows before it.
   async function renderSocial(
     lever: { apple: boolean; google: boolean } | undefined,
-    { os = "ios", ids = true, locale = "en" as "en" | "es", onDone = vi.fn() } = {},
+    {
+      os = "ios",
+      ids = true,
+      extra = undefined as Record<string, unknown> | undefined,
+      locale = "en" as "en" | "es",
+      onDone = vi.fn(),
+    } = {},
   ) {
     social.os = os;
     social.lever = lever;
-    social.extra = ids ? GOOGLE_IDS : {};
+    social.extra = extra ?? (ids ? GOOGLE_IDS : {});
     const resources = clerkResources();
     await renderForm(locale, onDone);
     await act(async () => {
@@ -1036,6 +1043,14 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
 
   it("Google without its client ids in the build: no Google button", async () => {
     await renderSocial({ apple: true, google: true }, { ids: false });
+
+    expect(appleButton()).not.toBeNull();
+    expect(text()).not.toContain("Continue with Google");
+  });
+
+  it("Google with both ids but no registered URL scheme: no Google button — its SDK would crash on the tap", async () => {
+    const { EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: _scheme, ...noScheme } = GOOGLE_IDS;
+    await renderSocial({ apple: true, google: true }, { extra: noScheme });
 
     expect(appleButton()).not.toBeNull();
     expect(text()).not.toContain("Continue with Google");

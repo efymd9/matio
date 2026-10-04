@@ -266,8 +266,8 @@ would add license-server complexity and cost for no benefit here.
       native Apple + native Google under the email form (board variant B), behind the
       `APP_SOCIAL_SIGNIN` lever, and on iOS Google never shows without Apple
       (`mobile/src/auth/social.ts`). Off until the owner's console steps are done
-      (`docs/registry.md`); token revocation on deletion (5.1.1(v)) is a registry row
-      before the public submission.
+      (`docs/registry.md`); token revocation on deletion (5.1.1(v)) is #407 — it blocks
+      the public submission and `apple` in the lever while a public build exists.
 - [ ] Privacy nutrition labels (App Store) + Data Safety form (Play) — must match what the
       device id, PostHog, and Meta SDKs actually collect.
 - [ ] ATT prompt if and only if Meta attribution ships (§10).

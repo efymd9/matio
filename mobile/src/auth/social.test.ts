@@ -1,7 +1,8 @@
 import type { ExpoConfig } from "expo/config";
 import { describe, expect, it } from "vitest";
-import appConfig, { googleIosUrlScheme, googleSignInExtra } from "../../app.config";
+import appConfig, { googleSignInExtra } from "../../app.config";
 import appJson from "../../app.json";
+import { googleIosUrlScheme } from "../../google-signin-config";
 import {
   classifySocialResult,
   googleSignInConfigured,
@@ -66,18 +67,44 @@ describe("socialProviders — which buttons show, in which order", () => {
   });
 });
 
-describe("googleSignInConfigured — both client ids, or no Google", () => {
+describe("googleSignInConfigured — both client ids and the matching URL scheme, or no Google", () => {
   const WEB = "EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID";
   const IOS = "EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID";
+  const SCHEME = "EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME";
+  const READY = {
+    [WEB]: "w.apps.googleusercontent.com",
+    [IOS]: "i.apps.googleusercontent.com",
+    [SCHEME]: "com.googleusercontent.apps.i",
+  };
+
+  it("is ready with the web id, the iOS id and the iOS id reversed as the scheme", () => {
+    expect(googleSignInConfigured(READY)).toBe(true);
+  });
 
   it("needs the web AND the iOS id, neither blank", () => {
-    expect(googleSignInConfigured({ [WEB]: "w.apps.googleusercontent.com", [IOS]: "i.apps.googleusercontent.com" })).toBe(true);
-    expect(googleSignInConfigured({ [WEB]: "w.apps.googleusercontent.com" })).toBe(false);
-    expect(googleSignInConfigured({ [IOS]: "i.apps.googleusercontent.com" })).toBe(false);
-    expect(googleSignInConfigured({ [WEB]: " ", [IOS]: "i.apps.googleusercontent.com" })).toBe(false);
-    expect(googleSignInConfigured({ [WEB]: 1, [IOS]: true })).toBe(false);
+    expect(googleSignInConfigured({ ...READY, [WEB]: undefined })).toBe(false);
+    expect(googleSignInConfigured({ ...READY, [IOS]: undefined })).toBe(false);
+    expect(googleSignInConfigured({ ...READY, [WEB]: " " })).toBe(false);
+    expect(googleSignInConfigured({ [WEB]: 1, [IOS]: true, [SCHEME]: "x" })).toBe(false);
     expect(googleSignInConfigured(undefined)).toBe(false);
     expect(googleSignInConfigured(null)).toBe(false);
+  });
+
+  // Google's SDK raises a native exception — an app crash no JavaScript
+  // catch reaches — on the first tap when the reversed-id scheme is not
+  // registered. The plugin registers what `extra` (or the variable) says.
+  it("no button without the URL scheme — the plugin registered none", () => {
+    expect(googleSignInConfigured({ ...READY, [SCHEME]: undefined })).toBe(false);
+  });
+
+  it("no button when the scheme is not the reversed iOS id — a mistyped override", () => {
+    expect(googleSignInConfigured({ ...READY, [SCHEME]: "com.googleusercontent.apps.other" })).toBe(false);
+  });
+
+  it("no button for an iOS id not shaped like Google's — no scheme can be derived from it", () => {
+    expect(
+      googleSignInConfigured({ ...READY, [IOS]: "not-a-client-id", [SCHEME]: "com.googleusercontent.apps.i" }),
+    ).toBe(false);
   });
 });
 
@@ -112,6 +139,20 @@ describe("classifySocialResult — what a finished flow meant", () => {
         signUp: { id: "sua_apple", status: "missing_requirements" },
       }),
     ).toBe("incomplete");
+  });
+
+  it("a transfer that stops short is a failure, not «we didn't get your email» — the address was shared", () => {
+    // An Apple ID with a Matio account: signUp.create leaves the sign-up
+    // transferable in missing_requirements, then the transfer sign-in stops
+    // at a second factor. Both moved.
+    expect(
+      classifySocialResult({
+        createdSessionId: null,
+        before,
+        signIn: { id: "sia_transfer", status: "needs_second_factor" },
+        signUp: { id: "sua_apple", status: "missing_requirements" },
+      }),
+    ).toBe("failed");
   });
 
   it("anything else that moved without a session is a failure, never silence", () => {
@@ -179,13 +220,32 @@ describe("app.config.ts — Google's ids from the build's environment into `extr
     });
   });
 
-  it("an explicit URL scheme wins over the derived one", () => {
+  it("an explicit URL scheme is carried as given — the plugin reads the variable first too", () => {
     expect(
       googleSignInExtra({
         EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: IOS_ID,
         EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: "com.googleusercontent.apps.custom",
       }).EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME,
     ).toBe("com.googleusercontent.apps.custom");
+  });
+
+  it("what the config builds is exactly what the button gate accepts — and a broken env hides the button", () => {
+    const env = {
+      EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: WEB_ID,
+      EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: IOS_ID,
+    };
+    expect(googleSignInConfigured(googleSignInExtra(env))).toBe(true);
+    // An iOS id without Google's suffix: no scheme is derived, none is
+    // registered, so no button (it would crash on tap).
+    const malformed = googleSignInExtra({ ...env, EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: "123-abc" });
+    expect(malformed.EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME).toBeUndefined();
+    expect(googleSignInConfigured(malformed)).toBe(false);
+    // An override that is not the reversed id registers the wrong scheme.
+    expect(
+      googleSignInConfigured(
+        googleSignInExtra({ ...env, EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME: "com.googleusercontent.apps.custom" }),
+      ),
+    ).toBe(false);
   });
 
   it("keeps app.json whole and only adds to `extra`", () => {

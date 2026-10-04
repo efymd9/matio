@@ -1,4 +1,10 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
+import {
+  GOOGLE_IOS_CLIENT_ID,
+  GOOGLE_IOS_URL_SCHEME,
+  GOOGLE_WEB_CLIENT_ID,
+  googleIosUrlScheme,
+} from "./google-signin-config";
 
 // The dynamic half of the app config (#277). Everything static stays in
 // app.json; this file only adds what has to come from the BUILD's
@@ -17,39 +23,26 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
 // They go into `extra` because that is where @clerk/expo's Google hook
 // reads them in a release build (Expo inlines EXPO_PUBLIC_* only in app
 // code, not inside node_modules), and where @clerk/expo-google-signin's
-// config plugin reads the URL scheme. A build without them is a build
-// without the Google button (mobile/src/auth/social.ts), not a broken one.
+// config plugin reads the URL scheme. A build whose scheme is missing or is
+// not the reversed iOS id has NO Google button (src/auth/social.ts checks
+// exactly that, with the same helper): Google's SDK raises an uncatchable
+// native exception on the first tap when the scheme is not registered.
 // None of them is a secret — an OAuth client id ships inside every app.
-
-const WEB_CLIENT_ID = "EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID";
-const IOS_CLIENT_ID = "EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID";
-const IOS_URL_SCHEME = "EXPO_PUBLIC_CLERK_GOOGLE_IOS_URL_SCHEME";
-
-const GOOGLE_CLIENT_SUFFIX = ".apps.googleusercontent.com";
-
-// `123-abc.apps.googleusercontent.com` → `com.googleusercontent.apps.123-abc`
-// — the "reversed client id" Google's console shows next to an iOS client.
-// Anything not shaped like a Google client id gets no scheme: a wrong one
-// would only fail later, inside Google's SDK, on the first tap.
-export function googleIosUrlScheme(iosClientId: string): string | undefined {
-  const id = iosClientId.trim();
-  if (!id.endsWith(GOOGLE_CLIENT_SUFFIX) || id.length === GOOGLE_CLIENT_SUFFIX.length) {
-    return undefined;
-  }
-  return `com.googleusercontent.apps.${id.slice(0, -GOOGLE_CLIENT_SUFFIX.length)}`;
-}
 
 // The `extra` entries for the environment given — only the ones that are
 // set, so an unconfigured build carries no empty strings.
 export function googleSignInExtra(env: Record<string, string | undefined>): Record<string, string> {
   const extra: Record<string, string> = {};
-  const web = env[WEB_CLIENT_ID]?.trim();
-  const ios = env[IOS_CLIENT_ID]?.trim();
-  if (web) extra[WEB_CLIENT_ID] = web;
+  const web = env[GOOGLE_WEB_CLIENT_ID]?.trim();
+  const ios = env[GOOGLE_IOS_CLIENT_ID]?.trim();
+  if (web) extra[GOOGLE_WEB_CLIENT_ID] = web;
   if (ios) {
-    extra[IOS_CLIENT_ID] = ios;
-    const scheme = env[IOS_URL_SCHEME]?.trim() || googleIosUrlScheme(ios);
-    if (scheme) extra[IOS_URL_SCHEME] = scheme;
+    extra[GOOGLE_IOS_CLIENT_ID] = ios;
+    // An explicit scheme is the plugin's own first choice too (it reads the
+    // variable before `extra`), so `extra` carries the same value; when it
+    // is not the reversed id, the button stays hidden.
+    const scheme = env[GOOGLE_IOS_URL_SCHEME]?.trim() || googleIosUrlScheme(ios);
+    if (scheme) extra[GOOGLE_IOS_URL_SCHEME] = scheme;
   }
   return extra;
 }

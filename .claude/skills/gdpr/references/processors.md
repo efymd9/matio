@@ -56,11 +56,13 @@ Apple и Google появляются как **провайдеры входа** 
   контрагенты; числятся в их списках.
 - **Google LLC / Google Ireland Ltd** и **Apple Inc. / Apple Distribution
   International Ltd** как **провайдеры входа** (#277: «Continue with Google»
-  в приложении iOS и в модалке Clerk на вебе, «Sign in with Apple» в
-  приложении iOS) — самостоятельные контролёры аккаунта пользователя у себя,
+  в приложении iOS и в модалке Clerk на вебе; «Sign in with Apple» в
+  приложении iOS и в модалке Clerk на вебе — после включения соединения
+  Apple в Clerk) — самостоятельные контролёры аккаунта пользователя у себя,
   не обрабатывают данные по нашему поручению; DPA с ними не заключается.
   Видят факт входа в Matio: Google — iOS client id приложения и Web client id
-  Clerk, Apple — bundle id `tv.matio.app` / Team `MTFRZQ8SRX`. От них через
+  Clerk, Apple — bundle id `tv.matio.app` / Team `MTFRZQ8SRX` (на вебе —
+  Services ID соединения Clerk). От них через
   Clerk мы получаем поля из `data-map.md` §1 (адрес — у Apple, возможно,
   relay-адрес `…@privaterelay.appleid.com`; имя — у Apple только при первом
   входе; у Google — фото профиля; id пользователя у провайдера). Сверено по
