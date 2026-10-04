@@ -79,3 +79,8 @@ storybook-static
 .design-sync/node_modules
 .ds-sync/
 ds-bundle/
+
+# Файлы-клапаны пауз гардов (локальное состояние сессии, не коммитится):
+# вотчеры основной сессии в простое (#404) и бебиситинг агента.
+.claude/watchers-paused
+.claude/babysit-paused
