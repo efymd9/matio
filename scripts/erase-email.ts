@@ -4,8 +4,12 @@
 // аккаунта». The logic lives in lib/address-requests.ts with its tests; this
 // file only hands in the database and the console.
 //
-//   DATABASE_URL=postgres://… pnpm erase-email <address>            # dry run (default)
-//   DATABASE_URL=postgres://… pnpm erase-email <address> --apply    # erase
+//   DATABASE_URL=postgres://… pnpm -s erase-email <address>            # dry run (default)
+//   DATABASE_URL=postgres://… pnpm -s erase-email <address> --apply    # erase
+//
+// Always `-s`: without it pnpm echoes the script line — the address with it —
+// to stdout before this script prints anything. The command line itself
+// carries the address regardless: paste the output lines, never the command.
 //
 // Deliberately NOT loading .env.local: that file carries the PRODUCTION
 // connection string, and deleting a person's rows has to be an explicit act

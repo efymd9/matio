@@ -49,6 +49,13 @@
       "uuid": "^11.1.1"
     }
   },
+  "expo": {
+    "install": {
+      "exclude": [
+        "@sentry/react-native"
+      ]
+    }
+  },
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",

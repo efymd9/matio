@@ -231,7 +231,7 @@ Clerk id вместо самого id для лимита авторизован
   (`app/api/v1/account/delete/route.test.ts`, #309 — тот же `eraseUser`)
   (`show_reminders` → `idea_submissions` → `users`).
 - **Адрес БЕЗ аккаунта** (`show_reminders`, `idea_submissions` — ни FK, ни
-  Clerk id, триггера «удалён в Clerk» нет): по заявке `pnpm erase-email
+  Clerk id, триггера «удалён в Clerk» нет): по заявке `pnpm -s erase-email
   <адрес> [--apply]` (#339, детали — в «Каноне портируемости» ниже и ранбуке
   §2); восстановление из бэкапа повторяет такое стирание по id идей из
   реестра заявок (`db-restore.md` §7) или тем же скриптом, если адрес под
@@ -309,7 +309,7 @@ Clerk id вместо самого id для лимита авторизован
   contact@matio.tv, верификация без документов (адрес аккаунта + вход через
   Clerk), 30 дней по ст. 12(3), формат ответа (JSON + письмо с перечнем
   ст. 15(1)), реестр заявок без имён — таблица в самом ранбуке. Раздел
-  «Адрес без аккаунта» (§2, #339): `pnpm export-email` / `erase-email`
+  «Адрес без аккаунта» (§2, #339): `pnpm -s export-email` / `erase-email`
   ниже. Раздел
   «Стирание» (§4, #180): два пути (пользователь сам в Clerk / оператор в
   Clerk Dashboard — один вебхук), `pnpm erase-user <id> [--apply]` для
@@ -339,8 +339,8 @@ Clerk id вместо самого id для лимита авторизован
   письмо помечает, что это ст. 15, не ст. 20. `ip_hash`,
   `stripe_customer_id`, id вендоров — данные субъекта, входят.
 - Адрес без аккаунта (`show_reminders` и `idea_submissions` — у автора идеи
-  аккаунта может не быть вовсе): `pnpm export-email <адрес> [--out <file>]` и
-  `pnpm erase-email <адрес> [--apply]` (#339; `scripts/export-email.ts` /
+  аккаунта может не быть вовсе): `pnpm -s export-email <адрес> [--out <file>]` и
+  `pnpm -s erase-email <адрес> [--apply]` (#339; `scripts/export-email.ts` /
   `erase-email.ts`, вся логика и тесты в `lib/address-requests.ts`, ранбук §2).
   Обе таблицы по адресу в нижнем регистре; `DATABASE_URL` явно, без него —
   exit 2; файл `0600`; в stdout и stderr — `address#<8 hex sha256>` (тот же

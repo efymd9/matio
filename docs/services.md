@@ -366,8 +366,14 @@ PostHog through `/ingest`; a blocked error report is our loss, not the viewer's.
 
 ### The app (`mobile/`, #317)
 
-**SDK**: `@sentry/react-native` (~7.11, the version `npx expo install` picks
-for Expo SDK 57; approved by the owner 27.09) + its config plugin
+**SDK**: `@sentry/react-native` (~8.28 since #390 — deliberately ahead of the
+~7.11 that Expo SDK 57's matrix tests and `npx expo install` would pick; the
+SDK itself approved by the owner 27.09). `mobile/package.json` carries
+`"expo": {"install": {"exclude": ["@sentry/react-native"]}}`, so `npx expo
+install --check` stops flagging it and `--fix` never downgrades it to 7.11 —
+which would silently undo the RN 8 integration names and
+`enableNetworkBreadcrumbs` in `mobile/src/observability.ts`. An EAS /
+TestFlight build with 8.x has not been verified yet (`docs/registry.md`) + its config plugin
 `@sentry/react-native/expo` in `mobile/app.json` — with **no** org, project or
 auth token committed.
 

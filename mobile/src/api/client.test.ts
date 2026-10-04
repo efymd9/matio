@@ -394,6 +394,50 @@ describe("deleteAccount (#309) — the one request with a longer deadline", () =
     await expect(outcome).resolves.toMatchObject({ code: "network", status: 0 });
   });
 
+  // #398 — the Account tab concludes "the account is gone" from a dead session
+  // only after a request that could have erased it went out.
+  it("reports a request carrying the Bearer the moment it leaves — before any answer, which may never come", async () => {
+    const { api, setAuthTokenProvider } = await loadClient();
+    setAuthTokenProvider(async () => "sess_token");
+    answer = hangUntilAborted;
+    const onSentWithToken = vi.fn();
+
+    const outcome = api.deleteAccount({ onSentWithToken }).catch((err: unknown) => err);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toHaveLength(1);
+    expect(onSentWithToken).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(45_000);
+    await expect(outcome).resolves.toMatchObject({ code: "network", status: 0 });
+    expect(onSentWithToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report a request sent with no Bearer (Clerk: nobody signed in) — its 401 erased nothing", async () => {
+    const { api, setAuthTokenProvider } = await loadClient();
+    setAuthTokenProvider(async () => null);
+    answer = async () =>
+      json(401, { error: { code: "unauthorized", message: "Sign in to delete your account." } });
+    const onSentWithToken = vi.fn();
+
+    await expect(api.deleteAccount({ onSentWithToken })).rejects.toMatchObject({ status: 401 });
+    expect(calls).toHaveLength(1);
+    expect(headersOf(calls[0]).Authorization).toBeUndefined();
+    expect(onSentWithToken).not.toHaveBeenCalled();
+  });
+
+  it("does not report anything when Clerk does not answer — nothing went out", async () => {
+    const { api, setAuthTokenProvider } = await loadClient();
+    setAuthTokenProvider(NEVER);
+    const onSentWithToken = vi.fn();
+
+    const outcome = api.deleteAccount({ onSentWithToken }).catch((err: unknown) => err);
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    await expect(outcome).resolves.toMatchObject({ code: "network", status: 0 });
+    expect(calls).toHaveLength(0);
+    expect(onSentWithToken).not.toHaveBeenCalled();
+  });
+
   it("keeps the server's code on a refusal — the Account tab says it failed and keeps the session", async () => {
     const { api, setAuthTokenProvider } = await loadClient();
     setAuthTokenProvider(async () => "sess_token");

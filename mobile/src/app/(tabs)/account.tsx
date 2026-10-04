@@ -1,7 +1,7 @@
 import { useAuth, useClerk, useUser } from "@clerk/expo";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -84,8 +84,9 @@ type SessionState = "live" | "gone" | "unknown";
 
 // Clerk's answer about the session, fetched fresh (skipCache — a cached token
 // would outlive the account by up to a minute). No session or no token, or
-// Clerk refusing the session itself (401 / 404 from its API: the session
-// ended with the account) → gone. A token → live. Anything else — offline, a
+// Clerk refusing the session itself (401 / 404 from its API) → gone: the
+// session ended — with the account only if a deletion request went out (the
+// caller's check, #398). A token → live. Anything else — offline, a
 // 5xx, a 429, no answer in time — is not an answer, and nothing is concluded
 // from it.
 function sessionState(getToken: ReturnType<typeof useAuth>["getToken"]): Promise<SessionState> {
@@ -113,6 +114,10 @@ function SignedInAccount() {
   const { getToken } = useAuth();
   const { items: resume } = useContinueWatching(true);
   const [deleting, setDeleting] = useState(false);
+  // Whether a deletion request carrying the session's Bearer has left the app
+  // in this mount — this tap's or an earlier one's (#398). Only such a request
+  // can have erased the account.
+  const deleteSent = useRef(false);
 
   const email = user?.primaryEmailAddress?.emailAddress ?? "";
   const initial = email.charAt(0).toUpperCase();
@@ -157,19 +162,39 @@ function SignedInAccount() {
   // have finished while its answer was lost (the 45s deadline, a dropped
   // connection), or a retry went out with no token because Clerk had no
   // session left to give (401). So a failure asks Clerk about the session
-  // before saying anything. Gone → the account is gone, as asked: sign out
-  // and go Home, exactly as on success. Live, or no answer → the honest
-  // failure as before: the session is kept, and the row can simply be tapped
-  // again, because both halves on the server are idempotent.
+  // before saying anything. Live, or no answer → the honest failure as
+  // before: the session is kept, and the row can simply be tapped again,
+  // because both halves on the server are idempotent. Gone → the account is
+  // gone, as asked: sign out and go Home, exactly as on success — but only
+  // once a request carrying the session has gone out (#398). A session can
+  // also end on its own — revoked from another device, at the end of its
+  // lifetime — before clerk-js unmounts this tab; then nothing was sent that
+  // could erase anything (no token, or an anonymous 401), the account is
+  // intact, and the viewer is told so and signed out: the tab turns into the
+  // sign-in form, and a fresh session can delete.
   const confirmDelete = useCallback(() => {
     const deleteOrSay = async () => {
       setDeleting(true);
       try {
-        await api.deleteAccount();
+        await api.deleteAccount({
+          onSentWithToken: () => {
+            deleteSent.current = true;
+          },
+        });
       } catch {
         if ((await sessionState(getToken)) !== "gone") {
           setDeleting(false);
           Alert.alert(t.app.account.deleteFailed, t.app.account.stalledBody);
+          return;
+        }
+        if (!deleteSent.current) {
+          setDeleting(false);
+          try {
+            await signOut();
+          } catch {
+            // A dead session Clerk drops on its own next refresh.
+          }
+          Alert.alert(t.app.account.deleteSessionEndedTitle, t.app.account.deleteSessionEndedBody);
           return;
         }
       }

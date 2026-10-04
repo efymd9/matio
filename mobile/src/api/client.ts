@@ -165,9 +165,14 @@ async function request<T>(
     body?: unknown;
     auth?: AuthMode;
     timeoutMs?: number;
+    // Called once, right before fetch, and only when the request carries the
+    // session's Bearer — the last moment the client controls: from here on
+    // the server may act on it, whatever answer (or none) comes back.
+    onSentWithToken?: () => void;
   } = { method: "GET" },
 ): Promise<T> {
   const headers = await buildHeaders(init.body !== undefined, init.auth ?? "optional");
+  if (headers.Authorization) init.onSentWithToken?.();
 
   // AbortSignal.timeout() is not reliably present in Hermes, so drive the
   // controller manually.
@@ -248,14 +253,18 @@ export const api = {
       auth: "required",
     }),
   // «Delete account» (#309). Bearer-only on the server; "required" so a token
-  // that does not arrive fails as a network error before any request, never
-  // an anonymous call into the 401. Safe to repeat after any failure — the
-  // server's two halves are idempotent.
-  deleteAccount: () =>
+  // that does not arrive fails as a network error before any request. Clerk
+  // answering "nobody is signed in" still sends it, with no Bearer, into a
+  // certain 401 that erases nothing. Safe to repeat after any failure — the
+  // server's two halves are idempotent. `onSentWithToken` tells the caller a
+  // request that COULD have erased the account went out (#398): only after
+  // one does a dead session mean the account is gone.
+  deleteAccount: (options?: { onSentWithToken?: () => void }) =>
     request<DeleteAccountResponse>("/api/v1/account/delete", {
       method: "POST",
       auth: "required",
       timeoutMs: ACCOUNT_DELETE_TIMEOUT_MS,
+      onSentWithToken: options?.onSentWithToken,
     }),
 };
 

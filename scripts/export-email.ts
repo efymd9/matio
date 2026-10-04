@@ -5,7 +5,11 @@
 // lives in lib/address-requests.ts with its tests; this file only hands in
 // the database, the console and the filesystem.
 //
-//   DATABASE_URL=postgres://… pnpm export-email <address> [--out <file>]
+//   DATABASE_URL=postgres://… pnpm -s export-email <address> [--out <file>]
+//
+// Always `-s`: without it pnpm echoes the script line — the address with it —
+// to stdout before this script prints anything. The command line itself
+// carries the address regardless: paste the output lines, never the command.
 //
 // Deliberately NOT loading .env.local: that file carries the PRODUCTION
 // connection string, and reading a person's record has to be an explicit act
