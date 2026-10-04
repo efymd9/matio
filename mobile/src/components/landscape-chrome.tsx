@@ -35,11 +35,17 @@ import type { Storyboard } from "@/watch/storyboard";
 // 4 s into playback; a double tap on the left or right third is −10 / +10 with
 // a mark on screen. Persistent pieces live outside the chrome: the buffering
 // disc, «Skip intro» (only for an episode with intro marks), the end-of-episode
-// card and the episodes panel.
+// card (over the bar while the bar shows, in its place while it is hidden)
+// and the episodes panel.
 //
-// VoiceOver: while the chrome is hidden it is not in the tree — nothing
-// invisible to focus — and while a screen reader runs the chrome simply
-// stays up. Magic Tap toggles playback, as in every player on iOS.
+// Accessibility: while the chrome is hidden it is not in the tree — nothing
+// invisible to focus — and while a screen reader runs the chrome simply stays
+// up, end card or not. For the assistive tech that is not a screen reader
+// (Switch Control, Full Keyboard Access, Voice Control) the hidden chrome
+// leaves one element behind: the picture's middle, «Show player controls».
+// No Magic Tap: React Native 0.86 on Fabric never hands the JS `onMagicTap`
+// to the native view (it reads `onAccessibilityMagicTap`), so the play/pause
+// pill — always in reach under VoiceOver — is the way.
 
 export const AUTO_HIDE_MS = 4_000;
 export const DOUBLE_TAP_MS = 300;
@@ -150,7 +156,10 @@ export function LandscapeChrome({
   const inEndWindow =
     upNext !== null && hasDuration && positionSeconds >= durationSeconds - END_CARD_SECONDS;
   const endCard = inEndWindow && !endDismissed && !panelOpen && scrub === null;
-  const controls = (visible || screenReader) && !endCard && !panelOpen;
+  // The end card does not take the bar away: a pause in the last seconds
+  // keeps its Play, a screen reader keeps everything (spec: the card stands
+  // over the bar).
+  const controls = (visible || screenReader) && !panelOpen;
   const introOn =
     intro !== null &&
     positionSeconds >= intro.start &&
@@ -169,6 +178,17 @@ export function LandscapeChrome({
     const timer = setTimeout(() => setMark(null), MARK_MS);
     return () => clearTimeout(timer);
   }, [mark]);
+
+  // The end card turns up on its own, at a moment nobody chose: VoiceOver
+  // says so (a no-op without a screen reader), once per appearance.
+  const upNextLine = upNext
+    ? `${t.upNextOverlay.label}: ${t.home.epShort(upNext.number)} · ${upNext.title}`
+    : null;
+  useEffect(() => {
+    if (endCard && upNextLine) AccessibilityInfo.announceForAccessibility(upNextLine);
+    // Only the card's arrival announces it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endCard]);
 
   const poke = () => {
     setVisible(true);
@@ -226,20 +246,28 @@ export function LandscapeChrome({
   const count = hasDuration ? Math.max(0, Math.ceil(durationSeconds - positionSeconds)) : 0;
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none" onMagicTap={onTogglePlay}>
-      {/* The picture: three tap zones, invisible to VoiceOver — a screen
-          reader keeps the chrome up, so there is nothing to reveal. */}
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      {/* The picture: three tap zones. Not accessibility elements while the
+          chrome is up (a screen reader keeps it up, so there is nothing to
+          reveal for it); once it hides, the middle one is the button that
+          brings it back — the only thing Switch Control, Full Keyboard
+          Access or Voice Control would otherwise find on the screen. */}
       <View style={styles.zones}>
-        {(["left", "centre", "right"] as const).map((zone) => (
-          <Pressable
-            key={zone}
-            testID={`tap-${zone}`}
-            accessible={false}
-            importantForAccessibility="no"
-            onPress={() => onZoneTap(zone)}
-            style={zone === "centre" ? styles.zoneCentre : styles.zoneSide}
-          />
-        ))}
+        {(["left", "centre", "right"] as const).map((zone) => {
+          const reveal = zone === "centre" && !controls;
+          return (
+            <Pressable
+              key={zone}
+              testID={`tap-${zone}`}
+              accessible={reveal}
+              importantForAccessibility={reveal ? "yes" : "no"}
+              accessibilityRole={reveal ? "button" : undefined}
+              accessibilityLabel={reveal ? t.app.player.showControls : undefined}
+              onPress={() => onZoneTap(zone)}
+              style={zone === "centre" ? styles.zoneCentre : styles.zoneSide}
+            />
+          );
+        })}
       </View>
 
       {mark ? (
@@ -455,7 +483,11 @@ export function LandscapeChrome({
             onDismissEnd();
             poke();
           }}
-          style={{ right: insets.right + SIDE, bottom: insets.bottom + BAR_BOTTOM }}
+          // Over the bar while it shows; in its place once it hides.
+          style={{
+            right: insets.right + SIDE,
+            bottom: insets.bottom + (controls ? ABOVE_BAR : BAR_BOTTOM),
+          }}
         />
       ) : null}
 

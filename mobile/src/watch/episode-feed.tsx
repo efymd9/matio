@@ -310,12 +310,17 @@ export function EpisodeFeed({
   // The landscape chrome's own ways to another episode (#375): Next and the
   // end card's Watch now (whatever the autoplay setting — the viewer asked),
   // and a row of the episodes panel. A locked target's page is its answer,
-  // as after an auto-advance.
+  // as after an auto-advance. The arm goes back to the target page itself —
+  // goTo only ever raises it, and after a jump BACK that would hand the new
+  // neighbour a token (and a warming player, and a funnel mint) at once
+  // instead of PRELOAD_LEAD_SECONDS before the end.
   const onSelectEpisode = useCallback(
     (index: number) => {
-      if (index !== currentRef.current) goTo(index, false);
+      if (index === currentRef.current) return;
+      goTo(index, false);
+      if (!vertical) setArmedIndex(index);
     },
-    [goTo],
+    [goTo, vertical],
   );
 
   // FlatList requires this pair to be referentially stable for the list's
@@ -571,6 +576,8 @@ function FeedPage({
   const loadingRef = useRef(false);
   const nearEndFiredRef = useRef(false);
   const initialSeekDoneRef = useRef(false);
+  // A seek of the viewer's made before the first load (seekTo, below).
+  const firstLoadSeekRef = useRef<number | null>(null);
   // The player is in a picture-in-picture window (its own on leave, or the
   // landscape chrome's button).
   const pipActiveRef = useRef(false);
@@ -778,6 +785,13 @@ function FeedPage({
       }
       if (initialSeekDoneRef.current) return;
       initialSeekDoneRef.current = true;
+      // The viewer seeked before the stream had loaded (#375): their target,
+      // not the resume.
+      const viewerTarget = firstLoadSeekRef.current;
+      if (viewerTarget !== null) {
+        if (viewerTarget > 0) videoRef.current?.seek(Math.min(viewerTarget, Math.max(0, e.duration - 1)));
+        return;
+      }
       if (resumeSeconds > 0 && resumeSeconds < e.duration - RESUME_TAIL_SECONDS) {
         videoRef.current?.seek(resumeSeconds);
       }
@@ -912,10 +926,17 @@ function FeedPage({
   // intro). The playhead moves on screen at once — a second ±10 before the
   // player's next progress sample counts from the new place, not the old.
   // A seek off the end leaves the ended state: the player is no longer there.
+  // A seek while a source is (re)loading is the viewer's word over onLoad's:
+  // the native player applies a pending seek BEFORE it reports the load, so
+  // onLoad's own restore — the playhead captured before a token refresh or a
+  // retry, the deep link's resume — would land last and undo it. The restore
+  // takes the viewer's target instead, and so does the first load's resume.
   const seekTo = useCallback((seconds: number) => {
     endedRef.current = false;
     positionRef.current = seconds;
     setPosition(seconds);
+    if (resumeAfterRefreshRef.current !== null) resumeAfterRefreshRef.current = seconds;
+    if (!initialSeekDoneRef.current) firstLoadSeekRef.current = seconds;
     videoRef.current?.seek(seconds);
   }, []);
 

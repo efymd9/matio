@@ -1639,6 +1639,33 @@ describe("EpisodeFeed — the landscape page's glass chrome, board E «Стек�
     expect(video("ep1").seek.mock.calls).toEqual([[110], [120], [110]]);
   });
 
+  // The native player applies a pending seek before it reports the load, so
+  // onLoad's own restore would land last (#408 review).
+  it("a seek while the hourly refresh reloads the source is the viewer's — onLoad does not drag it back", async () => {
+    vi.useFakeTimers();
+    countingGrants(undefined, 61); // refresh one second in
+    await renderFeed(makeShow("horizontal", ["free"]));
+    playAt("ep1", 300);
+
+    await advance(1_000);
+    const reloaded = video("ep1", 2);
+    tap(byLabel("Forward 10 seconds"));
+    act(() => reloaded.props.onLoad?.({ duration: 600 }));
+
+    expect(reloaded.seek).not.toHaveBeenCalledWith(300);
+    expect(reloaded.seek).toHaveBeenLastCalledWith(310);
+  });
+
+  it("a seek before the first load beats the deep link's resume", async () => {
+    await renderFeed(makeShow("horizontal", ["free"]), { resumeSeconds: 300 });
+
+    tap(byLabel("Forward 10 seconds"));
+    act(() => video("ep1").props.onLoad?.({ duration: 600 }));
+
+    expect(video("ep1").seek).not.toHaveBeenCalledWith(300);
+    expect(video("ep1").seek).toHaveBeenLastCalledWith(10);
+  });
+
   it("the picture-in-picture button opens the window; PiP on leave stays with the page in view", async () => {
     await renderFeed(makeShow("horizontal", ["free"]));
 
@@ -1766,6 +1793,25 @@ describe("EpisodeFeed — the landscape page's glass chrome, board E «Стек�
       act(() => video("ep1").props.onLoad?.({ duration: 600 }));
       expect(video("ep1").seek).toHaveBeenLastCalledWith(200);
       expect(video("ep1").props.paused).toBe(false);
+    });
+
+    it("a jump back through the panel keeps the 45 s rule: the new neighbour asks for its token only near the end", async () => {
+      await renderFeed(makeShow("horizontal", ["free", "free", "free", "free"]));
+
+      tap(byLabel("Episodes"));
+      tap(byLabel("3. Episode 3, 10 min"));
+      await flush();
+      tap(byLabel("Episodes"));
+      tap(byLabel("1. Episode 1, 10 min"));
+      await flush();
+
+      // Episode 1 again (a fresh page) — and no early ask for episode 2.
+      expect(tokens.calls).toEqual(["ep1", "ep3", "ep1"]);
+      expect(playerEl("ep2")).toBeNull();
+
+      playAt("ep1", 560);
+      await flush();
+      expect(tokens.calls).toEqual(["ep1", "ep3", "ep1", "ep2"]);
     });
 
     it("a locked episode carries its lock in the panel, and choosing it lands on its answer", async () => {

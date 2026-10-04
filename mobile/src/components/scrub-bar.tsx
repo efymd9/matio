@@ -14,6 +14,7 @@ import { tileAt, type Storyboard } from "@/watch/storyboard";
 export const SCRUB_STEP_SECONDS = 10;
 const KNOB = 14;
 const KNOB_SCRUBBING = 1.35;
+const ignoreActivate = () => {};
 
 // "M:SS", or "H:MM:SS" past the hour — the bar's read-outs.
 export function formatTime(total: number): string {
@@ -100,6 +101,12 @@ export function ScrubBar({
         if (e.nativeEvent.actionName === "increment") onStep(SCRUB_STEP_SECONDS);
         if (e.nativeEvent.actionName === "decrement") onStep(-SCRUB_STEP_SECONDS);
       }}
+      // A VoiceOver double tap on the bar does nothing. Without a handler
+      // iOS answers it with a synthetic touch at the element's centre, and
+      // the responder below would take that for a drag to the middle of the
+      // episode; with one, accessibilityActivate is handled and no touch is
+      // sent.
+      onAccessibilityTap={ignoreActivate}
       {...pan.panHandlers}
     >
       {/* Nothing inside takes a touch: the bar itself is the target, so a

@@ -144,6 +144,9 @@ export const appEs = {
     positionValue: (elapsed: string, total: string) => `${elapsed} de ${total}`,
     // Under the ±10 mark a double tap leaves on screen.
     tenSeconds: "10 s",
+    // Spoken only: the picture's middle once the chrome has hidden itself —
+    // what Switch Control / Full Keyboard Access / Voice Control can reach.
+    showControls: "Mostrar controles del reproductor",
   },
 };
 
@@ -246,6 +249,7 @@ export const appEn: AppDict = {
     position: "Playback position",
     positionValue: (elapsed: string, total: string) => `${elapsed} of ${total}`,
     tenSeconds: "10 sec",
+    showControls: "Show player controls",
   },
 };
 

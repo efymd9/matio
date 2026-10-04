@@ -18,11 +18,16 @@ vi.hoisted(() => {
 
 const h = vi.hoisted(() => ({
   screenReader: false,
+  // The chrome's screenReaderChanged listener, for a case that turns
+  // VoiceOver off mid-episode; and what it announced.
+  screenReaderListener: null as null | ((enabled: boolean) => void),
+  announced: [] as string[],
   // Views that carry accessibility actions — react-native-web drops the
-  // prop, so the wrapper below records it for the adjustable scrub bar.
+  // props, so the wrapper below records them for the adjustable scrub bar.
   actionable: [] as Array<{
     label?: string;
     onAccessibilityAction: (e: { nativeEvent: { actionName: string } }) => void;
+    onAccessibilityTap?: () => void;
   }>,
   images: [] as Array<{ source: { uri: string }; style: Record<string, number | string> }>,
 }));
@@ -35,6 +40,7 @@ vi.mock("react-native", async (importOriginal) => {
       h.actionable.push({
         label: props.accessibilityLabel as string | undefined,
         onAccessibilityAction: props.onAccessibilityAction as never,
+        onAccessibilityTap: props.onAccessibilityTap as never,
       });
     }
     return createElement(rn.View as never, { ...props, ref });
@@ -45,7 +51,13 @@ vi.mock("react-native", async (importOriginal) => {
     AccessibilityInfo: {
       ...rn.AccessibilityInfo,
       isScreenReaderEnabled: async () => h.screenReader,
-      addEventListener: () => ({ remove: () => undefined }),
+      addEventListener: (_event: string, listener: (enabled: boolean) => void) => {
+        h.screenReaderListener = listener;
+        return { remove: () => undefined };
+      },
+      announceForAccessibility: (message: string) => {
+        h.announced.push(message);
+      },
     },
   };
 });
@@ -210,6 +222,8 @@ function leaf(label: string) {
 
 beforeEach(() => {
   h.screenReader = false;
+  h.screenReaderListener = null;
+  h.announced.length = 0;
   h.actionable.length = 0;
   h.images.length = 0;
   for (const fn of Object.values(handlers)) fn.mockClear();
@@ -412,17 +426,41 @@ describe("LandscapeChrome — showing and hiding", () => {
     expect(handlers.onTogglePlay).toHaveBeenCalledTimes(1);
   });
 
-  it("stays up while a screen reader runs — there is nothing to reveal", async () => {
+  it("stays up while a screen reader runs — no auto-hide, and a tap cannot hide it", async () => {
     vi.useFakeTimers();
     h.screenReader = true;
     await render();
 
     advance(AUTO_HIDE_MS * 3);
-    click(byTestId("tap-centre"));
-
     expect(controlsShown()).toBe(true);
-    // The tap zones themselves are not VoiceOver elements.
+    click(byTestId("tap-centre"));
+    expect(controlsShown()).toBe(true);
+    // Nothing to reveal, so the picture is no VoiceOver element.
     expect(byTestId("tap-centre")?.getAttribute("role")).toBeNull();
+
+    // VoiceOver turned off mid-episode: the auto-hide is back.
+    act(() => h.screenReaderListener?.(false));
+    advance(AUTO_HIDE_MS);
+    expect(controlsShown()).toBe(false);
+  });
+
+  it("once hidden, it leaves one element behind — «Show player controls» — for Switch Control / Full Keyboard Access / Voice Control", async () => {
+    await render();
+    // While the chrome is up the picture is no accessibility element.
+    expect(byTestId("tap-centre")?.getAttribute("role")).toBeNull();
+    expect(byTestId("tap-centre")?.getAttribute("aria-label")).toBeNull();
+
+    click(byTestId("tap-centre"));
+    expect(controlsShown()).toBe(false);
+    const reveal = byLabel("Show player controls");
+    expect(reveal).toBe(byTestId("tap-centre"));
+    expect(reveal?.getAttribute("role")).toBe("button");
+    // The sides stay out of reach: one button, not three.
+    expect(byTestId("tap-left")?.getAttribute("role")).toBeNull();
+
+    click(reveal);
+    expect(controlsShown()).toBe(true);
+    expect(byLabel("Show player controls")).toBeNull();
   });
 
   it("a stall shows the spinner disc, the pill spins too, and the chrome waits", async () => {
@@ -534,6 +572,17 @@ describe("LandscapeChrome — play, pause and seek", () => {
 
     expect(handlers.onSeek.mock.calls).toEqual([[382], [362]]);
   });
+
+  it("a VoiceOver double tap on the bar is handled as nothing — no synthetic touch, no jump to the middle", async () => {
+    await render();
+    const bar = h.actionable.findLast((v) => v.label === "Playback position");
+
+    // iOS sends a touch at the element's centre only when activation is NOT
+    // handled; a handler makes accessibilityActivate answer YES.
+    expect(typeof bar?.onAccessibilityTap).toBe("function");
+    act(() => bar?.onAccessibilityTap?.());
+    expect(handlers.onSeek).not.toHaveBeenCalled();
+  });
 });
 
 describe("LandscapeChrome — «Skip intro»", () => {
@@ -553,7 +602,8 @@ describe("LandscapeChrome — «Skip intro»", () => {
 describe("LandscapeChrome — the end of an episode", () => {
   const NEAR_END = 960 - 9;
 
-  it("with autoplay: the next episode, a ring and the count to the advance — over a quiet picture", async () => {
+  it("with autoplay: the next episode, a ring and the count to the advance — over the bar, which stays", async () => {
+    vi.useFakeTimers();
     await render({ positionSeconds: NEAR_END });
 
     expect(byTestId("end-card")).not.toBeNull();
@@ -562,12 +612,43 @@ describe("LandscapeChrome — the end of an episode", () => {
     expect(text()).toContain("13 min");
     expect(text()).toContain("Watch now · 9");
     expect(byTestId("countdown-ring")).not.toBeNull();
+    // Over the bar (21 + 8 + 64 + 12) while the bar shows…
+    expect(controlsShown()).toBe(true);
+    expect(getComputedStyle(byTestId("end-card")!).bottom).toBe("105px");
+    // …and in its place once the bar has hidden itself.
+    advance(AUTO_HIDE_MS);
     expect(controlsShown()).toBe(false);
+    expect(getComputedStyle(byTestId("end-card")!).bottom).toBe("29px");
 
     click(leaf("Watch now · 9"));
     click(leaf("Cancel"));
     expect(handlers.onNext).toHaveBeenCalledTimes(1);
     expect(handlers.onDismissEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("VoiceOver hears the card arrive, once — and keeps «‹», Play/Pause and the bar while it shows", async () => {
+    h.screenReader = true;
+    await render({ positionSeconds: 900 });
+    expect(h.announced).toEqual([]);
+
+    await render({ positionSeconds: NEAR_END });
+    await render({ positionSeconds: NEAR_END + 1 });
+
+    expect(h.announced).toEqual(["Up next: Ep. 3 · Sealed in Blood"]);
+    expect(byTestId("end-card")).not.toBeNull();
+    for (const label of ["Back to show", "Play/Pause", "Playback position"]) {
+      expect(byLabel(label), label).not.toBeNull();
+    }
+  });
+
+  it("a pause inside the card's window keeps the way to play on and to leave", async () => {
+    await render({ positionSeconds: NEAR_END, paused: true });
+
+    expect(byTestId("end-card")).not.toBeNull();
+    click(byLabel("Play"));
+    expect(handlers.onTogglePlay).toHaveBeenCalledTimes(1);
+    click(byLabel("Back to show"));
+    expect(handlers.onBack).toHaveBeenCalledTimes(1);
   });
 
   it("autoplay off: the card waits — no ring, no count", async () => {
