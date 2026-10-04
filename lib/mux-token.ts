@@ -47,6 +47,18 @@ export function signMuxPlaybackToken(
   return signMuxToken(playbackId, ttlSeconds, "v");
 }
 
+// Signs a Mux storyboard JWT — audience 's'. The app's landscape player
+// (#375) reads `image.mux.com/<id>/storyboard.vtt?token=…` for the frame over
+// its scrub bar. Minted next to the playback token with the SAME ttl, so the
+// two expire together and a refresh renews both. Images only — it cannot
+// play video.
+export function signMuxStoryboardToken(
+  playbackId: string,
+  ttlSeconds: number,
+): string {
+  return signMuxToken(playbackId, ttlSeconds, "s");
+}
+
 // Signs a Mux thumbnail JWT — same key + algorithm, audience 't'. Used to
 // build authenticated image.mux.com URLs for episodes whose playback policy
 // is "signed". Public-policy assets don't need a token at all.

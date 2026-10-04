@@ -188,12 +188,15 @@ The downside of the keyed-remount pattern is a brief Loading splash on every man
 
 ## Mux thumbnail signing
 
-`lib/mux-token.ts` exposes both signers:
+`lib/mux-token.ts` exposes three signers:
 
 ```ts
 signMuxPlaybackToken(playbackId, ttl)   // aud='v' (video)
 signMuxThumbnailToken(playbackId, ttl)  // aud='t' (image)
+signMuxStoryboardToken(playbackId, ttl) // aud='s' (storyboard — the app's scrub preview, #375)
 ```
+
+The storyboard token is minted only by `/api/v1/playback-token`, next to the playback token and with its TTL (`storyboardToken` in the response); the app reads `https://image.mux.com/<id>/storyboard.vtt?token=<jwt>` and crops the tile out of the sprite (`mobile/src/watch/storyboard.ts`). The web token route does not send one.
 
 Plus a `muxThumbnailUrl(playbackId, policy, opts)` helper that builds `https://image.mux.com/<id>/thumbnail.jpg?width=…&height=…&fit_mode=smartcrop[&token=<jwt>]`. Token is included only when the asset's `mux_playback_policy === "signed"`. TTL is 1h — long enough for typical sessions, short enough to avoid leaking long-lived URLs.
 

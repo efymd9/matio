@@ -12,11 +12,11 @@ import Video, {
   type OnProgressData,
   type VideoRef,
 } from "react-native-video";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, ApiError, muxStreamUrl } from "@/api/client";
 import { useConfig } from "@/api/config-context";
 import { errorHint } from "@/api/error-hint";
-import { GlassBackButton } from "@/components/glass";
+import type { PanelEpisode } from "@/components/episodes-panel";
+import { LandscapeChrome, END_CARD_SECONDS } from "@/components/landscape-chrome";
 import { SignupWall } from "@/components/signup-wall";
 import { Artwork, ErrorState, Loading } from "@/components/ui";
 import { VerticalChrome } from "@/components/vertical-chrome";
@@ -25,12 +25,13 @@ import { autoplayNextEnabled, loadAutoplayNext } from "@/prefs/autoplay";
 import {
   isEpisodeLockedForApp,
   type EpisodeSummary,
+  type PlaybackDenialReason,
   type PlaybackMode,
   type PlaybackTokenResponse,
   type ShowDetail,
 } from "@/shared/api-types";
 import { optimizedImageUrl } from "@/shared/image-url";
-import { SCREEN_PAD, space } from "@/theme";
+import { useStoryboard } from "./storyboard";
 import { useProgressSaver } from "./use-progress-saver";
 import { useSegmentTracker } from "./use-segment-tracker";
 
@@ -53,7 +54,13 @@ import { useSegmentTracker } from "./use-segment-tracker";
 //                any moment
 //   horizontal — scrolling off; the next page warms only once the current
 //                one is PRELOAD_LEAD_SECONDS from its end (the web's lead),
-//                and `ended` jumps to it without animation
+//                and `ended` jumps to it without animation — as do the
+//                chrome's Next, the end card's Watch now and a row of its
+//                episodes panel (#375), backwards included
+//
+// Both orientations draw their own chrome over a <Video controls={false}>:
+// the vertical one (VerticalChrome), and since #375 the landscape one —
+// LandscapeChrome, board E «Стекло» — instead of the native transport.
 //
 // The gate is the same one the show page draws its locks from
 // (isEpisodeLockedForApp): an episode that asks for an account has the
@@ -110,39 +117,11 @@ const PREVIEW_END_SLACK_MS = 5_000;
 // The preview's end — the answer the token route gives once it has run out.
 const previewEnded = () => new ApiError("forbidden", "", 403, "subscribe_required");
 
-// Where a landscape page's «‹» sits (#359). The page is locked to landscape
-// with the status bar hidden (#252), and the native transport — an
-// AVPlayerViewController on iOS — lays its own top row out inside the safe
-// area: fullscreen, picture-in-picture and AirPlay on the LEADING side,
-// volume on the trailing one. #252 put the «‹» at the leading edge of that
-// safe area, on the assumption the native row sat on the trailing side, so
-// the disc covered fullscreen and PiP, and the title next to it (a box as
-// wide as the screen) took the taps meant for the rest of the row.
-// react-native-video 6.19 on iOS neither reports when that row shows nor
-// lets one of its buttons be hidden, and the library is not patched here
-// (registry) — so the «‹» leaves the safe area. On a Face ID iPhone the
-// leading inset (44–62pt) is a black strip beside a 16:9 picture: the 40pt
-// disc is centred in it, LANDSCAPE_BACK_TOP down — past the rounded corner,
-// above the notch / Dynamic Island, which sit mid-height — where no native
-// button is drawn. Its 8pt hitSlop stays inside the strip at a 59pt inset
-// and reaches at most 6pt past it at 44pt, short of AVKit's buttons, which
-// keep their own margin inside the safe area. A phone with no such strip
-// (iPhone SE: inset 0) gets the «‹» below the native row instead.
-const BACK_DISC = 40; // GlassBackButton's disc
-const PILLARBOX_MIN = 44; // the narrowest strip the disc fits with room to spare
-const LANDSCAPE_BACK_TOP = space(11);
-const LANDSCAPE_BACK_BELOW_ROW = space(16);
-
-function landscapeBackPosition(insets: { top: number; left: number }) {
-  if (insets.left >= PILLARBOX_MIN) {
-    return { top: LANDSCAPE_BACK_TOP, left: Math.max(0, (insets.left - BACK_DISC) / 2) };
-  }
-  return { top: insets.top + LANDSCAPE_BACK_BELOW_ROW, left: SCREEN_PAD };
-}
-
 type Playback = {
   playbackId: string;
   token: string;
+  // The scrub preview's frames (#375); null from a server before it.
+  storyboardToken: string | null;
   expiresAt: number;
   mode: PlaybackMode;
 };
@@ -151,6 +130,7 @@ function toPlayback(res: PlaybackTokenResponse): Playback {
   return {
     playbackId: res.playbackId,
     token: res.token,
+    storyboardToken: res.storyboardToken ?? null,
     expiresAt: Date.now() + res.expiresIn * 1000,
     mode: res.mode,
   };
@@ -255,6 +235,19 @@ export function EpisodeFeed({
     [episodes, onCurrentChange],
   );
 
+  // How much of each episode was watched in this feed — the landscape
+  // episodes panel's progress lines (#375). The furthest point, not the
+  // playhead: a rewatch from the start does not empty the line. This
+  // session's only — /v1 has no per-show progress read (registry).
+  const watchedRef = useRef(new Map<string, number>());
+  const onWatched = useCallback((episodeId: string, fraction: number) => {
+    watchedRef.current.set(episodeId, Math.max(watchedRef.current.get(episodeId) ?? 0, fraction));
+  }, []);
+  const watchedFraction = useCallback(
+    (episodeId: string) => watchedRef.current.get(episodeId) ?? 0,
+    [],
+  );
+
   // Subscription state is not exposed to the app (registry), so a signed-in
   // viewer might be a subscriber: for them a subscribers-only episode is not
   // locked here, the token route decides (#316). A subscriber gets a token
@@ -300,8 +293,8 @@ export function EpisodeFeed({
       if (index !== currentRef.current) return false;
       if (index + 1 >= episodes.length) return false;
       // Settings → Playback → autoplay off: a landscape show rests on its
-      // ended page (the native transport's own end state) instead of
-      // rolling into the next episode. A vertical show is a feed — the
+      // ended page — the end card waiting with Watch now (#375) — instead
+      // of rolling into the next episode. A vertical show is a feed — the
       // swipe is the viewer's choice and `ended` advances as before.
       if (!vertical && !autoplayNextEnabled()) return false;
       goTo(index + 1, vertical);
@@ -313,6 +306,22 @@ export function EpisodeFeed({
   const onNearEnd = useCallback((index: number) => {
     setArmedIndex((a) => Math.max(a, index + 1));
   }, []);
+
+  // The landscape chrome's own ways to another episode (#375): Next and the
+  // end card's Watch now (whatever the autoplay setting — the viewer asked),
+  // and a row of the episodes panel. A locked target's page is its answer,
+  // as after an auto-advance. The arm goes back to the target page itself —
+  // goTo only ever raises it, and after a jump BACK that would hand the new
+  // neighbour a token (and a warming player, and a funnel mint) at once
+  // instead of PRELOAD_LEAD_SECONDS before the end.
+  const onSelectEpisode = useCallback(
+    (index: number) => {
+      if (index === currentRef.current) return;
+      goTo(index, false);
+      if (!vertical) setArmedIndex(index);
+    },
+    [goTo, vertical],
+  );
 
   // FlatList requires this pair to be referentially stable for the list's
   // lifetime; `vertical` is fixed per show, so capturing it here is safe.
@@ -366,8 +375,9 @@ export function EpisodeFeed({
       const locked = lockedAt(index);
       const isCurrent = index === current;
       // The pool rule: players live on the current page and its neighbours
-      // only. A horizontal show never returns to a previous page, so it
-      // keeps just current + next.
+      // only. A horizontal show keeps just current + next: a page it goes
+      // back to (the episodes panel) is mounted afresh, at its remembered
+      // playhead.
       const inPool = vertical
         ? Math.abs(index - current) <= 1
         : index >= current && index <= current + 1;
@@ -403,16 +413,20 @@ export function EpisodeFeed({
             signedIn={signedIn}
             resumeSeconds={seedFor(index)}
             onPlayhead={onPlayhead}
+            onWatched={onWatched}
+            watchedFraction={watchedFraction}
+            lockedAt={lockedAt}
             onEnded={onEnded}
             onNearEnd={onNearEnd}
+            onSelectEpisode={onSelectEpisode}
             onBack={onBack}
             onSignIn={onSignIn}
           />
         );
       }
       // Only the page in view speaks to VoiceOver / TalkBack. A neighbour
-      // carries the same controls (Play/Pause, Back, Mute — or the native
-      // transport and the title in landscape) a swipe of focus away:
+      // carries the same controls (Play/Pause, Back, Mute — or the glass
+      // chrome in landscape) a swipe of focus away:
       // focusing one scrolled the paged list and switched the episode behind
       // the viewer's back (#302 item 4). `aria-hidden` is React Native's own
       // spelling of accessibilityElementsHidden (iOS) +
@@ -433,12 +447,15 @@ export function EpisodeFeed({
       onEnded,
       onNearEnd,
       onPlayhead,
+      onSelectEpisode,
       onSignIn,
+      onWatched,
       seedFor,
       show,
       signedIn,
       t,
       vertical,
+      watchedFraction,
     ],
   );
 
@@ -494,8 +511,12 @@ function FeedPage({
   signedIn,
   resumeSeconds,
   onPlayhead,
+  onWatched,
+  watchedFraction,
+  lockedAt,
   onEnded,
   onNearEnd,
+  onSelectEpisode,
   onBack,
   onSignIn,
 }: {
@@ -514,13 +535,19 @@ function FeedPage({
   // Every playhead sample, and 0 at the end: the feed remembers it for a
   // page re-created later.
   onPlayhead: (episodeId: string, seconds: number) => void;
+  // How far into the episode the viewer got (0–1), and the same for any
+  // episode — the landscape episodes panel's progress lines.
+  onWatched: (episodeId: string, fraction: number) => void;
+  watchedFraction: (episodeId: string) => number;
+  // The feed's lock rule, for the panel's lock icons.
+  lockedAt: (index: number) => false | PlaybackDenialReason;
   onEnded: (index: number) => boolean;
   onNearEnd: (index: number) => void;
+  onSelectEpisode: (index: number) => void;
   onBack: () => void;
   onSignIn: () => void;
 }) {
   const t = useT();
-  const insets = useSafeAreaInsets();
   const config = useConfig();
   const videoRef = useRef<VideoRef>(null);
 
@@ -530,11 +557,16 @@ function FeedPage({
   const [fetchNonce, setFetchNonce] = useState(0);
   const [authRetried, setAuthRetried] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
-  // Read by the vertical chrome only; the native transport draws its own —
-  // its spinner included, which is why only a vertical page tracks this.
+  // Both chromes are ours (the native transport is off on every page), so
+  // both read the stall, the playhead and the length from here.
   const [buffering, setBuffering] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
+  // The landscape end card's Cancel (#375): this ending does not advance.
+  // Cleared once the playhead leaves the card's window again.
+  const [endDismissed, setEndDismissed] = useState(false);
+  const endDismissedRef = useRef(false);
+  endDismissedRef.current = endDismissed;
 
   const positionRef = useRef(0);
   const durationRef = useRef(0);
@@ -544,8 +576,10 @@ function FeedPage({
   const loadingRef = useRef(false);
   const nearEndFiredRef = useRef(false);
   const initialSeekDoneRef = useRef(false);
+  // A seek of the viewer's made before the first load (seekTo, below).
+  const firstLoadSeekRef = useRef<number | null>(null);
   // The player is in a picture-in-picture window (its own on leave, or the
-  // native transport's button).
+  // landscape chrome's button).
   const pipActiveRef = useRef(false);
   // Playhead to restore after a token refresh — or a retry — reloads the
   // source.
@@ -678,8 +712,8 @@ function FeedPage({
             // the episode, then the SHOW — a bare «Capítulo 3» names nothing
             // (#315). Which field lands where (react-native-video 6.19):
             // iOS now-playing takes title + artist only
-            // (NowPlayingInfoCenterManager.swift); the landscape native
-            // transport shows title + subtitle; Android 13+ media controls
+            // (NowPlayingInfoCenterManager.swift); a native transport (off
+            // on every page since #375) shows title + subtitle; Android 13+ media controls
             // read title + artist from the session; Android ≤12's own
             // notification is title + DESCRIPTION (VideoPlaybackService.kt)
             // — so the show goes in all three, and no brand in any of them.
@@ -695,6 +729,14 @@ function FeedPage({
           }
         : null,
     [playback, episode.title, show.title, show.posterImageUrl],
+  );
+
+  // The landscape scrub preview's frames (#375) — fetched for the page in
+  // view only, again with every refreshed token.
+  const storyboard = useStoryboard(
+    playback?.playbackId ?? null,
+    playback?.storyboardToken ?? null,
+    !vertical && isCurrent,
   );
 
   // A "not playing" report waiting for its explanation (see
@@ -716,10 +758,10 @@ function FeedPage({
   const onBuffer = useCallback(
     (e: { isBuffering: boolean }) => {
       bufferingRef.current = e.isBuffering;
-      if (vertical) setBuffering(e.isBuffering);
+      setBuffering(e.isBuffering);
       if (e.isBuffering) cancelPendingPause();
     },
-    [cancelPendingPause, vertical],
+    [cancelPendingPause],
   );
 
   const onSeek = useCallback(() => {
@@ -743,6 +785,13 @@ function FeedPage({
       }
       if (initialSeekDoneRef.current) return;
       initialSeekDoneRef.current = true;
+      // The viewer seeked before the stream had loaded (#375): their target,
+      // not the resume.
+      const viewerTarget = firstLoadSeekRef.current;
+      if (viewerTarget !== null) {
+        if (viewerTarget > 0) videoRef.current?.seek(Math.min(viewerTarget, Math.max(0, e.duration - 1)));
+        return;
+      }
       if (resumeSeconds > 0 && resumeSeconds < e.duration - RESUME_TAIL_SECONDS) {
         videoRef.current?.seek(resumeSeconds);
       }
@@ -756,8 +805,15 @@ function FeedPage({
       onPlayhead(episode.id, e.currentTime);
       saver.onProgress(e.currentTime);
       tracker.onProgress(e.currentTime);
-      if (vertical) setPosition(e.currentTime);
+      setPosition(e.currentTime);
       const dur = durationRef.current;
+      if (dur > 0) {
+        onWatched(episode.id, Math.min(1, e.currentTime / dur));
+        // Back out of the end card's window: its Cancel was for that ending.
+        if (endDismissedRef.current && dur - e.currentTime > END_CARD_SECONDS) {
+          setEndDismissed(false);
+        }
+      }
       if (
         !nearEndFiredRef.current &&
         dur > 0 &&
@@ -767,23 +823,23 @@ function FeedPage({
         onNearEnd(index);
       }
     },
-    [episode.id, index, onNearEnd, onPlayhead, saver, tracker, vertical],
+    [episode.id, index, onNearEnd, onPlayhead, onWatched, saver, tracker],
   );
 
   // Hand the end to the feed: it advances, or — the last episode, autoplay
-  // off — the page rests. Our own chrome then shows the play glyph again;
-  // the native transport handles its own end state. A page the feed
-  // advanced past is left un-paused — it restarts when it is swiped back to
-  // (below).
+  // off, the landscape end card's Cancel — the page rests, and its chrome
+  // shows the play glyph again. A page the feed advanced past is left
+  // un-paused — it restarts when it is swiped back to (below).
   const settleEnd = useCallback(() => {
-    const advanced = onEnded(index);
-    setUserPaused(!advanced && vertical);
-  }, [index, onEnded, vertical]);
+    const advanced = !endDismissedRef.current && onEnded(index);
+    setUserPaused(!advanced);
+  }, [index, onEnded]);
 
   const onEnd = useCallback(() => {
     endedRef.current = true;
     cancelPendingPause();
     onPlayhead(episode.id, 0);
+    onWatched(episode.id, 1);
     saver.onEnded();
     tracker.onEnded();
     // In a picture-in-picture window the end waits for the window to close
@@ -793,7 +849,7 @@ function FeedPage({
     // sound only, behind another app (#302 item 2).
     if (pipActiveRef.current) return;
     settleEnd();
-  }, [cancelPendingPause, episode.id, onPlayhead, saver, settleEnd, tracker]);
+  }, [cancelPendingPause, episode.id, onPlayhead, onWatched, saver, settleEnd, tracker]);
 
   const onPictureInPictureStatusChanged = useCallback(
     (e: { isActive: boolean }) => {
@@ -805,12 +861,10 @@ function FeedPage({
   );
 
   // The player pauses on its own — a lock-screen or Control Center pause, a
-  // call — without the `paused` prop knowing. On a VERTICAL page, where our
-  // chrome owns play/pause, the current page follows the player's report,
-  // so the chrome shows the truth and the first tap plays rather than
-  // "pausing" what already is. (A landscape page keeps the native transport,
-  // which shows its own state; feeding its scrub-pauses back into `paused`
-  // would fight it.)
+  // call — without the `paused` prop knowing. Our chrome owns play/pause on
+  // every page (the native transport is off in landscape too since #375), so
+  // the current page follows the player's report: the chrome shows the truth
+  // and the first tap plays rather than "pausing" what already is.
   //
   // "Playing" is taken at once. "Not playing" is NOT a pause by itself: a
   // stall, a source reload (the token refresh) and a seek all report it
@@ -823,7 +877,7 @@ function FeedPage({
   // unexplained one becomes the viewer's pause.
   const onPlaybackStateChanged = useCallback(
     (e: { isPlaying: boolean; isSeeking: boolean }) => {
-      if (!vertical || !isCurrent) return;
+      if (!isCurrent) return;
       cancelPendingPause();
       if (e.isPlaying) {
         setUserPaused(false);
@@ -836,15 +890,15 @@ function FeedPage({
         setUserPaused(true);
       }, PAUSE_REPORT_SETTLE_MS);
     },
-    [cancelPendingPause, isCurrent, vertical],
+    [cancelPendingPause, isCurrent],
   );
 
-  // AirPods out / headphones unplugged on a vertical page: pause, never go on
-  // out loud through the speaker (iOS pauses by itself; Android only reports
-  // it). An explicit signal, so no settle wait.
+  // AirPods out / headphones unplugged: pause, never go on out loud through
+  // the speaker (iOS pauses by itself; Android only reports it). An explicit
+  // signal, so no settle wait.
   const onAudioBecomingNoisy = useCallback(() => {
-    if (vertical && isCurrent) setUserPaused(true);
-  }, [isCurrent, vertical]);
+    if (isCurrent) setUserPaused(true);
+  }, [isCurrent]);
 
   // Swiping back to a page that already ended: start it over, as a tap on its
   // play glyph would — not a frozen last frame with no glyph on it.
@@ -868,6 +922,30 @@ function FeedPage({
     setUserPaused((p) => !p);
   }, []);
 
+  // The landscape chrome's seeks (±10, a double tap, the scrub bar, Skip
+  // intro). The playhead moves on screen at once — a second ±10 before the
+  // player's next progress sample counts from the new place, not the old.
+  // A seek off the end leaves the ended state: the player is no longer there.
+  // A seek while a source is (re)loading is the viewer's word over onLoad's:
+  // the native player applies a pending seek BEFORE it reports the load, so
+  // onLoad's own restore — the playhead captured before a token refresh or a
+  // retry, the deep link's resume — would land last and undo it. The restore
+  // takes the viewer's target instead, and so does the first load's resume.
+  const seekTo = useCallback((seconds: number) => {
+    endedRef.current = false;
+    positionRef.current = seconds;
+    setPosition(seconds);
+    if (resumeAfterRefreshRef.current !== null) resumeAfterRefreshRef.current = seconds;
+    if (!initialSeekDoneRef.current) firstLoadSeekRef.current = seconds;
+    videoRef.current?.seek(seconds);
+  }, []);
+
+  const enterPip = useCallback(() => {
+    videoRef.current?.enterPictureInPicture();
+  }, []);
+
+  const dismissEnd = useCallback(() => setEndDismissed(true), []);
+
   // A player that fails is «Playback unavailable» — except one on a preview
   // token at the preview's end (PREVIEW_END_SLACK_MS): Mux refused the token
   // a moment before the timer above fired, and the honest answer is the
@@ -882,8 +960,8 @@ function FeedPage({
   }, [playback]);
 
   // --- end states, mirroring the web player's three distinct overlays ----
-  // Every one carries «Back»: it replaces the whole page, the «‹» and the
-  // vertical chrome with it (#292).
+  // Every one carries «Back»: it replaces the whole page, the chrome of
+  // either orientation with it (#292).
   if (tokenError) {
     const { code, reason } = tokenError;
     const retry = refetch;
@@ -960,7 +1038,11 @@ function FeedPage({
           style={StyleSheet.absoluteFill}
           // Vertical shows fill the portrait screen; landscape ones letterbox.
           resizeMode={vertical ? "cover" : "contain"}
-          controls={!vertical}
+          // Our chrome on both orientations — VerticalChrome, and since #375
+          // LandscapeChrome instead of the native transport. Without
+          // `controls` iOS renders the library's own AVPlayerLayer, which is
+          // also what arms picture-in-picture on leave (below).
+          controls={false}
           // A neighbour is created paused and muted: it buffers, and stays
           // silent and still until it becomes the current page.
           paused={!isCurrent || userPaused}
@@ -990,22 +1072,21 @@ function FeedPage({
           playWhenInactive
           // Picture-in-picture when the viewer leaves the app, now-playing
           // controls on the lock screen: the current page only, never a
-          // warming neighbour. PiP on leave works for VERTICAL shows only
-          // (iOS): react-native-video 6.19 arms automatic PiP on its own
-          // AVPlayerLayer, and a landscape page with `controls` renders an
-          // AVPlayerViewController instead, on which it never sets
-          // canStartPictureInPictureAutomaticallyFromInline — there PiP is
-          // the native transport's button (registry, upstream fix). The
-          // native config behind these (iOS `audio` background mode, the
-          // Android media-playback foreground service,
-          // supportsPictureInPicture) comes from the react-native-video
-          // plugin options in app.json.
+          // warming neighbour. react-native-video 6.19 arms automatic PiP on
+          // its own AVPlayerLayer only — before #375 a landscape page had
+          // `controls`, i.e. an AVPlayerViewController it never arms, and
+          // lost the picture on leave. With `controls` off on every page it
+          // should arm in both orientations; on a phone that is still to be
+          // seen (registry). The landscape chrome's button asks for a window
+          // directly (enterPictureInPicture). The native config behind these
+          // (iOS `audio` background mode, the Android media-playback
+          // foreground service, supportsPictureInPicture) comes from the
+          // react-native-video plugin options in app.json.
           enterPictureInPictureOnLeave={isCurrent}
           showNotificationControls={isCurrent}
           ignoreSilentSwitch="ignore"
-          // AirPlay: the native transport's route button on landscape shows;
-          // Control Center for vertical ones (no in-chrome picker without a
-          // native module — registry).
+          // AirPlay: Control Center, in both orientations — an in-chrome route
+          // picker needs a native module, a new dependency (registry).
           allowsExternalPlayback
           preventsDisplaySleepDuringVideoPlayback
         />
@@ -1033,23 +1114,69 @@ function FeedPage({
           onBack={onBack}
         />
       ) : (
-        // The same glass «‹» as the show page — the board's one new piece of
-        // player chrome — and nothing else: the native transport draws the
-        // rest, the episode's title included (from the source's metadata,
-        // #315). Where it sits: landscapeBackPosition.
-        <GlassBackButton
-          onPress={onBack}
-          accessibilityLabel={t.player.backToShowAria}
-          style={[styles.back, landscapeBackPosition(insets)]}
+        <LandscapeChrome
+          showTitle={show.title}
+          episodeTitle={episode.title}
+          episodeNumber={episode.number}
+          positionSeconds={position}
+          durationSeconds={duration}
+          paused={userPaused}
+          buffering={isCurrent && buffering}
+          intro={introWindow(episode)}
+          upNext={upNext(show, index)}
+          autoplay={autoplayNextEnabled()}
+          endDismissed={endDismissed}
+          storyboard={storyboard}
+          episodes={show.episodes.map(
+            (ep, i): PanelEpisode => ({
+              id: ep.id,
+              number: ep.number,
+              title: ep.title,
+              durationSeconds: ep.durationSeconds,
+              thumbnailUrl: ep.thumbnailUrl ?? show.posterImageUrl,
+              toneKey: `${show.slug}-${ep.id}`,
+              locked: lockedAt(i),
+              fraction:
+                i === index && duration > 0
+                  ? Math.max(watchedFraction(ep.id), position / duration)
+                  : watchedFraction(ep.id),
+              current: i === index,
+            }),
+          )}
+          seasonNumber={episode.seasonNumber}
+          onTogglePlay={togglePlay}
+          onSeek={seekTo}
+          onBack={onBack}
+          onPip={enterPip}
+          onNext={() => onSelectEpisode(index + 1)}
+          onDismissEnd={dismissEnd}
+          onSelectEpisode={onSelectEpisode}
         />
       )}
     </View>
   );
 }
 
+// «Skip intro» only for an episode the admin marked (#375).
+function introWindow(episode: EpisodeSummary): { start: number; end: number } | null {
+  const { introStartSeconds: start, introEndSeconds: end } = episode;
+  return start !== null && end !== null && end > start ? { start, end } : null;
+}
+
+// The landscape end card's next episode; none after the last.
+function upNext(show: ShowDetail, index: number) {
+  const next = show.episodes[index + 1];
+  if (!next) return null;
+  return {
+    number: next.number,
+    title: next.title,
+    durationSeconds: next.durationSeconds,
+    thumbnailUrl: next.thumbnailUrl ?? show.posterImageUrl,
+    toneKey: `${show.slug}-${next.id}`,
+  };
+}
+
 const styles = StyleSheet.create({
   list: { flex: 1, backgroundColor: "#000" },
   stage: { flex: 1, backgroundColor: "#000" },
-  // Its top/left are applied inline — they follow the safe-area insets.
-  back: { position: "absolute" },
 });

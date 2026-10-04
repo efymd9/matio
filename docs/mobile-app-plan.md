@@ -796,6 +796,23 @@ unsupported on the simulator; the props are untouched from #97); Android; a phys
   restored playhead after the swap, the 1/2/4s backoff, no refresh off the current page) and
   `src/pushed-screens.test.tsx` (the screen's remount seed).
 
+**Landscape chrome, 2026-10-04 (#375) — board E «Стекло».** The owner picked variant E of two
+board rounds (the board is linked from the issue). The native transport leaves the landscape
+page: `controls={false}` everywhere, and `components/landscape-chrome.tsx` draws three glass
+capsules with no scrims (title + «‹», picture-in-picture, a B1-shaped bar with the gold
+play/pause pill, ±10, the scrub bar, the times, Episodes, Next), the buffering disc, «Skip
+intro» for marked episodes, the end card (last 10 s; a countdown ring with autoplay on, a
+waiting card with it off, Cancel = no advance this time) and the episodes panel
+(`components/episodes-panel.tsx`). Taps: one toggles (auto-hide 4 s while playing), a double
+tap on a side third is ±10. The scrub preview is Mux's storyboard — the app route adds
+`storyboardToken` (aud `s`, same TTL) and `watch/storyboard.ts` crops the tile out of the
+sprite. The #359 «‹» in the pillarbox strip is gone with the transport it was dodging; with
+`controls` off the library plays landscape on its own `AVPlayerLayer`, the one it arms for PiP
+on leave — still to be confirmed on a phone (registry). No new dependencies; AirPlay stays in
+Control Center (an in-chrome route picker is a native module — registry). Tests:
+`src/components/landscape-chrome.test.tsx`, `src/watch/storyboard.test.tsx`, the #375 block of
+`src/watch/episode-feed.test.tsx`, `lib/mux-token.test.ts`, the route test.
+
 ## 15. Traps
 
 - **`/api/v1` is inside the Clerk matcher already** — don't add a second auth layer. Do add
