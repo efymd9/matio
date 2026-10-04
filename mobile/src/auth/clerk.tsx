@@ -7,7 +7,9 @@ import { keychainOptions } from "@/keychain";
 // Clerk wiring for the app, against the SAME production Clerk instance as the
 // web app — one user pool, no second identity system. Sign-in is passwordless
 // email-code, which is already the canonical credential for accounts created by
-// the web's guest-checkout flow.
+// the web's guest-checkout flow — plus, where the server's lever allows,
+// native Sign in with Apple and Google (#277, components/social-sign-in.tsx):
+// Clerk links them to an existing account by its verified address.
 
 export const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 

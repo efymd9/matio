@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import { StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AA_TEXT, contrastRatio, paintedBackground, parseColor } from "@/testing/contrast";
 import { colors } from "@/theme";
@@ -37,11 +38,70 @@ const useSignUp = vi.fn((): unknown => {
   throw new Error(OUTSIDE_PROVIDER);
 });
 
+const useClerk = vi.fn((): unknown => {
+  throw new Error(OUTSIDE_PROVIDER);
+});
 vi.mock("@clerk/expo", () => ({
   ClerkProvider: ({ children }: { children: unknown }) => children,
   useAuth: () => ({ isLoaded: true, isSignedIn: false, getToken: async () => null }),
   useSignIn: () => useSignIn(),
   useSignUp: () => useSignUp(),
+  useClerk: () => useClerk(),
+}));
+
+// #277 — the Apple / Google buttons. The two Clerk hooks live in their own
+// entry points (@clerk/expo/apple, /google) and, like every provider-bound
+// hook, throw outside <ClerkProvider>; their flows are spies a case scripts.
+// The native Apple module answers «available» as a case says and draws its
+// system button as a plain pressable whose props a case can read; the build's
+// Google client ids are expo-constants' `extra`; the platform is the one the
+// case names (web otherwise, react-native-web's own) — the buttons are
+// iOS-only. `social.lever` is what /v1/config reports.
+type Flow = {
+  createdSessionId: string | null;
+  setActive?: (params: { session: string }) => Promise<void>;
+  signIn?: { id?: string; status?: string };
+  signUp?: { id?: string; status?: string };
+};
+const social = vi.hoisted(() => ({
+  os: "web",
+  lever: undefined as undefined | { apple: boolean; google: boolean },
+  extra: {} as Record<string, unknown>,
+  appleAvailable: vi.fn(async () => true),
+  appleStart: vi.fn(async (): Promise<Flow> => ({ createdSessionId: null })),
+  googleStart: vi.fn(async (): Promise<Flow> => ({ createdSessionId: null })),
+  appleButtonProps: null as null | Record<string, unknown>,
+}));
+const useSignInWithApple = vi.fn((): unknown => {
+  throw new Error(OUTSIDE_PROVIDER);
+});
+const useSignInWithGoogle = vi.fn((): unknown => {
+  throw new Error(OUTSIDE_PROVIDER);
+});
+vi.mock("@clerk/expo/apple", () => ({ useSignInWithApple: () => useSignInWithApple() }));
+vi.mock("@clerk/expo/google", () => ({ useSignInWithGoogle: () => useSignInWithGoogle() }));
+vi.mock("expo-apple-authentication", async () => {
+  const { Pressable, Text } = await import("react-native");
+  return {
+    isAvailableAsync: () => social.appleAvailable(),
+    AppleAuthenticationButtonType: { SIGN_IN: 0, CONTINUE: 1, SIGN_UP: 2 },
+    AppleAuthenticationButtonStyle: { WHITE: 0, WHITE_OUTLINE: 1, BLACK: 2 },
+    AppleAuthenticationButton: (buttonProps: { onPress: () => void } & Record<string, unknown>) => {
+      social.appleButtonProps = buttonProps;
+      return (
+        <Pressable testID="apple-button" onPress={buttonProps.onPress}>
+          <Text>Continue with Apple</Text>
+        </Pressable>
+      );
+    },
+  };
+});
+vi.mock("expo-constants", () => ({
+  default: {
+    get expoConfig() {
+      return { extra: social.extra };
+    },
+  },
 }));
 
 // #304 item 1 — what VoiceOver is told. react-native-web's AccessibilityInfo
@@ -55,6 +115,12 @@ vi.mock("react-native", async (importOriginal) => {
     AccessibilityInfo: {
       ...rn.AccessibilityInfo,
       announceForAccessibilityWithOptions: a11y.announce,
+    },
+    Platform: {
+      ...rn.Platform,
+      get OS() {
+        return social.os;
+      },
     },
   };
 });
@@ -91,10 +157,28 @@ vi.mock("@/api/config-context", () => ({
       cookies: "https://matio.tv/cookies?embed=app",
       support: "mailto:contact@matio.tv",
     },
+    socialSignIn: social.lever,
   }),
 }));
 const browser = vi.hoisted(() => ({ open: vi.fn(async () => undefined) }));
 vi.mock("expo-web-browser", () => ({ openBrowserAsync: browser.open }));
+
+// What a build carries when the owner has set both Google client ids (EAS env
+// → app.config.ts → `extra`). Fake-looking on purpose.
+const GOOGLE_IDS = {
+  EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: "dummy-web.apps.googleusercontent.com",
+  EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: "dummy-ios.apps.googleusercontent.com",
+};
+
+function resetSocial() {
+  social.os = "web";
+  social.lever = undefined;
+  social.extra = {};
+  social.appleButtonProps = null;
+  social.appleAvailable.mockReset().mockImplementation(async () => true);
+  social.appleStart.mockReset().mockImplementation(async () => ({ createdSessionId: null }));
+  social.googleStart.mockReset().mockImplementation(async () => ({ createdSessionId: null }));
+}
 
 const props = {
   kicker: "Watch for free",
@@ -124,6 +208,10 @@ describe("SignInForm — the Clerk-key gate (#247)", { timeout: COLD_IMPORT_TIME
     vi.stubGlobal("__DEV__", false);
     useSignIn.mockClear();
     useSignUp.mockClear();
+    useClerk.mockClear();
+    useSignInWithApple.mockClear();
+    useSignInWithGoogle.mockClear();
+    resetSocial();
   });
 
   afterEach(() => {
@@ -142,6 +230,22 @@ describe("SignInForm — the Clerk-key gate (#247)", { timeout: COLD_IMPORT_TIME
     expect(html).not.toContain(props.headline);
     expect(useSignIn).not.toHaveBeenCalled();
     expect(useSignUp).not.toHaveBeenCalled();
+  });
+
+  it("without a key no Clerk hook runs — Apple's and Google's included — even with the lever on (#277)", async () => {
+    vi.stubEnv("EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY", undefined);
+    social.os = "ios";
+    social.lever = { apple: true, google: true };
+    social.extra = GOOGLE_IDS;
+    const SignInForm = await loadSignInForm();
+
+    const html = renderToString(<SignInForm {...props} />);
+
+    expect(html).toContain("Sign-in unavailable");
+    expect(html).not.toContain("Continue with");
+    for (const hook of [useSignIn, useSignUp, useClerk, useSignInWithApple, useSignInWithGoogle]) {
+      expect(hook).not.toHaveBeenCalled();
+    }
   });
 
   it("with a publishable key renders the email step through the Clerk hooks", async () => {
@@ -827,5 +931,266 @@ flowSuite("SignInForm — the error line reads at AA contrast (#314)", () => {
     // The non-text cue.
     expect(parseColor(style.borderLeftColor)).toEqual(parseColor(colors.rust));
     expect(style.borderLeftWidth).toBe("2px");
+  });
+});
+
+// ------------------------------------------- #277 Apple and Google (board B)
+
+flowSuite("SignInForm — Sign in with Apple and Google under the email form (#277)", () => {
+  // Clerk as the provider hands it to the social flows: the sign-in and
+  // sign-up it held before the tap, and its own setActive.
+  const clerk = {
+    client: { signIn: { id: "sia_before" }, signUp: { id: "sua_before" } },
+    setActive: vi.fn(async (_params: { session: string }) => undefined),
+  };
+
+  beforeEach(() => {
+    resetSocial();
+    clerk.setActive.mockClear();
+    useClerk.mockReset().mockImplementation(() => clerk);
+    useSignInWithApple
+      .mockReset()
+      .mockImplementation(() => ({ startAppleAuthenticationFlow: social.appleStart }));
+    useSignInWithGoogle
+      .mockReset()
+      .mockImplementation(() => ({ startGoogleAuthenticationFlow: social.googleStart }));
+  });
+
+  afterEach(() => resetSocial());
+
+  // Renders the form and lets the device's «is Sign in with Apple available?»
+  // answer land — no button shows before it.
+  async function renderSocial(
+    lever: { apple: boolean; google: boolean } | undefined,
+    { os = "ios", ids = true, locale = "en" as "en" | "es", onDone = vi.fn() } = {},
+  ) {
+    social.os = os;
+    social.lever = lever;
+    social.extra = ids ? GOOGLE_IDS : {};
+    const resources = clerkResources();
+    await renderForm(locale, onDone);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return { ...resources, onDone };
+  }
+
+  const appleButton = () => container.querySelector('[data-testid="apple-button"]');
+
+  it("lever off: no line, no buttons, Apple is never even asked — the screen as before", async () => {
+    for (const lever of [undefined, { apple: false, google: false }]) {
+      await renderSocial(lever);
+
+      expect(text()).toContain(props.cta);
+      expect(text()).not.toContain("or continue with");
+      expect(text()).not.toContain("Continue with Apple");
+      expect(text()).not.toContain("Continue with Google");
+      act(() => root?.unmount());
+      root = null;
+    }
+    expect(social.appleAvailable).not.toHaveBeenCalled();
+    expect(useSignInWithApple).not.toHaveBeenCalled();
+    expect(useSignInWithGoogle).not.toHaveBeenCalled();
+  });
+
+  it("`apple`: only Apple's own button — Continue, white, 48 pt, radius 12 — under the line", async () => {
+    await renderSocial({ apple: true, google: false });
+
+    expect(text()).toContain("or continue with");
+    expect(appleButton()).not.toBeNull();
+    expect(text()).not.toContain("Continue with Google");
+    expect(useSignInWithGoogle).not.toHaveBeenCalled();
+    expect(social.appleButtonProps).toMatchObject({
+      buttonType: 1, // CONTINUE
+      buttonStyle: 0, // WHITE
+      cornerRadius: 12,
+    });
+    expect(StyleSheet.flatten(social.appleButtonProps?.style as StyleProp<ViewStyle>)).toMatchObject({
+      height: 48,
+      width: "100%",
+    });
+  });
+
+  it("`apple,google` with the client ids: both, Apple above Google, both below the email field and its CTA", async () => {
+    await renderSocial({ apple: true, google: true });
+
+    const page = text();
+    expect(page).toContain("Continue with Apple");
+    expect(page).toContain("Continue with Google");
+    expect(page.indexOf(props.cta)).toBeLessThan(page.indexOf("Continue with Apple"));
+    expect(page.indexOf("Continue with Apple")).toBeLessThan(page.indexOf("Continue with Google"));
+    const input = container.querySelector("input") as Element;
+    expect(
+      input.compareDocumentPosition(appleButton() as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // Google's button, as its brand guide draws it in the dark theme: the
+    // same 48 pt and radius as Apple's.
+    const google = Array.from(container.querySelectorAll('[role="button"]')).find(
+      (el) => el.textContent === "Continue with Google",
+    ) as Element;
+    const style = getComputedStyle(google);
+    expect(style.height).toBe("48px");
+    expect(style.borderTopLeftRadius).toBe("12px");
+    expect(parseColor(style.backgroundColor)).toEqual(parseColor(colors.googleSurface));
+  });
+
+  it("Google without its client ids in the build: no Google button", async () => {
+    await renderSocial({ apple: true, google: true }, { ids: false });
+
+    expect(appleButton()).not.toBeNull();
+    expect(text()).not.toContain("Continue with Google");
+  });
+
+  it("a device without Sign in with Apple shows neither — never Google alone (App Store 4.8)", async () => {
+    social.appleAvailable.mockImplementation(async () => false);
+    await renderSocial({ apple: true, google: true });
+
+    expect(social.appleAvailable).toHaveBeenCalledTimes(1);
+    expect(appleButton()).toBeNull();
+    expect(text()).not.toContain("Continue with Google");
+    expect(text()).not.toContain("or continue with");
+  });
+
+  it("outside iOS nothing shows, and Apple is not asked", async () => {
+    await renderSocial({ apple: true, google: true }, { os: "android" });
+
+    expect(text()).not.toContain("or continue with");
+    expect(social.appleAvailable).not.toHaveBeenCalled();
+  });
+
+  it("a closed Apple sheet is silent: no error, nothing activated, the form ready again", async () => {
+    const { onDone } = await renderSocial({ apple: true, google: false });
+    // What the hook resolves with after ERR_REQUEST_CANCELED: no session, and
+    // the sign-in / sign-up Clerk already held — here the email form's own
+    // half-made sign-up, waiting in missing_requirements for its code.
+    social.appleStart.mockResolvedValueOnce({
+      createdSessionId: null,
+      signIn: clerk.client.signIn,
+      signUp: { id: "sua_before", status: "missing_requirements" },
+    });
+
+    await press("Continue with Apple");
+
+    expect(social.appleStart).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(clerk.setActive).not.toHaveBeenCalled();
+    expect(onDone).not.toHaveBeenCalled();
+    expect(text()).toContain(props.cta);
+  });
+
+  it("Apple success: the session goes live, then onDone — once", async () => {
+    const { onDone } = await renderSocial({ apple: true, google: false });
+    const setActive = vi.fn(async (_params: { session: string }) => undefined);
+    social.appleStart.mockResolvedValueOnce({ createdSessionId: "sess_apple", setActive });
+
+    await press("Continue with Apple");
+
+    expect(setActive).toHaveBeenCalledWith({ session: "sess_apple" });
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("Google success takes the same path — Clerk's own setActive when the hook hands none", async () => {
+    const { onDone } = await renderSocial({ apple: true, google: true });
+    social.googleStart.mockResolvedValueOnce({ createdSessionId: "sess_google" });
+
+    await press("Continue with Google");
+
+    expect(social.googleStart).toHaveBeenCalledTimes(1);
+    expect(clerk.setActive).toHaveBeenCalledWith({ session: "sess_google" });
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("an account Apple made without an address says so in our words — never Clerk's", async () => {
+    const { onDone } = await renderSocial({ apple: true, google: false });
+    social.appleStart.mockResolvedValueOnce({
+      createdSessionId: null,
+      signUp: { id: "sua_apple", status: "missing_requirements" },
+    });
+
+    await press("Continue with Apple");
+
+    const line = container.querySelector('[role="alert"]');
+    expect(line?.textContent).toBe(
+      "We didn't get your email address. Continue with your email instead.",
+    );
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it("a flow that throws ends in our message — not Clerk's text, not the address it quotes", async () => {
+    await renderSocial({ apple: true, google: true });
+    social.googleStart.mockRejectedValueOnce(
+      apiError("external_account_exists", "person@example.com is already connected to another account."),
+    );
+
+    await press("Continue with Google");
+
+    expect(text()).toContain("Couldn't sign you in. Try again or use your email.");
+    expect(text()).not.toContain("person@example.com");
+    // And the form is not stuck: the CTA is back.
+    expect(text()).toContain(props.cta);
+  });
+
+  it("a dead network on Apple reads as the connection hint", async () => {
+    await renderSocial({ apple: true, google: false });
+    social.appleStart.mockRejectedValueOnce(NETWORK_ERROR);
+
+    await press("Continue with Apple");
+
+    expect(text()).toContain("Check your connection and try again.");
+    expect(text()).not.toContain("Clerk:");
+  });
+
+  it("one flow at a time: while Apple's sheet is up, neither the email CTA nor Google starts", async () => {
+    const { signIn } = await renderSocial({ apple: true, google: true });
+    let finish: (value: Flow) => void = () => undefined;
+    social.appleStart.mockImplementationOnce(
+      () => new Promise<Flow>((resolve) => (finish = resolve)),
+    );
+
+    await press("Continue with Apple");
+    expect(text()).toContain("Please wait…");
+
+    typeInto("member@example.com");
+    await press("Please wait…");
+    await press("Continue with Google");
+    expect(signIn.emailCode.sendCode).not.toHaveBeenCalled();
+    expect(social.googleStart).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finish({ createdSessionId: null });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(text()).toContain(props.cta);
+  });
+
+  it("the code step is the email flow alone — no provider buttons", async () => {
+    await renderSocial({ apple: true, google: true });
+    expect(appleButton()).not.toBeNull();
+
+    typeInto("member@example.com");
+    await press(props.cta);
+
+    expect(text()).toContain("Check your email");
+    expect(appleButton()).toBeNull();
+    expect(text()).not.toContain("Continue with Google");
+  });
+
+  it("speaks Spanish to a Spanish viewer: the line, Google's words, and the failures", async () => {
+    await renderSocial({ apple: true, google: true }, { locale: "es" });
+
+    expect(text()).toContain("o continúa con");
+    expect(text()).toContain("Continuar con Google");
+
+    social.appleStart.mockResolvedValueOnce({
+      createdSessionId: null,
+      signUp: { id: "sua_apple", status: "missing_requirements" },
+    });
+    await press("Continue with Apple");
+    expect(text()).toContain("No recibimos tu correo. Continúa con tu correo electrónico.");
+
+    social.googleStart.mockRejectedValueOnce(new Error("boom"));
+    await press("Continuar con Google");
+    expect(text()).toContain("No se pudo iniciar sesión. Inténtalo de nuevo o usa tu correo.");
   });
 });

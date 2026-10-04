@@ -85,6 +85,11 @@ vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 // The build number (src/build.ts, via the config provider's floor check).
 vi.mock("expo-constants", () => ({ default: { nativeBuildVersion: "6" } }));
+// The form's Apple / Google buttons (#277) — off here (no lever in the
+// config), but their native modules load with the form.
+vi.mock("@clerk/expo/apple", () => ({ useSignInWithApple: () => ({}) }));
+vi.mock("@clerk/expo/google", () => ({ useSignInWithGoogle: () => ({}) }));
+vi.mock("expo-apple-authentication", () => ({ isAvailableAsync: async () => false }));
 
 const STALLED_TITLE = "Sign-in is unavailable right now";
 const STALLED_BODY = "Check your connection and try again.";

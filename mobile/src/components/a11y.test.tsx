@@ -161,6 +161,11 @@ vi.mock("expo-glass-effect", () => ({
 }));
 vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
+// The sign-in form's Apple / Google buttons (#277) — off here (no lever in
+// the config), but their native modules load with the form.
+vi.mock("@clerk/expo/apple", () => ({ useSignInWithApple: () => ({}) }));
+vi.mock("@clerk/expo/google", () => ({ useSignInWithGoogle: () => ({}) }));
+vi.mock("expo-apple-authentication", () => ({ isAvailableAsync: async () => false }));
 
 import AccountScreen from "@/app/(tabs)/account";
 import BrowseScreen from "@/app/(tabs)/browse";

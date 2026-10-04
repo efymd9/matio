@@ -28,6 +28,13 @@ export const colors = {
   // the vertical chrome's progress line): black at 45% so the gold fill
   // reads on any still. One value for the three places that draw it.
   scrimTrack: "rgba(0,0,0,0.45)",
+  // «Continue with Google» under the sign-in form (#277) — NOT Matio tokens:
+  // Google's sign-in brand guide prescribes the button's colours, and its
+  // dark theme (the owner's pick on the board, 04.10) is exactly these three.
+  // Nothing else in the app uses them.
+  googleSurface: "#131314",
+  googleText: "#E3E3E3",
+  googleStroke: "#8E918F",
 } as const;
 
 // The 8a spec's 4px base rhythm.

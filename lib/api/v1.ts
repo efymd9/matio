@@ -6,7 +6,7 @@ import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { SITE_URL } from "@/lib/seo";
-import type { ApiErrorBody, ApiErrorCode, SignupGate } from "./types";
+import type { ApiErrorBody, ApiErrorCode, SignupGate, SocialSignIn } from "./types";
 
 // Server-side helpers for the /api/v1 mobile surface. The wire TYPES live in
 // ./types.ts (universal, shared with the app); this module is the server half
@@ -131,6 +131,18 @@ export function resolveSignupGate(): SignupGate {
   }
 
   return { mode: "none" };
+}
+
+// The app's third-party sign-in lever (#277): APP_SOCIAL_SIGNIN is a
+// comma-separated list of providers — `apple`, `google` or `apple,google`.
+// Unset, empty or anything else is OFF: a typo must never switch on a button
+// whose Clerk / Google / Apple setup may not exist yet. Case and spaces
+// around a word are forgiven; an unknown word is ignored, not an error.
+// Read per request, like the other levers in /v1/config: an env change plus a
+// redeploy, no store release.
+export function resolveSocialSignIn(raw = process.env.APP_SOCIAL_SIGNIN): SocialSignIn {
+  const words = new Set((raw ?? "").split(",").map((word) => word.trim().toLowerCase()));
+  return { apple: words.has("apple"), google: words.has("google") };
 }
 
 // Reads a positive integer env var, falling back when unset or malformed.
