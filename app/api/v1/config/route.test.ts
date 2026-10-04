@@ -60,6 +60,29 @@ describe("GET /api/v1/config", () => {
     expect((await config()).flags.downloadsEnabled).toBe(true);
   });
 
+  it("reports the social sign-in lever: off unless APP_SOCIAL_SIGNIN names a provider (#277)", async () => {
+    // A phone already installed obeys this answer — and a button whose Clerk
+    // / Google / Apple setup does not exist yet must never switch on by
+    // accident. Still the same DB-free route (no db mock in this file).
+    const cases: Array<[string | undefined, { apple: boolean; google: boolean }]> = [
+      [undefined, { apple: false, google: false }],
+      ["", { apple: false, google: false }],
+      ["apple", { apple: true, google: false }],
+      ["google", { apple: false, google: true }],
+      ["apple,google", { apple: true, google: true }],
+      [" Google , APPLE ", { apple: true, google: true }],
+      ["1", { apple: false, google: false }],
+      ["yes", { apple: false, google: false }],
+      ["apple-google", { apple: false, google: false }],
+    ];
+    for (const [raw, expected] of cases) {
+      vi.stubEnv("APP_SOCIAL_SIGNIN", raw);
+      const res = await GET();
+      expect(res.status).toBe(200);
+      expect((await res.json()).socialSignIn).toEqual(expected);
+    }
+  });
+
   it("carries the build floor that retires a broken client", async () => {
     // The one lever that stops an old binary without a store round-trip.
     vi.stubEnv("APP_MIN_SUPPORTED_BUILD", "12");

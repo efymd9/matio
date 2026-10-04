@@ -122,6 +122,15 @@ export const appEs = {
     consentTerms: "Términos",
     consentMiddle: " y reconoces haber leído la ",
     consentPrivacy: "Política de privacidad",
+    // Apple / Google under the email form (#277, board variant B). The
+    // Apple button's words are drawn by iOS itself; Google's are its brand
+    // guide's own. The two failures are ours: a flow that broke, and an
+    // account the provider created without an address (an Apple ID with no
+    // shared email) — Clerk's own text is never shown.
+    orContinueWith: "o continúa con",
+    continueWithGoogle: "Continuar con Google",
+    socialFailed: "No se pudo iniciar sesión. Inténtalo de nuevo o usa tu correo.",
+    socialIncomplete: "No recibimos tu correo. Continúa con tu correo electrónico.",
   },
   watch: {
     subscribersOnly: "Solo para suscriptores",
@@ -236,6 +245,10 @@ export const appEn: AppDict = {
     consentTerms: "Terms",
     consentMiddle: " and acknowledge the ",
     consentPrivacy: "Privacy Policy",
+    orContinueWith: "or continue with",
+    continueWithGoogle: "Continue with Google",
+    socialFailed: "Couldn't sign you in. Try again or use your email.",
+    socialIncomplete: "We didn't get your email address. Continue with your email instead.",
   },
   watch: {
     subscribersOnly: "Subscribers only",

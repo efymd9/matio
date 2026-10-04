@@ -38,6 +38,7 @@ import {
   linearShowsOnly,
   readDeviceId,
   resolveSignupGate,
+  resolveSocialSignIn,
 } from "./v1";
 
 // The server half of the /api/v1 mobile surface. Everything asserted here is a
@@ -136,6 +137,25 @@ describe("resolveSignupGate", () => {
     vi.stubEnv("PAYMENTS_ENABLED", "");
     vi.stubEnv("REQUIRE_SIGNUP", "");
     expect(resolveSignupGate()).toEqual({ mode: "none" });
+  });
+});
+
+describe("resolveSocialSignIn (#277)", () => {
+  it("reads APP_SOCIAL_SIGNIN when called with no argument", () => {
+    vi.stubEnv("APP_SOCIAL_SIGNIN", "apple");
+    expect(resolveSocialSignIn()).toEqual({ apple: true, google: false });
+    vi.stubEnv("APP_SOCIAL_SIGNIN", undefined);
+    expect(resolveSocialSignIn()).toEqual({ apple: false, google: false });
+  });
+
+  it("switches on only the providers it names, and nothing for garbage", () => {
+    expect(resolveSocialSignIn("google")).toEqual({ apple: false, google: true });
+    expect(resolveSocialSignIn("apple,google")).toEqual({ apple: true, google: true });
+    // An unknown word is ignored next to a real one, never an error.
+    expect(resolveSocialSignIn("apple,facebook")).toEqual({ apple: true, google: false });
+    for (const garbage of ["", ",", "true", "on", "apples", "apple;google"]) {
+      expect(resolveSocialSignIn(garbage)).toEqual({ apple: false, google: false });
+    }
   });
 });
 

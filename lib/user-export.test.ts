@@ -431,8 +431,68 @@ describe("assembleUserExport · vendors", () => {
       lastName: "Ject",
       createdAt: "2026-01-01T00:00:00.000Z",
       lastSignInAt: "2026-09-01T00:00:00.000Z",
+      externalAccounts: [],
     });
     expect(result.notes.some((n) => n.startsWith("clerk:") && /sessions/.test(n))).toBe(true);
+  });
+
+  it("clerk: the Google and Apple profiles linked to the account go in the document, not in the summary (#277)", async () => {
+    const result = await assembleUserExport({
+      userId: USER_ID,
+      rows: emptyRows({ users: [account] }),
+      clients: {
+        clerk: {
+          users: {
+            getUser: async () => ({
+              ...clerkUser(),
+              externalAccounts: [
+                {
+                  provider: "oauth_google",
+                  providerUserId: "104000000000000000001",
+                  emailAddress: "subject@example.invalid",
+                  firstName: "Sub",
+                  lastName: "Ject",
+                  imageUrl: "https://lh3.googleusercontent.com/a/dummy",
+                },
+                {
+                  provider: "oauth_apple",
+                  providerUserId: "000111.dummy.2222",
+                  emailAddress: "dummy123@privaterelay.appleid.com",
+                  // Apple shares a name only at the first sign-in, and never a picture.
+                  firstName: "",
+                  lastName: "",
+                  imageUrl: "",
+                },
+              ],
+            }),
+          },
+        },
+      },
+    });
+
+    expect(result.processors.clerk?.externalAccounts).toEqual([
+      {
+        provider: "oauth_google",
+        providerUserId: "104000000000000000001",
+        emailAddress: "subject@example.invalid",
+        firstName: "Sub",
+        lastName: "Ject",
+        imageUrl: "https://lh3.googleusercontent.com/a/dummy",
+      },
+      {
+        provider: "oauth_apple",
+        providerUserId: "000111.dummy.2222",
+        emailAddress: "dummy123@privaterelay.appleid.com",
+        firstName: null,
+        lastName: null,
+        imageUrl: null,
+      },
+    ]);
+    const summary = summarizeExport(result);
+    expect(summary).toContain("processors: clerk=received");
+    expect(summary).not.toContain("privaterelay");
+    expect(summary).not.toContain("104000000000000000001");
+    expect(summary).not.toContain("googleusercontent");
   });
 
   it("a missing vendor key → null plus a note pointing at the runbook", async () => {

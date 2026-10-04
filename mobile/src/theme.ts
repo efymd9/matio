@@ -31,6 +31,13 @@ export const colors = {
   // Gold at 16% — the current episode's row in the landscape player's
   // episodes panel (#375, board E «Стекло»: `.e-ep.cur`).
   goldWash: "rgba(230,179,102,0.16)",
+  // «Continue with Google» under the sign-in form (#277) — NOT Matio tokens:
+  // Google's sign-in brand guide prescribes the button's colours, and its
+  // dark theme (the owner's pick on the board, 04.10) is exactly these three.
+  // Nothing else in the app uses them.
+  googleSurface: "#131314",
+  googleText: "#E3E3E3",
+  googleStroke: "#8E918F",
 } as const;
 
 // The 8a spec's 4px base rhythm.
