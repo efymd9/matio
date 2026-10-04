@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.19.0](https://github.com/efymd9/matio/compare/matio-v0.18.0...matio-v0.19.0) (2026-10-04)
+
+
+### Features
+
+* вход через Apple и Google в приложении iOS ([#277](https://github.com/efymd9/matio/issues/277)) ([#406](https://github.com/efymd9/matio/issues/406)) ([2d9e3ac](https://github.com/efymd9/matio/commit/2d9e3ac916e407e4ff7b6bd3dea62b8f196be12a))
+* приложение — свой стеклянный интерфейс горизонтального плеера (вариант E) с превью перемотки ([#375](https://github.com/efymd9/matio/issues/375)) ([#408](https://github.com/efymd9/matio/issues/408)) ([8597c27](https://github.com/efymd9/matio/commit/8597c27de2238a623dc674e536b30fa9840a92b1))
+
+
+### Documentation
+
+* /privacy — вход через Apple и Google в приложении, ЧЕРНОВИК на «да» владельца ([#277](https://github.com/efymd9/matio/issues/277)) ([#409](https://github.com/efymd9/matio/issues/409)) ([3c433d6](https://github.com/efymd9/matio/commit/3c433d6bffc0a117f3c7ef90df43dd1ae4def06b))
+
 ## [0.18.0](https://github.com/efymd9/matio/compare/matio-v0.17.0...matio-v0.18.0) (2026-10-04)
 
 
