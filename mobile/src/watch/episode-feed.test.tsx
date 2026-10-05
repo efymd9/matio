@@ -35,6 +35,7 @@ type VideoProps = {
   onError?: () => void;
   onBuffer?: (e: { isBuffering: boolean }) => void;
   onLoadStart?: () => void;
+  onReadyForDisplay?: () => void;
   onSeek?: () => void;
   onPlaybackStateChanged?: (e: { isPlaying: boolean; isSeeking: boolean }) => void;
   onAudioBecomingNoisy?: () => void;
@@ -1589,6 +1590,24 @@ describe("EpisodeFeed — the landscape page's glass chrome, board E «Стек�
 
   beforeEach(() => {
     safeArea.insets = DYNAMIC_ISLAND_LANDSCAPE;
+  });
+
+  it("the artwork under the player is gone once the first frame shows — the side strips are black, not the still (#412)", async () => {
+    await renderFeed(makeShow("horizontal", ["free"]));
+    const artwork = () => container.querySelector('[data-testid="page-artwork-ep1"]');
+
+    // Loading: the still covers the stage.
+    expect(artwork()).not.toBeNull();
+    act(() => video("ep1").props.onLoad?.({ duration: 600 }));
+    expect(artwork(), "a loaded source is not yet a frame on screen").not.toBeNull();
+
+    // First frame: only the black stage is left around the letterboxed picture.
+    act(() => video("ep1").props.onReadyForDisplay?.());
+    expect(artwork()).toBeNull();
+
+    // A reload of the same episode's source keeps it gone.
+    act(() => video("ep1").props.onLoadStart?.());
+    expect(artwork()).toBeNull();
   });
 
   it("the native transport is off: three glass capsules over the picture, kept off the Dynamic Island", async () => {
