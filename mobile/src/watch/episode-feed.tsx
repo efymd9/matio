@@ -565,6 +565,15 @@ function FeedPage({
   // The landscape end card's Cancel (#375): this ending does not advance.
   // Cleared once the playhead leaves the card's window again.
   const [endDismissed, setEndDismissed] = useState(false);
+  // The artwork under the player is a loading cover, not a backdrop (#412):
+  // a landscape page letterboxes (`contain`), and since #375 dropped the
+  // native transport the AVPlayerLayer is transparent outside the picture —
+  // a cover-filled artwork left underneath showed through the side strips
+  // while the episode played. It stays until the first frame is on screen,
+  // then the black stage is all that is around the picture. A source swap
+  // (token refresh) keeps it gone: the picture is already there.
+  const [firstFrame, setFirstFrame] = useState(false);
+  const onReadyForDisplay = useCallback(() => setFirstFrame(true), []);
   const endDismissedRef = useRef(false);
   endDismissedRef.current = endDismissed;
 
@@ -1030,7 +1039,11 @@ function FeedPage({
 
   return (
     <View style={styles.stage}>
-      <Placeholder show={show} episode={episode} />
+      {firstFrame ? null : (
+        <View testID={`page-artwork-${episode.id}`} style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Placeholder show={show} episode={episode} />
+        </View>
+      )}
       {source ? (
         <Video
           ref={videoRef}
@@ -1052,6 +1065,7 @@ function FeedPage({
           // would re-render the chrome 4×/s.
           progressUpdateInterval={1000}
           onLoadStart={onLoadStart}
+          onReadyForDisplay={onReadyForDisplay}
           onLoad={onLoad}
           onProgress={onProgress}
           onSeek={onSeek}
