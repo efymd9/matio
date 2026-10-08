@@ -77,7 +77,7 @@ export function decodeUnsubscribeParams(
 // `marketing_opt_in` goes false on every idea from the address. The ideas
 // themselves STAY — unsubscribing from emails does not withdraw a pitch (its
 // licence and the studio's review of it are another matter, handled by
-// writing to contact@). Nothing sends those emails yet; the flag is reset
+// writing to maksym@). Nothing sends those emails yet; the flag is reset
 // now so the day a sender exists it starts from the right answer. Idea
 // addresses are stored lowercased, like reminder addresses. Returns the
 // deleted reminder count, as before — the ideas update is not counted.

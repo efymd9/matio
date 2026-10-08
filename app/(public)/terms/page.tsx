@@ -279,7 +279,7 @@ function TermsEn() {
 
       <Section id="contact" title="15. Contact">
         <p>
-          Questions about these Terms or the service: <strong>contact@matio.tv</strong>.
+          Questions about these Terms or the service: <strong>maksym@matio.tv</strong>.
           See also the <LegalLink href="/privacy" className="underline underline-offset-2 hover:text-white">Privacy Policy</LegalLink>{" "}
           and{" "}
           <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</LegalLink>.
@@ -486,7 +486,7 @@ function TermsEs() {
       <Section id="contacto" title="15. Contacto">
         <p>
           Para cualquier consulta sobre estos Términos o el servicio:{" "}
-          <strong>contact@matio.tv</strong>. Consulta también la{" "}
+          <strong>maksym@matio.tv</strong>. Consulta también la{" "}
           <LegalLink href="/privacy" className="underline underline-offset-2 hover:text-white">
             Política de privacidad
           </LegalLink>{" "}

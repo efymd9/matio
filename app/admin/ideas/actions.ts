@@ -8,7 +8,7 @@ import { ideaSubmissions } from "@/db/schema";
 import { requireAdmin } from "@/lib/admin";
 
 // The one write the admin panel has on story ideas (#297): delete — for spam,
-// and for a fan who asks by email to contact@ (runbook
+// and for a fan who asks by email to maksym@ (runbook
 // docs/runbooks/gdpr-requests.md). There is no edit on purpose.
 //
 // `after` is bound by the page, the deleteEpisode idiom: the list stays on

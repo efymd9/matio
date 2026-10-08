@@ -27,7 +27,7 @@ export function getResend(): Resend {
 }
 
 // Sender identity. updates@ keeps transactional sending separate from the
-// support mailbox; Reply-To routes human replies to contact@ (the public
+// support mailbox; Reply-To routes human replies to maksym@ (the public
 // support address). Env overrides exist so a domain/address change never
 // needs a code change.
 export function emailFrom(): string {
@@ -35,5 +35,5 @@ export function emailFrom(): string {
 }
 
 export function emailReplyTo(): string {
-  return process.env.RESEND_REPLY_TO ?? "contact@matio.tv";
+  return process.env.RESEND_REPLY_TO ?? "maksym@matio.tv";
 }

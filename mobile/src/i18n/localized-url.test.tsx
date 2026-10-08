@@ -34,7 +34,7 @@ vi.mock("@/api/config-context", () => ({
       terms: `https://matio.tv/terms${legal.query}`,
       privacy: `https://matio.tv/privacy${legal.query}`,
       cookies: `https://matio.tv/cookies${legal.query}`,
-      support: "mailto:contact@matio.tv",
+      support: "mailto:maksym@matio.tv",
     },
   }),
 }));
@@ -76,7 +76,7 @@ describe("localizedUrl", () => {
   });
 
   it("leaves anything that is not an absolute http(s) URL alone", () => {
-    expect(localizedUrl("mailto:contact@matio.tv", "es")).toBe("mailto:contact@matio.tv");
+    expect(localizedUrl("mailto:maksym@matio.tv", "es")).toBe("mailto:maksym@matio.tv");
     expect(localizedUrl("/terms", "es")).toBe("/terms");
   });
 
@@ -113,7 +113,7 @@ describe("legalUrl (#310)", () => {
   });
 
   it("leaves anything that is not an absolute http(s) URL alone", () => {
-    expect(legalUrl("mailto:contact@matio.tv", "es")).toBe("mailto:contact@matio.tv");
+    expect(legalUrl("mailto:maksym@matio.tv", "es")).toBe("mailto:maksym@matio.tv");
   });
 });
 

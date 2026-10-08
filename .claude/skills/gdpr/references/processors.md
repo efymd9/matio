@@ -9,11 +9,12 @@
 добавляет.** Идеи хранятся в Neon и проходят через Vercel (оба уже в
 таблице), события `idea_submitted` / `SubmitApplication` уходят PostHog и
 Meta (оба уже в таблице), писем нет (Resend идей не видит). Исправлена
-неточность: ящик `contact@matio.tv`, через который студия отвечает авторам и
-принимает запросы субъектов, — **Namecheap PrivateEmail** (`dig MX matio.tv`
-→ `mx1/mx2.privateemail.com`, SPF `include:spf.privateemail.com`), он видит
-входящую переписку — отдельная строка ниже; раньше Namecheap значился как
-«не видит данных».
+неточность: публичный ящик студии, через который она отвечает авторам и
+принимает запросы субъектов, видит входящую переписку — отдельная строка
+ниже. До 08.10.2026 это был `contact@matio.tv` на Namecheap PrivateEmail; к
+08.10 почта домена уже на **Google Workspace** (`dig MX matio.tv` →
+`smtp.google.com`, SPF `include:_spf.google.com`), а contact@ не работает —
+публичный адрес сменён на `maksym@matio.tv` (#414).
 
 **04.10.2026 (#277, вход через Apple и Google в приложении iOS): новых
 процессоров нет.** Данные входа принимает и хранит Clerk (уже в таблице).
@@ -39,7 +40,7 @@ Apple и Google появляются как **провайдеры входа** 
 | **Google Ireland Ltd** / Google LLC | GA4: page_view, события, client id. **«User-provided data collection → automatic detection»: не сверено** — если включено, gtag сам ищет email на странице (`/ideas`, форма напоминаний). Сверяет владелец (GA4 Admin → Data collection → автоопределение = off); до того — `docs/registry.md` (строка AAM / GA4, #297) → #341 | Ирландия / США | **проверить**: Google Ads Data Processing Terms применяются только к сервисам, для которых приняты — в GA4 Admin принять «Data Processing Terms» | DPF для Ads Services с 01.09.2023; SCC там, где DPF не принят | https://business.safety.google/adsprocessorterms/ (v8.0, 30.05.2024), https://business.safety.google/adsdatatransfers/ |
 | **OpenAI Ireland Ltd** | ChatGPT Ads pixel: `page_viewed`, конверсии с `event_id` = `signup:<Clerk id>` / sub id, `__oppref` | Ирландия / США | авто: Ad Tools DPA — часть Advertising Terms («effective upon incorporation by reference»); **стороны — независимые контролёры**, не процессор (кроме «Restricted Processing») — учесть в политике; страница отдаёт 403 из агента — сверено по вторичным источникам, открыть руками | SCC + UK Addendum; **записи в DPF у OpenAI нет** | https://openai.com/policies/ad-tools-dpa/ , https://openai.com/policies/advertising-terms/ , https://openai.com/policies/eu-privacy-policy/ |
 | **Functional Software, Inc.** (Sentry) | ошибки/трейсы: `user.id`, URL без query, UA; **приложение** (#317, тот же проект, только в сборке с `EXPO_PUBLIC_SENTRY_DSN`): JS-ошибки после тех же скрабберов + нативные крэши (стек, контекст устройства, случайный installation id SDK — не Clerk id); без сессий release health | организация в **EU-регионе** (данные в ЕС); компания US | **проверить**: DPA v5.1.0 «amends the Agreement», требует отдельного принятия («enter into our DPA») в настройках организации | DPF → SCC при инвалидации; UK Addendum | https://sentry.io/legal/dpa/ — 29.05.2024; ретеншен: https://docs.sentry.io/security-legal-pii/security/data-retention-periods/ |
-| **Namecheap, Inc.** (PrivateEmail) | почтовый ящик `contact@matio.tv`: входящая и исходящая переписка — запросы субъектов (доступ, копия, удаление), ответы авторам идей (#297), любые письма зрителей; адрес отправителя и всё, что он написал | не сверено | **не сверено** → `docs/registry.md` (строка Namecheap PrivateEmail, #297) | не сверено | MX сверены 27.09.2026 (`dig MX matio.tv` → `mx1/mx2.privateemail.com`); условия и DPA — не сверены |
+| **Google Ireland Ltd** (Google Workspace — почта домена) | почтовый ящик `maksym@matio.tv` (публичный контакт с 08.10.2026, #414): входящая и исходящая переписка — запросы субъектов (доступ, копия, удаление), ответы авторам идей (#297), любые письма зрителей; адрес отправителя и всё, что он написал | не сверено | **не сверено** → `docs/registry.md` (строка «почта домена — Google Workspace», #414) | не сверено | MX сверены 08.10.2026 (`dig MX matio.tv` → `smtp.google.com`, SPF `include:_spf.google.com`); до этого — Namecheap PrivateEmail (MX `mx1/mx2.privateemail.com`, сверено 27.09.2026); условия и DPA Google Workspace — не сверены |
 | **GitHub, Inc.** (Microsoft) | CI: раннеры `db-backup` (дамп в открытом виде до шифрования) и `db-restore-check` (полное восстановление на время джобы); секреты `BACKUP_*` | США | авто (DPA «forms part of the GitHub Customer Agreement») | DPF (EU-US, UK Extension, Swiss-US) + SCC модули 1–3 + UK Addendum | https://github.com/customer-terms/github-data-protection-agreement — октябрь 2025 |
 
 ## Не процессоры (для ясности)
@@ -48,7 +49,7 @@ Apple и Google появляются как **провайдеры входа** 
   данные в контекст агентов не попадают (правило в SKILL.md). Станет
   процессором в тот день, когда первый LLM-вызов увидит данные пользователей.
 - **Namecheap** как регистратор домена и DNS, **Expo/EAS** (сборки
-  приложения) — не видят данных пользователей. Но почта `contact@matio.tv` —
+  приложения) — не видят данных пользователей. Но почта `maksym@matio.tv` —
   Namecheap **PrivateEmail**, и она видит переписку: это процессор, строка в
   таблице выше (#297). Пуши (#98) добавят Expo push service / FCM / APNs —
   строка здесь ДО первого пуша.
@@ -82,7 +83,7 @@ Apple и Google появляются как **провайдеры входа** 
    юристу.
 7. План Vercel (Hobby/Pro) — от него зависит ретеншен логов, обещанный в
    `/privacy` как 30 дней.
-8. Namecheap PrivateEmail — найти условия и DPA для ящика `contact@`, записать
+8. Google Workspace (почта домена) — подтвердить Data Processing Amendment для ящика `maksym@`, записать
    регион и механизм трансфера (#297; строка в `docs/registry.md`).
 9. Meta AAM и автоопределение GA4 — выключены ли (для каждого пикселя и для
    свойства GA4); ответ с датой — в строки Meta и Google выше (#297, #341). Блокирует

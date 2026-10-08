@@ -84,7 +84,7 @@ function PrivacyEn() {
           no.&nbsp;17381666, registered office: 66 Paul Street, London
           EC2A&nbsp;4NA), is the data controller for the personal data processed through{" "}
           <strong>matio.tv</strong>. You can reach us at{" "}
-          <strong>contact@matio.tv</strong>. Our data-protection contact is
+          <strong>maksym@matio.tv</strong>. Our data-protection contact is
           the same address. We have not appointed a Data Protection Officer
           and are not required to under Article 37 UK GDPR.
         </p>
@@ -299,7 +299,7 @@ function PrivacyEn() {
           </li>
           <li>
             <strong>Namecheap, Inc.</strong> (PrivateEmail) — our mailbox at
-            contact@matio.tv, for correspondence with you.
+            maksym@matio.tv, for correspondence with you.
           </li>
         </ul>
         <p>
@@ -358,11 +358,11 @@ function PrivacyEn() {
           object to the processing of your personal data, and to withdraw any
           consent you have given (e.g. by clearing marketing cookies in the
           cookie banner). To exercise these rights, contact us at{" "}
-          <strong>contact@matio.tv</strong>. We will respond within 30 days.
+          <strong>maksym@matio.tv</strong>. We will respond within 30 days.
         </p>
         <p>
           You can withdraw your consent to emails about new episodes and story
-          calls at any time by writing to <strong>contact@matio.tv</strong> or
+          calls at any time by writing to <strong>maksym@matio.tv</strong> or
           through the &ldquo;unsubscribe&rdquo; link in any email we send you.
         </p>
         <p>
@@ -542,7 +542,7 @@ function PrivacyEn() {
             close of the period you have paid for; and your billing records
             held by Stripe, our payment processor, are kept as described under
             &ldquo;Payment and tax records&rdquo; in section 6. You can also
-            write to <strong>contact@matio.tv</strong>, which is also how you
+            write to <strong>maksym@matio.tv</strong>, which is also how you
             exercise the other rights in section 7. Records kept against the
             device identifier are deleted 30 days after they are created, as
             above: deleting the account does not remove them sooner, and one
@@ -554,7 +554,7 @@ function PrivacyEn() {
 
       <Section id="contact" title="12. Contact">
         <p>
-          Privacy questions: <strong>contact@matio.tv</strong>. See also our{" "}
+          Privacy questions: <strong>maksym@matio.tv</strong>. See also our{" "}
           <LegalLink href="/terms" className="underline underline-offset-2 hover:text-white">
             Terms of Service
           </LegalLink>{" "}
@@ -578,7 +578,7 @@ function PrivacyEs() {
           (n.º&nbsp;17381666, domicilio social: 66 Paul Street, Londres
           EC2A&nbsp;4NA), es el responsable del tratamiento de los datos personales recogidos a
           través de <strong>matio.tv</strong>. Puedes contactarnos en{" "}
-          <strong>contact@matio.tv</strong>. Nuestro contacto en materia de
+          <strong>maksym@matio.tv</strong>. Nuestro contacto en materia de
           protección de datos es esa misma dirección. No hemos designado un
           Delegado de Protección de Datos y no estamos obligados a hacerlo
           conforme al artículo 37 del RGPD del Reino Unido.
@@ -814,7 +814,7 @@ function PrivacyEs() {
           </li>
           <li>
             <strong>Namecheap, Inc.</strong> (PrivateEmail) — nuestro buzón
-            contact@matio.tv, para la correspondencia contigo.
+            maksym@matio.tv, para la correspondencia contigo.
           </li>
         </ul>
         <p>
@@ -876,13 +876,13 @@ function PrivacyEs() {
           portabilidad y oposición al tratamiento de tus datos personales, así
           como a retirar el consentimiento que hubieras prestado (por ejemplo
           rechazando las cookies de marketing en el banner). Para ejercerlos,
-          escríbenos a <strong>contact@matio.tv</strong>. Responderemos en un
+          escríbenos a <strong>maksym@matio.tv</strong>. Responderemos en un
           plazo de 30 días.
         </p>
         <p>
           Puedes retirar en cualquier momento tu consentimiento para recibir
           correos sobre nuevos episodios y convocatorias de historias
-          escribiendo a <strong>contact@matio.tv</strong> o mediante el enlace
+          escribiendo a <strong>maksym@matio.tv</strong> o mediante el enlace
           «darse de baja» de cualquier correo que te enviemos.
         </p>
         <p>
@@ -1077,7 +1077,7 @@ function PrivacyEs() {
             periodo ya pagado; y tus registros de facturación que guarda
             Stripe, nuestro encargado de pagos, se conservan como se indica
             en «Registros de pago y fiscales» de la sección 6. También puedes
-            escribirnos a <strong>contact@matio.tv</strong>, que es además la
+            escribirnos a <strong>maksym@matio.tv</strong>, que es además la
             vía para ejercer los demás derechos de la sección 7. Los registros
             asociados al identificador del dispositivo se eliminan 30 días
             después de crearse, como se indica arriba: eliminar la cuenta no
@@ -1089,7 +1089,7 @@ function PrivacyEs() {
 
       <Section id="contacto" title="12. Contacto">
         <p>
-          Consultas de privacidad: <strong>contact@matio.tv</strong>. Consulta
+          Consultas de privacidad: <strong>maksym@matio.tv</strong>. Consulta
           también nuestros{" "}
           <LegalLink href="/terms" className="underline underline-offset-2 hover:text-white">
             Términos del servicio
