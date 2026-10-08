@@ -155,7 +155,7 @@ vi.mock("@/api/config-context", () => ({
       terms: "https://matio.tv/terms?embed=app",
       privacy: "https://matio.tv/privacy?embed=app",
       cookies: "https://matio.tv/cookies?embed=app",
-      support: "mailto:contact@matio.tv",
+      support: "mailto:maksym@matio.tv",
     },
     socialSignIn: social.lever,
   }),

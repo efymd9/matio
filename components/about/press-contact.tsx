@@ -18,10 +18,10 @@ export function PressContact({ t, locale }: { t: Dict; locale: Locale }) {
           {t.press.contactKicker}
         </span>
         <a
-          href="mailto:contact@matio.tv"
+          href="mailto:maksym@matio.tv"
           className="font-display text-3xl uppercase leading-none text-cream transition-opacity hover:opacity-90 sm:text-5xl xl:text-6xl"
         >
-          contact@matio.tv
+          maksym@matio.tv
         </a>
         <p className="mt-1 max-w-xl text-[15px] leading-relaxed text-cream/75">
           {t.press.contactBody}

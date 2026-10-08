@@ -93,7 +93,7 @@ const CASES = [
       "never a screenshot",
       "Account → Delete account",
       "Payment and tax records",
-      "contact@matio.tv",
+      "maksym@matio.tv",
     ],
   },
   {
@@ -124,7 +124,7 @@ const CASES = [
       "nunca una captura",
       "Cuenta → Eliminar cuenta",
       "Registros de pago y fiscales",
-      "contact@matio.tv",
+      "maksym@matio.tv",
     ],
   },
 ] as const;

@@ -1090,7 +1090,7 @@ export const ru = {
     firstTouch: "Первое касание",
     lastTouch: "Последнее касание",
     deleteDescription:
-      "Удаление стирает идею целиком. Для спама и по просьбе автора (письмо на contact@matio.tv) — тогда запишите id в реестр заявок. Это действие необратимо.",
+      "Удаление стирает идею целиком. Для спама и по просьбе автора (письмо на maksym@matio.tv) — тогда запишите id в реестр заявок. Это действие необратимо.",
     deleteConfirm: "Удалить эту идею? Это действие необратимо.",
     deleteThisIdea: "Удалить идею",
   },
@@ -2105,7 +2105,7 @@ export const en: AdminDict = {
     firstTouch: "First touch",
     lastTouch: "Last touch",
     deleteDescription:
-      "Deleting erases the idea completely. For spam, and for a fan's request (an email to contact@matio.tv) — then record the id in the requests log. This cannot be undone.",
+      "Deleting erases the idea completely. For spam, and for a fan's request (an email to maksym@matio.tv) — then record the id in the requests log. This cannot be undone.",
     deleteConfirm: "Delete this idea? This cannot be undone.",
     deleteThisIdea: "Delete idea",
   },

@@ -207,7 +207,7 @@ export const es = {
       "Hemos eliminado tu correo. No volveremos a enviarte avisos de episodios.",
     invalidHeading: "Enlace no válido",
     invalidBody:
-      "Este enlace de baja no es válido. Escríbenos a contact@matio.tv y nos encargamos.",
+      "Este enlace de baja no es válido. Escríbenos a maksym@matio.tv y nos encargamos.",
     backHome: "Volver al inicio",
   },
   paywall: {
@@ -340,7 +340,7 @@ export const es = {
     codeSendFailed:
       "No pudimos enviar el código. Comprueba el correo o abre esta página en tu navegador.",
     codeWrong: "Código incorrecto o caducado. Inténtalo de nuevo.",
-    wrongEmail: "¿No es tu correo? Escríbenos a contact@matio.tv",
+    wrongEmail: "¿No es tu correo? Escríbenos a maksym@matio.tv",
   },
   notFound: {
     code: "404",
@@ -701,7 +701,7 @@ export const en: Dict = {
       "We've removed your email. You won't get any more episode notifications.",
     invalidHeading: "Invalid link",
     invalidBody:
-      "This unsubscribe link isn't valid. Email contact@matio.tv and we'll take care of it.",
+      "This unsubscribe link isn't valid. Email maksym@matio.tv and we'll take care of it.",
     backHome: "Back to home",
   },
   paywall: {
@@ -829,7 +829,7 @@ export const en: Dict = {
     codeSendFailed:
       "We couldn't send the code. Check the email or open this page in your browser.",
     codeWrong: "Wrong or expired code. Please try again.",
-    wrongEmail: "Wrong email? Contact contact@matio.tv",
+    wrongEmail: "Wrong email? Contact maksym@matio.tv",
   },
   notFound: {
     code: "404",

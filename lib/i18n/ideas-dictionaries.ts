@@ -232,7 +232,7 @@ export const es = {
       // The link is the address itself (mailto:).
       a: {
         before: "Escribe a ",
-        link: "contact@matio.tv",
+        link: "maksym@matio.tv",
         after:
           " desde la dirección que usaste y lo eliminaremos. También puedes pedirnos una copia de lo que tenemos.",
       },
@@ -492,7 +492,7 @@ export const en: IdeasDict = {
       q: "How do I delete my submission?",
       a: {
         before: "Email ",
-        link: "contact@matio.tv",
+        link: "maksym@matio.tv",
         after:
           " from the address you used, and we'll delete it. You can also ask us for a copy of what we hold.",
       },

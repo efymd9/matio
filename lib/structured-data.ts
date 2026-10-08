@@ -75,7 +75,7 @@ export function organizationJsonLd(): JsonLd {
     // Raster logo (Google's Organization-logo guidance prefers a crawlable
     // PNG ≥112×112). Absolute so it's fetchable from any origin.
     logo: `${SITE_URL}/icon-512.png`,
-    email: "contact@matio.tv",
+    email: "maksym@matio.tv",
     // Machine-readable company registration — until now the number lived only
     // in prose (about/terms/JSON-LD legalName). GB-COH is the recognised
     // authority code for the UK register; this lets a crawler VERIFY
@@ -88,7 +88,7 @@ export function organizationJsonLd(): JsonLd {
     foundingDate: "2026-08-04",
     contactPoint: {
       "@type": "ContactPoint",
-      email: "contact@matio.tv",
+      email: "maksym@matio.tv",
       contactType: "customer support",
     },
     address: {

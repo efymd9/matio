@@ -98,7 +98,7 @@ describe("GET /api/v1/config", () => {
     for (const url of [body.urls.web, body.urls.terms, body.urls.privacy]) {
       expect(url).toMatch(/^https:\/\//);
     }
-    expect(body.urls.support).toBe("mailto:contact@matio.tv");
+    expect(body.urls.support).toBe("mailto:maksym@matio.tv");
   });
 
   it("sends the legal links as the bare embed pages (#310)", async () => {

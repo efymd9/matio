@@ -55,7 +55,7 @@ export async function GET() {
       terms: `${SITE_URL}${withAppEmbed("/terms")}`,
       privacy: `${SITE_URL}${withAppEmbed("/privacy")}`,
       cookies: `${SITE_URL}${withAppEmbed("/cookies")}`,
-      support: "mailto:contact@matio.tv",
+      support: "mailto:maksym@matio.tv",
     },
   };
 
