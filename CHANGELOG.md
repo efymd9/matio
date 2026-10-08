@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.1](https://github.com/efymd9/matio/compare/matio-v0.19.0...matio-v0.19.1) (2026-10-08)
+
+
+### Bug fixes
+
+* плеер — заставка под видео прячется на первом кадре, боковые полосы чёрные ([#412](https://github.com/efymd9/matio/issues/412)) ([#413](https://github.com/efymd9/matio/issues/413)) ([a0aed29](https://github.com/efymd9/matio/commit/a0aed296c3cd3e832995f9ae875972e968c7d9b3))
+* публичный контакт — maksym@matio.tv вместо неработающего contact@matio.tv ([#414](https://github.com/efymd9/matio/issues/414)) ([#415](https://github.com/efymd9/matio/issues/415)) ([d1f7f52](https://github.com/efymd9/matio/commit/d1f7f5293b5b46009658652a623d8e3f112dd41a))
+
 ## [0.19.0](https://github.com/efymd9/matio/compare/matio-v0.18.0...matio-v0.19.0) (2026-10-04)
 
 
