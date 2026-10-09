@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { ideaSubmissions, showReminders } from "@/db/schema";
+import { withRedactedFailure } from "@/lib/db-errors";
 
 // Unsubscribe links for reminder emails. Every outgoing email carries two
 // token-authenticated URLs for the same address:
@@ -81,15 +82,27 @@ export function decodeUnsubscribeParams(
 // now so the day a sender exists it starts from the right answer. Idea
 // addresses are stored lowercased, like reminder addresses. Returns the
 // deleted reminder count, as before — the ideas update is not counted.
+//
+// Both statements bind the address, so a failure leaves here without the
+// driver's text (#350, withRedactedFailure) — and it still leaves: the two
+// callers, the one-click route and the confirm page, answer it as a failure.
 export async function unsubscribeEmail(email: string): Promise<number> {
   const address = email.toLowerCase();
-  const deleted = await db
-    .delete(showReminders)
-    .where(eq(showReminders.email, address))
-    .returning({ id: showReminders.id });
-  await db
-    .update(ideaSubmissions)
-    .set({ marketingOptIn: false })
-    .where(eq(ideaSubmissions.email, address));
+  const deleted = await withRedactedFailure(
+    "unsubscribe: delete show_reminders by address",
+    () =>
+      db
+        .delete(showReminders)
+        .where(eq(showReminders.email, address))
+        .returning({ id: showReminders.id }),
+  );
+  await withRedactedFailure(
+    "unsubscribe: reset idea_submissions.marketing_opt_in by address",
+    () =>
+      db
+        .update(ideaSubmissions)
+        .set({ marketingOptIn: false })
+        .where(eq(ideaSubmissions.email, address)),
+  );
   return deleted.length;
 }
