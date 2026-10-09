@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, settleOr } from "@/api/client";
+import { appleCodeForDeletion } from "@/auth/apple-revocation";
 import { useOptionalAuth } from "@/auth/clerk";
 import { endGoogleSession } from "@/auth/google-session";
 import { AuthStalled } from "@/components/auth-stalled";
@@ -181,11 +182,18 @@ function SignedInAccount() {
   // could erase anything (no token, or an anonymous 401), the account is
   // intact, and the viewer is told so and signed out: the tab turns into the
   // sign-in form, and a fresh session can delete.
+  //
+  // An account that signed in with Apple first passes through Apple's sheet
+  // once more (#407): its fresh authorization code lets the server revoke the
+  // app's grant on the Apple ID. A cancelled sheet or any Apple failure only
+  // means no code — the deletion goes ahead (auth/apple-revocation.ts).
   const confirmDelete = useCallback(() => {
     const deleteOrSay = async () => {
       setDeleting(true);
+      const appleAuthorizationCode = await appleCodeForDeletion(user);
       try {
         await api.deleteAccount({
+          appleAuthorizationCode,
           onSentWithToken: () => {
             deleteSent.current = true;
           },
@@ -230,7 +238,7 @@ function SignedInAccount() {
       { text: t.app.common.cancel, style: "cancel" },
       { text: t.app.account.deleteAccount, style: "destructive", onPress: confirmFinal },
     ]);
-  }, [getToken, router, signOut, t]);
+  }, [getToken, router, signOut, t, user]);
 
   return (
     <ScrollView

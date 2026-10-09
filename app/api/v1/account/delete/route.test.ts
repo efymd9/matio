@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -256,6 +257,175 @@ describe("POST /api/v1/account/delete — the deletion", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     expect(h.sentryMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", () => {
+  // The app sends a fresh Apple authorization code for an Apple account;
+  // the route exchanges it and revokes the grant between our erasure and
+  // Clerk (lib/apple-revoke.ts has its own suite for Apple's protocol). Apple
+  // is a fake fetch that writes into the same ordered log as the database
+  // and Clerk. Whatever Apple does, the deletion completes.
+  const CODE = "c0de-dummy-apple-authorization";
+  let apple: { token: () => Promise<Response>; revoke: () => Promise<Response> };
+
+  function withCode(body: unknown = { appleAuthorizationCode: CODE }) {
+    return new Request("https://matio.tv/api/v1/account/delete", {
+      method: "POST",
+      headers: { authorization: "Bearer sess_dummy", "content-type": "application/json" },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    }) as unknown as Parameters<typeof POST>[0];
+  }
+
+  const done = (): Record<string, unknown> | undefined =>
+    vi.mocked(console.info).mock.calls.find((c) => c[0] === "account delete: done")?.[1] as
+      | Record<string, unknown>
+      | undefined;
+
+  beforeEach(() => {
+    const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+    vi.stubEnv("APPLE_TEAM_ID", "TEAMDUMMY1");
+    vi.stubEnv("APPLE_SIGN_IN_KEY_ID", "KEYDUMMY01");
+    vi.stubEnv(
+      "APPLE_SIGN_IN_PRIVATE_KEY",
+      privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    );
+    apple = {
+      token: async () =>
+        new Response(JSON.stringify({ refresh_token: "r-dummy", access_token: "a-dummy" }), {
+          status: 200,
+        }),
+      revoke: async () => new Response(null, { status: 200 }),
+    };
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (url === "https://appleid.apple.com/auth/token") {
+        h.writes.push("apple token");
+        return apple.token();
+      }
+      if (url === "https://appleid.apple.com/auth/revoke") {
+        h.writes.push("apple revoke");
+        return apple.revoke();
+      }
+      throw new Error(`unexpected request to ${url}`);
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("revokes AFTER our erasure and BEFORE the Clerk account goes — then {ok:true}", async () => {
+    const res = await POST(withCode());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(h.writes).toEqual([
+      "delete show_reminders",
+      "delete idea_submissions",
+      "delete users",
+      "apple token",
+      "apple revoke",
+      `clerk deleteUser ${USER_ID}`,
+    ]);
+    expect(done()).toMatchObject({ userId: USER_ID, apple: { status: "revoked" }, clerk: "deleted" });
+    expect(h.sentryMessage).not.toHaveBeenCalled();
+  });
+
+  it("Apple refusing the code (400 invalid_grant) still deletes the account — logged and sent to Sentry by id", async () => {
+    apple.token = async () =>
+      new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400 });
+
+    const res = await POST(withCode());
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(h.writes).toEqual([
+      "delete show_reminders",
+      "delete idea_submissions",
+      "delete users",
+      "apple token",
+      `clerk deleteUser ${USER_ID}`,
+    ]);
+    expect(done()).toMatchObject({
+      apple: { status: "failed", step: "token", httpStatus: 400, appleError: "invalid_grant" },
+      clerk: "deleted",
+    });
+    expect(h.sentryMessage).toHaveBeenCalledWith(
+      expect.stringContaining("Apple token revocation failed"),
+      expect.objectContaining({
+        level: "warning",
+        tags: { userId: USER_ID, step: "apple", appleStep: "token" },
+      }),
+    );
+  });
+
+  it("Apple timing out on the revocation still deletes the account", async () => {
+    apple.revoke = async () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    };
+
+    const res = await POST(withCode());
+
+    expect(res.status).toBe(200);
+    expect(h.writes.at(-1)).toBe(`clerk deleteUser ${USER_ID}`);
+    expect(done()).toMatchObject({
+      apple: { status: "failed", step: "revoke", error: { name: "TimeoutError" } },
+    });
+  });
+
+  it("no Apple key in the env: nothing goes to Apple, the deletion is what it was before #407", async () => {
+    vi.stubEnv("APPLE_SIGN_IN_PRIVATE_KEY", "");
+
+    const res = await POST(withCode());
+
+    expect(res.status).toBe(200);
+    expect(h.writes).toEqual([
+      "delete show_reminders",
+      "delete idea_submissions",
+      "delete users",
+      `clerk deleteUser ${USER_ID}`,
+    ]);
+    expect(done()).toMatchObject({ apple: { status: "skipped_unconfigured" } });
+    expect(h.sentryMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no body at all (a build from before #407, an account without Apple)", undefined],
+    ["a body that is not JSON", "not json"],
+    ["a body without a code (a cancelled Apple sheet)", {}],
+  ])("%s → skipped_no_code, nothing goes to Apple, the account is deleted", async (_label, body) => {
+    const res = await POST(body === undefined ? deleteRequest() : withCode(body));
+
+    expect(res.status).toBe(200);
+    expect(h.writes).toEqual([
+      "delete show_reminders",
+      "delete idea_submissions",
+      "delete users",
+      `clerk deleteUser ${USER_ID}`,
+    ]);
+    expect(done()).toMatchObject({ apple: { status: "skipped_no_code" } });
+  });
+
+  it("an erasure the database refuses spends nothing at Apple — the account and its grant stay for the retry", async () => {
+    h.usersDeleteFails = true;
+
+    const res = await POST(withCode());
+
+    expect(res.status).toBe(500);
+    expect(h.writes.some((w) => w.startsWith("apple"))).toBe(false);
+    expect(h.clerkDelete).not.toHaveBeenCalled();
+  });
+
+  it("a Clerk refusal after the revocation is still the 500 a retry finishes — and its log names Apple's outcome", async () => {
+    h.clerkDelete.mockRejectedValueOnce(clerkError(500));
+
+    const res = await POST(withCode());
+
+    expect(res.status).toBe(500);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Clerk account could NOT be deleted"),
+      expect.objectContaining({ userId: USER_ID, apple: { status: "revoked" } }),
+    );
   });
 });
 
