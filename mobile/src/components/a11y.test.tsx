@@ -482,7 +482,7 @@ describe("fixed-height chrome caps Larger Text (#288 item 13)", () => {
   });
 });
 
-describe("the vertical player's play/pause says its state; Magic Tap toggles it (#304 item 4)", () => {
+describe("the vertical player's play/pause says its state (#304 item 4); no Magic Tap (#411)", () => {
   const chrome = (paused: boolean, onTogglePlay = vi.fn()) => {
     render(
       <VerticalChrome
@@ -509,13 +509,18 @@ describe("the vertical player's play/pause says its state; Magic Tap toggles it 
     expect(byLabel("Play/Pause")?.getAttribute("aria-valuetext")).toBe("Paused");
   });
 
-  it("the two-finger double tap toggles playback, like a tap on the picture", () => {
+  // React Native 0.86 on Fabric drops `onMagicTap` on its way to the native
+  // view (the view config sends it under that name, the C++ props read only
+  // `onAccessibilityMagicTap`), so a two-finger double tap would do nothing.
+  // The chrome must not promise it; activating the control is the way.
+  it("activating the control toggles playback; nothing in the chrome hands out onMagicTap", () => {
     const onTogglePlay = chrome(false);
-    const surface = rec.pressables.filter((p) => p.accessibilityLabel === "Play/Pause").at(-1);
 
-    expect(surface?.onMagicTap).toBeTypeOf("function");
-    act(() => (surface?.onMagicTap as () => void)());
+    act(() => (byLabel("Play/Pause") as HTMLElement).click());
     expect(onTogglePlay).toHaveBeenCalledTimes(1);
+
+    expect(rec.pressables.length).toBeGreaterThan(0);
+    expect(rec.pressables.filter((p) => p.onMagicTap !== undefined)).toEqual([]);
   });
 });
 

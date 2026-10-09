@@ -63,11 +63,13 @@ export function VerticalChrome({
           this control is the only place VoiceOver can learn the state: it
           is the button's value, «Play/Pause, Playing» (#304 item 4) —
           `aria-valuetext`, which Pressable turns into accessibilityValue.text.
-          Magic Tap (the two-finger double tap) toggles it, as in every
-          player on iOS. */}
+          No Magic Tap (#411): React Native 0.86 on Fabric never hands the JS
+          `onMagicTap` to the native view — the view config passes it as
+          `onMagicTap`, the C++ props read only `onAccessibilityMagicTap` —
+          so the two-finger double tap would do nothing. Under VoiceOver this
+          control is the way: a double tap on it is a tap on the picture. */}
       <Pressable
         onPress={onTogglePlay}
-        onMagicTap={onTogglePlay}
         accessibilityRole="button"
         accessibilityLabel={t.player.playPauseAria}
         aria-valuetext={paused ? t.app.player.paused : t.app.player.playing}
