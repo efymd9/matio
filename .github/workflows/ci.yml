@@ -119,9 +119,10 @@ jobs:
         run: pnpm exec vitest run --project storybook --update || true
 
       # Эталоны лежат в `__screenshots__/` рядом с историей, а «actual» и
-      # дифф упавшего голдена vitest 5 кладёт в `.vitest/attachments/`
-      # (до 5.0 — `.vitest-attachments/`; старый путь молча давал артефакт
-      # без диффов, #424).
+      # дифф упавшего голдена vitest 5 кладёт в `.vitest/attachments/` (до
+      # 5.0 — `.vitest-attachments/`). Это скрытый каталог, а upload-artifact
+      # скрытые файлы по умолчанию пропускает — без include-hidden-files в
+      # артефакт приезжали одни свежие эталоны, без диффов (#424).
       - name: Артефакт голденов (эталоны + диффы)
         if: failure()
         uses: actions/upload-artifact@v7
@@ -130,6 +131,7 @@ jobs:
           path: |
             **/__screenshots__/**
             .vitest/attachments/**
+          include-hidden-files: true
           retention-days: 14
           if-no-files-found: ignore
 
