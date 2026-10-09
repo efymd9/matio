@@ -15,7 +15,7 @@ declare global {
 // moves the version — read that version's changelog, rehearse checkout on
 // staging, THEN move the literal. (The webhook endpoint has its own version,
 // set in the Stripe dashboard; this constant does not govern it.)
-export const STRIPE_API_VERSION = "2026-08-26.dahlia";
+export const STRIPE_API_VERSION = "2026-09-30.endive";
 
 // Lazy + cached. The Stripe SDK constructor will throw if the secret is empty.
 export function getStripe(): Stripe {
