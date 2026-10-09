@@ -52,18 +52,13 @@ updates:
       # только 28.10.2026; переход на 26 целиком — #289.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
-      # Семейство vitest ходит только строем: у @vitest/browser-playwright
-      # peer — ТОЧНАЯ версия vitest (поэтому он в package.json запинен без
-      # каретки), а @storybook/addon-vitest 10.6 объявляет peer
-      # `vitest ^3 || ^4` — на vitest 5 плагин Storybook ещё не работает:
-      # в #218 каждый голден Lab вернулся шириной 414 px (дефолтный viewport
-      # vitest) вместо 960. Мажор vitest — отдельный PR, когда addon-vitest
-      # объявит поддержку (#289, п. 1); маска ловит coverage-v8 и
-      # browser-playwright вместе с ядром.
-      - dependency-name: "vitest"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@vitest/*"
-        update-types: ["version-update:semver-major"]
+      # vitest и @vitest/* здесь больше нет: 5 взят в #424 (#289, п. 1),
+      # когда @storybook/addon-vitest 10.6.1 объявил peer `vitest ^5`.
+      # Миноры/патчи тройки (ядро, coverage-v8 и browser-playwright с
+      # ТОЧНЫМ peer на vitest) приезжают в группе вместе. Появится vitest 6
+      # в таблице бота — новая строка здесь (правило выше), а голдены Lab в
+      # его PR сверяются по ширине: 1200 px, 414 = плагин Storybook не
+      # выставил viewport (#220).
 
   # Expo-приложение: свой package-lock.json, живёт вне pnpm-воркспейса.
   #
