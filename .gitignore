@@ -62,8 +62,10 @@ storybook-static
 # A macOS run writes its own *-darwin.png (different text rasterisation);
 # committing those would make the suite red for everyone else.
 **/__screenshots__/**/*-darwin.png
-# vitest 5: attachments, failed-golden diffs and reports (was .vitest-attachments/).
+# vitest 5: attachments, failed-golden diffs and reports.
 .vitest/
+# The vitest 4 location — old checkouts still have this folder.
+.vitest-attachments/
 
 # Локальные настройки ОСНОВНОГО чекаута: хуки-гарды вотчеров очереди PR и
 # issues. Не коммитятся намеренно — иначе они приедут в worktree каждого

@@ -531,8 +531,9 @@ urgent — it costs one command.
   must pass. A component without a story is a component nobody can look at.
 - **Goldens are decisions, not chores.** The gallery boards (variants, tones,
   token sheet) are screenshot-compared. Baselines are per platform and only the
-  Linux ones are committed — CI is the arbiter, a macOS run only writes its own
-  gitignored `*-darwin.png`. When a golden fails, download the CI artifact
+  Linux ones are committed — CI is the arbiter; the first macOS run writes its
+  own gitignored `*-darwin.png` and fails those stories once, the second
+  passes. When a golden fails, download the CI artifact
   `visual-baselines`, look at the diff, and if the change was intended commit
   the regenerated PNGs in the same PR. Never regenerate until green.
 - **The Lab outside vitest (`pnpm lab`, `pnpm lab:build`) runs on a `vitest`

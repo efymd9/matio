@@ -618,8 +618,12 @@ Release + бамп `package.json`. Ритуал — скилл `/release`. Ме�
    `.next/dev/types/validator.ts` — лечится `rm -rf .next`.
 7. **Локальный `grep` на машине владельца — ugrep**, у него другая
    семантика `--include`; в скриптах отбирать файлы через `find`.
-8. **Голден-расхождение приезжает как «Test timed out in 15000ms»**, а не
-   как «screenshot mismatch» (см. `lab/golden.ts`).
+8. **Голден-расхождение на vitest 5 приходит явно**, за ~1 с: «Screenshot
+   does not match the stored reference.», причина и пути эталона и actual
+   (`.vitest/attachments/`) — прогон 37914796719, #424. «Test timed out in
+   15000ms» в `golden()` — признак vitest 4, больше не типичный. Видели пока
+   только расхождение по размеру; расхождение пикселей при том же размере
+   на vitest 5 ещё не ловилось (см. `lab/golden.ts`).
 9. **Секреты никогда не постить в issues/PR**; фейковые секреты в тестах
    должны выглядеть фейково (`sk-test-…`, dummy) — иначе их пометит ночной
    gitleaks.
