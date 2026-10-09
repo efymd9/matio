@@ -13,7 +13,7 @@
 # nightly run goes red — that is the review reminder, do not push the date out
 # without re-checking upstream. Mirror every entry in docs/registry.md.
 # Cap: 5 packages — several advisories of ONE package with ONE exposure count
-# once (image-size below). Re-check: 2026-12-20.
+# once (image-size and stream-json below). Re-check: 2026-12-20.
 
 # image-size 1.2.1 <- metro 0.84.4 (range ^1.0.2) <- @expo/metro <- expo.
 # No fixed release exists on any line (advisory: last_affected 2.0.2).
@@ -35,6 +35,20 @@ reason = "Same package and same exposure as GHSA-5p2g-fcmc-qvqq (image-size ICNS
 id = "GHSA-528h-pc64-c93x"
 ignoreUntil = 2026-12-20
 reason = "Unreachable. The flaw is in the pick/ignore/filter/replace filters; jayson requires only StreamValues and Verifier, and only from its SERVER-side lib/utils.js. @solana/web3.js imports just jayson/lib/client/browser, which does not load utils.js. Verified: stream-json, jayson and @solana/web3.js are all absent from the exported iOS bundle (#256). The fixed 3.5.0 is ESM-only and not loadable by jayson's CJS require."
+
+# Same package, same chain, same exposure as above (#417) — counts once toward
+# the cap. Both advisories are fixed only in 3.6.0, the same ESM-only line.
+# jayson 5.0.0 drops stream-json altogether, but @solana/web3.js 1.99.0 (the
+# latest) still asks jayson ^4.3.0.
+[[IgnoredVulns]]
+id = "GHSA-hqr4-qq8f-hg3x"
+ignoreUntil = 2026-12-20
+reason = "The vulnerable code is not in the installed version. The flaw is the comment re-scan in the JSONC parser and verifier (stream-json/jsonc/*); 1.9.1 ships no jsonc module at all (no jsonc or comment-handling code anywhere in the package) — the advisory's range simply starts at 0. jayson requires only the plain-JSON StreamValues and Verifier. Verified: stream-json, jayson and @solana/web3.js are all absent from the exported iOS bundle (#417). The fixed 3.6.0 is ESM-only and not loadable by jayson's CJS require."
+
+[[IgnoredVulns]]
+id = "GHSA-mjw6-4jj6-33hc"
+ignoreUntil = 2026-12-20
+reason = "Unreachable. The flaw is Assembler's plain current[key] assignment (a __proto__ key replaces the PARSED object's prototype, never Object.prototype), reached through StreamValues. jayson's lib/utils.js requires StreamValues at module load but instantiates the Assembler only in parseStream, which only its Node TCP/TLS server and client transports call; @solana/web3.js imports just jayson/lib/client/browser (uuid + generateRequest), which never loads utils.js, so stream-json is never even loaded. Verified: stream-json, jayson and @solana/web3.js are all absent from the exported iOS bundle (#417). The fixed 3.6.0 is ESM-only and not loadable by jayson's CJS require."
 
 # decode-uri-component 0.2.2 <- query-string 7.1.3 (range ^0.2.2) <- expo-router.
 # NOT a build-time-only entry — read the reason.
