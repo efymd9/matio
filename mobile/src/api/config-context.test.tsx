@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { act, useEffect, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "@/shared/api-types";
 
 // The launch gate every screen sits behind (#288 items 6 and 7):
@@ -61,9 +61,30 @@ const CONFIG: AppConfig = {
   },
 };
 
-let container: HTMLDivElement;
-let root: Root | null = null;
-const text = () => container.textContent ?? "";
+// Each test's own DOM, built in beforeEach and torn down in afterEach (#432).
+// vitest does not cancel a test that times out: its continuation keeps
+// running in the background. While the container and the root were plain
+// module variables, a first test stuck on a cold import woke up INSIDE the
+// next test — createRoot() on that test's container, an act() overlapping
+// its act() — and React's act queue never recovered: one timeout read as
+// sixteen failures, fifteen of them a misleading "expected '' to contain …".
+// So a test holds on to ITS stage, and after each import await of the
+// harness checks that the stage is still live: the continuation of a test
+// that timed out on a cold import stops before it touches the DOM, React or
+// the spies. NOT covered: a test that times out while one of its act()
+// calls is still pending (the harness's own, or one in settle /
+// foregroundAfter) — that still breaks React's act queue for the rest of
+// the file; the cold import was the failure seen (#432). A container of
+// its own is not enough by itself — a late act() still overlaps the next
+// test's and leaves React's act queue broken for the rest of the file
+// (checked with the check switched off: 14 of 16 red).
+type Stage = { container: HTMLDivElement; root: Root | null; live: boolean };
+let stage: Stage;
+const text = () => stage.container.textContent ?? "";
+
+function stillLive(own: Stage) {
+  if (!own.live) throw new Error("this test is already over (timed out?) — its continuation stops here");
+}
 
 type ConfigModule = typeof import("@/api/config-context");
 
@@ -76,9 +97,11 @@ async function renderProvider(
   locale: "en" | "es" = "en",
   body: (mod: ConfigModule) => ReactNode = () => <span>the app</span>,
 ) {
+  const own = stage;
   vi.resetModules();
   // The module instance the freshly imported provider will use.
   const { AppState } = await import("react-native");
+  stillLive(own);
   vi.spyOn(AppState, "addEventListener").mockImplementation((_type, handler) => {
     const listener = handler as (state: string) => void;
     onAppState = listener;
@@ -91,15 +114,17 @@ async function renderProvider(
   });
   const mod = await import("@/api/config-context");
   const { LocaleProvider } = await import("@/i18n/locale");
-  root = createRoot(container);
+  stillLive(own);
+  own.root = createRoot(own.container);
   await act(async () => {
-    root?.render(
+    own.root?.render(
       <LocaleProvider initial={locale}>
         <mod.ConfigProvider>{body(mod)}</mod.ConfigProvider>
       </LocaleProvider>,
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
+  stillLive(own);
   return mod;
 }
 
@@ -109,6 +134,21 @@ async function networkError() {
 }
 
 describe("ConfigProvider (#288)", () => {
+  // The cold import (#432). The first import of react-native in a worker
+  // loads react-native-web whole (Node loads it — vi.resetModules() never
+  // re-evaluates it), and the first import of the provider transforms its
+  // tree: a few hundred milliseconds on an idle machine, past the 5 s a test
+  // gets on a cold cache in a loaded coverage run. Paid once here, under a
+  // timeout of its own; after that, the reset + re-import in every
+  // renderProvider() only re-evaluates transformed modules — milliseconds.
+  beforeAll(async () => {
+    vi.stubGlobal("__DEV__", false); // client.ts reads it at load
+    await import("react-native");
+    await import("@/api/config-context");
+    await import("@/i18n/locale");
+    vi.unstubAllGlobals();
+  }, 60_000);
+
   beforeEach(() => {
     vi.stubGlobal("__DEV__", false);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -117,14 +157,15 @@ describe("ConfigProvider (#288)", () => {
     config.requests = 0;
     onAppState = null;
     listenersRemoved = 0;
-    container = document.createElement("div");
-    document.body.appendChild(container);
+    stage = { container: document.createElement("div"), root: null, live: true };
+    document.body.appendChild(stage.container);
   });
 
   afterEach(() => {
-    act(() => root?.unmount());
-    root = null;
-    container.remove();
+    stage.live = false;
+    act(() => stage.root?.unmount());
+    stage.root = null;
+    stage.container.remove();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -154,11 +195,13 @@ describe("ConfigProvider (#288)", () => {
 
     async function pressUpdate(openURL: (url: string) => Promise<unknown>) {
       config.answer = async () => ({ ...CONFIG, minSupportedBuild: 7 });
+      const own = stage;
       await renderProvider();
       // The module instance the freshly imported provider uses.
       const { Linking } = await import("react-native");
+      stillLive(own);
       const spy = vi.spyOn(Linking, "openURL").mockImplementation(openURL as never);
-      const node = Array.from(container.querySelectorAll("*")).find(
+      const node = Array.from(own.container.querySelectorAll("*")).find(
         (el) => el.children.length === 0 && el.textContent === "Update",
       );
       if (!node) throw new Error("no Update button");
@@ -174,7 +217,7 @@ describe("ConfigProvider (#288)", () => {
 
       expect(spy.mock.calls).toEqual([["itms-beta://"]]);
       // A plain CTA, not a play button.
-      expect(container.querySelector('[data-testid="play-glyph"]')).toBeNull();
+      expect(stage.container.querySelector('[data-testid="play-glyph"]')).toBeNull();
     });
 
     it("falls back to Apple's TestFlight page where the app is not installed — never to matio.tv", async () => {
@@ -422,8 +465,8 @@ describe("ConfigProvider (#288)", () => {
       expect(config.requests).toBe(2);
 
       const errors = vi.spyOn(console, "error");
-      act(() => root?.unmount());
-      root = null;
+      act(() => stage.root?.unmount());
+      stage.root = null;
       // Once, at unmount: the listener was not re-subscribed along the way.
       expect(listenersRemoved).toBe(1);
 

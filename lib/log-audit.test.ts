@@ -3595,4 +3595,308 @@ describe("log audit · a statement keyed on the address fails — unsubscribe an
       expect(logged()).toContain('"code":"57P01"');
     });
   });
+
+  describe("the rest of them (#425) — the users mirror, the reminder capture, the pay-first claim", () => {
+    // The same failure on the address-binding statements #350 left: the users
+    // mirror's own four (the Clerk user.created webhook lets the failure
+    // escape — Next answers 500, Svix redelivers), the series-end overlay's
+    // reminder upsert (answered as a typed server_error) and the pay-first
+    // claim's users upsert and its lookup by address (still thrown — the
+    // Stripe webhook rolls its event claim back on it, Stripe retries).
+    const NEW_ID = "user_new_marker";
+    const STALE_ID = "user_stale_marker";
+    const MOVED = "moved.leak.marker@example.invalid";
+
+    /** A select answering `rows` whether it ends in .limit() or is awaited as it is (a count). */
+    function rowsOf(rows: unknown[]) {
+      const chain = {
+        from: () => chain,
+        where: () => chain,
+        limit: async () => rows,
+        then: (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) =>
+          Promise.resolve(rows).then(resolve, reject),
+      };
+      return chain;
+    }
+
+    function failingSelect(error: Error) {
+      const chain = {
+        from: () => chain,
+        where: () => chain,
+        limit: async () => {
+          throw error;
+        },
+      };
+      return chain;
+    }
+
+    /** The insert losing to users_email_unique — the address in the params and the detail. */
+    function emailTaken() {
+      return Object.assign(
+        new Error(
+          `Failed query: insert into "users" ("id", "email") values ($1, $2)\nparams: ${NEW_ID},${MARKER_EMAIL}`,
+        ),
+        {
+          name: "DrizzleQueryError",
+          cause: Object.assign(
+            new Error('duplicate key value violates unique constraint "users_email_unique"'),
+            {
+              name: "PostgresError",
+              code: "23505",
+              constraint_name: "users_email_unique",
+              detail: `Key (email)=(${MARKER_EMAIL}) already exists.`,
+            },
+          ),
+        },
+      );
+    }
+
+    describe("users mirror (#380) behind the Clerk user.created webhook", () => {
+      function userCreated() {
+        clerkVerify.mockResolvedValue({
+          type: "user.created",
+          object: "event",
+          data: {
+            id: NEW_ID,
+            object: "user",
+            created_at: Date.parse("2026-10-01T05:56:00Z"),
+            primary_email_address_id: "idn_1",
+            email_addresses: [{ id: "idn_1", email_address: MARKER_EMAIL }],
+          },
+        });
+        // The new account is alive (#336); the holder of the address, when
+        // asked, has moved on to another one.
+        accountAudit.clerkGetUser.mockReset().mockImplementation(async (id: string) => {
+          const address = id === NEW_ID ? MARKER_EMAIL : MOVED;
+          return {
+            primaryEmailAddress: { emailAddress: address },
+            emailAddresses: [{ emailAddress: address }],
+          };
+        });
+      }
+
+      /** The users inserts, in order: an error is thrown, undefined goes through. */
+      function usersInserts(...answers: (Error | undefined)[]) {
+        insert.mockImplementation(() => ({
+          values: () => ({
+            onConflictDoNothing: async () => {
+              const answer = answers.shift();
+              if (answer) throw answer;
+            },
+          }),
+        }));
+      }
+
+      it.each([
+        [
+          "the insert",
+          "users mirror: insert users row",
+          () => usersInserts(refusal("users", "insert into")),
+        ],
+        [
+          "the lookup of the row holding the address",
+          "users mirror: find the users row by address",
+          () => {
+            usersInserts(emailTaken());
+            select.mockImplementation(() => failingSelect(refusal("users", "select from")));
+          },
+        ],
+        [
+          "the correction of the holder's stale address",
+          "users mirror: correct users.email by address",
+          () => {
+            usersInserts(emailTaken());
+            select.mockImplementation(() => rowsOf([{ id: STALE_ID }]));
+            update.mockImplementation(() => ({
+              set: () => ({
+                where: async () => {
+                  // Both addresses are this statement's params.
+                  throw Object.assign(refusal("users", "update"), {
+                    message: `Failed query: update "users" set "email" = $1 where ("users"."id" = $2 and "users"."email" = $3)\nparams: ${MOVED},${STALE_ID},${MARKER_EMAIL}`,
+                  });
+                },
+              }),
+            }));
+          },
+        ],
+        [
+          "the repeated insert",
+          "users mirror: insert users row again",
+          () => {
+            // The holder left between the two statements; the repeat fails.
+            usersInserts(emailTaken(), refusal("users", "insert into"));
+            select.mockImplementation(() => rowsOf([]));
+          },
+        ],
+      ])(
+        "%s fails: it escapes the webhook (500, Svix redelivers) as the statement's name, class and SQLSTATE — the address nowhere",
+        async (_label, statement, arrange) => {
+          userCreated();
+          arrange();
+          const logged = captureConsole();
+
+          const { escaped } = await underNext(() =>
+            clerkWebhook(new Request("https://matio.tv/api/webhooks/clerk", { method: "POST" }) as never),
+          );
+
+          expect(escaped).toMatchObject({
+            name: "DrizzleQueryError",
+            code: "57P01",
+            message: `${statement} failed`,
+          });
+          expect((escaped as { cause?: unknown }).cause).toBeUndefined();
+          const sent = await sentryBytes(escaped, "/api/webhooks/clerk", "/api/webhooks/clerk");
+          expectNoMarker(logged(), sent, sentryMessages());
+          for (const sink of [logged(), sent]) expect(sink).not.toContain(MOVED);
+          expect(sent).toContain(`${statement} failed`);
+          expect(sent).toContain('"function":"withRedactedFailure"'); // the stack went out
+        },
+      );
+    });
+
+    it("reminder capture: a failed upsert answers server_error — the overlay's generic error — logged by show id, class and SQLSTATE, reported with its stack and no address", async () => {
+      select
+        // The show is published…
+        .mockImplementationOnce(() => rowsOf([{ id: "show_marker" }]))
+        // …and the brake has counted no recent rows.
+        .mockImplementation(() => rowsOf([{ n: 0 }]));
+      insert.mockImplementation(() => ({
+        values: () => ({
+          onConflictDoUpdate: async () => {
+            throw refusal("show_reminders", "insert into");
+          },
+        }),
+      }));
+      const { subscribeToShowReminder } = await import("@/app/watch/actions");
+      const logged = captureConsole();
+
+      const { result, escaped } = await underNext(() =>
+        subscribeToShowReminder({ showId: "show_marker", email: MARKER_EMAIL }),
+      );
+
+      expect(escaped).toBeUndefined();
+      expect(result).toEqual({ ok: false, reason: "server_error" });
+      expectNoMarker(logged(), sentryMessages());
+      expect(logged()).toContain("subscribeToShowReminder: failed");
+      expect(logged()).toContain('"showId":"show_marker"');
+      expect(logged()).toContain('"code":"57P01"');
+      const sent = await reportedBytes("https://matio.tv/watch/some-show");
+      expectNoMarker(sent);
+      expect(sent).toContain("reminder capture: upsert show_reminders by address failed");
+      expect(sent).toContain('"function":"withRedactedFailure"'); // the stack went out
+      expect(sent).toContain('"showId":"show_marker"');
+    });
+
+    describe("pay-first claim (#385)", () => {
+      const LIVE_ID = "user_live_marker";
+      const CUSTOMER_ID = "cus_marker";
+      const guestSub = {
+        id: "sub_marker",
+        object: "subscription",
+        status: "active",
+        metadata: { guest: "1" },
+        customer: CUSTOMER_ID,
+        items: { data: [] },
+      };
+
+      async function realClaim() {
+        const actual = await vi.importActual<typeof import("@/lib/guest-checkout")>(
+          "@/lib/guest-checkout",
+        );
+        return actual.claimGuestCheckout;
+      }
+
+      /** The event claim goes in; the buyer's users row does not. */
+      function usersUpsertRefused() {
+        const refused = async () => {
+          throw refusal("users", "insert into");
+        };
+        insert.mockImplementation((table: unknown) =>
+          table === stripeEvents
+            ? {
+                values: () => ({
+                  onConflictDoNothing: () => ({
+                    returning: async () => [{ eventId: "evt_marker" }],
+                  }),
+                }),
+              }
+            : { values: () => ({ onConflictDoUpdate: refused, onConflictDoNothing: refused }) },
+        );
+      }
+
+      beforeEach(() => {
+        // Clerk knows the address under the live id; no row is bound to the
+        // customer, none to the live id, none holds the address.
+        guestClaimAudit.getUserList.mockResolvedValue({ data: [{ id: LIVE_ID }] });
+        select.mockImplementation(() => rowsOf([]));
+        usersUpsertRefused();
+      });
+
+      it("Stripe webhook: the failure still rolls the event claim back (500, Stripe retries) and is printed without the address the customer carries", async () => {
+        vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_dummy");
+        guestClaimAudit.claim.mockImplementation(
+          (await realClaim()) as (...args: unknown[]) => Promise<unknown>,
+        );
+        guestClaimAudit.customerRetrieve.mockResolvedValue({
+          id: CUSTOMER_ID,
+          object: "customer",
+          email: MARKER_EMAIL,
+          name: MARKER_NAME,
+        });
+        guestClaimAudit.constructEvent.mockReturnValue({
+          id: "evt_marker",
+          type: "customer.subscription.created",
+          data: { object: guestSub },
+        });
+        del.mockImplementation(() => ({ where: async () => undefined }));
+        const logged = captureConsole();
+
+        const res = await stripeWebhook(
+          new Request("https://matio.test/api/webhooks/stripe", {
+            method: "POST",
+            headers: { "stripe-signature": "t=1,v1=dummy" },
+            body: "{}",
+          }) as never,
+        );
+
+        expect(res.status).toBe(500);
+        expect(del).toHaveBeenCalledTimes(1); // the event claim is rolled back
+        // The address did flow through the real claim.
+        expect(guestClaimAudit.getUserList).toHaveBeenCalledWith({ emailAddress: [MARKER_EMAIL] });
+        // What Node prints for the route's `console.error("…", err)`: the
+        // error with its own properties and its cause chain.
+        const { inspect } = await import("node:util");
+        const printed = vi
+          .mocked(console.error)
+          .mock.calls.flat()
+          .map((arg) => inspect(arg, { depth: 5 }))
+          .join("\n");
+        expect(printed).toContain("Stripe webhook handler error");
+        expect(printed).toContain("guest checkout: upsert users row failed");
+        expect(printed).toContain("57P01");
+        expectNoMarker(logged(), printed, sentryMessages());
+      });
+
+      it("/welcome's path: the lookup by address after the failed upsert fails too — the claim throws that statement, redacted", async () => {
+        select
+          .mockImplementationOnce(() => rowsOf([])) // the row bound to the customer
+          .mockImplementationOnce(() => rowsOf([])) // the live id's own row
+          .mockImplementation(() => failingSelect(refusal("users", "select from")));
+        const claim = await realClaim();
+
+        const error = await claim(guestSub as never, { emailHint: MARKER_EMAIL }).then(
+          () => null,
+          (e: unknown) => e,
+        );
+
+        expect(error).toMatchObject({
+          name: "DrizzleQueryError",
+          code: "57P01",
+          message: "guest checkout: find the users row by address failed",
+        });
+        const { inspect } = await import("node:util");
+        expectNoMarker(inspect(error, { depth: 5 }));
+      });
+    });
+  });
 });
