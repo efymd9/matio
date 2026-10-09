@@ -12,7 +12,12 @@
 // §6/§7/§8 — same DRAFT status (counsel questions: #168). Sign-in with
 // Google / Apple (#277) added 2026-10-04 in §2, §4 and §11: an agent's draft,
 // merged only on the owner's «да» in the PR thread, counsel review pending
-// with the rest (#168). matio.tv/ideas is
+// with the rest (#168). §3's marketing-measurement basis (#342) rewritten
+// 2026-10-09 to say what lib/cookie-consent.ts + proxy.ts do — consent via
+// the banner in the EU/EEA, UK and CH, on by default with the footer opt-out
+// elsewhere — worded like the §2 ideas item: an agent's draft, merged only
+// on the owner's «да» in the PR thread; the counsel question is in #168.
+// matio.tv/ideas is
 // plain text on purpose: every internal link here must survive ?embed=app
 // (app/(public)/legal-embed.test.tsx).
 import type { Metadata } from "next";
@@ -32,8 +37,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED_ES = "27 de septiembre de 2026";
-const LAST_UPDATED_EN = "September 27, 2026";
+const LAST_UPDATED_ES = "9 de octubre de 2026";
+const LAST_UPDATED_EN = "October 9, 2026";
 
 export default async function PrivacyPage() {
   const { locale, t } = await getDict();
@@ -210,8 +215,11 @@ function PrivacyEn() {
             cookies and, where enabled, the Meta Pixel, Meta Conversions API,
             PostHog (product-analytics funnel measurement), and Google Analytics
             (site-traffic measurement).
-            Lawful basis: <em>consent</em> — these run only after you accept
-            marketing cookies in the banner, and stop if you withdraw consent.
+            Lawful basis in the EU/EEA, the UK and Switzerland:{" "}
+            <em>consent</em> — there these run only after you accept marketing
+            cookies in the banner, and stop if you withdraw consent. Elsewhere
+            they are on by default, and you can switch them off under
+            &ldquo;Cookie preferences&rdquo; in the footer.
           </li>
           <li>
             <strong>First-party audience measurement</strong> (counting unique
@@ -717,9 +725,12 @@ function PrivacyEs() {
             y, cuando está activado, el Meta Pixel, la API de Conversiones de
             Meta, PostHog (analítica de embudo de producto) y Google Analytics
             (medición del tráfico del sitio).
-            Base jurídica: <em>consentimiento</em>: solo se ejecutan tras
-            aceptar las cookies de marketing en el banner y se detienen si
-            retiras el consentimiento.
+            Base jurídica en la UE/EEE, el Reino Unido y Suiza:{" "}
+            <em>consentimiento</em>; allí solo se ejecutan tras aceptar las
+            cookies de marketing en el banner y se detienen si retiras el
+            consentimiento. En el resto del mundo están activadas por defecto y
+            puedes desactivarlas en «Preferencias de cookies», en el pie de
+            página.
           </li>
           <li>
             <strong>Medición de audiencia de origen propio</strong> (contar
