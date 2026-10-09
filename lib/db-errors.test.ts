@@ -1,5 +1,11 @@
+import { inspect } from "node:util";
 import { describe, expect, it } from "vitest";
-import { describeDbError, isForeignKeyViolation, isUniqueViolation } from "./db-errors";
+import {
+  describeDbError,
+  isForeignKeyViolation,
+  isUniqueViolation,
+  withRedactedFailure,
+} from "./db-errors";
 
 // Drizzle 0.44+ throws a DrizzleQueryError whose own `.code` is undefined —
 // the PostgresError with the SQLSTATE sits on `.cause`. Both helpers must see
@@ -119,5 +125,90 @@ describe("describeDbError — what a failure may be described by", () => {
     );
 
     expect(JSON.stringify(describeDbError(wrapped))).not.toContain("1eaf0000");
+  });
+});
+
+describe("withRedactedFailure — a statement that binds an address (#350)", () => {
+  const ADDRESS = "fan.marker@example.invalid";
+  // The realistic shape: Drizzle's wrapper repeats the statement with its
+  // params; the driver's error quotes the address in its own text and `detail`.
+  const refusal = () =>
+    Object.assign(
+      new Error(
+        `Failed query: delete from "show_reminders" where "show_reminders"."email" = $1 returning "id"\nparams: ${ADDRESS}`,
+      ),
+      {
+        name: "DrizzleQueryError",
+        cause: Object.assign(new Error(`terminating connection while deleting ${ADDRESS}`), {
+          name: "PostgresError",
+          code: "57P01",
+          detail: `Key (email)=(${ADDRESS})`,
+        }),
+      },
+    );
+
+  it("hands back the statement's own result when it succeeds", async () => {
+    await expect(withRedactedFailure("s", async () => [{ id: "rem_1" }])).resolves.toEqual([
+      { id: "rem_1" },
+    ]);
+  });
+
+  it("re-throws a failure as class + SQLSTATE under a fixed message — no text, no cause", async () => {
+    const thrown = await withRedactedFailure("unsubscribe: delete show_reminders by address", () => {
+      throw refusal();
+    }).catch((e: unknown) => e);
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toMatchObject({
+      name: "DrizzleQueryError",
+      code: "57P01",
+      message: "unsubscribe: delete show_reminders by address failed",
+    });
+    expect((thrown as Error).cause).toBeUndefined();
+    // Everything Node would print for it — the stack, own props, the cause.
+    expect(inspect(thrown, { depth: 5 })).not.toContain(ADDRESS);
+    // What the callers read still reads the same.
+    expect(describeDbError(thrown)).toEqual(describeDbError(refusal()));
+  });
+
+  it("keeps the violated constraint's name — the users mirror's #380 branch still reads `users_email_unique` — and still no address", async () => {
+    // The users insert refused on the address: Drizzle's wrapper, then the
+    // driver's 23505 naming the constraint and quoting the row in `detail`.
+    const conflict = Object.assign(
+      new Error(`Failed query: insert into "users" ("id", "email") values ($1, $2)\nparams: user_1,${ADDRESS}`),
+      {
+        name: "DrizzleQueryError",
+        cause: Object.assign(new Error(`duplicate key value violates unique constraint "users_email_unique"`), {
+          name: "PostgresError",
+          code: "23505",
+          constraint_name: "users_email_unique",
+          detail: `Key (email)=(${ADDRESS}) already exists.`,
+        }),
+      },
+    );
+
+    const thrown = await withRedactedFailure("users mirror: insert", () => {
+      throw conflict;
+    }).catch((e: unknown) => e);
+
+    expect(isUniqueViolation(thrown, "users_email_unique")).toBe(true);
+    expect(isUniqueViolation(thrown, "users_pkey")).toBe(false);
+    expect(thrown).toMatchObject({ code: "23505", constraint_name: "users_email_unique" });
+    expect((thrown as Error).message).toBe("users mirror: insert failed");
+    expect((thrown as Error).cause).toBeUndefined();
+    // Message, stack and every own property, as Node would print them.
+    expect(inspect(thrown, { depth: 5 })).not.toContain(ADDRESS);
+    expect(JSON.stringify(thrown)).not.toContain(ADDRESS);
+  });
+
+  it("a rejected promise is redacted the same way, and an error with no SQLSTATE stays without one", async () => {
+    const thrown = await withRedactedFailure("s", () =>
+      Promise.reject(new TypeError(`cannot bind ${ADDRESS}`)),
+    ).catch((e: unknown) => e);
+
+    expect(thrown).toMatchObject({ name: "TypeError", message: "s failed" });
+    expect("code" in (thrown as object)).toBe(false);
+    expect("constraint_name" in (thrown as object)).toBe(false);
+    expect(inspect(thrown)).not.toContain(ADDRESS);
   });
 });
