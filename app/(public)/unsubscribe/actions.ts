@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { describeDbError } from "@/lib/db-errors";
 import {
   decodeUnsubscribeParams,
   unsubscribeEmail,
@@ -21,6 +22,17 @@ export async function confirmUnsubscribe(
     // Renders the invalid-link state (no params → invalid).
     redirect("/unsubscribe");
   }
-  await unsubscribeEmail(parsed.email);
+  try {
+    await unsubscribeEmail(parsed.email);
+  } catch (err) {
+    // The address is still on the list, so never the done page. The failure
+    // goes on as an error — the app's error page says so and offers a retry
+    // (the link is still in the URL), and onRequestError reports it — but as
+    // a fresh one carrying class and SQLSTATE only: the statements bind the
+    // address, and Next prints whatever escapes to the runtime log (#350).
+    const { name, code } = describeDbError(err);
+    console.error("confirmUnsubscribe: failed", { name, code });
+    throw new Error(`confirmUnsubscribe: failed (${name}, ${code ?? "no code"})`);
+  }
   redirect("/unsubscribe?done=1");
 }

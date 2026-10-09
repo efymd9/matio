@@ -53,6 +53,7 @@ const {
   stripeSessionExpire,
   erasedCustomer,
   sentryMessage,
+  sentryException,
 } = vi.hoisted(() => ({
   execute: vi.fn(),
   select: vi.fn(),
@@ -67,14 +68,19 @@ const {
   stripeSessionExpire: vi.fn(),
   erasedCustomer: vi.fn(),
   sentryMessage: vi.fn(),
+  sentryException: vi.fn(),
 }));
 vi.mock("@/db", () => ({ db: { execute, select, update, delete: del, insert } }));
 vi.mock("server-only", () => ({}));
 // Sentry is the second sink these paths report to (the Clerk erasure and the
-// retention cron both send a message with tags). Spied so the audit can read
-// what would leave the process — the scrubbers in lib/observability.ts are
-// exercised separately above; here the question is what the CALL carries.
-vi.mock("@sentry/nextjs", () => ({ captureMessage: sentryMessage }));
+// retention cron both send a message with tags; the #350 failure paths send
+// the error itself). Spied so the audit can read what would leave the
+// process — the scrubbers in lib/observability.ts are exercised separately
+// above; here the question is what the CALL carries.
+vi.mock("@sentry/nextjs", () => ({
+  captureMessage: sentryMessage,
+  captureException: sentryException,
+}));
 
 // The erasure handler's two outbound calls (cancel the live subscription at
 // Stripe; find every customer for the address, #223) are spies so their
@@ -198,7 +204,10 @@ vi.mock("@/lib/resend", () => ({
   emailFrom: () => "Matio <updates@example.invalid>",
   emailReplyTo: () => "contact@example.invalid",
 }));
-vi.mock("@/lib/email-unsubscribe", () => ({
+// Partial: the unsubscribe route and the confirm action (#350 cases) run the
+// real token check and the real unsubscribeEmail against the mocked db.
+vi.mock("@/lib/email-unsubscribe", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/email-unsubscribe")>()),
   unsubscribeUrls: () => ({
     page: "https://matio.tv/unsubscribe?token=dummy",
     oneClick: "https://matio.tv/api/email/unsubscribe?token=dummy",
@@ -400,6 +409,7 @@ beforeEach(() => {
   guestClaimAudit.customerRetrieve.mockReset();
   guestClaimAudit.constructEvent.mockReset();
   sentryMessage.mockReset();
+  sentryException.mockReset();
   walletAudit.authUserId = "user_1";
   walletAudit.claimCookie = "";
   // mockReset puts back the delegating implementation each spy was built with.
@@ -3159,5 +3169,428 @@ describe("log audit · subject requests by address (pnpm -s export-email / erase
     expect(erasing.err.join("\n")).toContain("DATABASE_URL must be passed explicitly");
     expect(leaked(logged, exporting)).toEqual([]);
     expect(leaked(logged, erasing)).toEqual([]);
+  });
+});
+
+describe("log audit · a statement keyed on the address fails — unsubscribe and erasure (#350)", () => {
+  // The statements that bind an address — the reminder rows and the story
+  // ideas, by address — failing the way Drizzle fails: its wrapper repeats the
+  // statement WITH its params, and the driver's error can quote the row again
+  // in its text and `detail`. Before #350 nobody caught it: Next printed it
+  // whole to the runtime log and handed it to Sentry. Every caller is driven
+  // here — the one-click route, the confirm page's action, the Clerk
+  // user.deleted webhook, the users mirror's late erasure and the app's
+  // «Delete account» — and what comes out is read where it would land: the
+  // console (Vercel's log), every Sentry call, and, for an error a caller
+  // lets escape or hands to captureException, the bytes the real Sentry
+  // server SDK with our options sends.
+  const E = Buffer.from(MARKER_EMAIL).toString("base64url");
+  const MARKERS = [MARKER_EMAIL, MARKER_NAME, E];
+  const USER_ID = "user_erase_marker";
+  const DSN = "https://dummy00000000000000000000000000@o0.ingest.de.sentry.io/0";
+
+  function refusal(table: string, op = "delete from") {
+    const cause = Object.assign(
+      new Error(`terminating connection due to administrator command (row ${MARKER_NAME} <${MARKER_EMAIL}>)`),
+      { name: "PostgresError", code: "57P01", detail: `Key (email)=(${MARKER_EMAIL})` },
+    );
+    return Object.assign(
+      new Error(`Failed query: ${op} "${table}" where "${table}"."email" = $1\nparams: ${MARKER_EMAIL}`),
+      { name: "DrizzleQueryError", cause },
+    );
+  }
+
+  /**
+   * What Next does with an error a route handler or an action lets escape:
+   * prints it whole to the runtime log — Node's inspect, i.e. the message, the
+   * stack, every own property and the `cause` chain — and hands it to
+   * onRequestError (Sentry, below).
+   */
+  async function underNext<T>(run: () => Promise<T>): Promise<{ result?: T; escaped?: unknown }> {
+    const { inspect } = await import("node:util");
+    try {
+      return { result: await run() };
+    } catch (escaped) {
+      console.error(inspect(escaped, { depth: 5 }));
+      return { escaped };
+    }
+  }
+
+  /** Every envelope the real server SDK, with our options and the cause chain on, sends for what `capture` reports. */
+  async function sentryTransport(capture: (sdk: typeof SentrySdk) => void): Promise<string[]> {
+    type Client = {
+      init(): void;
+      flush(timeout?: number): PromiseLike<boolean>;
+      close(timeout?: number): PromiseLike<boolean>;
+    };
+    const require = createRequire(import.meta.url);
+    const root = path.dirname(require.resolve("@sentry/nextjs/package.json"));
+    const sdk = require(path.join(root, "build/cjs/index.server.js")) as typeof SentrySdk;
+    const sent: string[] = [];
+    const NodeClient = sdk.NodeClient as unknown as new (options: Record<string, unknown>) => Client;
+    const client = new NodeClient({
+      dsn: DSN,
+      stackParser: sdk.defaultStackParser,
+      integrations: [sdk.linkedErrorsIntegration(), sdk.requestDataIntegration()],
+      transport: (options: Parameters<typeof sdk.createTransport>[0]) =>
+        sdk.createTransport(options, async (request) => {
+          sent.push(
+            typeof request.body === "string" ? request.body : new TextDecoder().decode(request.body),
+          );
+          return { statusCode: 200 };
+        }),
+      ...sentryPrivacyOptions(sdk.withStaticSpan),
+    });
+    sdk.getCurrentScope().setClient(client as unknown as SentrySdk.NodeClient);
+    client.init();
+    try {
+      capture(sdk);
+      await client.flush(2000);
+    } finally {
+      await client.close(0);
+      sdk.getCurrentScope().setClient(undefined);
+    }
+    return sent;
+  }
+
+  /** The bytes onRequestError would send for an escaped error. */
+  async function sentryBytes(escaped: unknown, requestPath: string, routePath: string) {
+    const sent = await sentryTransport((sdk) =>
+      sdk.captureRequestError(
+        escaped,
+        { path: requestPath, method: "POST", headers: {} },
+        { routerKind: "App Router", routePath, routeType: "route" },
+      ),
+    );
+    expect(sent).toHaveLength(1); // the escaped error did go out
+    return sent[0];
+  }
+
+  /**
+   * The bytes the real SDK sends for every error the code under test handed
+   * to Sentry.captureException — with its context, inside the request it
+   * served (the URL, query string included, as the SDK records it).
+   */
+  async function reportedBytes(requestUrl: string) {
+    const calls = sentryException.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const sent = await sentryTransport((sdk) => {
+      for (const [error, context] of calls) {
+        sdk.withScope((scope) => {
+          scope.setSDKProcessingMetadata({
+            normalizedRequest: { url: requestUrl, method: "POST", headers: {} },
+          });
+          sdk.captureException(error, context);
+        });
+      }
+    });
+    expect(sent).toHaveLength(calls.length); // every report did go out
+    return sent.join("\n");
+  }
+
+  /** What the code under test handed to Sentry, as the call carries it. */
+  function sentryMessages() {
+    return [...sentryMessage.mock.calls, ...sentryException.mock.calls].map(render).join("\n");
+  }
+
+  function expectNoMarker(...sinks: string[]) {
+    for (const sink of sinks) {
+      for (const marker of MARKERS) expect(sink).not.toContain(marker);
+    }
+  }
+
+  // The reminder DELETE fails, or — once it went through — the ideas' opt-out
+  // UPDATE does. Either way the address is still on a list.
+  function unsubscribeFailsAt(table: "show_reminders" | "idea_submissions") {
+    if (table === "show_reminders") {
+      del.mockImplementation(() => ({
+        where: () => ({
+          returning: async () => {
+            throw refusal("show_reminders");
+          },
+        }),
+      }));
+      return;
+    }
+    del.mockImplementation(() => ({ where: () => ({ returning: async () => [{ id: "rem_1" }] }) }));
+    update.mockImplementation(() => ({
+      set: () => ({
+        where: async () => {
+          throw refusal("idea_submissions", "update");
+        },
+      }),
+    }));
+  }
+
+  async function link() {
+    const { unsubscribeToken } = await import("@/lib/email-unsubscribe");
+    return { e: E, t: unsubscribeToken(MARKER_EMAIL) };
+  }
+
+  it("backstop: even the raw driver error, had it escaped, reaches the Sentry transport without the address — the runtime log was the leak", async () => {
+    // The address in all three places the driver can put it: the wrapper's
+    // `params:` (cut by stripQueryParams), the cause's OWN message (no
+    // `params:` there — only redactEmails on the linked chain holds it) and
+    // `detail`. Only the address: a non-email value quoted in a cause's own
+    // message is NOT cut (registry, #326).
+    const raw = Object.assign(
+      new Error(`Failed query: delete from "show_reminders" where "show_reminders"."email" = $1\nparams: ${MARKER_EMAIL}`),
+      {
+        name: "DrizzleQueryError",
+        cause: Object.assign(
+          new Error(`terminating connection due to administrator command while deleting ${MARKER_EMAIL}`),
+          { name: "PostgresError", code: "57P01", detail: `Key (email)=(${MARKER_EMAIL})` },
+        ),
+      },
+    );
+    const { t } = await link();
+
+    const sent = await sentryBytes(raw, `/api/email/unsubscribe?e=${E}&t=${t}`, "/api/email/unsubscribe");
+
+    expect(sent).toContain("DrizzleQueryError");
+    // The cause did go out (the linked chain) — with the address cut from it.
+    expect(sent).toContain("terminating connection due to administrator command while deleting");
+    expectNoMarker(sent);
+  });
+
+  it.each(["show_reminders", "idea_submissions"] as const)(
+    "one-click (RFC 8058): a failed %s statement answers 500 — never a 2xx — logged by class and SQLSTATE only, reported with its stack and no address",
+    async (table) => {
+      unsubscribeFailsAt(table);
+      const { e, t } = await link();
+      const { POST: oneClick } = await import("@/app/api/email/unsubscribe/route");
+      const logged = captureConsole();
+
+      const { result: res, escaped } = await underNext(() =>
+        oneClick({
+          nextUrl: new URL(`https://matio.tv/api/email/unsubscribe?e=${e}&t=${t}`),
+        } as unknown as Parameters<typeof oneClick>[0]),
+      );
+
+      expect(escaped).toBeUndefined();
+      expect(res?.status).toBe(500);
+      const body = JSON.stringify(await res!.json());
+      expect(body).toBe('{"error":"server_error"}');
+      expectNoMarker(logged(), body, sentryMessages());
+      expect(logged()).toContain("email unsubscribe (one-click): failed");
+      expect(logged()).toContain('"code":"57P01"');
+      expect(logged()).toContain("DrizzleQueryError");
+      expect(sentryMessages()).toContain('"code":"57P01"');
+      // What actually leaves for Sentry: the redacted error with its stack,
+      // the tags, the request — the link's query string (the address,
+      // base64url) stripped.
+      const sent = await reportedBytes(`https://matio.tv/api/email/unsubscribe?e=${e}&t=${t}`);
+      expectNoMarker(sent);
+      expect(sent).not.toContain(t);
+      expect(sent).toContain("by address failed");
+      expect(sent).toContain('"function":"withRedactedFailure"'); // the stack went out
+      expect(sent).toContain('"tags":{"code":"57P01","name":"DrizzleQueryError"}');
+      expect(sent).toContain('"url":"https://matio.tv/api/email/unsubscribe"');
+    },
+  );
+
+  it("confirm page: a failed unsubscribe never reaches the done page — it escapes to the error page as class and SQLSTATE, the address nowhere", async () => {
+    unsubscribeFailsAt("show_reminders");
+    const { e, t } = await link();
+    const { confirmUnsubscribe } = await import("@/app/(public)/unsubscribe/actions");
+    const logged = captureConsole();
+
+    const { escaped } = await underNext(() => confirmUnsubscribe(e, t));
+
+    // An error, not the redirect to `?done=1` (Next's redirect is a throw too).
+    expect(escaped).toBeInstanceOf(Error);
+    expect((escaped as { digest?: string }).digest).toBeUndefined();
+    expect((escaped as Error).message).toBe("confirmUnsubscribe: failed (DrizzleQueryError, 57P01)");
+    const sent = await sentryBytes(escaped, `/unsubscribe?e=${e}&t=${t}`, "/unsubscribe");
+    expectNoMarker(logged(), sent, sentryMessages());
+    expect(logged()).toContain("confirmUnsubscribe: failed");
+    expect(sent).toContain("confirmUnsubscribe: failed");
+  });
+
+  describe("erasure", () => {
+    beforeEach(() => {
+      vi.stubEnv("POSTHOG_PERSONAL_API_KEY", "");
+      vi.stubEnv("POSTHOG_PROJECT_ID", "");
+      accountAudit.clerkGetUser.mockReset();
+      accountAudit.clerkDelete.mockReset().mockResolvedValue({ id: "user_1" });
+    });
+
+    function selectChain(rows: unknown[]) {
+      const chain = { from: () => chain, where: () => chain, limit: async () => rows };
+      return chain;
+    }
+
+    /** The users row eraseUser reads (the address in it), no live subscription, the tombstone goes in — then a by-address DELETE fails. */
+    function erasureFailsAt(table: "show_reminders" | "idea_submissions") {
+      select
+        .mockImplementationOnce(() =>
+          selectChain([{ email: MARKER_EMAIL, stripeCustomerId: "cus_dummy" }]),
+        )
+        .mockImplementation(() => selectChain([]));
+      insert.mockImplementation(() => ({
+        values: () => ({ onConflictDoNothing: async () => undefined }),
+      }));
+      del.mockImplementation((t: PgTable) => ({
+        where: () => ({
+          returning: async () => {
+            if (getTableName(t) === table) throw refusal(table);
+            return [];
+          },
+        }),
+      }));
+    }
+
+    function userDeleted() {
+      clerkVerify.mockResolvedValue({
+        type: "user.deleted",
+        object: "event",
+        data: { id: USER_ID, object: "user", deleted: true },
+      });
+    }
+
+    it.each(["show_reminders", "idea_submissions"] as const)(
+      "Clerk user.deleted: a failed %s DELETE answers 500 (Clerk retries), logged by id, class and SQLSTATE only, reported with its stack and no address",
+      async (table) => {
+        erasureFailsAt(table);
+        userDeleted();
+        const logged = captureConsole();
+
+        const { result: res, escaped } = await underNext(() =>
+          clerkWebhook(new Request("https://matio.tv/api/webhooks/clerk", { method: "POST" }) as never),
+        );
+
+        expect(escaped).toBeUndefined();
+        expect(res?.status).toBe(500);
+        const body = await res!.text();
+        expectNoMarker(logged(), body, sentryMessages());
+        expect(logged()).toContain("user.deleted: erasure failed");
+        expect(logged()).toContain(USER_ID);
+        expect(logged()).toContain('"code":"57P01"');
+        expect(sentryMessages()).toContain(USER_ID);
+        const sent = await reportedBytes("https://matio.tv/api/webhooks/clerk");
+        expectNoMarker(sent);
+        expect(sent).toContain(`erase user: delete ${table} by address failed`);
+        expect(sent).toContain('"function":"eraseUser"'); // the stack went out
+        expect(sent).toContain(`"userId":"${USER_ID}"`);
+      },
+    );
+
+    it("Clerk user.deleted: a failure NOT redacted at the source — the tombstone write — goes to Sentry with its cause and stack, the address still cut", async () => {
+      // Whatever else eraseUser throws binds ids only; this one's cause quotes
+      // the address anyway, to prove the scrubbers hold on the raw chain the
+      // route now hands to captureException.
+      select
+        .mockImplementationOnce(() =>
+          selectChain([{ email: MARKER_EMAIL, stripeCustomerId: "cus_dummy" }]),
+        )
+        .mockImplementation(() => selectChain([]));
+      insert.mockImplementation(() => ({
+        values: () => ({
+          onConflictDoNothing: async () => {
+            throw Object.assign(
+              new Error(`Failed query: insert into "erased_customers" ("stripe_customer_id") values ($1)\nparams: cus_dummy`),
+              {
+                name: "DrizzleQueryError",
+                cause: Object.assign(new Error(`connection reset while erasing ${MARKER_EMAIL}`), {
+                  name: "PostgresError",
+                  code: "08006",
+                  detail: `Key (email)=(${MARKER_EMAIL})`,
+                }),
+              },
+            );
+          },
+        }),
+      }));
+      userDeleted();
+      const logged = captureConsole();
+
+      const { result: res, escaped } = await underNext(() =>
+        clerkWebhook(new Request("https://matio.tv/api/webhooks/clerk", { method: "POST" }) as never),
+      );
+
+      expect(escaped).toBeUndefined();
+      expect(res?.status).toBe(500);
+      expect(del).not.toHaveBeenCalled(); // nothing goes before the tombstone
+      expectNoMarker(logged(), sentryMessages());
+      expect(logged()).toContain('"code":"08006"');
+      const sent = await reportedBytes("https://matio.tv/api/webhooks/clerk");
+      expectNoMarker(sent);
+      expect(sent).toContain("connection reset while erasing"); // the cause did go out
+      expect(sent).toContain('"function":"eraseUser"');
+      expect(sent).toContain('"code":"08006"');
+    });
+
+    it("users mirror (#380): a late erasure whose DELETE fails escapes the user.created webhook as class and SQLSTATE — the address nowhere", async () => {
+      const NEW_ID = "user_new_marker";
+      const STALE_ID = "user_stale_marker";
+      clerkVerify.mockResolvedValue({
+        type: "user.created",
+        object: "event",
+        data: {
+          id: NEW_ID,
+          object: "user",
+          primary_email_address_id: "idn_1",
+          email_addresses: [{ id: "idn_1", email_address: MARKER_EMAIL }],
+        },
+      });
+      // The new account is alive; the row holding its address belongs to one
+      // Clerk no longer knows — so the mirror erases it, late.
+      accountAudit.clerkGetUser.mockImplementation(async (id: string) => {
+        if (id === STALE_ID) {
+          throw Object.assign(new Error("not found"), { name: "ClerkAPIResponseError", status: 404 });
+        }
+        return { primaryEmailAddress: { emailAddress: MARKER_EMAIL }, emailAddresses: [] };
+      });
+      insert.mockImplementationOnce(() => ({
+        values: () => ({
+          onConflictDoNothing: async () => {
+            throw Object.assign(new Error(`Failed query: insert into "users"\nparams: ${NEW_ID},${MARKER_EMAIL}`), {
+              cause: Object.assign(new Error("duplicate key"), {
+                code: "23505",
+                constraint_name: "users_email_unique",
+              }),
+            });
+          },
+        }),
+      }));
+      select.mockImplementationOnce(() => selectChain([{ id: STALE_ID }]));
+      erasureFailsAt("show_reminders");
+      const logged = captureConsole();
+
+      const { escaped } = await underNext(() =>
+        clerkWebhook(new Request("https://matio.tv/api/webhooks/clerk", { method: "POST" }) as never),
+      );
+
+      // Escapes by design (500 → Svix redelivers), and carries nothing of the address.
+      expect(escaped).toMatchObject({
+        name: "DrizzleQueryError",
+        code: "57P01",
+        message: "erase user: delete show_reminders by address failed",
+      });
+      const sent = await sentryBytes(escaped, "/api/webhooks/clerk", "/api/webhooks/clerk");
+      expectNoMarker(logged(), sent, sentryMessages());
+    });
+
+    it("app «Delete account» (#309): a failed by-address DELETE answers 500 with the SQLSTATE through Drizzle's wrapper, the address nowhere", async () => {
+      erasureFailsAt("idea_submissions");
+      const logged = captureConsole();
+
+      const { result: res, escaped } = await underNext(() =>
+        deleteAccount(
+          new Request("https://matio.tv/api/v1/account/delete", {
+            method: "POST",
+            headers: { authorization: "Bearer sess_dummy" },
+          }) as never,
+        ),
+      );
+
+      expect(escaped).toBeUndefined();
+      expect(res?.status).toBe(500);
+      expect(accountAudit.clerkDelete).not.toHaveBeenCalled();
+      const body = JSON.stringify(await res!.json());
+      expectNoMarker(logged(), body, sentryMessages());
+      expect(logged()).toContain("account delete: erasure FAILED");
+      expect(logged()).toContain('"code":"57P01"');
+    });
   });
 });
