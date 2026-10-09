@@ -222,11 +222,15 @@ jobs:
         run: |
           echo "::warning::смоук не сошёлся — откатываю прод на ${{ steps.prev.outputs.id }}"
           vercel rollback "${{ steps.prev.outputs.id }}" --yes
+          # Оба вопроса смоука, а не один: healthz живёт ВНЕ proxy.ts (#419)
+          # и ответит 200, даже если откатились на сборку с лежащим
+          # мидлваром. Откат удался, только когда 200 отдают оба.
           for _ in $(seq 1 6); do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://matio.tv/api/healthz || true)
-            echo "после отката /api/healthz: $code"
-            [ "$code" = "200" ] && exit 0
+            mw=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://matio.tv/api/v1/config || true)
+            echo "после отката /api/healthz: $code, /api/v1/config: $mw"
+            [ "$code" = "200" ] && [ "$mw" = "200" ] && exit 0
             sleep 10
           done
-          echo "::error::откат выполнен, но прод не отвечает 200 — нужен человек."
+          echo "::error::откат выполнен, но прод не отвечает 200 на /api/healthz и /api/v1/config — нужен человек."
           exit 1

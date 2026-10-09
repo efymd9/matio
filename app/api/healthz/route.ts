@@ -13,6 +13,8 @@
 // the Clerk middleware throws on every request when its keys are absent —
 // every Vercel preview — and this answer is about the build, not about Clerk.
 // So nothing here may lean on the middleware: no `auth()`, no header it sets.
+// /api/readyz is NOT excluded — the uptime monitor relies on its walk through
+// proxy.ts (see that route).
 import { resolveStage } from "@/lib/observability";
 
 export const runtime = "nodejs";

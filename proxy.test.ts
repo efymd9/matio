@@ -124,19 +124,26 @@ describe("proxy — staging lock on", () => {
     expect(res?.headers.get("Set-Cookie")).toContain("matio_aid");
   });
 
-  // Since #419 the matcher keeps both health routes out of proxy.ts (proved
-  // below), so on the real bench they never reach this function. What is
-  // proved here is the second line: should a matcher change ever route them
-  // back in, the lock still lets them through.
-  it("keeps /api/healthz and /api/readyz open — the uptime check has no password", async () => {
+  // Since #419 the matcher keeps /api/healthz out of proxy.ts (proved below),
+  // so on the real bench it never reaches this function. What is proved here
+  // is the second line: should a matcher change ever route it back in, the
+  // lock still lets it through.
+  it("keeps /api/healthz open — the uptime check has no password", async () => {
     vi.stubEnv("STAGING_LOCK_PASSWORD", PASSWORD);
 
-    for (const path of ["/api/healthz", "/api/readyz"]) {
-      const res = await proxy(request(path), event);
+    const res = await proxy(request("/api/healthz"), event);
 
-      expect(res?.status, path).not.toBe(401);
-      expect(res?.headers.get("X-Robots-Tag"), path).toBe("noindex, nofollow");
-    }
+    expect(res?.status).not.toBe(401);
+    // Open, but still not something a crawler should list.
+    expect(res?.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+  });
+
+  it("keeps /api/readyz behind the password — #419 left it inside the matcher", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", PASSWORD);
+
+    const res = await proxy(request("/api/readyz"), event);
+
+    expect(res?.status).toBe(401);
   });
 
   it("locks the visit beacon — no drive-by rows in the bench's ledger", async () => {
@@ -414,21 +421,30 @@ describe("proxy — the app's embed of the legal documents", () => {
   });
 });
 
-// #419 — the two health routes never enter proxy.ts. clerkMiddleware throws
-// on every request it sees when the Clerk keys are absent (Vercel previews,
-// the #46 incident), so a health check inside the matcher answered 500 for a
-// reason that has nothing to do with the build it reports. Asked through
-// Next's own matcher compiler — the same code the build runs — so what is
-// proved is what Vercel will route, not a hand-written regex.
-describe("proxy — the matcher keeps the health routes out", () => {
+// #419 — /api/healthz never enters proxy.ts. clerkMiddleware throws on every
+// request it sees when the Clerk keys are absent (Vercel previews, the #46
+// incident), so a health check inside the matcher answered 500 for a reason
+// that has nothing to do with the build it reports. /api/readyz stays inside
+// on purpose: the production uptime monitor polls it, and its walk through
+// proxy.ts is what lets that monitor see a middleware outage between
+// releases. Asked through Next's own matcher compiler — the same code the
+// build runs — so what is proved is what Vercel will route, not a
+// hand-written regex.
+describe("proxy — the matcher keeps /api/healthz out, and only it", () => {
   const matches = (url: string) =>
     unstable_doesMiddlewareMatch({ config, url, nextConfig: {} });
 
-  it("does not run on /api/healthz or /api/readyz", () => {
-    for (const path of ["/api/healthz", "/api/readyz", "/api/healthz/", "/api/readyz/"]) {
+  it("does not run on /api/healthz", () => {
+    for (const path of ["/api/healthz", "/api/healthz/"]) {
       expect(matches(path), path).toBe(false);
     }
     expect(matches("/api/healthz?probe=1"), "with a query").toBe(false);
+  });
+
+  it("still runs on /api/readyz — the uptime monitor relies on it", () => {
+    for (const path of ["/api/readyz", "/api/readyz/", "/api/readyz?probe=1"]) {
+      expect(matches(path), path).toBe(true);
+    }
   });
 
   it("still runs everywhere else — pages, the web's /api, the app's /api/v1", () => {
@@ -449,10 +465,10 @@ describe("proxy — the matcher keeps the health routes out", () => {
     }
   });
 
-  it("excludes exactly those two paths, not everything that starts like them", () => {
+  it("excludes exactly that path, not everything that starts like it", () => {
     // The same precision as the staging lock's open paths
     // (lib/staging-lock.ts): a look-alike stays behind the middleware.
-    for (const path of ["/api/healthz-debug", "/api/healthz/secret", "/api/readyzz"]) {
+    for (const path of ["/api/healthz-debug", "/api/healthz/secret", "/api/healthzz"]) {
       expect(matches(path), path).toBe(true);
     }
   });

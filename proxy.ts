@@ -465,19 +465,22 @@ async function lockedRequest(
   return res;
 }
 
-// `/api/healthz` and `/api/readyz` (with or without a trailing slash, and
-// nothing else that merely starts the same) are left out of BOTH entries
-// (#419): clerkMiddleware throws on every request it sees when the Clerk keys
-// are absent — every Vercel preview, and the #46 incident — so a health check
-// in here answered 500 about Clerk instead of about the build. Neither route
-// needs anything from this file. Consequences, both deliberate: the staging
-// lock never sees them (readyz answers the bench without a password, like
-// healthz always did — lib/staging-lock.ts), and healthz no longer proves the
-// middleware works, so the release smoke asks /api/v1/config for that
-// (.github/workflows/deploy-production.yml). Pinned by proxy.test.ts.
+// `/api/healthz` (with or without a trailing slash, and nothing else that
+// merely starts the same) is left out of BOTH entries (#419): clerkMiddleware
+// throws on every request it sees when the Clerk keys are absent — every
+// Vercel preview, and the #46 incident — so the health check answered 500
+// about Clerk instead of about the build. It needs nothing from this file.
+// Consequences, both deliberate: the staging lock never sees it (it was on
+// the lock's open list anyway — lib/staging-lock.ts), and healthz no longer
+// proves the middleware works, so the release smoke asks /api/v1/config for
+// that (.github/workflows/deploy-production.yml).
+//
+// `/api/readyz` stays IN, on purpose: the production uptime monitor polls it,
+// and its walk through this file is what lets the monitor see a middleware
+// outage between releases, not only a database one. Pinned by proxy.test.ts.
 export const config = {
   matcher: [
-    "/((?!_next|ingest|api/(?:healthz|readyz)/?$|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    "/(api|trpc)((?!/(?:healthz|readyz)/?$).*)",
+    "/((?!_next|ingest|api/healthz/?$|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/(api|trpc)((?!/healthz/?$).*)",
   ],
 };

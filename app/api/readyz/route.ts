@@ -9,13 +9,15 @@
 // the service is serving. Connection-pool exhaustion is sudden, total, and
 // invisible to a probe that opens its own cheap query.
 //
+// INSIDE proxy.ts's matcher on purpose — unlike /api/healthz (#419). The
+// production uptime monitor polls THIS route, and the walk through the Clerk
+// middleware is what lets it see a middleware outage (the #46 class) between
+// releases, not only a database one. proxy.test.ts pins it.
+//
 // The answer carries STATUS AND DURATION ONLY. No connection strings, no
 // driver messages, no host names — a public endpoint that echoes the database
 // error is a free reconnaissance tool, and the message from `postgres` can
 // carry the URL it failed to reach.
-//
-// OUTSIDE proxy.ts, like healthz (#419): no Clerk middleware runs here, so no
-// `auth()`; and no staging lock either — the bench answers without a password.
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db";
