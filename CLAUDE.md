@@ -455,7 +455,15 @@ urgent — it costs one command.
   `unavailable` / `not_configured`) and nothing else — no connection strings,
   no driver messages. **A green readyz does not prove the service is
   serving**: connection-pool exhaustion is sudden, total, and invisible to a
-  probe that opens its own cheap query.
+  probe that opens its own cheap query. **healthz lives outside `proxy.ts`'s
+  matcher (#419)** — no Clerk middleware (it throws on every request
+  without its keys, as on every Vercel preview), no staging lock — so it
+  may not call `auth()`, and the release smoke proves the middleware
+  through `/api/v1/config` instead. **readyz stays INSIDE the matcher on
+  purpose**: the production uptime monitor (Sentry Uptime, every 10 min)
+  polls it, and its walk through `proxy.ts` is what lets the monitor see a
+  middleware outage between releases, not only a database one — never
+  exclude it (`proxy.test.ts` pins both).
 - Ops details, the staging/production specifics and the incident ritual live in
   the `/devops` skill → «Наблюдаемость»; per-service setup in
   [docs/services.md](./docs/services.md).
