@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // #407 — «Delete account» for an account that signed in with Apple asks
 // Apple's sheet once more for a fresh authorization code, which the server
@@ -30,7 +30,15 @@ vi.mock("react-native", async (importOriginal) => {
   };
 });
 
-import { appleCodeForDeletion, signedInWithApple } from "./apple-revocation";
+// The deadline is the /v1 client's own settleOrNull; that module reads
+// Metro's __DEV__ at load, and its device-id half (the keychain) is not under
+// test here.
+vi.hoisted(() => {
+  (globalThis as { __DEV__?: boolean }).__DEV__ = false;
+});
+vi.mock("@/api/device", () => ({ getDeviceId: async () => null }));
+
+import { APPLE_SHEET_TIMEOUT_MS, appleCodeForDeletion, signedInWithApple } from "./apple-revocation";
 
 const APPLE_USER = { externalAccounts: [{ provider: "google" }, { provider: "apple" }] };
 
@@ -93,5 +101,60 @@ describe("appleCodeForDeletion", () => {
   it("a credential without a code is no code", async () => {
     apple.signIn.mockResolvedValue({ authorizationCode: null, identityToken: "id-dummy" });
     await expect(appleCodeForDeletion(APPLE_USER)).resolves.toBeUndefined();
+  });
+});
+
+describe("appleCodeForDeletion — the sheet's deadline", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function track(p: Promise<string | undefined>) {
+    const state: { settled: boolean; code?: string } = { settled: false };
+    void p.then((code) => {
+      state.settled = true;
+      state.code = code;
+    });
+    return state;
+  }
+
+  it("a sheet that never answers is no code once the deadline passes — the deletion is never held forever", async () => {
+    apple.signIn.mockImplementation(() => new Promise<never>(() => {}));
+
+    const state = track(appleCodeForDeletion(APPLE_USER));
+    await vi.advanceTimersByTimeAsync(APPLE_SHEET_TIMEOUT_MS - 1);
+    expect(state.settled).toBe(false); // still the person's time at Face ID
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(state.settled).toBe(true);
+    expect(state.code).toBeUndefined();
+  });
+
+  it("an availability check that never answers is bounded by the same deadline", async () => {
+    apple.available.mockImplementation(() => new Promise<never>(() => {}));
+
+    const state = track(appleCodeForDeletion(APPLE_USER));
+    await vi.advanceTimersByTimeAsync(APPLE_SHEET_TIMEOUT_MS);
+
+    expect(state.settled).toBe(true);
+    expect(state.code).toBeUndefined();
+    expect(apple.signIn).not.toHaveBeenCalled();
+  });
+
+  it("is generous: a person who takes a minute and a half at the sheet still hands the server a code", async () => {
+    apple.signIn.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ authorizationCode: "c0de-slow", identityToken: "id-dummy" }), 90_000),
+        ),
+    );
+
+    const state = track(appleCodeForDeletion(APPLE_USER));
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    expect(state).toEqual({ settled: true, code: "c0de-slow" });
   });
 });

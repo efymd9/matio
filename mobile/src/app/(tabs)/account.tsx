@@ -185,8 +185,9 @@ function SignedInAccount() {
   //
   // An account that signed in with Apple first passes through Apple's sheet
   // once more (#407): its fresh authorization code lets the server revoke the
-  // app's grant on the Apple ID. A cancelled sheet or any Apple failure only
-  // means no code — the deletion goes ahead (auth/apple-revocation.ts).
+  // app's grant on the Apple ID. A cancelled sheet, any Apple failure or a
+  // sheet past its deadline only means no code — the deletion goes ahead
+  // (auth/apple-revocation.ts).
   const confirmDelete = useCallback(() => {
     const deleteOrSay = async () => {
       setDeleting(true);

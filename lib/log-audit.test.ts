@@ -1644,6 +1644,29 @@ describe("log audit · /api/v1/account/delete (the app's self-service erasure, #
       expect(logged()).toContain("ECONNRESET");
       expect(logged()).toContain("TypeError");
     });
+
+    it("a code that arrives with no APPLE_* key is a Sentry warning by user id and step — the code reaches neither the console nor Sentry", async () => {
+      vi.stubEnv("APPLE_SIGN_IN_PRIVATE_KEY", "");
+      accountWithLiveSubscription();
+      const fetched = vi.fn(async () => new Response(null, { status: 200 }));
+      vi.stubGlobal("fetch", fetched);
+      const logged = captureConsole();
+
+      const res = await deleteAccount(appleRequest());
+
+      expect(res.status).toBe(200);
+      expect(fetched).not.toHaveBeenCalled(); // nothing went to Apple
+      const warning = sentryMessage.mock.calls.find(([message]) =>
+        String(message).includes("APPLE_* key is not configured"),
+      );
+      expect(warning?.[1]).toEqual({ level: "warning", tags: { userId: USER_ID, step: "apple" } });
+      const sentry = sentryMessage.mock.calls.map(render).join("\n");
+      for (const marker of [APPLE_CODE, MARKER_EMAIL]) {
+        expect(logged()).not.toContain(marker);
+        expect(sentry).not.toContain(marker);
+      }
+      expect(logged()).toContain('"status":"skipped_unconfigured"');
+    });
   });
 });
 

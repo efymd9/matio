@@ -262,10 +262,12 @@ describe("POST /api/v1/account/delete — the deletion", () => {
 
 describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", () => {
   // The app sends a fresh Apple authorization code for an Apple account;
-  // the route exchanges it and revokes the grant between our erasure and
-  // Clerk (lib/apple-revoke.ts has its own suite for Apple's protocol). Apple
-  // is a fake fetch that writes into the same ordered log as the database
-  // and Clerk. Whatever Apple does, the deletion completes.
+  // the route exchanges it and revokes the grant after our erasure, side by
+  // side with the Clerk delete (lib/apple-revoke.ts has its own suite for
+  // Apple's protocol). Apple is a fake fetch that writes into the same
+  // ordered log as the database and Clerk. Whatever Apple does, the deletion
+  // completes.
+  const ERASURE = ["delete show_reminders", "delete idea_submissions", "delete users"];
   const CODE = "c0de-dummy-apple-authorization";
   let apple: { token: () => Promise<Response>; revoke: () => Promise<Response> };
 
@@ -314,21 +316,50 @@ describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", ()
     vi.unstubAllGlobals();
   });
 
-  it("revokes AFTER our erasure and BEFORE the Clerk account goes — then {ok:true}", async () => {
+  it("revokes only AFTER our erasure, and the Clerk account goes too — then {ok:true}", async () => {
     const res = await POST(withCode());
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(h.writes).toEqual([
-      "delete show_reminders",
-      "delete idea_submissions",
-      "delete users",
-      "apple token",
-      "apple revoke",
-      `clerk deleteUser ${USER_ID}`,
-    ]);
+    expect(h.writes.slice(0, 3)).toEqual(ERASURE);
+    expect(h.writes.slice(3).sort()).toEqual(
+      ["apple revoke", "apple token", `clerk deleteUser ${USER_ID}`],
+    );
+    expect(h.writes.indexOf("apple token")).toBeLessThan(h.writes.indexOf("apple revoke"));
     expect(done()).toMatchObject({ userId: USER_ID, apple: { status: "revoked" }, clerk: "deleted" });
     expect(h.sentryMessage).not.toHaveBeenCalled();
+  });
+
+  it("runs Apple BESIDE the Clerk delete, not in front of it — a slow Apple does not spend the client's deadline before Clerk", async () => {
+    // Apple's exchange answers only once Clerk has been asked. Run in
+    // sequence (Apple first), Clerk would be asked only after the exchange
+    // AND the revocation — the escape timer lets that order show up as an
+    // assertion failure rather than a hung test.
+    let release!: () => void;
+    const clerkAsked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const escape = setTimeout(() => release(), 200);
+    apple.token = async () => {
+      await clerkAsked;
+      return new Response(JSON.stringify({ refresh_token: "r-dummy" }), { status: 200 });
+    };
+    let seenByClerk: string[] = [];
+    h.clerkDelete.mockImplementationOnce(async (id: string) => {
+      seenByClerk = [...h.writes];
+      release();
+      return { id };
+    });
+
+    const res = await POST(withCode());
+    clearTimeout(escape);
+
+    expect(res.status).toBe(200);
+    // Clerk was asked while Apple's exchange was still out — before any revoke.
+    expect(seenByClerk).toContain("apple token");
+    expect(seenByClerk).not.toContain("apple revoke");
+    expect(h.writes.slice(-1)).toEqual(["apple revoke"]);
+    expect(done()).toMatchObject({ apple: { status: "revoked" }, clerk: "deleted", sweep: "clean" });
   });
 
   it("Apple refusing the code (400 invalid_grant) still deletes the account — logged and sent to Sentry by id", async () => {
@@ -339,13 +370,8 @@ describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", ()
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(h.writes).toEqual([
-      "delete show_reminders",
-      "delete idea_submissions",
-      "delete users",
-      "apple token",
-      `clerk deleteUser ${USER_ID}`,
-    ]);
+    expect(h.writes.slice(0, 3)).toEqual(ERASURE);
+    expect(h.writes.slice(3).sort()).toEqual(["apple token", `clerk deleteUser ${USER_ID}`]);
     expect(done()).toMatchObject({
       apple: { status: "failed", step: "token", httpStatus: 400, appleError: "invalid_grant" },
       clerk: "deleted",
@@ -367,26 +393,27 @@ describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", ()
     const res = await POST(withCode());
 
     expect(res.status).toBe(200);
-    expect(h.writes.at(-1)).toBe(`clerk deleteUser ${USER_ID}`);
+    expect(h.writes).toContain(`clerk deleteUser ${USER_ID}`);
     expect(done()).toMatchObject({
       apple: { status: "failed", step: "revoke", error: { name: "TimeoutError" } },
+      clerk: "deleted",
     });
   });
 
-  it("no Apple key in the env: nothing goes to Apple, the deletion is what it was before #407", async () => {
+  it("no Apple key in the env: nothing goes to Apple, the deletion is what it was before #407 — and the grant that stayed is a Sentry warning by id", async () => {
     vi.stubEnv("APPLE_SIGN_IN_PRIVATE_KEY", "");
 
     const res = await POST(withCode());
 
     expect(res.status).toBe(200);
-    expect(h.writes).toEqual([
-      "delete show_reminders",
-      "delete idea_submissions",
-      "delete users",
-      `clerk deleteUser ${USER_ID}`,
-    ]);
+    expect(h.writes).toEqual([...ERASURE, `clerk deleteUser ${USER_ID}`]);
     expect(done()).toMatchObject({ apple: { status: "skipped_unconfigured" } });
-    expect(h.sentryMessage).not.toHaveBeenCalled();
+    expect(h.sentryMessage).toHaveBeenCalledTimes(1);
+    expect(h.sentryMessage).toHaveBeenCalledWith(
+      expect.stringContaining("APPLE_* key is not configured"),
+      { level: "warning", tags: { userId: USER_ID, step: "apple" } },
+    );
+    expect(JSON.stringify(h.sentryMessage.mock.calls)).not.toContain(CODE);
   });
 
   it.each([
@@ -397,13 +424,10 @@ describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", ()
     const res = await POST(body === undefined ? deleteRequest() : withCode(body));
 
     expect(res.status).toBe(200);
-    expect(h.writes).toEqual([
-      "delete show_reminders",
-      "delete idea_submissions",
-      "delete users",
-      `clerk deleteUser ${USER_ID}`,
-    ]);
+    expect(h.writes).toEqual([...ERASURE, `clerk deleteUser ${USER_ID}`]);
     expect(done()).toMatchObject({ apple: { status: "skipped_no_code" } });
+    // No grant to revoke is not news — only a code that found no key is.
+    expect(h.sentryMessage).not.toHaveBeenCalled();
   });
 
   it("an erasure the database refuses spends nothing at Apple — the account and its grant stay for the retry", async () => {
@@ -416,15 +440,42 @@ describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", ()
     expect(h.clerkDelete).not.toHaveBeenCalled();
   });
 
-  it("a Clerk refusal after the revocation is still the 500 a retry finishes — and its log names Apple's outcome", async () => {
+  it("a Clerk refusal beside the revocation is still the 500 a retry finishes — Apple runs to its end, and the log names both outcomes", async () => {
     h.clerkDelete.mockRejectedValueOnce(clerkError(500));
 
     const res = await POST(withCode());
 
     expect(res.status).toBe(500);
+    expect(h.writes).toContain("apple revoke");
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining("Clerk account could NOT be deleted"),
-      expect.objectContaining({ userId: USER_ID, apple: { status: "revoked" } }),
+      expect.objectContaining({
+        userId: USER_ID,
+        apple: { status: "revoked" },
+        httpStatus: 500,
+        sweep: "clean",
+      }),
+    );
+  });
+
+  it("a Clerk 503 beside the revocation still runs the post-Clerk sweep (#336) — after BOTH have answered", async () => {
+    // A /v1/progress heal put the row back during the vendor window; Clerk
+    // then answers 503, which does not prove it kept the account.
+    h.clerkDelete.mockImplementationOnce(async () => {
+      h.userRow = { email: EMAIL, stripeCustomerId: null };
+      throw clerkError(503);
+    });
+
+    const res = await POST(withCode());
+
+    expect(res.status).toBe(500);
+    expect(h.userRow).toBeUndefined();
+    // The sweep's second erasure comes after Apple's revoke and Clerk's answer.
+    expect(h.writes.slice(-3)).toEqual(ERASURE);
+    expect(h.writes.indexOf("apple revoke")).toBeLessThan(h.writes.length - 3);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Clerk account could NOT be deleted"),
+      expect.objectContaining({ apple: { status: "revoked" }, httpStatus: 503, sweep: "erased_again" }),
     );
   });
 });

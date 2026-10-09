@@ -32,8 +32,9 @@ const REQUEST_TIMEOUT_MS = 12_000;
 
 // Account deletion is the one request whose server side waits on vendors in
 // sequence — Stripe (cancel ≈17s at worst with its retries, then the customer
-// search, 5s), PostHog (5s a request), Apple for an Apple account (two
-// requests, 5s each — #407), then Clerk; each bounded, typically ~2s in all.
+// search, 5s), PostHog (5s a request), then Clerk — with Apple for an Apple
+// account (two requests, 5s each — #407) beside it, not in front of it; each
+// bounded, typically ~2s in all.
 // 12s would abandon a deletion the server is still finishing and tell the
 // viewer it failed. The route's own ceiling is 60s (maxDuration).
 export const ACCOUNT_DELETE_TIMEOUT_MS = 45_000;

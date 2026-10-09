@@ -39,10 +39,14 @@ import { getStripe } from "@/lib/stripe";
 //      lib/apple-revoke.ts exchanges it and revokes the grant. Only once our
 //      side is erased: a deletion that stops at step 1 leaves the account AND
 //      its Apple grant, and the retry brings a new code (one use, five
-//      minutes). Best-effort — whatever Apple answers, step 2 runs; a failure
-//      is logged and sent to Sentry by id. No code (an account without Apple,
-//      an older build, a cancelled sheet) or no Apple key in the env is a
-//      typed skip, and the deletion is exactly what it was before #407.
+//      minutes). It runs SIDE BY SIDE with step 2, not in front of it: Apple's
+//      two requests (5s each) would otherwise eat the client's 45s deadline
+//      ahead of Clerk. Best-effort — neither step waits on or cuts short the
+//      other, whatever Apple answers the deletion goes on, and a failure is
+//      logged and sent to Sentry by id. No code (an account without Apple, an
+//      older build, a cancelled sheet) is a typed skip, and the deletion is
+//      exactly what it was before #407. A code with no Apple key in the env is
+//      the same skip plus a Sentry warning by id: an Apple grant that stayed.
 //   2. Clerk `users.deleteUser` — the account and its sessions. A 404 is
 //      success: a double tap, a lost response retried, or the dashboard got
 //      there first. Any other failure is 500 with our side already erased; the
@@ -82,8 +86,8 @@ import { getStripe } from "@/lib/stripe";
 export const runtime = "nodejs";
 // Every vendor step inside is bounded — the Stripe cancellation ≈17s at worst
 // with its retries, the customer search, each PostHog request and each of
-// Apple's two requests 5s — so the budget is stated rather than left to the
-// plan's default.
+// Apple's two requests 5s (beside Clerk's delete, not before it) — so the
+// budget is stated rather than left to the plan's default.
 export const maxDuration = 60;
 
 const FAILED = "Couldn't delete your account. Please try again.";
@@ -118,50 +122,79 @@ export async function POST(req: NextRequest) {
     return apiError("server_error", FAILED);
   }
 
-  const apple = await revokeApple(userId, req);
+  // Steps 1b and 2, side by side. The body is read only here, after the
+  // session was checked and our side erased: an old build sends none, and an
+  // unreadable one is the same «no code» — it never fails the deletion.
+  // Neither promise can reject (revokeAppleAuthorization never throws, and
+  // deleteAtClerk turns every Clerk failure into a result), so Promise.all
+  // waits for BOTH, the way allSettled would — one step never cuts the other
+  // short, and both outcomes reach the log lines below.
+  const code = appleAuthorizationCode(await req.json().catch(() => undefined));
+  const [apple, clerk] = await Promise.all([
+    revokeAppleAuthorization(code),
+    deleteAtClerk(userId),
+  ]);
+  reportApple(userId, apple);
 
-  let clerk: "deleted" | "already_gone";
-  try {
-    await (await clerkClient()).users.deleteUser(userId);
-    clerk = "deleted";
-  } catch (err) {
-    const httpStatus = clerkHttpStatus(err);
-    if (httpStatus !== 404) {
-      // Step 3 even here — see the comment at the top.
-      const sweep = await sweepHealedRow(userId);
-      console.error(
-        "account delete: our data is erased but the Clerk account could NOT be deleted — a retry finishes it",
-        { userId, erase, apple, httpStatus, sweep, error: describeError(err) },
-      );
-      Sentry.captureMessage(
-        "account delete: Clerk account NOT deleted after the erasure",
-        { level: "error", tags: { userId, step: "clerk" } },
-      );
-      return apiError("server_error", FAILED);
-    }
-    clerk = "already_gone";
+  if (clerk.status === "failed") {
+    // Step 3 even here — see the comment at the top.
+    const sweep = await sweepHealedRow(userId);
+    console.error(
+      "account delete: our data is erased but the Clerk account could NOT be deleted — a retry finishes it",
+      { userId, erase, apple, httpStatus: clerk.httpStatus, sweep, error: clerk.error },
+    );
+    Sentry.captureMessage(
+      "account delete: Clerk account NOT deleted after the erasure",
+      { level: "error", tags: { userId, step: "clerk" } },
+    );
+    return apiError("server_error", FAILED);
   }
 
   const sweep = await sweepHealedRow(userId);
-  console.info("account delete: done", { userId, erase, apple, clerk, sweep });
+  console.info("account delete: done", { userId, erase, apple, clerk: clerk.status, sweep });
   const body: DeleteAccountResponse = { ok: true };
   return apiOk(body);
 }
 
-// Step 1b. The body is read only here, after the session was checked: an old
-// build sends none, and an unreadable one is the same «no code» — it never
-// fails the deletion. The result carries no token and no code, so it is
-// logged as is.
-async function revokeApple(userId: string, req: NextRequest): Promise<AppleRevocation> {
-  const body: unknown = await req.json().catch(() => undefined);
-  const apple = await revokeAppleAuthorization(appleAuthorizationCode(body));
+// Step 2. A 404 is success (see the comment at the top); any other failure —
+// clerkClient() itself throwing included — is a result, never a throw, so
+// the Apple step beside it always runs to its end.
+type ClerkDeletion =
+  | { status: "deleted" | "already_gone" }
+  | {
+      status: "failed";
+      httpStatus: number | undefined;
+      error: ReturnType<typeof describeError>;
+    };
+
+async function deleteAtClerk(userId: string): Promise<ClerkDeletion> {
+  try {
+    await (await clerkClient()).users.deleteUser(userId);
+    return { status: "deleted" };
+  } catch (err) {
+    const httpStatus = clerkHttpStatus(err);
+    if (httpStatus === 404) return { status: "already_gone" };
+    return { status: "failed", httpStatus, error: describeError(err) };
+  }
+}
+
+// Step 1b's outcome for the operator. The result carries no token and no code,
+// so it is logged as is (in the lines above); Sentry gets the user id and the
+// step only. Two outcomes leave the person's Apple grant in place and are
+// sent: a failure, and a code that arrived while the APPLE_* key is not in
+// the env (an Apple account deleted before the owner set it — #407's ops tail).
+function reportApple(userId: string, apple: AppleRevocation): void {
   if (apple.status === "failed") {
     Sentry.captureMessage("account delete: Apple token revocation failed", {
       level: "warning",
       tags: { userId, step: "apple", appleStep: apple.step },
     });
+  } else if (apple.status === "skipped_unconfigured") {
+    Sentry.captureMessage(
+      "account delete: an Apple code arrived but the APPLE_* key is not configured — the Apple grant stays",
+      { level: "warning", tags: { userId, step: "apple" } },
+    );
   }
-  return apple;
 }
 
 // Step 3: one more look at `users`; a row found is erased again by the same
