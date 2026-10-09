@@ -551,12 +551,29 @@ describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)"
     // customer's next webhook resurrects the account. Nothing may be deleted
     // before it is on disk.
     h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
-    h.insertFails = new Error("connection reset");
+    h.insertFails = Object.assign(new Error("connection reset"), {
+      name: "PostgresError",
+      code: "08006",
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(POST(signed(userDeleted(USER_ID)))).rejects.toThrow(
-      "connection reset",
-    );
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    // Answered, not thrown (#350): the 500 is what makes Svix redeliver, and
+    // the failure is named by id, class and SQLSTATE — never by its text.
+    expect(res.status).toBe(500);
     expect(h.deletes).toEqual([]);
+    expect(error).toHaveBeenCalledWith(
+      "user.deleted: erasure failed — 500, Clerk retries",
+      { userId: USER_ID, name: "PostgresError", code: "08006" },
+    );
+    expect(h.sentryMessage).toHaveBeenCalledWith(
+      "user.deleted: erasure failed — Clerk retries",
+      {
+        level: "error",
+        tags: { userId: USER_ID, code: "08006", name: "PostgresError" },
+      },
+    );
   });
 
   it("looks for a live subscription with the access-granting predicate", async () => {

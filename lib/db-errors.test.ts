@@ -1,5 +1,11 @@
+import { inspect } from "node:util";
 import { describe, expect, it } from "vitest";
-import { describeDbError, isForeignKeyViolation, isUniqueViolation } from "./db-errors";
+import {
+  describeDbError,
+  isForeignKeyViolation,
+  isUniqueViolation,
+  withRedactedFailure,
+} from "./db-errors";
 
 // Drizzle 0.44+ throws a DrizzleQueryError whose own `.code` is undefined —
 // the PostgresError with the SQLSTATE sits on `.cause`. Both helpers must see
@@ -119,5 +125,59 @@ describe("describeDbError — what a failure may be described by", () => {
     );
 
     expect(JSON.stringify(describeDbError(wrapped))).not.toContain("1eaf0000");
+  });
+});
+
+describe("withRedactedFailure — a statement that binds an address (#350)", () => {
+  const ADDRESS = "fan.marker@example.invalid";
+  // The realistic shape: Drizzle's wrapper repeats the statement with its
+  // params; the driver's error quotes the address in its own text and `detail`.
+  const refusal = () =>
+    Object.assign(
+      new Error(
+        `Failed query: delete from "show_reminders" where "show_reminders"."email" = $1 returning "id"\nparams: ${ADDRESS}`,
+      ),
+      {
+        name: "DrizzleQueryError",
+        cause: Object.assign(new Error(`terminating connection while deleting ${ADDRESS}`), {
+          name: "PostgresError",
+          code: "57P01",
+          detail: `Key (email)=(${ADDRESS})`,
+        }),
+      },
+    );
+
+  it("hands back the statement's own result when it succeeds", async () => {
+    await expect(withRedactedFailure("s", async () => [{ id: "rem_1" }])).resolves.toEqual([
+      { id: "rem_1" },
+    ]);
+  });
+
+  it("re-throws a failure as class + SQLSTATE under a fixed message — no text, no cause", async () => {
+    const thrown = await withRedactedFailure("unsubscribe: delete show_reminders by address", () => {
+      throw refusal();
+    }).catch((e: unknown) => e);
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect(thrown).toMatchObject({
+      name: "DrizzleQueryError",
+      code: "57P01",
+      message: "unsubscribe: delete show_reminders by address failed",
+    });
+    expect((thrown as Error).cause).toBeUndefined();
+    // Everything Node would print for it — the stack, own props, the cause.
+    expect(inspect(thrown, { depth: 5 })).not.toContain(ADDRESS);
+    // What the callers read still reads the same.
+    expect(describeDbError(thrown)).toEqual(describeDbError(refusal()));
+  });
+
+  it("a rejected promise is redacted the same way, and an error with no SQLSTATE stays without one", async () => {
+    const thrown = await withRedactedFailure("s", () =>
+      Promise.reject(new TypeError(`cannot bind ${ADDRESS}`)),
+    ).catch((e: unknown) => e);
+
+    expect(thrown).toMatchObject({ name: "TypeError", message: "s failed" });
+    expect("code" in (thrown as object)).toBe(false);
+    expect(inspect(thrown)).not.toContain(ADDRESS);
   });
 });

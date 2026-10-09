@@ -1,4 +1,6 @@
+import * as Sentry from "@sentry/nextjs";
 import { NextResponse, type NextRequest } from "next/server";
+import { describeDbError } from "@/lib/db-errors";
 import {
   decodeUnsubscribeParams,
   unsubscribeEmail,
@@ -20,7 +22,21 @@ export async function POST(req: NextRequest) {
   if (!parsed || !verifyUnsubscribeToken(parsed.email, parsed.token)) {
     return NextResponse.json({ error: "invalid_token" }, { status: 400 });
   }
-  await unsubscribeEmail(parsed.email);
+  try {
+    await unsubscribeEmail(parsed.email);
+  } catch (err) {
+    // The address is still on the list: never a 2xx (the mailbox provider
+    // would take it as done). The statements bind the address, so the
+    // failure is logged and reported by class and SQLSTATE only (#350) —
+    // there is no id to name; the address is the subject.
+    const { name, code } = describeDbError(err);
+    console.error("email unsubscribe (one-click): failed", { name, code });
+    Sentry.captureMessage("email unsubscribe (one-click): failed", {
+      level: "error",
+      tags: { code: code ?? "none", name },
+    });
+    return NextResponse.json({ error: "server_error" }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }
 

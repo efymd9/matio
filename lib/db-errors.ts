@@ -53,3 +53,29 @@ export function describeDbError(e: unknown): { name: string; code: string | null
   }
   return { name, code: null };
 }
+
+/**
+ * Runs a statement whose params are personal data — an address — and, should
+ * it fail, re-throws the failure WITHOUT its text (#350). Drizzle's wrapper
+ * repeats the statement with its params (`Failed query: <sql>\nparams:
+ * <params>`), the driver's error can quote the row in its `detail`, and
+ * whatever a caller lets escape Next prints whole to the runtime log and hands
+ * to Sentry through onRequestError. What is re-thrown keeps exactly what
+ * describeDbError and isUniqueViolation read — the class name and the
+ * SQLSTATE — under a fixed message naming the statement, with no `cause`.
+ * The callers still catch it and answer for their own contract.
+ */
+export async function withRedactedFailure<T>(
+  statement: string,
+  run: () => PromiseLike<T>,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (e) {
+    const { name, code } = describeDbError(e);
+    throw Object.assign(new Error(`${statement} failed`), {
+      name,
+      ...(code === null ? {} : { code }),
+    });
+  }
+}

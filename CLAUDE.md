@@ -851,7 +851,9 @@ lib/
   db-errors.ts             # isUniqueViolation / isForeignKeyViolation — walk
                            #   e.cause (Drizzle 0.44+ wraps PostgresError;
                            #   .code is NOT on the thrown error). Use these,
-                           #   never e.code directly
+                           #   never e.code directly. withRedactedFailure
+                           #   (#350): a statement that binds an ADDRESS
+                           #   re-throws class + SQLSTATE only, no text
   observability.ts         # universal + PURE: resolveStage/resolveRelease
                            #   (shared with /api/healthz) + the Sentry privacy
                            #   contract (scrubbers + sentryPrivacyOptions() for
