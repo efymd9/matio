@@ -44,8 +44,16 @@ export const NOINDEX_VALUE = "noindex, nofollow";
 // signature, Svix for Clerk, Mux signature). Leaving the webhooks locked
 // meant the bench answered 401 to Stripe and no purchase could ever be
 // rehearsed — found while preparing #153.
+//
+// The two health routes are a second line only: since #419 proxy.ts's
+// matcher keeps them out of the middleware entirely, so this lock never sees
+// them. /api/readyz joined the list then, BY DECISION rather than by
+// accident: it answers the bench exactly what it answers matio.tv in public —
+// a status and a duration, no data — and it should stay open here even if a
+// matcher change ever routes it back through the lock.
 const OPEN_PATHS = new Set([
   "/api/healthz",
+  "/api/readyz",
   "/api/cron/retention",
   "/api/webhooks/stripe",
   "/api/webhooks/clerk",

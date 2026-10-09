@@ -31,6 +31,12 @@ describe("isStagingLockOpenPath", () => {
     expect(isStagingLockOpenPath("/api/healthz/")).toBe(true);
   });
 
+  it("leaves readiness open too — the bench gets the same status-only answer as prod (#419)", () => {
+    expect(isStagingLockOpenPath("/api/readyz")).toBe(true);
+    expect(isStagingLockOpenPath("/api/readyz/")).toBe(true);
+    expect(isStagingLockOpenPath("/api/readyz/secret")).toBe(false);
+  });
+
   it("leaves the retention cron open — Vercel Cron carries its own bearer, not Basic", () => {
     // The route refuses anything but `Bearer <CRON_SECRET>` itself; a Basic
     // challenge here would only 401 the platform's nightly call on the bench.

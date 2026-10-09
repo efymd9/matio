@@ -8,6 +8,11 @@
 // Lives under /api rather than at a bare /healthz on purpose: proxy.ts mints
 // the first-party `matio_aid` audience cookie on ordinary GET requests and
 // skips /api — an uptime monitor must not manufacture visitors.
+//
+// OUTSIDE proxy.ts altogether since #419 (its matcher leaves this path out):
+// the Clerk middleware throws on every request when its keys are absent —
+// every Vercel preview — and this answer is about the build, not about Clerk.
+// So nothing here may lean on the middleware: no `auth()`, no header it sets.
 import { resolveStage } from "@/lib/observability";
 
 export const runtime = "nodejs";

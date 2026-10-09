@@ -455,7 +455,11 @@ urgent — it costs one command.
   `unavailable` / `not_configured`) and nothing else — no connection strings,
   no driver messages. **A green readyz does not prove the service is
   serving**: connection-pool exhaustion is sudden, total, and invisible to a
-  probe that opens its own cheap query.
+  probe that opens its own cheap query. **Both live outside `proxy.ts`'s
+  matcher (#419)** — no Clerk middleware (it throws on every request
+  without its keys, as on every Vercel preview), no staging lock — so
+  neither may call `auth()`, and the release smoke proves the middleware
+  through `/api/v1/config` instead.
 - Ops details, the staging/production specifics and the incident ritual live in
   the `/devops` skill → «Наблюдаемость»; per-service setup in
   [docs/services.md](./docs/services.md).

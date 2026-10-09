@@ -13,6 +13,9 @@
 // driver messages, no host names — a public endpoint that echoes the database
 // error is a free reconnaissance tool, and the message from `postgres` can
 // carry the URL it failed to reach.
+//
+// OUTSIDE proxy.ts, like healthz (#419): no Clerk middleware runs here, so no
+// `auth()`; and no staging lock either — the bench answers without a password.
 import { sql } from "drizzle-orm";
 
 import { db } from "@/db";

@@ -9,6 +9,7 @@
 // instance, neither of which belongs in a unit test — and the lock must work
 // regardless of what Clerk decides about a request.
 
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest, NextResponse } from "next/server";
 import type { NextFetchEvent } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -48,7 +49,7 @@ vi.mock("@clerk/nextjs/server", () => ({
     ),
 }));
 
-const { default: proxy } = await import("./proxy");
+const { default: proxy, config } = await import("./proxy");
 
 // Obviously fake — the nightly gitleaks scan should have nothing to chase.
 const PASSWORD = "dummy-staging-password";
@@ -123,14 +124,19 @@ describe("proxy — staging lock on", () => {
     expect(res?.headers.get("Set-Cookie")).toContain("matio_aid");
   });
 
-  it("keeps /api/healthz open — the uptime check has no password", async () => {
+  // Since #419 the matcher keeps both health routes out of proxy.ts (proved
+  // below), so on the real bench they never reach this function. What is
+  // proved here is the second line: should a matcher change ever route them
+  // back in, the lock still lets them through.
+  it("keeps /api/healthz and /api/readyz open — the uptime check has no password", async () => {
     vi.stubEnv("STAGING_LOCK_PASSWORD", PASSWORD);
 
-    const res = await proxy(request("/api/healthz"), event);
+    for (const path of ["/api/healthz", "/api/readyz"]) {
+      const res = await proxy(request(path), event);
 
-    expect(res?.status).not.toBe(401);
-    // Open, but still not something a crawler should list.
-    expect(res?.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+      expect(res?.status, path).not.toBe(401);
+      expect(res?.headers.get("X-Robots-Tag"), path).toBe("noindex, nofollow");
+    }
   });
 
   it("locks the visit beacon — no drive-by rows in the bench's ledger", async () => {
@@ -405,6 +411,50 @@ describe("proxy — the app's embed of the legal documents", () => {
     const res = await proxy(request("/terms?embed=app"), event);
 
     expect(res?.status).toBe(401);
+  });
+});
+
+// #419 — the two health routes never enter proxy.ts. clerkMiddleware throws
+// on every request it sees when the Clerk keys are absent (Vercel previews,
+// the #46 incident), so a health check inside the matcher answered 500 for a
+// reason that has nothing to do with the build it reports. Asked through
+// Next's own matcher compiler — the same code the build runs — so what is
+// proved is what Vercel will route, not a hand-written regex.
+describe("proxy — the matcher keeps the health routes out", () => {
+  const matches = (url: string) =>
+    unstable_doesMiddlewareMatch({ config, url, nextConfig: {} });
+
+  it("does not run on /api/healthz or /api/readyz", () => {
+    for (const path of ["/api/healthz", "/api/readyz", "/api/healthz/", "/api/readyz/"]) {
+      expect(matches(path), path).toBe(false);
+    }
+    expect(matches("/api/healthz?probe=1"), "with a query").toBe(false);
+  });
+
+  it("still runs everywhere else — pages, the web's /api, the app's /api/v1", () => {
+    for (const path of [
+      "/",
+      "/shows/some-show",
+      "/es/about",
+      "/watch/some-show",
+      "/admin",
+      "/api/playback-token",
+      "/api/t",
+      // The release smoke's middleware check (deploy-production.yml): it
+      // only proves Clerk is alive while this path stays inside the matcher.
+      "/api/v1/config",
+      "/api/v1/continue",
+    ]) {
+      expect(matches(path), path).toBe(true);
+    }
+  });
+
+  it("excludes exactly those two paths, not everything that starts like them", () => {
+    // The same precision as the staging lock's open paths
+    // (lib/staging-lock.ts): a look-alike stays behind the middleware.
+    for (const path of ["/api/healthz-debug", "/api/healthz/secret", "/api/readyzz"]) {
+      expect(matches(path), path).toBe(true);
+    }
   });
 });
 
