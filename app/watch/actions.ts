@@ -1,9 +1,11 @@
 "use server";
 
 import { auth } from "@clerk/nextjs/server";
+import * as Sentry from "@sentry/nextjs";
 import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
 import { db } from "@/db";
+import { describeDbError, withRedactedFailure } from "@/lib/db-errors";
 import {
   episodes,
   seasons,
@@ -205,7 +207,11 @@ const EMAIL_MAX_LEN = 254; // RFC 3696 — full address upper bound
 
 export type ShowReminderResult =
   | { ok: true }
-  | { ok: false; reason: "invalid_email" | "invalid_show" | "rate_limited" };
+  | {
+      ok: false;
+      // server_error: the database refused the upsert (#425).
+      reason: "invalid_email" | "invalid_show" | "rate_limited" | "server_error";
+    };
 
 // New capture rows allowed per (hashed IP, rolling hour). Real viewers
 // submit once per show; the cap exists so an anonymous attacker can't
@@ -294,17 +300,35 @@ export async function subscribeToShowReminder(input: {
   // previously-anonymous subscriber resubmits signed-in. created_at and
   // ip_hash keep their original values — the rate limit counts row
   // creation, not resubmits.
-  await db
-    .insert(showReminders)
-    .values({ showId: show.id, email, userId: userId ?? null, locale, ipHash })
-    .onConflictDoUpdate({
-      target: [showReminders.showId, showReminders.email],
-      set: {
-        notifiedAt: null,
-        locale,
-        userId: sql`coalesce(${userId ?? null}, ${showReminders.userId})`,
-      },
+  //
+  // The upsert binds the address, so its failure comes out of
+  // withRedactedFailure without the driver's text (#425) and is answered
+  // here: the runtime log gets the show id, class and SQLSTATE; Sentry the
+  // redacted error, for its stack. A typed answer, not a throw — the overlay
+  // shows its generic error for it, the copy a thrown action got before.
+  try {
+    await withRedactedFailure("reminder capture: upsert show_reminders by address", () =>
+      db
+        .insert(showReminders)
+        .values({ showId: show.id, email, userId: userId ?? null, locale, ipHash })
+        .onConflictDoUpdate({
+          target: [showReminders.showId, showReminders.email],
+          set: {
+            notifiedAt: null,
+            locale,
+            userId: sql`coalesce(${userId ?? null}, ${showReminders.userId})`,
+          },
+        }),
+    );
+  } catch (err) {
+    const { name, code } = describeDbError(err);
+    console.error("subscribeToShowReminder: failed", { showId: show.id, name, code });
+    Sentry.captureException(err, {
+      level: "error",
+      tags: { showId: show.id, code: code ?? "none", name },
     });
+    return { ok: false, reason: "server_error" };
+  }
 
   return { ok: true };
 }
