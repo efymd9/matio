@@ -602,6 +602,24 @@ describe("scrubSentrySpan (#394)", () => {
     expect(scrubSentrySpan(span)).toBe(span);
     expect(span.data).toEqual({ "url.full": "https://matio.tv/api/t" });
   });
+
+  it("drops the scope user's name, email and IP from a span, keeps the id (#438)", () => {
+    // The keys @sentry/core 11 writes a scope user under (`commonSpanAttributes`
+    // — `USER_NAME` is "user.name"; there is no "user.username" convention).
+    const span = {
+      op: "http.client",
+      data: {
+        "user.id": "user_1",
+        "user.name": "Viewer Name",
+        "user.email": "viewer@example.invalid",
+        "user.ip_address": "203.0.113.7",
+      },
+    };
+
+    scrubSentrySpan(span);
+
+    expect(span.data).toEqual({ "user.id": "user_1" });
+  });
 });
 
 describe("elementTags (#394)", () => {

@@ -310,6 +310,34 @@ describe("the spans and contexts the event scrub used to miss (#394)", () => {
     expect(JSON.stringify(payload)).toContain('"value":"https://matio.tv/unsubscribe"');
   });
 
+  it("drops the scope user's name and email from a standalone span — the SDK's own keys (#438)", async () => {
+    const { sdk, sent } = startBrowserClient();
+    const NAME = "dummy-viewer-name";
+
+    // A standalone span takes the scope user as attributes whatever
+    // `dataCollection` says (@sentry/core `commonSpanAttributes`) — under the
+    // SDK's key for each, so a scrubber listing another spelling misses it.
+    const scope = sdk.getCurrentScope();
+    scope.setUser({ id: "user_1", username: NAME, email: ADDRESS });
+    try {
+      sdk
+        .startInactiveSpan({
+          name: "GET /api/t",
+          op: "http.client",
+          experimental: { standalone: true },
+        })
+        .end();
+      await browserClient!.flush(2000);
+    } finally {
+      scope.setUser(null);
+    }
+
+    expect(sent).toHaveLength(1);
+    for (const secret of [NAME, ADDRESS]) expect(sent[0]).not.toContain(secret);
+    // Not vacuous: the user did reach the span, minus everything but the id.
+    expect(JSON.stringify(items(sent[0]!)[2])).toContain('"user.id":{"value":"user_1"');
+  });
+
   it("cuts the query from contexts.nextjs.request_path — every unhandled server error", async () => {
     const { sent } = startClient();
 
