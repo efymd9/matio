@@ -68,9 +68,13 @@ const CONFIG: AppConfig = {
 // next test — createRoot() on that test's container, an act() overlapping
 // its act() — and React's act queue never recovered: one timeout read as
 // sixteen failures, fifteen of them a misleading "expected '' to contain …".
-// So a test holds on to ITS stage, and after every await of the harness
-// checks that the stage is still live: the continuation of a test that is
-// over stops before it touches the DOM, React or the spies. A container of
+// So a test holds on to ITS stage, and after each import await of the
+// harness checks that the stage is still live: the continuation of a test
+// that timed out on a cold import stops before it touches the DOM, React or
+// the spies. NOT covered: a test that times out while one of its act()
+// calls is still pending (the harness's own, or one in settle /
+// foregroundAfter) — that still breaks React's act queue for the rest of
+// the file; the cold import was the failure seen (#432). A container of
 // its own is not enough by itself — a late act() still overlaps the next
 // test's and leaves React's act queue broken for the rest of the file
 // (checked with the check switched off: 14 of 16 red).
