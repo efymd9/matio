@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,12 +18,28 @@ const h = vi.hoisted(() => ({
   inserts: [] as { values: unknown; target: unknown }[],
   holder: undefined as { id: string } | undefined,
   selects: [] as unknown[],
+  selectFails: undefined as Error | undefined,
   updates: [] as { set: unknown; where: unknown }[],
   updateFails: undefined as Error | undefined,
   getUser: vi.fn(),
   eraseUser: vi.fn(),
   sentry: vi.fn(),
+  /** Every error the address-conflict check was handed (#425). */
+  conflictChecks: [] as unknown[],
 }));
+
+// The real rule, watched: what the conflict branch decides on is the error
+// AFTER withRedactedFailure — the #380 resolution must hold on it (#425).
+vi.mock("@/lib/db-errors", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db-errors")>();
+  return {
+    ...actual,
+    isUniqueViolation: (e: unknown, constraint?: string) => {
+      h.conflictChecks.push(e);
+      return actual.isUniqueViolation(e, constraint);
+    },
+  };
+});
 
 vi.mock("@/db", () => ({
   db: {
@@ -42,6 +59,7 @@ vi.mock("@/db", () => ({
           limit: async () => {
             h.ops.push("select holder");
             h.selects.push(where);
+            if (h.selectFails) throw h.selectFails;
             return h.holder ? [h.holder] : [];
           },
         }),
@@ -102,6 +120,27 @@ function uniqueViolation(constraint: string) {
 }
 const emailTaken = () => uniqueViolation("users_email_unique");
 
+/**
+ * A driver failure quoting the address everywhere it can: Drizzle's params,
+ * the driver error's own text and its `detail` (#425).
+ */
+function quotingFailure(code: string, constraint?: string) {
+  return Object.assign(
+    new Error(
+      `Failed query: insert into "users" ("id", "email") values ($1, $2)\nparams: ${USER_ID},${EMAIL}`,
+    ),
+    {
+      name: "DrizzleQueryError",
+      cause: Object.assign(new Error(`statement on ${EMAIL} failed`), {
+        name: "PostgresError",
+        code,
+        detail: `Key (email)=(${EMAIL})`,
+        ...(constraint ? { constraint_name: constraint } : {}),
+      }),
+    },
+  );
+}
+
 function clerkError(status: number | undefined) {
   return Object.assign(new Error("Clerk refused"), {
     name: "ClerkAPIResponseError",
@@ -131,8 +170,10 @@ beforeEach(() => {
   h.inserts.length = 0;
   h.holder = undefined;
   h.selects.length = 0;
+  h.selectFails = undefined;
   h.updates.length = 0;
   h.updateFails = undefined;
+  h.conflictChecks.length = 0;
   h.getUser.mockReset();
   h.eraseUser.mockReset().mockResolvedValue({ status: "erased" });
   h.sentry.mockReset();
@@ -172,7 +213,12 @@ describe("mirrorClerkUser · no conflict", () => {
   it("a unique violation on another constraint is not this conflict — it propagates and Clerk is not asked", async () => {
     h.insertResults.push(uniqueViolation("users_stripe_customer_id_unique"));
 
-    await expect(mirrorClerkUser(USER_ID, EMAIL, CREATED)).rejects.toThrow("Failed query");
+    // Redacted (#425): the statement's name, the SQLSTATE and the constraint.
+    await expect(mirrorClerkUser(USER_ID, EMAIL, CREATED)).rejects.toMatchObject({
+      message: "users mirror: insert users row failed",
+      code: "23505",
+      constraint_name: "users_stripe_customer_id_unique",
+    });
     expect(h.ops).toEqual(["insert users"]);
   });
 });
@@ -322,7 +368,9 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
     h.getUser.mockResolvedValue(account(CURRENT));
     h.updateFails = new Error("connection reset");
 
-    await expect(mirrorClerkUser(USER_ID, EMAIL, CREATED)).rejects.toThrow("connection reset");
+    await expect(mirrorClerkUser(USER_ID, EMAIL, CREATED)).rejects.toThrow(
+      "users mirror: correct users.email by address failed",
+    );
     expect(h.inserts).toEqual([]);
   });
 
@@ -373,8 +421,86 @@ describe("mirrorClerkUser · the address is held by another row (#380)", () => {
     h.getUser.mockRejectedValue(clerkError(404));
     h.insertResults.push(emailTaken());
 
-    await expect(mirrorClerkUser(USER_ID, EMAIL, CREATED)).rejects.toThrow("Failed query");
+    await expect(mirrorClerkUser(USER_ID, EMAIL, CREATED)).rejects.toMatchObject({
+      message: "users mirror: insert users row again failed",
+      code: "23505",
+      constraint_name: "users_email_unique",
+    });
     expect(h.ops.filter((op) => op === "insert users")).toHaveLength(2);
+  });
+
+  it("the conflict is recognised on the REDACTED failure — the constraint's name survives withRedactedFailure, the address does not (#425)", async () => {
+    // The driver's refusal quotes the address in Drizzle's params, in its own
+    // text and in `detail`; the #380 branch must still resolve.
+    h.insertResults.length = 0;
+    h.insertResults.push(quotingFailure("23505", "users_email_unique"));
+    h.getUser.mockRejectedValue(clerkError(404));
+
+    const result = await mirrorClerkUser(USER_ID, EMAIL, CREATED);
+
+    expect(result).toEqual({ status: "mirrored", resolved: "stale_row_erased" });
+    const [checked] = h.conflictChecks;
+    expect(checked).toMatchObject({
+      message: "users mirror: insert users row failed",
+      code: "23505",
+      constraint_name: "users_email_unique",
+    });
+    expect((checked as { cause?: unknown }).cause).toBeUndefined();
+    expect(inspect(checked, { depth: 5 })).not.toContain(EMAIL);
+  });
+});
+
+describe("mirrorClerkUser · a failing statement leaves without the address (#425)", () => {
+  // Every statement of the mirror binds the address. A failure still leaves
+  // — the callers answer for it (the webhook's 500, a page's error page, the
+  // app route's 503) — but as the statement's name, the class and the
+  // SQLSTATE: Next prints whatever escapes to the runtime log whole.
+  it.each([
+    [
+      "the insert",
+      "users mirror: insert users row failed",
+      () => {
+        h.insertResults.push(quotingFailure("57P01"));
+      },
+    ],
+    [
+      "the lookup of the row holding the address",
+      "users mirror: find the users row by address failed",
+      () => {
+        h.insertResults.push(emailTaken());
+        h.selectFails = quotingFailure("57P01");
+      },
+    ],
+    [
+      "the correction of the holder's stale address",
+      "users mirror: correct users.email by address failed",
+      () => {
+        h.insertResults.push(emailTaken());
+        h.holder = { id: STALE_ID };
+        h.getUser.mockResolvedValue(account(CURRENT));
+        h.updateFails = quotingFailure("57P01");
+      },
+    ],
+    [
+      "the repeated insert",
+      "users mirror: insert users row again failed",
+      () => {
+        // The holder left between the two statements; the repeat fails.
+        h.insertResults.push(emailTaken(), quotingFailure("57P01"));
+      },
+    ],
+  ])("%s: re-thrown as class and SQLSTATE under a fixed message, no cause", async (_label, message, arrange) => {
+    arrange();
+
+    const error = await mirrorClerkUser(USER_ID, EMAIL, CREATED).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({ message, name: "DrizzleQueryError", code: "57P01" });
+    expect((error as { cause?: unknown }).cause).toBeUndefined();
+    expect(inspect(error, { depth: 5 })).not.toContain(EMAIL);
   });
 });
 
