@@ -27,11 +27,14 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     // The address is still on the list: never a 2xx (the mailbox provider
     // would take it as done). The statements bind the address, so the
-    // failure is logged and reported by class and SQLSTATE only (#350) —
-    // there is no id to name; the address is the subject.
+    // runtime log gets class and SQLSTATE only (#350) — there is no id to
+    // name; the address is the subject. Sentry gets the error itself, for
+    // its stack: unsubscribeEmail throws it already redacted
+    // (withRedactedFailure — a fixed message, no cause), and the scrubbers
+    // strip the link's query string (lib/log-audit.test.ts).
     const { name, code } = describeDbError(err);
     console.error("email unsubscribe (one-click): failed", { name, code });
-    Sentry.captureMessage("email unsubscribe (one-click): failed", {
+    Sentry.captureException(err, {
       level: "error",
       tags: { code: code ?? "none", name },
     });

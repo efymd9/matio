@@ -853,7 +853,9 @@ lib/
                            #   .code is NOT on the thrown error). Use these,
                            #   never e.code directly. withRedactedFailure
                            #   (#350): a statement that binds an ADDRESS
-                           #   re-throws class + SQLSTATE only, no text
+                           #   re-throws class + SQLSTATE + constraint
+                           #   name only (isUniqueViolation still reads
+                           #   it), no text, no cause
   observability.ts         # universal + PURE: resolveStage/resolveRelease
                            #   (shared with /api/healthz) + the Sentry privacy
                            #   contract (scrubbers + sentryPrivacyOptions() for

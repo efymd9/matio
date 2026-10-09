@@ -61,9 +61,11 @@ export function describeDbError(e: unknown): { name: string; code: string | null
  * <params>`), the driver's error can quote the row in its `detail`, and
  * whatever a caller lets escape Next prints whole to the runtime log and hands
  * to Sentry through onRequestError. What is re-thrown keeps exactly what
- * describeDbError and isUniqueViolation read — the class name and the
- * SQLSTATE — under a fixed message naming the statement, with no `cause`.
- * The callers still catch it and answer for their own contract.
+ * describeDbError and isUniqueViolation read — the class name, the SQLSTATE
+ * and the violated constraint's name (a schema identifier such as
+ * "users_email_unique", not user data — the users mirror's #380 conflict
+ * branch keys on it) — under a fixed message naming the statement, with no
+ * `cause`. The callers still catch it and answer for their own contract.
  */
 export async function withRedactedFailure<T>(
   statement: string,
@@ -73,9 +75,12 @@ export async function withRedactedFailure<T>(
     return await run();
   } catch (e) {
     const { name, code } = describeDbError(e);
+    // The constraint is read off the same link that carries the SQLSTATE.
+    const constraint = code === null ? undefined : findPgError(e, code)?.constraint_name;
     throw Object.assign(new Error(`${statement} failed`), {
       name,
       ...(code === null ? {} : { code }),
+      ...(typeof constraint === "string" ? { constraint_name: constraint } : {}),
     });
   }
 }

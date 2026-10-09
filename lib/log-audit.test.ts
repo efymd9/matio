@@ -53,6 +53,7 @@ const {
   stripeSessionExpire,
   erasedCustomer,
   sentryMessage,
+  sentryException,
 } = vi.hoisted(() => ({
   execute: vi.fn(),
   select: vi.fn(),
@@ -67,14 +68,19 @@ const {
   stripeSessionExpire: vi.fn(),
   erasedCustomer: vi.fn(),
   sentryMessage: vi.fn(),
+  sentryException: vi.fn(),
 }));
 vi.mock("@/db", () => ({ db: { execute, select, update, delete: del, insert } }));
 vi.mock("server-only", () => ({}));
 // Sentry is the second sink these paths report to (the Clerk erasure and the
-// retention cron both send a message with tags). Spied so the audit can read
-// what would leave the process — the scrubbers in lib/observability.ts are
-// exercised separately above; here the question is what the CALL carries.
-vi.mock("@sentry/nextjs", () => ({ captureMessage: sentryMessage }));
+// retention cron both send a message with tags; the #350 failure paths send
+// the error itself). Spied so the audit can read what would leave the
+// process — the scrubbers in lib/observability.ts are exercised separately
+// above; here the question is what the CALL carries.
+vi.mock("@sentry/nextjs", () => ({
+  captureMessage: sentryMessage,
+  captureException: sentryException,
+}));
 
 // The erasure handler's two outbound calls (cancel the live subscription at
 // Stripe; find every customer for the address, #223) are spies so their
@@ -403,6 +409,7 @@ beforeEach(() => {
   guestClaimAudit.customerRetrieve.mockReset();
   guestClaimAudit.constructEvent.mockReset();
   sentryMessage.mockReset();
+  sentryException.mockReset();
   walletAudit.authUserId = "user_1";
   walletAudit.claimCookie = "";
   // mockReset puts back the delegating implementation each spy was built with.
@@ -3174,8 +3181,9 @@ describe("log audit · a statement keyed on the address fails — unsubscribe an
   // here — the one-click route, the confirm page's action, the Clerk
   // user.deleted webhook, the users mirror's late erasure and the app's
   // «Delete account» — and what comes out is read where it would land: the
-  // console (Vercel's log), every Sentry message, and, for an error a caller
-  // lets escape, the bytes the real Sentry server SDK with our options sends.
+  // console (Vercel's log), every Sentry call, and, for an error a caller
+  // lets escape or hands to captureException, the bytes the real Sentry
+  // server SDK with our options sends.
   const E = Buffer.from(MARKER_EMAIL).toString("base64url");
   const MARKERS = [MARKER_EMAIL, MARKER_NAME, E];
   const USER_ID = "user_erase_marker";
@@ -3208,8 +3216,8 @@ describe("log audit · a statement keyed on the address fails — unsubscribe an
     }
   }
 
-  /** The bytes onRequestError would send for an escaped error: the real server SDK, our options, the cause chain on. */
-  async function sentryBytes(escaped: unknown, requestPath: string, routePath: string) {
+  /** Every envelope the real server SDK, with our options and the cause chain on, sends for what `capture` reports. */
+  async function sentryTransport(capture: (sdk: typeof SentrySdk) => void): Promise<string[]> {
     type Client = {
       init(): void;
       flush(timeout?: number): PromiseLike<boolean>;
@@ -3223,7 +3231,7 @@ describe("log audit · a statement keyed on the address fails — unsubscribe an
     const client = new NodeClient({
       dsn: DSN,
       stackParser: sdk.defaultStackParser,
-      integrations: [sdk.linkedErrorsIntegration()],
+      integrations: [sdk.linkedErrorsIntegration(), sdk.requestDataIntegration()],
       transport: (options: Parameters<typeof sdk.createTransport>[0]) =>
         sdk.createTransport(options, async (request) => {
           sent.push(
@@ -3236,22 +3244,53 @@ describe("log audit · a statement keyed on the address fails — unsubscribe an
     sdk.getCurrentScope().setClient(client as unknown as SentrySdk.NodeClient);
     client.init();
     try {
-      sdk.captureRequestError(
-        escaped,
-        { path: requestPath, method: "POST", headers: {} },
-        { routerKind: "App Router", routePath, routeType: "route" },
-      );
+      capture(sdk);
       await client.flush(2000);
     } finally {
       await client.close(0);
       sdk.getCurrentScope().setClient(undefined);
     }
+    return sent;
+  }
+
+  /** The bytes onRequestError would send for an escaped error. */
+  async function sentryBytes(escaped: unknown, requestPath: string, routePath: string) {
+    const sent = await sentryTransport((sdk) =>
+      sdk.captureRequestError(
+        escaped,
+        { path: requestPath, method: "POST", headers: {} },
+        { routerKind: "App Router", routePath, routeType: "route" },
+      ),
+    );
     expect(sent).toHaveLength(1); // the escaped error did go out
     return sent[0];
   }
 
+  /**
+   * The bytes the real SDK sends for every error the code under test handed
+   * to Sentry.captureException — with its context, inside the request it
+   * served (the URL, query string included, as the SDK records it).
+   */
+  async function reportedBytes(requestUrl: string) {
+    const calls = sentryException.mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const sent = await sentryTransport((sdk) => {
+      for (const [error, context] of calls) {
+        sdk.withScope((scope) => {
+          scope.setSDKProcessingMetadata({
+            normalizedRequest: { url: requestUrl, method: "POST", headers: {} },
+          });
+          sdk.captureException(error, context);
+        });
+      }
+    });
+    expect(sent).toHaveLength(calls.length); // every report did go out
+    return sent.join("\n");
+  }
+
+  /** What the code under test handed to Sentry, as the call carries it. */
   function sentryMessages() {
-    return sentryMessage.mock.calls.map(render).join("\n");
+    return [...sentryMessage.mock.calls, ...sentryException.mock.calls].map(render).join("\n");
   }
 
   function expectNoMarker(...sinks: string[]) {
@@ -3289,15 +3328,19 @@ describe("log audit · a statement keyed on the address fails — unsubscribe an
   }
 
   it("backstop: even the raw driver error, had it escaped, reaches the Sentry transport without the address — the runtime log was the leak", async () => {
+    // The address in all three places the driver can put it: the wrapper's
+    // `params:` (cut by stripQueryParams), the cause's OWN message (no
+    // `params:` there — only redactEmails on the linked chain holds it) and
+    // `detail`. Only the address: a non-email value quoted in a cause's own
+    // message is NOT cut (registry, #326).
     const raw = Object.assign(
       new Error(`Failed query: delete from "show_reminders" where "show_reminders"."email" = $1\nparams: ${MARKER_EMAIL}`),
       {
         name: "DrizzleQueryError",
-        cause: Object.assign(new Error("terminating connection due to administrator command"), {
-          name: "PostgresError",
-          code: "57P01",
-          detail: `Key (email)=(${MARKER_EMAIL})`,
-        }),
+        cause: Object.assign(
+          new Error(`terminating connection due to administrator command while deleting ${MARKER_EMAIL}`),
+          { name: "PostgresError", code: "57P01", detail: `Key (email)=(${MARKER_EMAIL})` },
+        ),
       },
     );
     const { t } = await link();
@@ -3305,11 +3348,13 @@ describe("log audit · a statement keyed on the address fails — unsubscribe an
     const sent = await sentryBytes(raw, `/api/email/unsubscribe?e=${E}&t=${t}`, "/api/email/unsubscribe");
 
     expect(sent).toContain("DrizzleQueryError");
+    // The cause did go out (the linked chain) — with the address cut from it.
+    expect(sent).toContain("terminating connection due to administrator command while deleting");
     expectNoMarker(sent);
   });
 
   it.each(["show_reminders", "idea_submissions"] as const)(
-    "one-click (RFC 8058): a failed %s statement answers 500 — never a 2xx — and is logged and reported by class and SQLSTATE only",
+    "one-click (RFC 8058): a failed %s statement answers 500 — never a 2xx — logged by class and SQLSTATE only, reported with its stack and no address",
     async (table) => {
       unsubscribeFailsAt(table);
       const { e, t } = await link();
@@ -3331,6 +3376,16 @@ describe("log audit · a statement keyed on the address fails — unsubscribe an
       expect(logged()).toContain('"code":"57P01"');
       expect(logged()).toContain("DrizzleQueryError");
       expect(sentryMessages()).toContain('"code":"57P01"');
+      // What actually leaves for Sentry: the redacted error with its stack,
+      // the tags, the request — the link's query string (the address,
+      // base64url) stripped.
+      const sent = await reportedBytes(`https://matio.tv/api/email/unsubscribe?e=${e}&t=${t}`);
+      expectNoMarker(sent);
+      expect(sent).not.toContain(t);
+      expect(sent).toContain("by address failed");
+      expect(sent).toContain('"function":"withRedactedFailure"'); // the stack went out
+      expect(sent).toContain('"tags":{"code":"57P01","name":"DrizzleQueryError"}');
+      expect(sent).toContain('"url":"https://matio.tv/api/email/unsubscribe"');
     },
   );
 
@@ -3385,15 +3440,19 @@ describe("log audit · a statement keyed on the address fails — unsubscribe an
       }));
     }
 
+    function userDeleted() {
+      clerkVerify.mockResolvedValue({
+        type: "user.deleted",
+        object: "event",
+        data: { id: USER_ID, object: "user", deleted: true },
+      });
+    }
+
     it.each(["show_reminders", "idea_submissions"] as const)(
-      "Clerk user.deleted: a failed %s DELETE answers 500 (Clerk retries) and is named by id, class and SQLSTATE only",
+      "Clerk user.deleted: a failed %s DELETE answers 500 (Clerk retries), logged by id, class and SQLSTATE only, reported with its stack and no address",
       async (table) => {
         erasureFailsAt(table);
-        clerkVerify.mockResolvedValue({
-          type: "user.deleted",
-          object: "event",
-          data: { id: USER_ID, object: "user", deleted: true },
-        });
+        userDeleted();
         const logged = captureConsole();
 
         const { result: res, escaped } = await underNext(() =>
@@ -3408,8 +3467,58 @@ describe("log audit · a statement keyed on the address fails — unsubscribe an
         expect(logged()).toContain(USER_ID);
         expect(logged()).toContain('"code":"57P01"');
         expect(sentryMessages()).toContain(USER_ID);
+        const sent = await reportedBytes("https://matio.tv/api/webhooks/clerk");
+        expectNoMarker(sent);
+        expect(sent).toContain(`erase user: delete ${table} by address failed`);
+        expect(sent).toContain('"function":"eraseUser"'); // the stack went out
+        expect(sent).toContain(`"userId":"${USER_ID}"`);
       },
     );
+
+    it("Clerk user.deleted: a failure NOT redacted at the source — the tombstone write — goes to Sentry with its cause and stack, the address still cut", async () => {
+      // Whatever else eraseUser throws binds ids only; this one's cause quotes
+      // the address anyway, to prove the scrubbers hold on the raw chain the
+      // route now hands to captureException.
+      select
+        .mockImplementationOnce(() =>
+          selectChain([{ email: MARKER_EMAIL, stripeCustomerId: "cus_dummy" }]),
+        )
+        .mockImplementation(() => selectChain([]));
+      insert.mockImplementation(() => ({
+        values: () => ({
+          onConflictDoNothing: async () => {
+            throw Object.assign(
+              new Error(`Failed query: insert into "erased_customers" ("stripe_customer_id") values ($1)\nparams: cus_dummy`),
+              {
+                name: "DrizzleQueryError",
+                cause: Object.assign(new Error(`connection reset while erasing ${MARKER_EMAIL}`), {
+                  name: "PostgresError",
+                  code: "08006",
+                  detail: `Key (email)=(${MARKER_EMAIL})`,
+                }),
+              },
+            );
+          },
+        }),
+      }));
+      userDeleted();
+      const logged = captureConsole();
+
+      const { result: res, escaped } = await underNext(() =>
+        clerkWebhook(new Request("https://matio.tv/api/webhooks/clerk", { method: "POST" }) as never),
+      );
+
+      expect(escaped).toBeUndefined();
+      expect(res?.status).toBe(500);
+      expect(del).not.toHaveBeenCalled(); // nothing goes before the tombstone
+      expectNoMarker(logged(), sentryMessages());
+      expect(logged()).toContain('"code":"08006"');
+      const sent = await reportedBytes("https://matio.tv/api/webhooks/clerk");
+      expectNoMarker(sent);
+      expect(sent).toContain("connection reset while erasing"); // the cause did go out
+      expect(sent).toContain('"function":"eraseUser"');
+      expect(sent).toContain('"code":"08006"');
+    });
 
     it("users mirror (#380): a late erasure whose DELETE fails escapes the user.created webhook as class and SQLSTATE — the address nowhere", async () => {
       const NEW_ID = "user_new_marker";

@@ -100,9 +100,12 @@ export async function POST(req: NextRequest) {
     // email). Anything the erasure throws (the tombstone write, a DELETE —
     // the database is the only thing it throws for) becomes a 500 on
     // purpose: Clerk retries, and the retry converges. It is answered here
-    // rather than left to the framework (#350): the DELETEs bind the
-    // address, so the failure is logged and reported by id, class and
-    // SQLSTATE only — never the error, whose text is the statement.
+    // rather than left to the framework (#350): the runtime log gets id,
+    // class and SQLSTATE only — never the error, whose text is the
+    // statement. Sentry gets the error itself, for its stack: the by-address
+    // DELETEs throw it already redacted (withRedactedFailure), the other
+    // statements bind ids only, and the scrubbers cut params and addresses
+    // from whatever is sent (lib/log-audit.test.ts drives both shapes).
     const userId = evt.data.id;
     if (!userId) {
       // Clerk's "Send Example" payload and any malformed delivery: nothing
@@ -125,7 +128,7 @@ export async function POST(req: NextRequest) {
         name,
         code,
       });
-      Sentry.captureMessage("user.deleted: erasure failed — Clerk retries", {
+      Sentry.captureException(err, {
         level: "error",
         tags: { userId, code: code ?? "none", name },
       });
