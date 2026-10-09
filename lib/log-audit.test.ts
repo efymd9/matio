@@ -1549,6 +1549,125 @@ describe("log audit · /api/v1/account/delete (the app's self-service erasure, #
     expect(logged()).toContain('"httpStatus":422');
     expect(logged()).toContain("ClerkAPIResponseError");
   });
+
+  // #407 — the Apple revocation in the same request. What could leak: the
+  // authorization code the app sent, the tokens Apple's exchange returns (its
+  // id_token carries the Apple ID's address), the client secret we sign, and
+  // Apple's error bodies, which may quote any of them.
+  describe("· the Sign in with Apple revocation (#407)", () => {
+    const APPLE_CODE = "c0de-leak-marker-apple";
+    const APPLE_REFRESH = "r-leak-marker-refresh";
+    const ID_TOKEN = `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ email: MARKER_EMAIL, name: MARKER_NAME })).toString("base64url")}.`;
+    let secrets: string[];
+
+    function appleRequest() {
+      return new Request("https://matio.tv/api/v1/account/delete", {
+        method: "POST",
+        headers: { authorization: "Bearer sess_dummy", "content-type": "application/json" },
+        body: JSON.stringify({ appleAuthorizationCode: APPLE_CODE }),
+      }) as never;
+    }
+
+    beforeEach(async () => {
+      const { generateKeyPairSync } = await import("node:crypto");
+      const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+      vi.stubEnv("APPLE_TEAM_ID", "TEAMDUMMY1");
+      vi.stubEnv("APPLE_SIGN_IN_KEY_ID", "KEYDUMMY01");
+      vi.stubEnv(
+        "APPLE_SIGN_IN_PRIVATE_KEY",
+        privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+      );
+      secrets = [];
+    });
+
+    function apple(revoke: () => Promise<Response>) {
+      vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+        secrets.push(new URLSearchParams(String(init.body)).get("client_secret") ?? "");
+        if (url.endsWith("/auth/token")) {
+          return new Response(
+            JSON.stringify({ refresh_token: APPLE_REFRESH, access_token: "a-dummy", id_token: ID_TOKEN }),
+            { status: 200 },
+          );
+        }
+        return revoke();
+      });
+    }
+
+    it("a refused revocation is logged by step, status and Apple's code — never the code, a token, the secret or the address", async () => {
+      accountWithLiveSubscription();
+      apple(async () =>
+        new Response(
+          JSON.stringify({
+            error: "invalid_client",
+            error_description: `token ${APPLE_REFRESH} for ${MARKER_EMAIL} (${MARKER_NAME}), code ${APPLE_CODE}`,
+          }),
+          { status: 400 },
+        ),
+      );
+      const logged = captureConsole();
+
+      const res = await deleteAccount(appleRequest());
+
+      expect(res.status).toBe(200);
+      const body = JSON.stringify(await res.json());
+      const sentry = sentryMessage.mock.calls.map(render).join("\n");
+      expect(secrets.length).toBe(2);
+      for (const marker of [APPLE_CODE, APPLE_REFRESH, ID_TOKEN, MARKER_EMAIL, MARKER_NAME, ...secrets]) {
+        expect(logged()).not.toContain(marker);
+        expect(body).not.toContain(marker);
+        expect(sentry).not.toContain(marker);
+      }
+      expect(logged()).toContain("account delete: done");
+      expect(logged()).toContain(USER_ID);
+      expect(logged()).toContain('"step":"revoke"');
+      expect(logged()).toContain('"appleError":"invalid_client"');
+      expect(sentry).toContain('"appleStep":"revoke"');
+    });
+
+    it("a thrown fetch whose message quotes the code and the address is logged by class only", async () => {
+      accountWithLiveSubscription();
+      apple(async () => {
+        throw Object.assign(new TypeError(`fetch failed: ${APPLE_CODE} ${MARKER_EMAIL}`), {
+          code: "ECONNRESET",
+        });
+      });
+      const logged = captureConsole();
+
+      const res = await deleteAccount(appleRequest());
+
+      expect(res.status).toBe(200);
+      const sentry = sentryMessage.mock.calls.map(render).join("\n");
+      for (const marker of [APPLE_CODE, APPLE_REFRESH, MARKER_EMAIL, ...secrets]) {
+        expect(logged()).not.toContain(marker);
+        expect(sentry).not.toContain(marker);
+      }
+      expect(logged()).toContain("ECONNRESET");
+      expect(logged()).toContain("TypeError");
+    });
+
+    it("a code that arrives with no APPLE_* key is a Sentry warning by user id and step — the code reaches neither the console nor Sentry", async () => {
+      vi.stubEnv("APPLE_SIGN_IN_PRIVATE_KEY", "");
+      accountWithLiveSubscription();
+      const fetched = vi.fn(async () => new Response(null, { status: 200 }));
+      vi.stubGlobal("fetch", fetched);
+      const logged = captureConsole();
+
+      const res = await deleteAccount(appleRequest());
+
+      expect(res.status).toBe(200);
+      expect(fetched).not.toHaveBeenCalled(); // nothing went to Apple
+      const warning = sentryMessage.mock.calls.find(([message]) =>
+        String(message).includes("APPLE_* key is not configured"),
+      );
+      expect(warning?.[1]).toEqual({ level: "warning", tags: { userId: USER_ID, step: "apple" } });
+      const sentry = sentryMessage.mock.calls.map(render).join("\n");
+      for (const marker of [APPLE_CODE, MARKER_EMAIL]) {
+        expect(logged()).not.toContain(marker);
+        expect(sentry).not.toContain(marker);
+      }
+      expect(logged()).toContain('"status":"skipped_unconfigured"');
+    });
+  });
 });
 
 describe("log audit · Stripe mirror refusing an erased customer", () => {

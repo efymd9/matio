@@ -48,7 +48,7 @@ const signOut = vi.fn(async () => {
 // The client's own hook (#398): a request carrying the session's Bearer is
 // about to leave. A case whose request never went out (no token, an anonymous
 // 401) simply does not call it.
-type DeleteOptions = { onSentWithToken?: () => void };
+type DeleteOptions = { appleAuthorizationCode?: string; onSentWithToken?: () => void };
 const deleteAccount = vi.fn(async (options?: DeleteOptions) => {
   h.steps.push("api.deleteAccount");
   options?.onSentWithToken?.();
@@ -66,8 +66,9 @@ const router = {
     h.steps.push(`replace ${href}`);
   }),
 };
+const clerkUser = { primaryEmailAddress: { emailAddress: "member@example.com" } };
 vi.mock("@clerk/expo", () => ({
-  useUser: () => ({ user: { primaryEmailAddress: { emailAddress: "member@example.com" } } }),
+  useUser: () => ({ user: clerkUser }),
   useClerk: () => ({ signOut }),
   useAuth: () => ({ getToken }),
 }));
@@ -78,6 +79,13 @@ const endGoogleSession = vi.fn(async () => {
   h.steps.push("google.signOut");
 });
 vi.mock("@/auth/google-session", () => ({ endGoogleSession: () => endGoogleSession() }));
+// #407 — an Apple account's fresh authorization code, asked right before the
+// deletion request (auth/apple-revocation.ts has its own suite). No code —
+// an account without Apple — unless a case says otherwise.
+const appleCode = vi.fn(async (_user: unknown): Promise<string | undefined> => undefined);
+vi.mock("@/auth/apple-revocation", () => ({
+  appleCodeForDeletion: (user: unknown) => appleCode(user),
+}));
 vi.mock("@/auth/clerk", () => ({
   CLERK_PUBLISHABLE_KEY: "pk_test_dummy",
   useOptionalAuth: () => ({
@@ -188,6 +196,7 @@ beforeEach(() => {
     h.steps.push("getToken");
     return "jwt_dummy";
   });
+  appleCode.mockReset().mockResolvedValue(undefined);
   router.replace.mockClear();
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -341,6 +350,37 @@ describe("Account tab — «Delete account» (#309)", () => {
     expect(deleteAccount).toHaveBeenCalledTimes(1);
     expect(h.steps).toEqual(["api.deleteAccount", "google.signOut", "signOut", "replace /"]);
     expect(alerts.calls).toHaveLength(2); // no failure dialog
+  });
+
+  it("an Apple account: Apple's fresh code is asked for Clerk's user AFTER both confirmations, then rides with the request (#407)", async () => {
+    appleCode.mockImplementation(async () => {
+      h.steps.push("apple.code");
+      return "c0de-dummy";
+    });
+    render();
+    press("Delete account");
+    await choose("Delete account");
+    expect(appleCode).not.toHaveBeenCalled(); // not on the first question
+    await choose("Delete permanently");
+
+    expect(appleCode).toHaveBeenCalledWith(clerkUser);
+    expect(deleteAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ appleAuthorizationCode: "c0de-dummy" }),
+    );
+    expect(h.steps).toEqual(["apple.code", "api.deleteAccount", "google.signOut", "signOut", "replace /"]);
+  });
+
+  it("no Apple code (a cancelled sheet, an account without Apple) still deletes — the request simply carries none", async () => {
+    render();
+    press("Delete account");
+    await choose("Delete account");
+    await choose("Delete permanently");
+
+    expect(appleCode).toHaveBeenCalledTimes(1);
+    expect(deleteAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ appleAuthorizationCode: undefined }),
+    );
+    expect(h.steps).toEqual(["api.deleteAccount", "google.signOut", "signOut", "replace /"]);
   });
 
   it("a deletion that fails says so and keeps the session — no sign-out, no navigation", async () => {

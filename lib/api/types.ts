@@ -229,10 +229,17 @@ export type ContinueResponse = {
 // ---------------------------------------------------------------- account
 
 // POST /api/v1/account/delete — self-service account deletion (art. 17,
-// App Store 5.1.1(v), #309). Bearer-only, no body. `ok` means the account
+// App Store 5.1.1(v), #309). Bearer-only. `ok` means the account
 // is gone at Clerk AND our side is erased — the client signs out. Any error
 // (5xx, network) means the deletion did not finish and is safe to repeat:
 // both halves are idempotent.
+//
+// The body is optional (#407): an account that signed in with Apple sends a
+// fresh authorization code from Apple's sheet, which the server exchanges and
+// revokes (lib/apple-revoke.ts). Without one — no Apple account, a cancelled
+// sheet, a build from before #407 sending no body at all — the deletion is
+// the same; the revocation never decides whether it succeeds.
+export type DeleteAccountRequest = { appleAuthorizationCode?: string };
 export type DeleteAccountResponse = { ok: true };
 
 // ---------------------------------------------------------------- retention

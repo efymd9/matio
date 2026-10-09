@@ -4,6 +4,7 @@ import type {
   AppConfig,
   CatalogResponse,
   ContinueResponse,
+  DeleteAccountRequest,
   DeleteAccountResponse,
   EpisodeProgressResponse,
   PlaybackTokenResponse,
@@ -31,9 +32,11 @@ const REQUEST_TIMEOUT_MS = 12_000;
 
 // Account deletion is the one request whose server side waits on vendors in
 // sequence — Stripe (cancel ≈17s at worst with its retries, then the customer
-// search, 5s), PostHog (5s a request), then Clerk; each bounded, typically
-// ~2s in all. 12s would abandon a deletion the server is still finishing and
-// tell the viewer it failed. The route's own ceiling is 60s (maxDuration).
+// search, 5s), PostHog (5s a request), then Clerk — with Apple for an Apple
+// account (two requests, 5s each — #407) beside it, not in front of it; each
+// bounded, typically ~2s in all.
+// 12s would abandon a deletion the server is still finishing and tell the
+// viewer it failed. The route's own ceiling is 60s (maxDuration).
 export const ACCOUNT_DELETE_TIMEOUT_MS = 45_000;
 
 // Clerk's getToken() is a hook-bound function, but this module is plain and is
@@ -258,14 +261,21 @@ export const api = {
   // certain 401 that erases nothing. Safe to repeat after any failure — the
   // server's two halves are idempotent. `onSentWithToken` tells the caller a
   // request that COULD have erased the account went out (#398): only after
-  // one does a dead session mean the account is gone.
-  deleteAccount: (options?: { onSentWithToken?: () => void }) =>
-    request<DeleteAccountResponse>("/api/v1/account/delete", {
+  // one does a dead session mean the account is gone. An Apple authorization
+  // code (#407 — auth/apple-revocation.ts) rides in the body so the server can
+  // revoke the Apple grant; without one the request has no body, as before.
+  deleteAccount: (options?: { appleAuthorizationCode?: string; onSentWithToken?: () => void }) => {
+    const body: DeleteAccountRequest | undefined = options?.appleAuthorizationCode
+      ? { appleAuthorizationCode: options.appleAuthorizationCode }
+      : undefined;
+    return request<DeleteAccountResponse>("/api/v1/account/delete", {
       method: "POST",
+      body,
       auth: "required",
       timeoutMs: ACCOUNT_DELETE_TIMEOUT_MS,
       onSentWithToken: options?.onSentWithToken,
-    }),
+    });
+  },
 };
 
 // Mux HLS URL for a signed playback ID. Kept here so the URL shape lives next
