@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import { getTableName, type SQL } from "drizzle-orm";
 import { PgDialect, type PgTable } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -254,6 +255,51 @@ describe("eraseUser · the local erasure through an injected client", () => {
     await expect(eraseUser(USER_ID, deps())).rejects.toThrow("connection reset");
     expect(h.deletes).toEqual([]);
   });
+
+  it.each(["show_reminders", "idea_submissions"])(
+    "a %s DELETE that fails leaves without the driver's text — the address it binds — keeping class and SQLSTATE (#350)",
+    async (table) => {
+      h.userRow = { email: EMAIL, stripeCustomerId: null };
+      const address = EMAIL.toLowerCase();
+      const db = makeDb();
+      const failing = {
+        ...db,
+        delete: (t: PgTable) =>
+          getTableName(t) === table
+            ? {
+                where: () => {
+                  throw Object.assign(
+                    new Error(`Failed query: delete from "${table}" …\nparams: ${address}`),
+                    {
+                      name: "DrizzleQueryError",
+                      cause: Object.assign(new Error(`while deleting ${address}`), {
+                        name: "PostgresError",
+                        code: "57P01",
+                      }),
+                    },
+                  );
+                },
+              }
+            : db.delete(t),
+      } as unknown as EraseDb;
+
+      const thrown = await eraseUser(USER_ID, { ...deps(), db: failing }).catch(
+        (e: unknown) => e,
+      );
+
+      // Still a failure — the callers answer 500 / exit 1 on it — but one
+      // that names the statement, the class and the SQLSTATE, nothing more.
+      expect(thrown).toMatchObject({
+        name: "DrizzleQueryError",
+        code: "57P01",
+        message: `erase user: delete ${table} by address failed`,
+      });
+      expect((thrown as Error).cause).toBeUndefined();
+      expect(inspect(thrown, { depth: 5 })).not.toContain(address);
+      // The users row stays — the retry converges on it.
+      expect(h.writes).not.toContain("delete users");
+    },
+  );
 
   it("a live subscription is set to cancel at period end through the injected client, with the stated budget", async () => {
     h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };

@@ -1,8 +1,10 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import { verifyWebhook } from "@clerk/nextjs/webhooks";
+import * as Sentry from "@sentry/nextjs";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
-import { eraseUser } from "@/lib/erase-user";
+import { describeDbError } from "@/lib/db-errors";
+import { eraseUser, type EraseUserResult } from "@/lib/erase-user";
 import { describeError } from "@/lib/observability";
 import { getPosthogQueryConfig } from "@/lib/posthog-config";
 import { getStripe } from "@/lib/stripe";
@@ -95,8 +97,15 @@ export async function POST(req: NextRequest) {
     // it there is the ONE trigger, and lib/erase-user.ts is the ONE
     // mechanism — shared with `pnpm erase-user <id> --apply` for the day
     // this webhook did not arrive. The payload carries only the id (no
-    // email). Anything the erasure throws (the tombstone write failing)
-    // becomes a 500 on purpose: Clerk retries, and the retry converges.
+    // email). Anything the erasure throws (the tombstone write, a DELETE —
+    // the database is the only thing it throws for) becomes a 500 on
+    // purpose: Clerk retries, and the retry converges. It is answered here
+    // rather than left to the framework (#350): the runtime log gets id,
+    // class and SQLSTATE only — never the error, whose text is the
+    // statement. Sentry gets the error itself, for its stack: the by-address
+    // DELETEs throw it already redacted (withRedactedFailure), the other
+    // statements bind ids only, and the scrubbers cut params and addresses
+    // from whatever is sent (lib/log-audit.test.ts drives both shapes).
     const userId = evt.data.id;
     if (!userId) {
       // Clerk's "Send Example" payload and any malformed delivery: nothing
@@ -105,11 +114,26 @@ export async function POST(req: NextRequest) {
       console.warn("user.deleted event has no id — skipping");
       return new Response("OK (no id, skipped)", { status: 200 });
     }
-    const result = await eraseUser(userId, {
-      db,
-      getStripe,
-      posthog: getPosthogQueryConfig(),
-    });
+    let result: EraseUserResult;
+    try {
+      result = await eraseUser(userId, {
+        db,
+        getStripe,
+        posthog: getPosthogQueryConfig(),
+      });
+    } catch (err) {
+      const { name, code } = describeDbError(err);
+      console.error("user.deleted: erasure failed — 500, Clerk retries", {
+        userId,
+        name,
+        code,
+      });
+      Sentry.captureException(err, {
+        level: "error",
+        tags: { userId, code: code ?? "none", name },
+      });
+      return new Response("Erasure failed — retry", { status: 500 });
+    }
     // Already erased (Clerk redelivers on timeouts) or never mirrored —
     // either way the end state holds. Idempotent 200.
     return new Response(
