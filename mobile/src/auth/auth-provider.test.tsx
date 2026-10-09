@@ -1,8 +1,9 @@
 /** @vitest-environment jsdom */
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TokenCache } from "@clerk/expo";
+import { closeStage, openStage, stillLive, type Stage } from "@/testing/stage";
 
 // What AuthProvider hands Clerk and the fetch client (#299).
 //
@@ -89,13 +90,15 @@ vi.mock("@/api/client", () => ({
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-let container: HTMLDivElement;
-let root: Root;
+// Each test's own container and root (#439 — see @/testing/stage).
+let stage: Stage;
 
 async function mountAuthProvider() {
+  const own = stage;
   vi.resetModules();
   const { AuthProvider } = await import("./clerk");
-  act(() => root.render(<AuthProvider>{null}</AuthProvider>));
+  stillLive(own);
+  act(() => own.root?.render(<AuthProvider>{null}</AuthProvider>));
   const cache = clerkState.tokenCache;
   if (!cache) throw new Error("ClerkProvider was not mounted");
   return cache;
@@ -111,14 +114,12 @@ beforeEach(() => {
   clerkState.status = "ready";
   clerkState.getToken = vi.fn(async () => "sess_token");
   bridge.provider = undefined;
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
+  stage = openStage();
+  stage.root = createRoot(stage.container);
 });
 
 afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+  closeStage(stage);
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -228,7 +229,7 @@ describe("the token provider AuthBridge installs in the fetch client", () => {
     await mountAuthProvider();
     expect(bridge.provider).toBeTypeOf("function");
 
-    act(() => root.render(null));
+    act(() => stage.root?.render(null));
 
     expect(bridge.provider).toBeNull();
   });
