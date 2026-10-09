@@ -48,7 +48,7 @@ reason = "The vulnerable code is not in the installed version. The flaw is the c
 [[IgnoredVulns]]
 id = "GHSA-mjw6-4jj6-33hc"
 ignoreUntil = 2026-12-20
-reason = "Unreachable. The flaw is Assembler's plain current[key] assignment (a __proto__ key replaces the PARSED object's prototype, never Object.prototype), reached through StreamValues. jayson loads StreamValues only in lib/utils.js parseStream, which only its Node TCP/TLS server and client transports call. @solana/web3.js imports just jayson/lib/client/browser (uuid + generateRequest), which does not load utils.js. Verified: stream-json, jayson and @solana/web3.js are all absent from the exported iOS bundle (#417). The fixed 3.6.0 is ESM-only and not loadable by jayson's CJS require."
+reason = "Unreachable. The flaw is Assembler's plain current[key] assignment (a __proto__ key replaces the PARSED object's prototype, never Object.prototype), reached through StreamValues. jayson's lib/utils.js requires StreamValues at module load but instantiates the Assembler only in parseStream, which only its Node TCP/TLS server and client transports call; @solana/web3.js imports just jayson/lib/client/browser (uuid + generateRequest), which never loads utils.js, so stream-json is never even loaded. Verified: stream-json, jayson and @solana/web3.js are all absent from the exported iOS bundle (#417). The fixed 3.6.0 is ESM-only and not loadable by jayson's CJS require."
 
 # decode-uri-component 0.2.2 <- query-string 7.1.3 (range ^0.2.2) <- expo-router.
 # NOT a build-time-only entry — read the reason.
