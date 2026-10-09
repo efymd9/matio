@@ -511,8 +511,9 @@ describe("the vertical player's play/pause says its state (#304 item 4); no Magi
 
   // React Native 0.86 on Fabric drops `onMagicTap` on its way to the native
   // view (the view config sends it under that name, the C++ props read only
-  // `onAccessibilityMagicTap`), so a two-finger double tap would do nothing.
-  // The chrome must not promise it; activating the control is the way.
+  // `onAccessibilityMagicTap`), so a handler here would never be called; what
+  // iOS does with the unhandled gesture is unobserved (docs/registry.md). The
+  // chrome must not promise a handler; activating the control is the way.
   it("activating the control toggles playback; nothing in the chrome hands out onMagicTap", () => {
     const onTogglePlay = chrome(false);
 
