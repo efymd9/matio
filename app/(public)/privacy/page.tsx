@@ -17,6 +17,12 @@
 // the banner in the EU/EEA, UK and CH, on by default with the footer opt-out
 // elsewhere — worded like the §2 ideas item: an agent's draft, merged only
 // on the owner's «да» in the PR thread; the counsel question is in #168.
+// §3 (#420) 2026-10-11: Mux Data moved out of the legitimate-interests
+// "improve the service" item into that marketing-measurement item (both
+// players run it only with marketing consent — lib/use-marketing-consent.ts,
+// as /cookies §2 says), and the ChatGPT Ads pixel named there: an agent's
+// draft, merged only on the owner's «да» in the PR thread; who OpenAI is to
+// us (§4) is the counsel's question in #168, p. 8.
 // matio.tv/ideas is
 // plain text on purpose: every internal link here must survive ?embed=app
 // (app/(public)/legal-embed.test.tsx).
@@ -37,8 +43,8 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED_ES = "9 de octubre de 2026";
-const LAST_UPDATED_EN = "October 9, 2026";
+const LAST_UPDATED_ES = "11 de octubre de 2026";
+const LAST_UPDATED_EN = "October 11, 2026";
 
 export default async function PrivacyPage() {
   const { locale, t } = await getDict();
@@ -195,9 +201,8 @@ function PrivacyEn() {
             operating a stable, safe service.
           </li>
           <li>
-            <strong>To improve the service</strong> (aggregate analytics,
-            playback-quality monitoring via Mux Data). Lawful basis:{" "}
-            <em>legitimate interests</em>.
+            <strong>To improve the service</strong> (aggregate analytics).
+            Lawful basis: <em>legitimate interests</em>.
           </li>
           <li>
             <strong>To review a story idea you send us</strong>, contact you
@@ -213,8 +218,10 @@ function PrivacyEn() {
             and{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_last</code>{" "}
             cookies and, where enabled, the Meta Pixel, Meta Conversions API,
-            PostHog (product-analytics funnel measurement), and Google Analytics
-            (site-traffic measurement).
+            PostHog (product-analytics funnel measurement), Google Analytics
+            (site-traffic measurement), the ChatGPT Ads measurement pixel
+            (measuring our advertising in ChatGPT), and Mux Data (watch-time
+            and playback-quality measurement by our video provider, Mux).
             Lawful basis in the EU/EEA, the UK and Switzerland:{" "}
             <em>consent</em> — there these run only after you accept marketing
             cookies in the banner, and stop if you withdraw consent. Elsewhere
@@ -703,9 +710,8 @@ function PrivacyEs() {
             de operar un servicio estable y seguro.
           </li>
           <li>
-            <strong>Para mejorar el servicio</strong> (analítica agregada,
-            monitorización de calidad de reproducción con Mux Data). Base
-            jurídica: <em>interés legítimo</em>.
+            <strong>Para mejorar el servicio</strong> (analítica agregada).
+            Base jurídica: <em>interés legítimo</em>.
           </li>
           <li>
             <strong>Para revisar una idea de historia que nos envías</strong>,
@@ -723,8 +729,11 @@ function PrivacyEs() {
             y{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">attribution_last</code>{" "}
             y, cuando está activado, el Meta Pixel, la API de Conversiones de
-            Meta, PostHog (analítica de embudo de producto) y Google Analytics
-            (medición del tráfico del sitio).
+            Meta, PostHog (analítica de embudo de producto), Google Analytics
+            (medición del tráfico del sitio), el píxel de medición de ChatGPT
+            Ads (medición de nuestra publicidad en ChatGPT) y Mux Data
+            (medición del tiempo de visionado y de la calidad de reproducción
+            por nuestro proveedor de vídeo, Mux).
             Base jurídica en la UE/EEE, el Reino Unido y Suiza:{" "}
             <em>consentimiento</em>; allí solo se ejecutan tras aceptar las
             cookies de marketing en el banner y se detienen si retiras el

@@ -124,3 +124,76 @@ describe("/privacy §3 — marketing measurement and the geo-aware consent defau
     },
   );
 });
+
+// #420 — the same §3 item is where every tool the marketing-consent gate
+// switches on has to be named, because its basis sentence covers "these".
+// Mux Data is one of them (both players pass disableTracking/disableCookies
+// and no envKey without consent — lib/use-marketing-consent.ts, pinned by
+// components/watch/player.test.tsx and components/site/hero-banner.test.tsx),
+// and so is the ChatGPT Ads pixel (components/site/openai-pixel.tsx); /cookies
+// §2 names both under that consent. §3 once filed Mux Data under the
+// legitimate-interests "improve the service" item and left the pixel out.
+const TOOL_CASES = [
+  {
+    locale: "en",
+    purposes: "purposes",
+    improveMarker: "To improve the service",
+    regions: "EU/EEA, the UK and Switzerland",
+    tools: [
+      "Meta Pixel",
+      "Meta Conversions API",
+      "PostHog",
+      "Google Analytics",
+      "ChatGPT Ads measurement pixel",
+      "Mux Data",
+    ],
+  },
+  {
+    locale: "es",
+    purposes: "finalidades",
+    improveMarker: "Para mejorar el servicio",
+    regions: "UE/EEE, el Reino Unido y Suiza",
+    tools: [
+      "Meta Pixel",
+      "API de Conversiones de Meta",
+      "PostHog",
+      "Google Analytics",
+      "píxel de medición de ChatGPT Ads",
+      "Mux Data",
+    ],
+  },
+] as const;
+
+describe("/privacy §3 — every consent-gated measurement tool sits under the consent item (#420)", () => {
+  it.each(TOOL_CASES)(
+    "($locale) names Mux Data and the ChatGPT Ads pixel in the consent item, before its basis sentence",
+    async (c) => {
+      const html = await render(c.locale);
+      const marketing = item(section(html, c.purposes), "attribution_first");
+      const basisAt = marketing.indexOf(c.regions);
+      expect(basisAt).toBeGreaterThan(-1);
+      for (const tool of c.tools) {
+        const at = marketing.indexOf(tool);
+        expect(at, tool).toBeGreaterThan(-1);
+        expect(at, tool).toBeLessThan(basisAt);
+      }
+    },
+  );
+
+  it.each(TOOL_CASES)(
+    "($locale) no longer files Mux Data under the legitimate-interests item — §3 names it once",
+    async (c) => {
+      const purposes = section(await render(c.locale), c.purposes);
+      const improve = item(purposes, c.improveMarker);
+      expect(improve).not.toBe("");
+      expect(improve).not.toContain("Mux");
+
+      const withMux = purposes
+        .split("<li")
+        .slice(1)
+        .filter((li) => li.includes("Mux Data"));
+      expect(withMux).toHaveLength(1);
+      expect(withMux[0]).toContain("attribution_first");
+    },
+  );
+});
