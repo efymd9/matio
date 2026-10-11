@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeStage, openStage, stillLive, type Stage } from "@/testing/stage";
 
 // #288 item 14 — a tester who turned «Play next episode automatically» off
 // relaunched, opened Settings, and watched the switch render ON and then
@@ -32,20 +33,29 @@ const AUTOPLAY_KEY = "matio_autoplay_next";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-let container: HTMLDivElement;
-let root: Root;
+// Each test's own container and root (#439 — see @/testing/stage).
+let stage: Stage;
 
 // Every value the Settings switch would render, in order.
 const frames: boolean[] = [];
 
+// The module under test, fresh from the registry beforeEach resets.
+async function importAutoplay() {
+  const own = stage;
+  const mod = await import("./autoplay");
+  stillLive(own);
+  return mod;
+}
+
 async function renderSwitch() {
-  const { useAutoplayNext } = await import("./autoplay");
+  const own = stage;
+  const { useAutoplayNext } = await importAutoplay();
   function Switch() {
     const [enabled] = useAutoplayNext();
     frames.push(enabled);
     return null;
   }
-  act(() => root.render(<Switch />));
+  act(() => own.root?.render(<Switch />));
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -57,20 +67,18 @@ beforeEach(() => {
   store.values.clear();
   store.values.set(AUTOPLAY_KEY, "0");
   frames.length = 0;
-  container = document.createElement("div");
-  document.body.appendChild(container);
-  root = createRoot(container);
+  stage = openStage();
+  stage.root = createRoot(stage.container);
 });
 
 afterEach(() => {
-  act(() => root.unmount());
-  container.remove();
+  closeStage(stage);
   vi.unstubAllGlobals();
 });
 
 describe("the autoplay setting on Settings' first open (#288 item 14)", () => {
   it("renders the stored «off» from its first frame once the read has been primed", async () => {
-    const { loadAutoplayNext } = await import("./autoplay");
+    const { loadAutoplayNext } = await importAutoplay();
     await loadAutoplayNext();
 
     await renderSwitch();

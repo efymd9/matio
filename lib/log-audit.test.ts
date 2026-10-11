@@ -462,7 +462,8 @@ describe("log audit · Sentry payloads", () => {
       ],
       exception: { values: [{ value: `no row for ${MARKER_EMAIL}` }] },
       // @sentry/nextjs 11 (#390) records the request on the spans too, as
-      // OpenTelemetry attributes: one per header, the body, the client's IP.
+      // OpenTelemetry attributes: one per header, the body, the client's IP —
+      // and the scope user's username as `user.name` (#438).
       contexts: {
         trace: {
           data: {
@@ -470,6 +471,7 @@ describe("log audit · Sentry payloads", () => {
             "http.request.header.cookie": [`__session=${MARKER_SECRET}`],
             "http.request.header.authorization": [`Bearer ${MARKER_SECRET}`],
             "http.request.body.data": JSON.stringify({ name: MARKER_NAME }),
+            "user.name": MARKER_NAME,
           },
         },
       },

@@ -1,8 +1,9 @@
 /** @vitest-environment jsdom */
 import { act, useEffect, type ReactNode } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "@/shared/api-types";
+import { closeStage, openStage, stillLive, type Stage } from "@/testing/stage";
 
 // The launch gate every screen sits behind (#288 items 6 and 7):
 //   - the build floor compares /v1/config's minSupportedBuild with THIS
@@ -61,30 +62,14 @@ const CONFIG: AppConfig = {
   },
 };
 
-// Each test's own DOM, built in beforeEach and torn down in afterEach (#432).
-// vitest does not cancel a test that times out: its continuation keeps
-// running in the background. While the container and the root were plain
-// module variables, a first test stuck on a cold import woke up INSIDE the
-// next test — createRoot() on that test's container, an act() overlapping
-// its act() — and React's act queue never recovered: one timeout read as
-// sixteen failures, fifteen of them a misleading "expected '' to contain …".
-// So a test holds on to ITS stage, and after each import await of the
-// harness checks that the stage is still live: the continuation of a test
-// that timed out on a cold import stops before it touches the DOM, React or
-// the spies. NOT covered: a test that times out while one of its act()
-// calls is still pending (the harness's own, or one in settle /
-// foregroundAfter) — that still breaks React's act queue for the rest of
-// the file; the cold import was the failure seen (#432). A container of
-// its own is not enough by itself — a late act() still overlaps the next
-// test's and leaves React's act queue broken for the rest of the file
-// (checked with the check switched off: 14 of 16 red).
-type Stage = { container: HTMLDivElement; root: Root | null; live: boolean };
+// Each test's own DOM, opened in beforeEach and closed in afterEach (#432;
+// the harness is @/testing/stage since #439). Before it, one test stuck on a
+// cold import woke up inside the next one, and one timeout read as sixteen
+// failures, fifteen of them a misleading "expected '' to contain …". NOT
+// covered: a test that times out while one of its act() calls is still
+// pending — the harness's own, or one in settle / foregroundAfter.
 let stage: Stage;
 const text = () => stage.container.textContent ?? "";
-
-function stillLive(own: Stage) {
-  if (!own.live) throw new Error("this test is already over (timed out?) — its continuation stops here");
-}
 
 type ConfigModule = typeof import("@/api/config-context");
 
@@ -157,15 +142,11 @@ describe("ConfigProvider (#288)", () => {
     config.requests = 0;
     onAppState = null;
     listenersRemoved = 0;
-    stage = { container: document.createElement("div"), root: null, live: true };
-    document.body.appendChild(stage.container);
+    stage = openStage();
   });
 
   afterEach(() => {
-    stage.live = false;
-    act(() => stage.root?.unmount());
-    stage.root = null;
-    stage.container.remove();
+    closeStage(stage);
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
