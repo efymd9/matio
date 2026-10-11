@@ -87,7 +87,8 @@ export function SeriesEndOverlay({
         }
         // Reason → copy mapping. invalid_show should never happen via
         // the UI (the id came from the page) — it falls through to the
-        // generic error so the user has a path forward.
+        // generic error so the user has a path forward, as does
+        // server_error (the database refused the write, #425).
         if (result.reason === "invalid_email") {
           setState({
             kind: "error",

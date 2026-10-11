@@ -1,3 +1,4 @@
+import { inspect } from "node:util";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -145,6 +146,34 @@ describe("getOrSyncCurrentUser", () => {
     h.clerkUser = { primaryEmailAddress: null, emailAddresses: [] };
 
     expect(await getOrSyncCurrentUser()).toBeNull();
+    expect(h.writes).toEqual([]);
+  });
+
+  it("a failing mirror write still throws — the page's error page, the app's 503 — but carries no address (#425)", async () => {
+    h.insertResults.push(
+      Object.assign(
+        new Error(`Failed query: insert into "users" ("id", "email") values ($1, $2)\nparams: ${USER_ID},${EMAIL}`),
+        {
+          name: "DrizzleQueryError",
+          cause: Object.assign(new Error(`connection lost writing ${EMAIL}`), {
+            code: "57P01",
+            detail: `Key (email)=(${EMAIL})`,
+          }),
+        },
+      ),
+    );
+
+    const error = await getOrSyncCurrentUser().then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(error).toMatchObject({
+      message: "users mirror: insert users row failed",
+      name: "DrizzleQueryError",
+      code: "57P01",
+    });
+    expect(inspect(error, { depth: 5 })).not.toContain(EMAIL);
     expect(h.writes).toEqual([]);
   });
 });

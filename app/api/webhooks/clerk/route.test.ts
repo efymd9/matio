@@ -36,6 +36,7 @@ const h = vi.hoisted(() => ({
   stripeUpdate: vi.fn(),
   stripeSearch: vi.fn(),
   sentryMessage: vi.fn(),
+  sentryException: vi.fn(),
 }));
 
 vi.mock("@/db", async () => {
@@ -113,7 +114,10 @@ vi.mock("@/lib/stripe", () => ({
   }),
 }));
 
-vi.mock("@sentry/nextjs", () => ({ captureMessage: h.sentryMessage }));
+vi.mock("@sentry/nextjs", () => ({
+  captureMessage: h.sentryMessage,
+  captureException: h.sentryException,
+}));
 
 import * as schema from "@/db/schema";
 import { POST } from "./route";
@@ -193,6 +197,7 @@ beforeEach(() => {
   // Stripe knows no customer for the address unless a case says otherwise.
   h.stripeSearch.mockReset().mockResolvedValue({ data: [], has_more: false });
   h.sentryMessage.mockReset();
+  h.sentryException.mockReset();
   vi.stubEnv("CLERK_WEBHOOK_SIGNING_SECRET", SIGNING_SECRET);
   // PostHog is off unless a case turns it on: with credentials in the
   // shell the erasure would otherwise reach the real persons endpoint.
@@ -551,12 +556,29 @@ describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)"
     // customer's next webhook resurrects the account. Nothing may be deleted
     // before it is on disk.
     h.userRow = { email: EMAIL, stripeCustomerId: "cus_dummy" };
-    h.insertFails = new Error("connection reset");
+    h.insertFails = Object.assign(new Error("connection reset"), {
+      name: "PostgresError",
+      code: "08006",
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(POST(signed(userDeleted(USER_ID)))).rejects.toThrow(
-      "connection reset",
-    );
+    const res = await POST(signed(userDeleted(USER_ID)));
+
+    // Answered, not thrown (#350): the 500 is what makes Svix redeliver, and
+    // the log names the failure by id, class and SQLSTATE — never by its
+    // text. Sentry gets the error itself (its stack), tagged the same way.
+    expect(res.status).toBe(500);
     expect(h.deletes).toEqual([]);
+    expect(error).toHaveBeenCalledWith(
+      "user.deleted: erasure failed — 500, Clerk retries",
+      { userId: USER_ID, name: "PostgresError", code: "08006" },
+    );
+    expect(h.sentryException).toHaveBeenCalledTimes(1);
+    expect(h.sentryException).toHaveBeenCalledWith(h.insertFails, {
+      level: "error",
+      tags: { userId: USER_ID, code: "08006", name: "PostgresError" },
+    });
+    expect(h.sentryMessage).not.toHaveBeenCalled();
   });
 
   it("looks for a live subscription with the access-granting predicate", async () => {

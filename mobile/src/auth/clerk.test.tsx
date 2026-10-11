@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeStage, openStage, stillLive, type Stage } from "@/testing/stage";
 
 // #253 — the Account tab of 0.1.0 (5) spun forever. The build carried the
 // key, but the production Clerk instance answered 400 native_api_disabled
@@ -100,26 +101,28 @@ const SIGNED_OUT_HEADLINE = "Create your account";
 // The key is read once, at module load (auth/clerk.tsx), exactly as a build
 // inlines it — so each case loads the screen fresh under its own env.
 async function loadAccountScreen() {
+  const own = stage;
   vi.resetModules();
   const mod = await import("@/app/(tabs)/account");
+  stillLive(own);
   return mod.default;
 }
 
-let container: HTMLDivElement;
-let root: Root | null = null;
+// Each test's own container and root (#439 — see @/testing/stage).
+let stage: Stage;
 
 function render(element: React.ReactElement) {
-  root = createRoot(container);
-  act(() => root?.render(element));
+  stage.root = createRoot(stage.container);
+  act(() => stage.root?.render(element));
 }
 
-const text = () => container.textContent ?? "";
-const spinning = () => container.querySelector('[role="progressbar"]') !== null;
+const text = () => stage.container.textContent ?? "";
+const spinning = () => stage.container.querySelector('[role="progressbar"]') !== null;
 
 // Presses a react-native-web Pressable by its label: the click bubbles from
 // the Text up to the Pressable's element, where RNW's responder fires onPress.
 function press(label: string) {
-  const node = Array.from(container.querySelectorAll("*")).find(
+  const node = Array.from(stage.container.querySelectorAll("*")).find(
     (el) => el.children.length === 0 && el.textContent === label,
   );
   if (!node) throw new Error(`no element labelled ${label}`);
@@ -145,14 +148,11 @@ describe("AccountScreen — a Clerk that will not load (#253)", { timeout: COLD_
     clerk.off.mockClear();
     clerk.loadHeadlessClerk = loadHeadlessClerk;
     loadHeadlessClerk.mockClear();
-    container = document.createElement("div");
-    document.body.appendChild(container);
+    stage = openStage();
   });
 
   afterEach(() => {
-    act(() => root?.unmount());
-    root = null;
-    container.remove();
+    closeStage(stage);
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.useRealTimers();

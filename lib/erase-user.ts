@@ -14,6 +14,7 @@ import {
   watchDays,
   watchProgress,
 } from "@/db/schema";
+import { withRedactedFailure } from "@/lib/db-errors";
 import { describeError } from "@/lib/observability";
 import {
   erasePosthogPerson,
@@ -492,26 +493,37 @@ export async function eraseUser(
   // already gone, users found and deleted). The order matters: reminders
   // first, or SET NULL would cut the user_id link before the explicit delete
   // can use it; ideas before users, because the users row is the only place
-  // the address is read from.
+  // the address is read from. Both DELETEs bind the address, so a failure
+  // leaves here without the driver's text (#350, withRedactedFailure) — every
+  // caller (the two routes, the users mirror, the script) prints or reports
+  // what escapes, and the address must not ride along.
 
   // "Delete my account" erases the reminder requests too: every row for the
   // account's address (the same reach as unsubscribeEmail — the address IS
   // the subscription) plus any row the account linked under another
   // address. This runs BEFORE the users DELETE, because the FK's SET NULL
   // would drop that link first. Reminder addresses are stored lowercased.
-  const reminders = await db
-    .delete(showReminders)
-    .where(reminderRowsWhere(userId, user.email, reassignedAt))
-    .returning({ id: showReminders.id });
+  const reminders = await withRedactedFailure(
+    "erase user: delete show_reminders by address",
+    () =>
+      db
+        .delete(showReminders)
+        .where(reminderRowsWhere(userId, user.email, reassignedAt))
+        .returning({ id: showReminders.id }),
+  );
 
   // "Delete my account" erases the story ideas sent from the account's
   // address too (#297) — including an idea whose licence the fan granted;
   // v1 has no exception for it (registry). No FK does this: the table has
   // no user_id, so this explicit step is the whole mechanism.
-  const ideas = await db
-    .delete(ideaSubmissions)
-    .where(ideaSubmissionRowsWhere(user.email, reassignedAt))
-    .returning({ id: ideaSubmissions.id });
+  const ideas = await withRedactedFailure(
+    "erase user: delete idea_submissions by address",
+    () =>
+      db
+        .delete(ideaSubmissions)
+        .where(ideaSubmissionRowsWhere(user.email, reassignedAt))
+        .returning({ id: ideaSubmissions.id }),
+  );
 
   await db.delete(users).where(eq(users.id, userId));
 

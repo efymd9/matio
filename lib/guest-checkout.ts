@@ -8,6 +8,7 @@ import {
   applyUserAttributionPayload,
   fromStripeMetadata,
 } from "@/lib/attribution";
+import { withRedactedFailure } from "@/lib/db-errors";
 import { getStripe } from "@/lib/stripe";
 import { ACCESS_GRANTING_STATUSES } from "@/lib/subscription-access";
 import { linkTrialSessionsByToken } from "@/lib/trial";
@@ -272,33 +273,39 @@ export async function claimGuestCheckout(
   //    violation lands in the catch; surface it loudly instead of
   //    guessing, since silently re-keying a users PK would cascade into
   //    subscriptions/trials FKs.
+  // Both statements bind the buyer's address, so a database failure leaves
+  // without the driver's text (#425, withRedactedFailure) — and it still
+  // leaves: the webhook rolls the stripe_events claim back on it and Stripe
+  // retries; /welcome degrades. Both print what escapes (the webhook's
+  // `handler error` line, /welcome's `claim/mirror failed` line).
   try {
-    // signup_origin only lands on INSERT — an existing row (returning
-    // churned user) keeps its original origin; the rebind path never
-    // rewrites it.
-    const insert = db.insert(users).values({
-      id: userId,
-      email,
-      stripeCustomerId: customerId,
-      // 'guest_checkout' ONLY when THIS claim created the Clerk account
-      // (ensureClerkUser → created). A pre-existing Clerk user that merely
-      // lacked a mirror row (created === false) is a real interactive identity
-      // — stamp 'clerk_signup' so guestBorn (and thus one-click ticket minting)
-      // never mistakes it for guest-born. The normal guest case is created.
-      signupOrigin: created ? "guest_checkout" : "clerk_signup",
+    await withRedactedFailure("guest checkout: upsert users row", () => {
+      // signup_origin only lands on INSERT — an existing row (returning
+      // churned user) keeps its original origin; the rebind path never
+      // rewrites it.
+      const insert = db.insert(users).values({
+        id: userId,
+        email,
+        stripeCustomerId: customerId,
+        // 'guest_checkout' ONLY when THIS claim created the Clerk account
+        // (ensureClerkUser → created). A pre-existing Clerk user that merely
+        // lacked a mirror row (created === false) is a real interactive identity
+        // — stamp 'clerk_signup' so guestBorn (and thus one-click ticket minting)
+        // never mistakes it for guest-born. The normal guest case is created.
+        signupOrigin: created ? "guest_checkout" : "clerk_signup",
+      });
+      return rebind
+        ? insert.onConflictDoUpdate({
+            target: users.id,
+            set: { stripeCustomerId: customerId },
+          })
+        : insert.onConflictDoNothing({ target: users.id });
     });
-    await (rebind
-      ? insert.onConflictDoUpdate({
-          target: users.id,
-          set: { stripeCustomerId: customerId },
-        })
-      : insert.onConflictDoNothing({ target: users.id }));
   } catch (err) {
-    const [byEmail] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.email, email))
-      .limit(1);
+    const [byEmail] = await withRedactedFailure(
+      "guest checkout: find the users row by address",
+      () => db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1),
+    );
     if (byEmail && byEmail.id !== userId) {
       // Ids only, never the address: this text is printed to the runtime log
       // by the webhook route and /welcome and sent to Sentry (#385). The
