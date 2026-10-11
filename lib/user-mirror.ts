@@ -4,7 +4,7 @@ import * as Sentry from "@sentry/nextjs";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
-import { isUniqueViolation } from "@/lib/db-errors";
+import { isUniqueViolation, withRedactedFailure } from "@/lib/db-errors";
 import { eraseUser } from "@/lib/erase-user";
 import { describeError } from "@/lib/observability";
 import { getPosthogQueryConfig } from "@/lib/posthog-config";
@@ -47,6 +47,13 @@ import { getStripe } from "@/lib/stripe";
 // Every outcome is reported by ids and statuses only — to the log and to
 // Sentry, because Vercel logs live a day — never the address
 // (lib/log-audit.test.ts).
+//
+// Every statement here binds the address, so a database failure leaves
+// without the driver's text (#425, withRedactedFailure): class, SQLSTATE and
+// the violated constraint's name — all the conflict branch reads
+// (`isUniqueViolation(err, USERS_EMAIL_UNIQUE)`). What escapes, the callers
+// answer as before: the webhook with a 500 (Svix redelivers), a page with its
+// error page, /api/v1/progress with its 503.
 
 /** The unique constraint on users.email (drizzle/0000_cold_shinobi_shaw.sql). */
 export const USERS_EMAIL_UNIQUE = "users_email_unique";
@@ -132,10 +139,12 @@ export function clerkHttpStatus(err: unknown): number | undefined {
 /** true = the row is there; false = the address is held by another row. */
 async function insertMirrorRow(userId: string, email: string): Promise<boolean> {
   try {
-    await db
-      .insert(users)
-      .values({ id: userId, email })
-      .onConflictDoNothing({ target: users.id });
+    await withRedactedFailure("users mirror: insert users row", () =>
+      db
+        .insert(users)
+        .values({ id: userId, email })
+        .onConflictDoNothing({ target: users.id }),
+    );
     return true;
   } catch (err) {
     if (isUniqueViolation(err, USERS_EMAIL_UNIQUE)) return false;
@@ -146,13 +155,15 @@ async function insertMirrorRow(userId: string, email: string): Promise<boolean> 
 /**
  * The repeat after a resolution. One attempt only: losing the address again
  * in the same breath is a race worth a retry from the caller (the webhook's
- * 500 → Svix), not a loop here — so the driver error propagates.
+ * 500 → Svix), not a loop here — so the (redacted) failure propagates.
  */
 async function insertAgain(userId: string, email: string) {
-  await db
-    .insert(users)
-    .values({ id: userId, email })
-    .onConflictDoNothing({ target: users.id });
+  await withRedactedFailure("users mirror: insert users row again", () =>
+    db
+      .insert(users)
+      .values({ id: userId, email })
+      .onConflictDoNothing({ target: users.id }),
+  );
 }
 
 export async function mirrorClerkUser(
@@ -163,11 +174,10 @@ export async function mirrorClerkUser(
 ): Promise<MirrorUserResult> {
   if (await insertMirrorRow(userId, email)) return { status: "mirrored" };
 
-  const [holder] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.email, email))
-    .limit(1);
+  const [holder] = await withRedactedFailure(
+    "users mirror: find the users row by address",
+    () => db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1),
+  );
   if (!holder || holder.id === userId) {
     // The holder left between the two statements (a concurrent erasure), or
     // it IS this account (the webhook and a sync inserting at once).
@@ -211,10 +221,12 @@ export async function mirrorClerkUser(
     return { status: "unresolved", reason: "holder_has_no_address" };
   }
   try {
-    await db
-      .update(users)
-      .set({ email: current })
-      .where(and(eq(users.id, holder.id), eq(users.email, email)));
+    await withRedactedFailure("users mirror: correct users.email by address", () =>
+      db
+        .update(users)
+        .set({ email: current })
+        .where(and(eq(users.id, holder.id), eq(users.email, email))),
+    );
   } catch (err) {
     if (!isUniqueViolation(err, USERS_EMAIL_UNIQUE)) throw err;
     report("current_address_taken", ids);

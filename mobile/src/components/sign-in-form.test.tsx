@@ -1,10 +1,11 @@
 /** @vitest-environment jsdom */
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AA_TEXT, contrastRatio, paintedBackground, parseColor } from "@/testing/contrast";
+import { closeStage, openStage, stillLive, type Stage } from "@/testing/stage";
 import { colors } from "@/theme";
 
 // #247 — the Account tab of 0.1.0 (4) died on open. The TestFlight build
@@ -189,11 +190,17 @@ const props = {
   onDone: () => undefined,
 };
 
+// Each test's own container and root (#439 — see @/testing/stage). The gate
+// cases render to a string and use only its «still running» flag.
+let stage: Stage;
+
 // The key is read once, at module load (auth/clerk.tsx), exactly as a build
 // inlines it — so each case loads the component fresh under its own env.
 async function loadSignInForm() {
+  const own = stage;
   vi.resetModules();
   const mod = await import("@/components/sign-in-form");
+  stillLive(own);
   return mod.SignInForm;
 }
 
@@ -213,9 +220,11 @@ describe("SignInForm — the Clerk-key gate (#247)", { timeout: COLD_IMPORT_TIME
     useSignInWithApple.mockClear();
     useSignInWithGoogle.mockClear();
     resetSocial();
+    stage = openStage();
   });
 
   afterEach(() => {
+    closeStage(stage);
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -305,13 +314,10 @@ function clerkResources() {
   return { signIn, signUp };
 }
 
-let container: HTMLDivElement;
-let root: Root | null = null;
-
-const text = () => container.textContent ?? "";
+const text = () => stage.container.textContent ?? "";
 
 function typeInto(value: string) {
-  const input = container.querySelector("input");
+  const input = stage.container.querySelector("input");
   if (!input) throw new Error("no input");
   const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
   act(() => {
@@ -324,7 +330,7 @@ function typeInto(value: string) {
 // from the Text up to the Pressable, where RNW's responder fires onPress.
 // Then lets the awaited Clerk calls settle.
 async function press(label: string) {
-  const node = Array.from(container.querySelectorAll("*")).find(
+  const node = Array.from(stage.container.querySelectorAll("*")).find(
     (el) => el.children.length === 0 && el.textContent === label,
   );
   if (!node) throw new Error(`no element labelled ${label}`);
@@ -339,12 +345,14 @@ async function renderForm(
   onDone = vi.fn(),
   extra: { signInHint?: boolean } = {},
 ) {
+  const own = stage;
   vi.stubEnv("EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY", "pk_test_dummy");
   const SignInForm = await loadSignInForm();
   const { LocaleProvider } = await import("@/i18n/locale");
-  root = createRoot(container);
+  stillLive(own);
+  own.root = createRoot(own.container);
   act(() =>
-    root?.render(
+    own.root?.render(
       <LocaleProvider initial={locale}>
         <SignInForm {...props} {...extra} onDone={onDone} />
       </LocaleProvider>,
@@ -359,14 +367,11 @@ describe("SignInForm — the email-code flow (#288)", { timeout: COLD_IMPORT_TIM
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     useSignIn.mockReset();
     useSignUp.mockReset();
-    container = document.createElement("div");
-    document.body.appendChild(container);
+    stage = openStage();
   });
 
   afterEach(() => {
-    act(() => root?.unmount());
-    root = null;
-    container.remove();
+    closeStage(stage);
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -539,14 +544,11 @@ function flowSuite(name: string, body: () => void) {
       vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
       useSignIn.mockReset();
       useSignUp.mockReset();
-      container = document.createElement("div");
-      document.body.appendChild(container);
+      stage = openStage();
     });
 
     afterEach(() => {
-      act(() => root?.unmount());
-      root = null;
-      container.remove();
+      closeStage(stage);
       vi.useRealTimers();
       vi.unstubAllEnvs();
       vi.unstubAllGlobals();
@@ -572,7 +574,7 @@ flowSuite("SignInForm — «Already have an account? Sign in» (#292 item 7)", (
     expect(text()).not.toContain("Already have an account?");
     expect(text()).toContain("No account yet?");
     // The field is where the viewer is sent, as before.
-    expect(document.activeElement).toBe(container.querySelector("input"));
+    expect(document.activeElement).toBe(stage.container.querySelector("input"));
 
     await press("Create account");
 
@@ -617,7 +619,7 @@ flowSuite("SignInForm — the code step (#292 item 4)", () => {
     }
   }
 
-  const codeInput = () => container.querySelector("input");
+  const codeInput = () => stage.container.querySelector("input");
 
   it("focuses the code field the moment the step opens", async () => {
     clerkResources();
@@ -779,7 +781,7 @@ flowSuite("SignInForm — the code step (#292 item 4)", () => {
     typeInto("member@example.com");
     await press(props.cta);
     expect(a11y.announce).not.toHaveBeenCalled();
-    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(stage.container.querySelector('[role="alert"]')).toBeNull();
 
     signIn.emailCode.verifyCode.mockResolvedValueOnce({
       error: apiError("form_code_incorrect", "is incorrect"),
@@ -789,7 +791,7 @@ flowSuite("SignInForm — the code step (#292 item 4)", () => {
 
     expect(a11y.announce).toHaveBeenCalledTimes(1);
     expect(a11y.announce).toHaveBeenCalledWith("Incorrect code.", { queue: true });
-    const line = container.querySelector('[role="alert"]');
+    const line = stage.container.querySelector('[role="alert"]');
     expect(line?.textContent).toBe("Incorrect code.");
     expect(line?.getAttribute("aria-live")).toBe("polite");
 
@@ -827,7 +829,7 @@ flowSuite("SignInForm — the code step (#292 item 4)", () => {
   it("none of the form's gold buttons carries the ▶ play glyph", async () => {
     clerkResources();
     await renderForm();
-    const glyphs = () => container.querySelectorAll('[data-testid="play-glyph"]').length;
+    const glyphs = () => stage.container.querySelectorAll('[data-testid="play-glyph"]').length;
 
     expect(glyphs()).toBe(0);
     typeInto("member@example.com");
@@ -843,7 +845,7 @@ flowSuite("SignInForm — the Terms / Privacy line under the email CTA (#312)", 
   // The element whose own text is exactly `label` — a nested Text link is a
   // leaf span inside the line.
   function leaf(label: string): Element | undefined {
-    return Array.from(container.querySelectorAll("*")).find(
+    return Array.from(stage.container.querySelectorAll("*")).find(
       (el) => el.children.length === 0 && el.textContent === label,
     );
   }
@@ -921,7 +923,7 @@ flowSuite("SignInForm — the error line reads at AA contrast (#314)", () => {
     typeInto("not-an-address");
     await press(props.cta);
 
-    const line = container.querySelector('[role="alert"]');
+    const line = stage.container.querySelector('[role="alert"]');
     expect(line?.textContent).toBe("Enter a valid email address.");
     const style = getComputedStyle(line as Element);
     expect(parseColor(style.color)).toEqual(parseColor(colors.ink));
@@ -982,7 +984,7 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
     return { ...resources, onDone };
   }
 
-  const appleButton = () => container.querySelector('[data-testid="apple-button"]');
+  const appleButton = () => stage.container.querySelector('[data-testid="apple-button"]');
 
   it("lever off: no line, no buttons, Apple is never even asked — the screen as before", async () => {
     for (const lever of [undefined, { apple: false, google: false }]) {
@@ -992,8 +994,8 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
       expect(text()).not.toContain("or continue with");
       expect(text()).not.toContain("Continue with Apple");
       expect(text()).not.toContain("Continue with Google");
-      act(() => root?.unmount());
-      root = null;
+      act(() => stage.root?.unmount());
+      stage.root = null;
     }
     expect(social.appleAvailable).not.toHaveBeenCalled();
     expect(useSignInWithApple).not.toHaveBeenCalled();
@@ -1026,13 +1028,13 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
     expect(page).toContain("Continue with Google");
     expect(page.indexOf(props.cta)).toBeLessThan(page.indexOf("Continue with Apple"));
     expect(page.indexOf("Continue with Apple")).toBeLessThan(page.indexOf("Continue with Google"));
-    const input = container.querySelector("input") as Element;
+    const input = stage.container.querySelector("input") as Element;
     expect(
       input.compareDocumentPosition(appleButton() as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     // Google's button, as its brand guide draws it in the dark theme: the
     // same 48 pt and radius as Apple's.
-    const google = Array.from(container.querySelectorAll('[role="button"]')).find(
+    const google = Array.from(stage.container.querySelectorAll('[role="button"]')).find(
       (el) => el.textContent === "Continue with Google",
     ) as Element;
     const style = getComputedStyle(google);
@@ -1087,7 +1089,7 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
     await press("Continue with Apple");
 
     expect(social.appleStart).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(stage.container.querySelector('[role="alert"]')).toBeNull();
     expect(clerk.setActive).not.toHaveBeenCalled();
     expect(onDone).not.toHaveBeenCalled();
     expect(text()).toContain(props.cta);
@@ -1102,7 +1104,7 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
 
     expect(setActive).toHaveBeenCalledWith({ session: "sess_apple" });
     expect(onDone).toHaveBeenCalledTimes(1);
-    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(stage.container.querySelector('[role="alert"]')).toBeNull();
   });
 
   it("Google success takes the same path — Clerk's own setActive when the hook hands none", async () => {
@@ -1125,7 +1127,7 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
 
     await press("Continue with Apple");
 
-    const line = container.querySelector('[role="alert"]');
+    const line = stage.container.querySelector('[role="alert"]');
     expect(line?.textContent).toBe(
       "We didn't get your email address. Continue with your email instead.",
     );

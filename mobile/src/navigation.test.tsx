@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeStage, openStage, stillLive, type Stage } from "@/testing/stage";
 
 // #288 — the ways out of the sign-in screen. A viewer who taps a locked
 // episode on the show page (or Home's Play) and signs in must land IN that
@@ -148,18 +149,18 @@ async function loadScreen() {
   return (await import("@/app/sign-in")).default;
 }
 
-let container: HTMLDivElement;
-let root: Root | null = null;
+// Each test's own container and root (#439 — see @/testing/stage).
+let stage: Stage;
 let Screen: Awaited<ReturnType<typeof loadScreen>>;
 
-const text = () => container.textContent ?? "";
+const text = () => stage.container.textContent ?? "";
 
 function render() {
-  act(() => root?.render(<Screen />));
+  act(() => stage.root?.render(<Screen />));
 }
 
 function typeInto(value: string) {
-  const input = container.querySelector("input");
+  const input = stage.container.querySelector("input");
   if (!input) throw new Error("no input");
   const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
   act(() => {
@@ -169,7 +170,7 @@ function typeInto(value: string) {
 }
 
 async function press(label: string) {
-  const node = Array.from(container.querySelectorAll("*")).find(
+  const node = Array.from(stage.container.querySelectorAll("*")).find(
     (el) => el.children.length === 0 && el.textContent === label,
   );
   if (!node) throw new Error(`no element labelled ${label}`);
@@ -198,6 +199,9 @@ describe("goBackOrHome", () => {
 });
 
 describe("SignInScreen — where success and «Not now» lead (#288)", { timeout: COLD_IMPORT_TIMEOUT_MS }, () => {
+  // The screen's cold import is in this hook, and the describe's `timeout` is
+  // the tests' budget only — a hook keeps hookTimeout (10 s) unless it is
+  // given its own (#439).
   beforeEach(async () => {
     vi.stubGlobal("__DEV__", false);
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -211,16 +215,16 @@ describe("SignInScreen — where success and «Not now» lead (#288)", { timeout
     social.appleStart.mockReset().mockImplementation(async () => ({ createdSessionId: null }));
     clerk.setActive.mockClear();
     showRead.calls = [];
-    Screen = await loadScreen();
-    container = document.createElement("div");
-    document.body.appendChild(container);
-    root = createRoot(container);
-  });
+    stage = openStage();
+    const own = stage;
+    const loaded = await loadScreen();
+    stillLive(own);
+    Screen = loaded;
+    own.root = createRoot(own.container);
+  }, COLD_IMPORT_TIMEOUT_MS);
 
   afterEach(() => {
-    act(() => root?.unmount());
-    root = null;
-    container.remove();
+    closeStage(stage);
     // Back to jsdom's own (prototype) clientHeight.
     Reflect.deleteProperty(document.documentElement, "clientHeight");
     vi.unstubAllEnvs();
@@ -320,7 +324,7 @@ describe("SignInScreen — where success and «Not now» lead (#288)", { timeout
     render();
     await settle();
 
-    expect(container.querySelector('[data-testid="show-frame"]')).not.toBeNull();
+    expect(stage.container.querySelector('[data-testid="show-frame"]')).not.toBeNull();
     expect(showRead.calls).toEqual(["the-scarlet-oath"]);
     expect(text()).toContain("Ep. 3 · Sealed in Blood");
   });
@@ -329,14 +333,14 @@ describe("SignInScreen — where success and «Not now» lead (#288)", { timeout
     render();
     await settle();
 
-    expect(container.querySelector('[data-testid="show-frame"]')).toBeNull();
+    expect(stage.container.querySelector('[data-testid="show-frame"]')).toBeNull();
     expect(showRead.calls).toEqual([]);
   });
 
   it("a 375×667 phone gets the smaller frame; a 390×844 phone the board's full one", async () => {
     params = EPISODE;
     const frameHeight = () =>
-      getComputedStyle(container.querySelector('[data-testid="show-frame"]') as Element).height;
+      getComputedStyle(stage.container.querySelector('[data-testid="show-frame"]') as Element).height;
 
     setWindowHeight(667);
     render();

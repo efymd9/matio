@@ -159,13 +159,17 @@ const HEADER_ATTRIBUTE_PREFIXES = ["http.request.header.", "http.response.header
  * `network.peer.address` on a server span, `user.ip_address`) and a request
  * body (`http.request.body.data`). @sentry/nextjs 11 attaches them when
  * `dataCollection` allows it — ours does not (`webDataCollection`); deleted
- * here so a future SDK default cannot bring them back (#390).
+ * here so a future SDK default cannot bring them back (#390). The scope user
+ * goes on a span as `user.email` / `user.ip_address` / `user.name` (the
+ * username: `USER_NAME` in @sentry/conventions, which has no `user.username`
+ * key) — `user.id` stays, like the event's `user` (#438).
  */
 const VIEWER_DATA_KEYS = [
   "client.address",
   "network.peer.address",
   "user.ip_address",
   "user.email",
+  "user.name",
   "user.username",
   "http.request.body.data",
 ];
