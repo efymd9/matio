@@ -22,7 +22,10 @@
 // players run it only with marketing consent — lib/use-marketing-consent.ts,
 // as /cookies §2 says), and the ChatGPT Ads pixel named there: an agent's
 // draft, merged only on the owner's «да» in the PR thread; who OpenAI is to
-// us (§4) is the counsel's question in #168, p. 8.
+// us (§4) is the counsel's question in #168, p. 8. In the same draft (#443):
+// §2 «Marketing-attribution data» names the same tools and the same geo rule
+// as §3, and the §4 Meta / PostHog / Google rows plus Mux (now with Mux Data)
+// say that rule instead of «after you accept» to everyone.
 // matio.tv/ideas is
 // plain text on purpose: every internal link here must survive ?embed=app
 // (app/(public)/legal-embed.test.tsx).
@@ -134,12 +137,18 @@ function PrivacyEn() {
             <strong>Marketing-attribution data</strong> — if you arrive from a
             campaign URL we record the source / medium / campaign in two cookies
             and may attach the snapshot to your account at checkout for revenue
-            attribution. If you accept marketing cookies, we also run the Meta
+            attribution. While marketing cookies are on, we also run the Meta
             Pixel and Meta Conversions API for advertising measurement (sharing a
             hashed email address, IP address and conversion events with Meta),
             PostHog for product analytics (funnel and engagement events, masked
-            session replays, processed in the EU), and Google Analytics (GA4)
-            for site-traffic measurement.
+            session replays, processed in the EU), Google Analytics (GA4) for
+            site-traffic measurement, the ChatGPT Ads measurement pixel
+            (ChatGPT ad measurement), and Mux Data (watch-time and
+            playback-quality measurement by our video provider, Mux). In the
+            EU/EEA, the UK and Switzerland, marketing cookies are on only after
+            you accept them in the banner; elsewhere they are on by default and
+            you can switch them off under &ldquo;Cookie preferences&rdquo; in
+            the footer.
             See the <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</LegalLink>.
           </li>
           <li>
@@ -220,8 +229,8 @@ function PrivacyEn() {
             cookies and, where enabled, the Meta Pixel, Meta Conversions API,
             PostHog (product-analytics funnel measurement), Google Analytics
             (site-traffic measurement), the ChatGPT Ads measurement pixel
-            (measuring our advertising in ChatGPT), and Mux Data (watch-time
-            and playback-quality measurement by our video provider, Mux).
+            (ChatGPT ad measurement), and Mux Data (watch-time and
+            playback-quality measurement by our video provider, Mux).
             Lawful basis in the EU/EEA, the UK and Switzerland:{" "}
             <em>consent</em> — there these run only after you accept marketing
             cookies in the banner, and stop if you withdraw consent. Elsewhere
@@ -257,7 +266,11 @@ function PrivacyEn() {
           </li>
           <li>
             <strong>Mux Inc.</strong> (US) — video transcoding, storage and
-            signed playback. SCCs.
+            signed playback, and playback measurement (Mux Data: watch time and
+            playback quality). Mux Data is only engaged while marketing cookies
+            are on: in the EU/EEA, the UK and Switzerland after you accept them
+            in the banner; elsewhere by default, until you switch them off
+            under &ldquo;Cookie preferences&rdquo; in the footer. SCCs.
           </li>
           <li>
             <strong>Vercel Inc.</strong> (US, EU regions for compute) — hosting.
@@ -278,7 +291,10 @@ function PrivacyEn() {
             <strong>Meta Platforms Ireland Ltd</strong> (Ireland, with
             transfers to Meta Platforms Inc. in the US) — advertising
             measurement via the Meta Pixel and Conversions API. Only engaged
-            after you accept marketing cookies. We share a hashed (SHA-256)
+            while marketing cookies are on: in the EU/EEA, the UK and
+            Switzerland after you accept them in the banner; elsewhere by
+            default, until you switch them off under &ldquo;Cookie
+            preferences&rdquo; in the footer. We share a hashed (SHA-256)
             email address, IP address and conversion events so Meta can
             attribute and optimise our ad campaigns. US transfers covered by
             SCCs.
@@ -287,7 +303,10 @@ function PrivacyEn() {
             <strong>PostHog Inc.</strong> (US, EU Cloud region for our project)
             — product analytics. Our PostHog project is hosted on PostHog&rsquo;s
             EU Cloud (servers in the European Union), so behavioral and usage
-            data stays in the EU. Only engaged after you accept marketing cookies.
+            data stays in the EU. Only engaged while marketing cookies are on:
+            in the EU/EEA, the UK and Switzerland after you accept them in the
+            banner; elsewhere by default, until you switch them off under
+            &ldquo;Cookie preferences&rdquo; in the footer.
             We send funnel events (page views, feature interactions, sign-up
             steps) and masked session replays. SCCs cover any onward transfers to
             PostHog&rsquo;s US infrastructure.
@@ -295,7 +314,10 @@ function PrivacyEn() {
           <li>
             <strong>Google Ireland Ltd</strong> (Ireland, with transfers to
             Google LLC in the US) — site analytics via Google Analytics 4. Only
-            engaged after you accept marketing cookies. We share usage and device
+            engaged while marketing cookies are on: in the EU/EEA, the UK and
+            Switzerland after you accept them in the banner; elsewhere by
+            default, until you switch them off under &ldquo;Cookie
+            preferences&rdquo; in the footer. We share usage and device
             data (page views, approximate location from IP, browser/device
             details) so we can measure site traffic. US transfers covered by SCCs.
           </li>
@@ -636,13 +658,20 @@ function PrivacyEs() {
             <strong>Datos de atribución</strong>: si llegas desde una URL de
             campaña, guardamos la fuente, el medio y el nombre de campaña en
             dos cookies y podemos vincular la instantánea a tu cuenta al pagar
-            para atribución de ingresos. Si aceptas las cookies de marketing,
-            además usamos el Meta Pixel y la API de Conversiones de Meta para
-            medición publicitaria (compartiendo un correo electrónico cifrado,
-            dirección IP y eventos de conversión con Meta), PostHog para
-            analítica de producto (eventos de embudo y de uso, grabaciones de
-            sesión enmascaradas, procesados en la UE) y Google Analytics (GA4)
-            para medir el tráfico del sitio. Consulta la{" "}
+            para atribución de ingresos. Mientras las cookies de marketing
+            estén activadas, además usamos el Meta Pixel y la API de
+            Conversiones de Meta para medición publicitaria (compartiendo un
+            correo electrónico cifrado, dirección IP y eventos de conversión con
+            Meta), PostHog para analítica de producto (eventos de embudo y de
+            uso, grabaciones de sesión enmascaradas, procesados en la UE),
+            Google Analytics (GA4) para medir el tráfico del sitio, el píxel de
+            medición de ChatGPT Ads (medición de anuncios en ChatGPT) y Mux
+            Data (medición del tiempo de visionado y de la calidad de
+            reproducción por nuestro proveedor de vídeo, Mux). En la UE/EEE, el
+            Reino Unido y Suiza, las cookies de marketing solo se activan
+            después de que las aceptes en el banner; en el resto del mundo
+            están activadas por defecto y puedes desactivarlas en «Preferencias
+            de cookies», en el pie de página. Consulta la{" "}
             <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">
               Política de cookies
             </LegalLink>
@@ -731,7 +760,7 @@ function PrivacyEs() {
             y, cuando está activado, el Meta Pixel, la API de Conversiones de
             Meta, PostHog (analítica de embudo de producto), Google Analytics
             (medición del tráfico del sitio), el píxel de medición de ChatGPT
-            Ads (medición de nuestra publicidad en ChatGPT) y Mux Data
+            Ads (medición de anuncios en ChatGPT) y Mux Data
             (medición del tiempo de visionado y de la calidad de reproducción
             por nuestro proveedor de vídeo, Mux).
             Base jurídica en la UE/EEE, el Reino Unido y Suiza:{" "}
@@ -772,7 +801,13 @@ function PrivacyEs() {
           </li>
           <li>
             <strong>Mux Inc.</strong> (EE. UU.) — transcodificación,
-            almacenamiento y reproducción firmada de vídeo. CCT.
+            almacenamiento y reproducción firmada de vídeo, y medición de la
+            reproducción (Mux Data: tiempo de visionado y calidad de
+            reproducción). Mux Data solo se utiliza mientras las cookies de
+            marketing estén activadas: en la UE/EEE, el Reino Unido y Suiza,
+            después de que las aceptes en el banner; en el resto del mundo, por
+            defecto, hasta que las desactives en «Preferencias de cookies», en
+            el pie de página. CCT.
           </li>
           <li>
             <strong>Vercel Inc.</strong> (EE. UU., regiones europeas para
@@ -795,7 +830,10 @@ function PrivacyEs() {
             <strong>Meta Platforms Ireland Ltd</strong> (Irlanda, con
             transferencias a Meta Platforms Inc. en EE. UU.) — medición
             publicitaria mediante el Meta Pixel y la API de Conversiones. Solo
-            se utiliza tras aceptar las cookies de marketing. Compartimos un
+            se utiliza mientras las cookies de marketing estén activadas: en la
+            UE/EEE, el Reino Unido y Suiza, después de que las aceptes en el
+            banner; en el resto del mundo, por defecto, hasta que las desactives
+            en «Preferencias de cookies», en el pie de página. Compartimos un
             correo electrónico cifrado (hash SHA-256), la dirección IP y eventos
             de conversión para que Meta pueda atribuir y optimizar nuestras
             campañas. Transferencias a EE. UU. amparadas por CCT.
@@ -805,7 +843,10 @@ function PrivacyEs() {
             nuestro proyecto) — analítica de producto. Nuestro proyecto de
             PostHog está alojado en PostHog Cloud EU (servidores en la Unión
             Europea), por lo que los datos de comportamiento y uso permanecen
-            en la UE. Solo se utiliza tras aceptar las cookies de marketing.
+            en la UE. Solo se utiliza mientras las cookies de marketing estén
+            activadas: en la UE/EEE, el Reino Unido y Suiza, después de que las
+            aceptes en el banner; en el resto del mundo, por defecto, hasta que
+            las desactives en «Preferencias de cookies», en el pie de página.
             Enviamos eventos de embudo (visitas de página, interacciones,
             pasos del registro) y grabaciones de sesión enmascaradas.
             Las CCT cubren cualquier transferencia posterior a la infraestructura
@@ -814,7 +855,10 @@ function PrivacyEs() {
           <li>
             <strong>Google Ireland Ltd</strong> (Irlanda, con transferencias a
             Google LLC en EE. UU.) — analítica del sitio mediante Google
-            Analytics 4. Solo se utiliza tras aceptar las cookies de marketing.
+            Analytics 4. Solo se utiliza mientras las cookies de marketing estén
+            activadas: en la UE/EEE, el Reino Unido y Suiza, después de que las
+            aceptes en el banner; en el resto del mundo, por defecto, hasta que
+            las desactives en «Preferencias de cookies», en el pie de página.
             Compartimos datos de uso y de dispositivo (visitas de página,
             ubicación aproximada por IP, detalles de navegador/dispositivo) para
             medir el tráfico del sitio. Transferencias a EE. UU. amparadas por CCT.

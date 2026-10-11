@@ -197,3 +197,93 @@ describe("/privacy §3 — every consent-gated measurement tool sits under the c
     },
   );
 });
+
+// #443 — §2 «Marketing-attribution data» and the §4 rows of the tools behind
+// that consent are the other places the policy names it. They once said
+// «if / after you accept marketing cookies» to every visitor, while the code
+// asks only in the EU/EEA, UK and CH and turns the switch on by default
+// elsewhere (lib/cookie-consent.ts:marketingConsentRequired, proxy.ts
+// autoGrant) — and §2 did not name the ChatGPT Ads pixel or Mux Data, which
+// read the same cookie_consent.marketing (components/site/openai-pixel.tsx,
+// lib/use-marketing-consent.ts). They now carry the §3 rule and the §3 list.
+const ELSEWHERE_CASES = [
+  {
+    ...CASES[0],
+    tools: TOOL_CASES[0].tools,
+    sharing: "sharing",
+    attributionMarker: "Marketing-attribution data",
+    defaultWord: "by default",
+    consentPhrase: "marketing cookies",
+    oldPhrases: [
+      "If you accept marketing cookies",
+      "after you accept marketing cookies",
+    ],
+  },
+  {
+    ...CASES[1],
+    tools: TOOL_CASES[1].tools,
+    sharing: "encargados",
+    attributionMarker: "Datos de atribución",
+    defaultWord: "por defecto",
+    consentPhrase: "cookies de marketing",
+    oldPhrases: [
+      "Si aceptas las cookies de marketing",
+      "tras aceptar las cookies de marketing",
+    ],
+  },
+] as const;
+
+// The §4 rows whose processing the marketing switch turns on: Meta (Pixel +
+// CAPI), PostHog, Google Analytics — and Mux, for Mux Data.
+const GATED_ROWS = [
+  "Meta Platforms Ireland Ltd",
+  "PostHog Inc.",
+  "Google Analytics 4",
+  "Mux Inc.",
+] as const;
+
+describe("/privacy §2 and §4 — the same geo rule and the same tools as §3 (#443)", () => {
+  it.each(ELSEWHERE_CASES)(
+    "($locale) §2 names every tool §3 names, then the banner regions and the footer opt-out — no «if you accept» for everyone",
+    async (c) => {
+      const html = await render(c.locale);
+      const attribution = item(section(html, c.collect), c.attributionMarker);
+      expect(attribution).not.toBe("");
+      for (const old of c.oldPhrases) expect(attribution).not.toContain(old);
+
+      const regionsAt = attribution.indexOf(c.regions);
+      expect(regionsAt).toBeGreaterThan(-1);
+      expect(attribution.toLowerCase()).toContain(c.onByDefault.toLowerCase());
+      expect(attribution).toContain(c.footerLabel);
+      for (const tool of c.tools) {
+        const at = attribution.indexOf(tool);
+        expect(at, tool).toBeGreaterThan(-1);
+        expect(at, tool).toBeLessThan(regionsAt);
+      }
+    },
+  );
+
+  it.each(ELSEWHERE_CASES)(
+    "($locale) §4: the Meta, PostHog, Google Analytics and Mux rows — and any row that names the consent — carry the geo rule",
+    async (c) => {
+      const sharing = section(await render(c.locale), c.sharing);
+      for (const marker of GATED_ROWS) {
+        expect(item(sharing, marker), marker).toContain(c.consentPhrase);
+      }
+      expect(item(sharing, "Mux Inc.")).toContain("Mux Data");
+
+      const consentRows = sharing
+        .split("<li")
+        .slice(1)
+        .map((li) => item(`<li${li}`, c.consentPhrase))
+        .filter((row) => row !== "");
+      expect(consentRows.length).toBeGreaterThanOrEqual(GATED_ROWS.length);
+      for (const row of consentRows) {
+        for (const old of c.oldPhrases) expect(row).not.toContain(old);
+        expect(row).toContain(c.regions);
+        expect(row).toContain(c.defaultWord);
+        expect(row).toContain(c.footerLabel);
+      }
+    },
+  );
+});
