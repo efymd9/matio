@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // #407 — «Delete account» for an account that signed in with Apple asks
 // Apple's sheet once more for a fresh authorization code, which the server
-// exchanges and revokes. Apple's native module and the platform are faked;
-// what is under test is when the sheet is asked at all, what is asked for,
-// and that nothing here can stop the deletion.
+// exchanges and revokes. The sheet sits between the two confirmations (the
+// owner's option (а), PR #427), so its answer has three shapes the Account
+// tab acts on: a code, a cancellation (stop — nothing is deleted), a failure
+// (the final question says Apple stays connected). Apple's native module and
+// the platform are faked; what is under test is when the sheet is asked at
+// all, what is asked for, and which of the three answers comes back.
 const apple = vi.hoisted(() => ({
   os: "ios",
   available: vi.fn(async () => true),
@@ -38,7 +41,13 @@ vi.hoisted(() => {
 });
 vi.mock("@/api/device", () => ({ getDeviceId: async () => null }));
 
-import { APPLE_SHEET_TIMEOUT_MS, appleCodeForDeletion, signedInWithApple } from "./apple-revocation";
+import {
+  APPLE_SHEET_TIMEOUT_MS,
+  type AppleDeletionCode,
+  askAppleForDeletionCode,
+  needsAppleSheet,
+  signedInWithApple,
+} from "./apple-revocation";
 
 const APPLE_USER = { externalAccounts: [{ provider: "google" }, { provider: "apple" }] };
 
@@ -60,51 +69,61 @@ describe("signedInWithApple — which accounts have an Apple grant to revoke", (
   });
 });
 
-describe("appleCodeForDeletion", () => {
-  it("asks Apple's sheet for a code — with no scopes: only the code is wanted", async () => {
-    await expect(appleCodeForDeletion(APPLE_USER)).resolves.toBe("c0de-dummy");
+describe("needsAppleSheet — whose deletion passes through Apple's sheet", () => {
+  it("an Apple account on iOS", () => {
+    expect(needsAppleSheet(APPLE_USER)).toBe(true);
+  });
+
+  it("never an account without Apple — its deletion keeps the two confirmations and nothing between", () => {
+    expect(needsAppleSheet({ externalAccounts: [{ provider: "google" }] })).toBe(false);
+    expect(needsAppleSheet({ externalAccounts: [] })).toBe(false);
+    expect(needsAppleSheet(null)).toBe(false);
+  });
+
+  it("never off iOS — Android has no native Apple flow", () => {
+    apple.os = "android";
+    expect(needsAppleSheet(APPLE_USER)).toBe(false);
+  });
+});
+
+describe("askAppleForDeletionCode", () => {
+  it("a code from Apple's sheet — asked with no scopes: only the code is wanted", async () => {
+    await expect(askAppleForDeletionCode()).resolves.toEqual({ status: "code", code: "c0de-dummy" });
     expect(apple.signIn).toHaveBeenCalledTimes(1);
     expect(apple.signIn).toHaveBeenCalledWith({ requestedScopes: [] });
   });
 
-  it("never shows the sheet to an account without Apple", async () => {
-    await expect(appleCodeForDeletion({ externalAccounts: [{ provider: "google" }] })).resolves.toBeUndefined();
-    expect(apple.available).not.toHaveBeenCalled();
-    expect(apple.signIn).not.toHaveBeenCalled();
-  });
-
-  it("never asks off iOS — Android has no native Apple flow", async () => {
-    apple.os = "android";
-    await expect(appleCodeForDeletion(APPLE_USER)).resolves.toBeUndefined();
-    expect(apple.signIn).not.toHaveBeenCalled();
-  });
-
-  it("a device where Sign in with Apple is unavailable answers no code, without the sheet", async () => {
-    apple.available.mockResolvedValue(false);
-    await expect(appleCodeForDeletion(APPLE_USER)).resolves.toBeUndefined();
-    expect(apple.signIn).not.toHaveBeenCalled();
-  });
-
-  it("a cancelled sheet (ERR_REQUEST_CANCELED) is no code — not a failure that could stop the deletion", async () => {
+  it("the person dismissing the sheet (ERR_REQUEST_CANCELED) is a cancellation — the deletion stops there", async () => {
     apple.signIn.mockRejectedValue(Object.assign(new Error("The user canceled"), { code: "ERR_REQUEST_CANCELED" }));
-    await expect(appleCodeForDeletion(APPLE_USER)).resolves.toBeUndefined();
+    await expect(askAppleForDeletionCode()).resolves.toEqual({ status: "cancelled" });
   });
 
-  it("any other Apple failure, or an unanswerable availability check, is no code too", async () => {
-    apple.signIn.mockRejectedValue(Object.assign(new Error("failed"), { code: "ERR_REQUEST_FAILED" }));
-    await expect(appleCodeForDeletion(APPLE_USER)).resolves.toBeUndefined();
+  it("any other Apple failure is a failure, not a cancellation", async () => {
+    for (const code of ["ERR_REQUEST_FAILED", "ERR_REQUEST_UNKNOWN", "ERR_REQUEST_NOT_HANDLED", undefined]) {
+      apple.signIn.mockRejectedValueOnce(Object.assign(new Error("failed"), { code }));
+      await expect(askAppleForDeletionCode()).resolves.toEqual({ status: "failed" });
+    }
+  });
 
+  it("a device where Sign in with Apple is unavailable is a failure, without the sheet", async () => {
+    apple.available.mockResolvedValue(false);
+    await expect(askAppleForDeletionCode()).resolves.toEqual({ status: "failed" });
+    expect(apple.signIn).not.toHaveBeenCalled();
+  });
+
+  it("an availability check that rejects is a failure", async () => {
     apple.available.mockRejectedValue(new Error("native module missing"));
-    await expect(appleCodeForDeletion(APPLE_USER)).resolves.toBeUndefined();
+    await expect(askAppleForDeletionCode()).resolves.toEqual({ status: "failed" });
+    expect(apple.signIn).not.toHaveBeenCalled();
   });
 
-  it("a credential without a code is no code", async () => {
+  it("a credential without a code is a failure", async () => {
     apple.signIn.mockResolvedValue({ authorizationCode: null, identityToken: "id-dummy" });
-    await expect(appleCodeForDeletion(APPLE_USER)).resolves.toBeUndefined();
+    await expect(askAppleForDeletionCode()).resolves.toEqual({ status: "failed" });
   });
 });
 
-describe("appleCodeForDeletion — the sheet's deadline", () => {
+describe("askAppleForDeletionCode — the sheet's deadline", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -112,35 +131,33 @@ describe("appleCodeForDeletion — the sheet's deadline", () => {
     vi.useRealTimers();
   });
 
-  function track(p: Promise<string | undefined>) {
-    const state: { settled: boolean; code?: string } = { settled: false };
-    void p.then((code) => {
+  function track(p: Promise<AppleDeletionCode>) {
+    const state: { settled: boolean; answer?: AppleDeletionCode } = { settled: false };
+    void p.then((answer) => {
       state.settled = true;
-      state.code = code;
+      state.answer = answer;
     });
     return state;
   }
 
-  it("a sheet that never answers is no code once the deadline passes — the deletion is never held forever", async () => {
+  it("a sheet that never answers is a failure once the deadline passes — never a silent «go ahead», never held forever", async () => {
     apple.signIn.mockImplementation(() => new Promise<never>(() => {}));
 
-    const state = track(appleCodeForDeletion(APPLE_USER));
+    const state = track(askAppleForDeletionCode());
     await vi.advanceTimersByTimeAsync(APPLE_SHEET_TIMEOUT_MS - 1);
     expect(state.settled).toBe(false); // still the person's time at Face ID
     await vi.advanceTimersByTimeAsync(1);
 
-    expect(state.settled).toBe(true);
-    expect(state.code).toBeUndefined();
+    expect(state).toEqual({ settled: true, answer: { status: "failed" } });
   });
 
   it("an availability check that never answers is bounded by the same deadline", async () => {
     apple.available.mockImplementation(() => new Promise<never>(() => {}));
 
-    const state = track(appleCodeForDeletion(APPLE_USER));
+    const state = track(askAppleForDeletionCode());
     await vi.advanceTimersByTimeAsync(APPLE_SHEET_TIMEOUT_MS);
 
-    expect(state.settled).toBe(true);
-    expect(state.code).toBeUndefined();
+    expect(state).toEqual({ settled: true, answer: { status: "failed" } });
     expect(apple.signIn).not.toHaveBeenCalled();
   });
 
@@ -152,9 +169,9 @@ describe("appleCodeForDeletion — the sheet's deadline", () => {
         ),
     );
 
-    const state = track(appleCodeForDeletion(APPLE_USER));
+    const state = track(askAppleForDeletionCode());
     await vi.advanceTimersByTimeAsync(90_000);
 
-    expect(state).toEqual({ settled: true, code: "c0de-slow" });
+    expect(state).toEqual({ settled: true, answer: { status: "code", code: "c0de-slow" } });
   });
 });

@@ -44,8 +44,9 @@ import { getStripe } from "@/lib/stripe";
 //      ahead of Clerk. Best-effort — neither step waits on or cuts short the
 //      other, whatever Apple answers the deletion goes on, and a failure is
 //      logged and sent to Sentry by id. No code (an account without Apple, an
-//      older build, a cancelled sheet) is a typed skip, and the deletion is
-//      exactly what it was before #407. A code with no Apple key in the env is
+//      older build, Apple's sheet failing — the app then asked the person to
+//      confirm without it; a CANCELLED sheet sends no request at all) is a
+//      typed skip, and the deletion is exactly what it was before #407. A code with no Apple key in the env is
 //      the same skip plus a Sentry warning by id: an Apple grant that stayed.
 //   2. Clerk `users.deleteUser` — the account and its sessions. A 404 is
 //      success: a double tap, a lost response retried, or the dashboard got

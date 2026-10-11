@@ -70,7 +70,8 @@ export type AppleRevocation =
   // Apple accepted the revocation: the grant is gone from the person's Apple ID.
   | { status: "revoked" }
   // The request carried no code: an account without Apple, an app build from
-  // before #407, a sheet the person cancelled, or Android.
+  // before #407, Apple's sheet failing at deletion (the person confirmed
+  // without it — a cancelled sheet sends no request at all), or Android.
   | { status: "skipped_no_code" }
   // A code arrived but the env above is incomplete — nothing was sent to Apple.
   | { status: "skipped_unconfigured" }

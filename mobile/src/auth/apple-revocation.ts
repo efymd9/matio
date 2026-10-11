@@ -7,22 +7,30 @@ import { settleOrNull } from "@/api/client";
 // revoked, and the server can revoke only with a token it gets by exchanging
 // an authorization code (lib/apple-revoke.ts). Nobody kept one from the
 // sign-in — @clerk/expo's hook hands Clerk Apple's identity token and drops
-// the code — so the Account tab asks Apple for a FRESH code right before the
-// deletion request and sends it along. Apple's sheet appears once more: that
-// is Apple's own documented way to get a code for an existing user.
+// the code — so the Account tab asks Apple for a FRESH code during the
+// deletion and sends it along. Apple's sheet appears once more: that is
+// Apple's own documented way to get a code for an existing user.
 //
-// Best-effort, never throws: a cancelled sheet (ERR_REQUEST_CANCELED), an
-// unavailable or failing Apple, Android, or an account with no Apple sign-in
-// all answer `undefined`, and the deletion goes ahead without a code — the
-// person asked for their account to go, and the revocation never decides
-// that. No scopes are requested: only the code is wanted, and the credential
+// Where the sheet sits in the deletion (the owner's option (а), PR #427):
+// BETWEEN the first confirmation and the final «Delete permanently», so a
+// Cancel at any step means «not yet» — nothing irreversible happens before
+// the last button. The tab reads the three answers below:
+//   code      → the final confirmation, then the request carrying the code;
+//   cancelled → the person dismissed Apple's sheet: no request, the account
+//               stays, they can try again;
+//   failed    → Apple could not give a code — unavailable, an error, no code
+//               in the credential, the deadline. Not the person's choice, and
+//               a hard stop here would make deletion impossible in the app for
+//               anyone whose sheet cannot work (no Apple Account on this
+//               device, a restricted one): so the final confirmation still
+//               comes, but says Matio stays connected to the Apple Account.
+// No scopes are requested: only the code is wanted, and the credential
 // (name, address, tokens) is neither read nor kept beyond it.
 //
 // The sheet waits on a person (Face ID, a password), so its deadline is
 // generous — but there is one: a native promise that never settles would
-// otherwise hold «Delete account» on its spinner forever, with no request
-// sent. Past it the answer is «no code», as for a cancelled sheet, and the
-// deletion goes ahead (a code Apple hands over later is simply dropped).
+// otherwise hold «Delete account» on its spinner forever. Past it the answer
+// is `failed` (a code Apple hands over later is simply dropped).
 export const APPLE_SHEET_TIMEOUT_MS = 120_000;
 
 // The fields read off Clerk's user, structurally — `provider` is "apple"
@@ -35,18 +43,37 @@ export function signedInWithApple(user: UserWithExternalAccounts): boolean {
   return user?.externalAccounts?.some((account) => account.provider === "apple") ?? false;
 }
 
-export async function appleCodeForDeletion(
-  user: UserWithExternalAccounts,
-): Promise<string | undefined> {
-  if (Platform.OS !== "ios" || !signedInWithApple(user)) return undefined;
-  // settleOrNull answers null for a rejection (a cancelled sheet, a failing
-  // Apple) and for the deadline alike.
-  const credential = await settleOrNull(
-    (async () => {
-      if (!(await AppleAuthentication.isAvailableAsync())) return null;
-      return AppleAuthentication.signInAsync({ requestedScopes: [] });
+// Whether «Delete account» passes through Apple's sheet: an Apple account on
+// iOS. Everyone else — no Apple sign-in, or Android, which has no native
+// Apple flow — keeps the two confirmations and nothing between them.
+export function needsAppleSheet(user: UserWithExternalAccounts): boolean {
+  return Platform.OS === "ios" && signedInWithApple(user);
+}
+
+export type AppleDeletionCode =
+  | { status: "code"; code: string }
+  | { status: "cancelled" }
+  | { status: "failed" };
+
+// Never throws. Only Apple's own ERR_REQUEST_CANCELED is a cancellation;
+// every other rejection, an unavailable Apple and the deadline are `failed`.
+export async function askAppleForDeletionCode(): Promise<AppleDeletionCode> {
+  const answer = await settleOrNull(
+    (async (): Promise<AppleDeletionCode> => {
+      if (!(await AppleAuthentication.isAvailableAsync())) return { status: "failed" };
+      try {
+        const credential = await AppleAuthentication.signInAsync({ requestedScopes: [] });
+        return credential.authorizationCode
+          ? { status: "code", code: credential.authorizationCode }
+          : { status: "failed" };
+      } catch (err) {
+        return (err as { code?: unknown } | null)?.code === "ERR_REQUEST_CANCELED"
+          ? { status: "cancelled" }
+          : { status: "failed" };
+      }
     })(),
     APPLE_SHEET_TIMEOUT_MS,
   );
-  return credential?.authorizationCode ?? undefined;
+  // null: the availability check rejected, or the deadline passed.
+  return answer ?? { status: "failed" };
 }

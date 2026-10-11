@@ -419,7 +419,7 @@ describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", ()
   it.each([
     ["no body at all (a build from before #407, an account without Apple)", undefined],
     ["a body that is not JSON", "not json"],
-    ["a body without a code (a cancelled Apple sheet)", {}],
+    ["a JSON body without a code", {}],
   ])("%s → skipped_no_code, nothing goes to Apple, the account is deleted", async (_label, body) => {
     const res = await POST(body === undefined ? deleteRequest() : withCode(body));
 

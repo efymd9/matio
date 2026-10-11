@@ -79,12 +79,16 @@ const endGoogleSession = vi.fn(async () => {
   h.steps.push("google.signOut");
 });
 vi.mock("@/auth/google-session", () => ({ endGoogleSession: () => endGoogleSession() }));
-// #407 — an Apple account's fresh authorization code, asked right before the
-// deletion request (auth/apple-revocation.ts has its own suite). No code —
-// an account without Apple — unless a case says otherwise.
-const appleCode = vi.fn(async (_user: unknown): Promise<string | undefined> => undefined);
+// #407 — an Apple account's fresh authorization code from Apple's sheet,
+// asked BETWEEN the two confirmations (the owner's option (а), PR #427;
+// auth/apple-revocation.ts has its own suite). An account without Apple —
+// no sheet at all — unless a case says otherwise.
+type AppleAnswer = { status: "code"; code: string } | { status: "cancelled" } | { status: "failed" };
+const appleNeeded = vi.fn((_user: unknown) => false);
+const appleSheet = vi.fn(async (): Promise<AppleAnswer> => ({ status: "failed" }));
 vi.mock("@/auth/apple-revocation", () => ({
-  appleCodeForDeletion: (user: unknown) => appleCode(user),
+  needsAppleSheet: (user: unknown) => appleNeeded(user),
+  askAppleForDeletionCode: () => appleSheet(),
 }));
 vi.mock("@/auth/clerk", () => ({
   CLERK_PUBLISHABLE_KEY: "pk_test_dummy",
@@ -196,7 +200,8 @@ beforeEach(() => {
     h.steps.push("getToken");
     return "jwt_dummy";
   });
-  appleCode.mockReset().mockResolvedValue(undefined);
+  appleNeeded.mockReset().mockReturnValue(false);
+  appleSheet.mockReset().mockResolvedValue({ status: "failed" });
   router.replace.mockClear();
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -352,34 +357,21 @@ describe("Account tab — «Delete account» (#309)", () => {
     expect(alerts.calls).toHaveLength(2); // no failure dialog
   });
 
-  it("an Apple account: Apple's fresh code is asked for Clerk's user AFTER both confirmations, then rides with the request (#407)", async () => {
-    appleCode.mockImplementation(async () => {
-      h.steps.push("apple.code");
-      return "c0de-dummy";
-    });
+  it("an account without Apple: no Apple sheet anywhere — the two questions as before, then the request with no code (#407)", async () => {
     render();
     press("Delete account");
+    expect(appleNeeded).toHaveBeenCalledWith(clerkUser);
+    expect(alerts.calls[0].message).not.toContain("Apple");
     await choose("Delete account");
-    expect(appleCode).not.toHaveBeenCalled(); // not on the first question
+    expect(alerts.calls).toHaveLength(2);
+    expect(alerts.calls[1].message).toBe(
+      "Your account is deleted for good — we can't restore it, and signing up again starts from scratch.",
+    );
     await choose("Delete permanently");
 
-    expect(appleCode).toHaveBeenCalledWith(clerkUser);
-    expect(deleteAccount).toHaveBeenCalledWith(
-      expect.objectContaining({ appleAuthorizationCode: "c0de-dummy" }),
-    );
-    expect(h.steps).toEqual(["apple.code", "api.deleteAccount", "google.signOut", "signOut", "replace /"]);
-  });
-
-  it("no Apple code (a cancelled sheet, an account without Apple) still deletes — the request simply carries none", async () => {
-    render();
-    press("Delete account");
-    await choose("Delete account");
-    await choose("Delete permanently");
-
-    expect(appleCode).toHaveBeenCalledTimes(1);
-    expect(deleteAccount).toHaveBeenCalledWith(
-      expect.objectContaining({ appleAuthorizationCode: undefined }),
-    );
+    expect(appleSheet).not.toHaveBeenCalled();
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(deleteAccount.mock.calls[0][0]?.appleAuthorizationCode).toBeUndefined();
     expect(h.steps).toEqual(["api.deleteAccount", "google.signOut", "signOut", "replace /"]);
   });
 
@@ -447,6 +439,194 @@ describe("Account tab — «Delete account» (#309)", () => {
       "Cancelar",
       "Eliminar definitivamente",
     ]);
+  });
+});
+
+// #407, the owner's option (а) (PR #427): for an Apple account on iOS, Apple's
+// sheet comes BETWEEN the first question and the final «Delete permanently»,
+// so a Cancel at any step — the first question, Apple's sheet, the final
+// question — sends nothing. Order: question → sheet → question → request.
+describe("Account tab — «Delete account» for an Apple account (#407, option (а))", () => {
+  // The sheet records how many dialogs had been shown when it came up.
+  function sheetAnswers(answer: AppleAnswer) {
+    appleNeeded.mockReturnValue(true);
+    appleSheet.mockImplementation(async () => {
+      h.steps.push(`apple.sheet after ${alerts.calls.length} dialog(s)`);
+      return answer;
+    });
+  }
+
+  it("question → Apple's sheet → the final question → the request carrying the code, then sign-out and Home", async () => {
+    sheetAnswers({ status: "code", code: "c0de-dummy" });
+    render();
+    press("Delete account");
+
+    // The first question says the sheet is coming; nothing asked of Apple yet.
+    expect(alerts.calls).toHaveLength(1);
+    expect(alerts.calls[0].title).toBe("Delete your account?");
+    expect(alerts.calls[0].message).toContain("won't be charged again");
+    expect(alerts.calls[0].message).toContain("Sign in with Apple once more");
+    expect(appleSheet).not.toHaveBeenCalled();
+
+    await choose("Delete account");
+    // The sheet came up after the first question and before the final one.
+    expect(h.steps).toEqual(["apple.sheet after 1 dialog(s)"]);
+    expect(alerts.calls).toHaveLength(2);
+    expect(alerts.calls[1].title).toBe("This can't be undone");
+    expect(alerts.calls[1].message).toBe(
+      "Your account is deleted for good — we can't restore it, and signing up again starts from scratch.",
+    );
+    expect(alerts.calls[1].buttons?.map((b) => [b.text, b.style])).toEqual([
+      ["Cancel", "cancel"],
+      ["Delete permanently", "destructive"],
+    ]);
+    expect(deleteAccount).not.toHaveBeenCalled();
+
+    await choose("Delete permanently");
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(deleteAccount.mock.calls[0][0]?.appleAuthorizationCode).toBe("c0de-dummy");
+    expect(h.steps).toEqual([
+      "apple.sheet after 1 dialog(s)",
+      "api.deleteAccount",
+      "google.signOut",
+      "signOut",
+      "replace /",
+    ]);
+    expect(alerts.calls).toHaveLength(2); // no failure dialog
+  });
+
+  it("Cancel on Apple's sheet stops the deletion: no request, no final question, a calm word that the account stays — and the row works again", async () => {
+    sheetAnswers({ status: "cancelled" });
+    render();
+    press("Delete account");
+    await choose("Delete account");
+
+    expect(appleSheet).toHaveBeenCalledTimes(1);
+    expect(deleteAccount).not.toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(alerts.calls).toHaveLength(2);
+    expect(alerts.calls[1].title).toBe("Your account is still here");
+    expect(alerts.calls[1].message).toBe("Nothing was deleted. You can try again whenever you like.");
+    expect(alerts.calls[1].buttons).toBeUndefined(); // just the system OK — nothing to confirm
+    expect(text()).not.toContain("Please wait…");
+
+    press("Delete account");
+    expect(alerts.calls).toHaveLength(3);
+    expect(alerts.calls[2].title).toBe("Delete your account?");
+  });
+
+  it("a code, then Cancel on the final question: no request — the code is simply dropped", async () => {
+    sheetAnswers({ status: "code", code: "c0de-dummy" });
+    render();
+    press("Delete account");
+    await choose("Delete account");
+    expect(appleSheet).toHaveBeenCalledTimes(1); // the code is in hand…
+    await choose("Cancel"); // …and the final question is refused
+
+    expect(deleteAccount).not.toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(alerts.calls).toHaveLength(2);
+    expect(text()).not.toContain("Please wait…");
+  });
+
+  it("Cancel on the first question never brings up Apple's sheet", async () => {
+    sheetAnswers({ status: "code", code: "c0de-dummy" });
+    render();
+    press("Delete account");
+    await choose("Cancel");
+
+    expect(appleSheet).not.toHaveBeenCalled();
+    expect(deleteAccount).not.toHaveBeenCalled();
+    expect(alerts.calls).toHaveLength(1);
+  });
+
+  it("a sheet that could not give a code (an error, its deadline): the final question still comes and says Apple stays connected — confirming deletes without a code", async () => {
+    sheetAnswers({ status: "failed" });
+    render();
+    press("Delete account");
+    await choose("Delete account");
+
+    expect(deleteAccount).not.toHaveBeenCalled(); // never silently
+    expect(alerts.calls).toHaveLength(2);
+    expect(alerts.calls[1].title).toBe("This can't be undone");
+    expect(alerts.calls[1].message).toContain("Sign in with Apple didn't go through");
+    expect(alerts.calls[1].message).toContain("stays connected to your Apple Account");
+    expect(alerts.calls[1].message).toContain("deleted for good");
+    expect(alerts.calls[1].buttons?.map((b) => [b.text, b.style])).toEqual([
+      ["Cancel", "cancel"],
+      ["Delete permanently", "destructive"],
+    ]);
+
+    await choose("Delete permanently");
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(deleteAccount.mock.calls[0][0]?.appleAuthorizationCode).toBeUndefined();
+    expect(router.replace).toHaveBeenCalledWith("/");
+  });
+
+  it("…and Cancel on that final question sends nothing either", async () => {
+    sheetAnswers({ status: "failed" });
+    render();
+    press("Delete account");
+    await choose("Delete account");
+    expect(alerts.calls.at(-1)?.message).toContain("Sign in with Apple didn't go through");
+    await choose("Cancel");
+
+    expect(deleteAccount).not.toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
+    expect(alerts.calls).toHaveLength(2);
+  });
+
+  it("while Apple's sheet is up the row says «Please wait» and cannot start a second chain", async () => {
+    appleNeeded.mockReturnValue(true);
+    let answer: (value: AppleAnswer) => void = () => undefined;
+    appleSheet.mockImplementationOnce(() => new Promise<AppleAnswer>((resolve) => (answer = resolve)));
+    render();
+    press("Delete account");
+    await choose("Delete account");
+
+    expect(text()).toContain("Please wait…");
+    expect(container.querySelector('[aria-label="Delete account"]')).toBeNull();
+    await act(async () => {
+      answer({ status: "code", code: "c0de-dummy" });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(text()).not.toContain("Please wait…");
+    expect(alerts.calls.at(-1)?.title).toBe("This can't be undone");
+    expect(deleteAccount).not.toHaveBeenCalled();
+  });
+
+  it("a failed request after the code keeps #336's honest failure and the session", async () => {
+    sheetAnswers({ status: "code", code: "c0de-dummy" });
+    deleteAccount.mockRejectedValueOnce(new ApiError("network", "The request timed out.", 0));
+    render();
+    press("Delete account");
+    await choose("Delete account");
+    await choose("Delete permanently");
+
+    expect(getToken).toHaveBeenCalledWith({ skipCache: true });
+    expect(alerts.calls.at(-1)?.title).toBe("Couldn't delete your account");
+    expect(signOut).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("speaks Spanish too", async () => {
+    sheetAnswers({ status: "cancelled" });
+    render("es");
+    press("Eliminar cuenta");
+    expect(alerts.calls[0].message).toContain("«Iniciar sesión con Apple»");
+    await choose("Eliminar cuenta");
+
+    expect(alerts.calls[1].title).toBe("Tu cuenta sigue aquí");
+    expect(alerts.calls[1].message).toBe("No se ha eliminado nada. Puedes volver a intentarlo cuando quieras.");
+
+    sheetAnswers({ status: "failed" });
+    press("Eliminar cuenta");
+    await choose("Eliminar cuenta");
+    expect(alerts.calls[3].title).toBe("Esta acción no se puede deshacer");
+    expect(alerts.calls[3].message).toContain("Matio seguirá conectado a tu cuenta de Apple");
+    expect(alerts.calls[3].buttons?.map((b) => b.text)).toEqual(["Cancelar", "Eliminar definitivamente"]);
   });
 });
 

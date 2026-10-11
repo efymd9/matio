@@ -236,9 +236,10 @@ export type ContinueResponse = {
 //
 // The body is optional (#407): an account that signed in with Apple sends a
 // fresh authorization code from Apple's sheet, which the server exchanges and
-// revokes (lib/apple-revoke.ts). Without one — no Apple account, a cancelled
-// sheet, a build from before #407 sending no body at all — the deletion is
-// the same; the revocation never decides whether it succeeds.
+// revokes (lib/apple-revoke.ts). Without one — no Apple account, Apple's
+// sheet failing (the app asks the person to confirm without it; a cancelled
+// sheet sends no request at all), a build from before #407 sending no body —
+// the deletion is the same; the revocation never decides whether it succeeds.
 export type DeleteAccountRequest = { appleAuthorizationCode?: string };
 export type DeleteAccountResponse = { ok: true };
 
