@@ -60,7 +60,9 @@ export function buildCheckoutSessionParams({
   //     supported with `ui_mode: elements`: custom_text". So the localized
   //     waiver wording below simply cannot be sent. (The API version is pinned
   //     since #266 — STRIPE_API_VERSION in lib/stripe.ts; re-check this when
-  //     that literal moves.)
+  //     that literal moves. Verified on 2026-08-26.dahlia; NOT re-verified on
+  //     2026-09-30.endive (#433) — harmless, this surface never sends
+  //     custom_text; registry row.)
   //   * `consent_collection` IS accepted, but its only renderer is Stripe's
   //     `TermsElement`, which the installed SDK marks "Requires beta access"
   //     and types with zero options — it could not carry our wording even with
