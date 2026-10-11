@@ -12,6 +12,7 @@ const apple = vi.hoisted(() => ({
   os: "ios",
   available: vi.fn(async () => true),
   signIn: vi.fn(async (_options?: unknown) => ({
+    user: "001234.dummy-linked",
     authorizationCode: "c0de-dummy" as string | null,
     identityToken: "id-dummy",
   })),
@@ -45,16 +46,22 @@ import {
   APPLE_SHEET_TIMEOUT_MS,
   type AppleDeletionCode,
   askAppleForDeletionCode,
+  linkedAppleUserIds,
   needsAppleSheet,
   signedInWithApple,
 } from "./apple-revocation";
 
 const APPLE_USER = { externalAccounts: [{ provider: "google" }, { provider: "apple" }] };
+// Apple's stable user identifier, as Clerk keeps it (`providerUserId`) and as
+// the sheet returns it (`credential.user`) for the same Apple Account.
+const LINKED = "001234.dummy-linked";
 
 beforeEach(() => {
   apple.os = "ios";
   apple.available.mockReset().mockResolvedValue(true);
-  apple.signIn.mockReset().mockResolvedValue({ authorizationCode: "c0de-dummy", identityToken: "id-dummy" });
+  apple.signIn
+    .mockReset()
+    .mockResolvedValue({ user: LINKED, authorizationCode: "c0de-dummy", identityToken: "id-dummy" });
 });
 
 describe("signedInWithApple — which accounts have an Apple grant to revoke", () => {
@@ -66,6 +73,28 @@ describe("signedInWithApple — which accounts have an Apple grant to revoke", (
     ["a user Clerk has not filled in", {}, false],
   ])("%s → %s", (_label, user, expected) => {
     expect(signedInWithApple(user)).toBe(expected);
+  });
+});
+
+describe("linkedAppleUserIds — the Apple Account(s) the Matio account is linked to", () => {
+  it("Clerk's providerUserId of every Apple external account, nothing of any other provider", () => {
+    expect(
+      linkedAppleUserIds({
+        externalAccounts: [
+          { provider: "google", providerUserId: "google-dummy" },
+          { provider: "apple", providerUserId: LINKED },
+        ],
+      }),
+    ).toEqual([LINKED]);
+  });
+
+  it.each([
+    ["an Apple account Clerk gave no id for", APPLE_USER],
+    ["an empty id", { externalAccounts: [{ provider: "apple", providerUserId: "" }] }],
+    ["Google only", { externalAccounts: [{ provider: "google", providerUserId: "google-dummy" }] }],
+    ["no user", null],
+  ])("%s → none", (_label, user) => {
+    expect(linkedAppleUserIds(user)).toEqual([]);
   });
 });
 
@@ -118,8 +147,45 @@ describe("askAppleForDeletionCode", () => {
   });
 
   it("a credential without a code is a failure", async () => {
-    apple.signIn.mockResolvedValue({ authorizationCode: null, identityToken: "id-dummy" });
+    apple.signIn.mockResolvedValue({ user: LINKED, authorizationCode: null, identityToken: "id-dummy" });
     await expect(askAppleForDeletionCode()).resolves.toEqual({ status: "failed" });
+  });
+});
+
+// Review of #427, finding 1: the sheet signs in with THIS device's Apple
+// Account. A code for another one would revoke that account's grant on the
+// server and log `revoked`, while the grant of the account Matio is linked to
+// stays.
+describe("askAppleForDeletionCode — the code must come from the linked Apple Account", () => {
+  it("the linked Apple Account → its code", async () => {
+    await expect(askAppleForDeletionCode([LINKED])).resolves.toEqual({ status: "code", code: "c0de-dummy" });
+  });
+
+  it("any of several linked Apple Accounts → its code", async () => {
+    await expect(askAppleForDeletionCode(["001234.dummy-other-linked", LINKED])).resolves.toEqual({
+      status: "code",
+      code: "c0de-dummy",
+    });
+  });
+
+  it("ANOTHER Apple Account's code is dropped — a failure, never a code to send", async () => {
+    apple.signIn.mockResolvedValue({
+      user: "009999.dummy-someone-else",
+      authorizationCode: "c0de-of-another-account",
+      identityToken: "id-dummy",
+    });
+    const answer = await askAppleForDeletionCode([LINKED]);
+    expect(answer).toEqual({ status: "failed" });
+    expect(JSON.stringify(answer)).not.toContain("c0de-of-another-account");
+  });
+
+  it("no linked id from Clerk does not block: the code goes as before", async () => {
+    apple.signIn.mockResolvedValue({
+      user: "009999.dummy-someone-else",
+      authorizationCode: "c0de-dummy",
+      identityToken: "id-dummy",
+    });
+    await expect(askAppleForDeletionCode([])).resolves.toEqual({ status: "code", code: "c0de-dummy" });
   });
 });
 
@@ -165,7 +231,7 @@ describe("askAppleForDeletionCode — the sheet's deadline", () => {
     apple.signIn.mockImplementation(
       () =>
         new Promise((resolve) =>
-          setTimeout(() => resolve({ authorizationCode: "c0de-slow", identityToken: "id-dummy" }), 90_000),
+          setTimeout(() => resolve({ user: LINKED, authorizationCode: "c0de-slow", identityToken: "id-dummy" }), 90_000),
         ),
     );
 

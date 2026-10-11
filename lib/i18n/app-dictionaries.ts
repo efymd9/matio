@@ -78,8 +78,9 @@ export const appEs = {
     // An account that signed in with Apple (#407, the owner's option (а)):
     // Apple's sheet sits between the two confirmations. The first one warns
     // it is coming; a dismissed sheet stops the deletion, calmly; a sheet that
-    // could not give a code (an error, its deadline) leads to the final
-    // confirmation with the Apple consequence spelled out.
+    // could not give a code (an error, its deadline, another Apple Account's
+    // code) leads to the final confirmation with the Apple consequence
+    // spelled out — as does an Apple account deleted on Android (no sheet).
     deleteConfirmAppleNote:
       "Después, Apple te pedirá de nuevo «Iniciar sesión con Apple»: continúa para que Matio se desconecte también de tu cuenta de Apple.",
     deleteAppleCancelledTitle: "Tu cuenta sigue aquí",

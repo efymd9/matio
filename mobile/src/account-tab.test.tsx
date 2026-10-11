@@ -66,7 +66,12 @@ const router = {
     h.steps.push(`replace ${href}`);
   }),
 };
-const clerkUser = { primaryEmailAddress: { emailAddress: "member@example.com" } };
+// Clerk's user; a case that needs an Apple-linked account sets its
+// external accounts (the shape auth/apple-revocation.ts reads).
+const clerkUser: {
+  primaryEmailAddress: { emailAddress: string };
+  externalAccounts?: Array<{ provider: string; providerUserId: string }>;
+} = { primaryEmailAddress: { emailAddress: "member@example.com" } };
 vi.mock("@clerk/expo", () => ({
   useUser: () => ({ user: clerkUser }),
   useClerk: () => ({ signOut }),
@@ -82,13 +87,30 @@ vi.mock("@/auth/google-session", () => ({ endGoogleSession: () => endGoogleSessi
 // #407 — an Apple account's fresh authorization code from Apple's sheet,
 // asked BETWEEN the two confirmations (the owner's option (а), PR #427;
 // auth/apple-revocation.ts has its own suite). An account without Apple —
-// no sheet at all — unless a case says otherwise.
+// no sheet at all — unless a case says otherwise. Whether the sheet comes up
+// (iOS + Apple) and its answer are faked; the rest of the module is real, and
+// a case can run the real sheet module over the faked native one below.
 type AppleAnswer = { status: "code"; code: string } | { status: "cancelled" } | { status: "failed" };
 const appleNeeded = vi.fn((_user: unknown) => false);
-const appleSheet = vi.fn(async (): Promise<AppleAnswer> => ({ status: "failed" }));
-vi.mock("@/auth/apple-revocation", () => ({
-  needsAppleSheet: (user: unknown) => appleNeeded(user),
-  askAppleForDeletionCode: () => appleSheet(),
+const appleSheet = vi.fn(async (_linkedUserIds?: readonly string[]): Promise<AppleAnswer> => ({ status: "failed" }));
+vi.mock("@/auth/apple-revocation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/auth/apple-revocation")>();
+  return {
+    ...actual,
+    needsAppleSheet: (user: unknown) => appleNeeded(user),
+    askAppleForDeletionCode: (linkedUserIds?: readonly string[]) => appleSheet(linkedUserIds),
+  };
+});
+// Apple's native sheet, for the cases that run the real sheet module: the
+// Apple Account signed in on the device answers with its own identifier.
+const appleNative = vi.hoisted(() => ({ user: "001234.dummy-linked" }));
+vi.mock("expo-apple-authentication", () => ({
+  isAvailableAsync: async () => true,
+  signInAsync: async () => ({
+    user: appleNative.user,
+    authorizationCode: "c0de-dummy",
+    identityToken: "id-dummy",
+  }),
 }));
 vi.mock("@/auth/clerk", () => ({
   CLERK_PUBLISHABLE_KEY: "pk_test_dummy",
@@ -202,6 +224,8 @@ beforeEach(() => {
   });
   appleNeeded.mockReset().mockReturnValue(false);
   appleSheet.mockReset().mockResolvedValue({ status: "failed" });
+  delete clerkUser.externalAccounts;
+  appleNative.user = "001234.dummy-linked";
   router.replace.mockClear();
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -627,6 +651,89 @@ describe("Account tab — «Delete account» for an Apple account (#407, option 
     expect(alerts.calls[3].title).toBe("Esta acción no se puede deshacer");
     expect(alerts.calls[3].message).toContain("Matio seguirá conectado a tu cuenta de Apple");
     expect(alerts.calls[3].buttons?.map((b) => b.text)).toEqual(["Cancelar", "Eliminar definitivamente"]);
+  });
+
+  // Review of #427, finding 1: the sheet signs in with the Apple Account of
+  // the device, which need not be the one Matio is linked to — and a code for
+  // another account would revoke THAT grant and log `revoked`.
+  it("the sheet is handed the Apple Account Matio is linked to — Clerk's providerUserId, nothing of other providers", async () => {
+    clerkUser.externalAccounts = [
+      { provider: "google", providerUserId: "google-dummy" },
+      { provider: "apple", providerUserId: "001234.dummy-linked" },
+    ];
+    sheetAnswers({ status: "cancelled" });
+    render();
+    press("Delete account");
+    await choose("Delete account");
+
+    expect(appleSheet).toHaveBeenCalledTimes(1);
+    expect(appleSheet).toHaveBeenCalledWith(["001234.dummy-linked"]);
+  });
+
+  async function deleteThroughTheRealSheet() {
+    const real = await vi.importActual<typeof import("@/auth/apple-revocation")>("@/auth/apple-revocation");
+    clerkUser.externalAccounts = [{ provider: "apple", providerUserId: "001234.dummy-linked" }];
+    appleNeeded.mockReturnValue(true);
+    appleSheet.mockImplementation((linkedUserIds) => real.askAppleForDeletionCode(linkedUserIds));
+    render();
+    press("Delete account");
+    await choose("Delete account");
+  }
+
+  it("a code for ANOTHER Apple Account (the real sheet module): no code is sent, and the final question says Matio stays connected", async () => {
+    appleNative.user = "009999.dummy-someone-else";
+    await deleteThroughTheRealSheet();
+
+    expect(alerts.calls).toHaveLength(2);
+    expect(alerts.calls[1].title).toBe("This can't be undone");
+    expect(alerts.calls[1].message).toContain("Sign in with Apple didn't go through");
+    expect(alerts.calls[1].message).toContain("stays connected to your Apple Account");
+    await choose("Delete permanently");
+
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(deleteAccount.mock.calls[0][0]?.appleAuthorizationCode).toBeUndefined();
+    expect(router.replace).toHaveBeenCalledWith("/");
+  });
+
+  it("…and the linked Apple Account's code (the real sheet module) is sent", async () => {
+    appleNative.user = "001234.dummy-linked";
+    await deleteThroughTheRealSheet();
+
+    expect(alerts.calls[1].message).toBe(
+      "Your account is deleted for good — we can't restore it, and signing up again starts from scratch.",
+    );
+    await choose("Delete permanently");
+
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(deleteAccount.mock.calls[0][0]?.appleAuthorizationCode).toBe("c0de-dummy");
+  });
+
+  // Review of #427, finding 3: Apple's sheet exists only on iOS
+  // (expo-apple-authentication), so an Apple account deleted on Android keeps
+  // its grant — the final question says so, as when the sheet gives no code.
+  it("an Apple account where the sheet cannot come up (Android): two questions and no sheet — the final one says Matio stays connected to the Apple Account", async () => {
+    clerkUser.externalAccounts = [{ provider: "apple", providerUserId: "001234.dummy-linked" }];
+    appleNeeded.mockReturnValue(false); // needsAppleSheet off iOS (its own suite)
+    render();
+    press("Delete account");
+
+    expect(alerts.calls[0].message).not.toContain("Apple"); // no sheet is coming
+    await choose("Delete account");
+    expect(appleSheet).not.toHaveBeenCalled();
+    expect(alerts.calls).toHaveLength(2);
+    expect(alerts.calls[1].title).toBe("This can't be undone");
+    expect(alerts.calls[1].message).toBe(
+      "Sign in with Apple didn't go through, so Matio stays connected to your Apple Account — you can remove it yourself in Settings, under Sign in with Apple. Your Matio account is still deleted for good and can't be restored.",
+    );
+    expect(alerts.calls[1].buttons?.map((b) => [b.text, b.style])).toEqual([
+      ["Cancel", "cancel"],
+      ["Delete permanently", "destructive"],
+    ]);
+    await choose("Delete permanently");
+
+    expect(deleteAccount).toHaveBeenCalledTimes(1);
+    expect(deleteAccount.mock.calls[0][0]?.appleAuthorizationCode).toBeUndefined();
+    expect(router.replace).toHaveBeenCalledWith("/");
   });
 });
 

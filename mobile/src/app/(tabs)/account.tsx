@@ -13,7 +13,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, settleOr } from "@/api/client";
-import { askAppleForDeletionCode, needsAppleSheet } from "@/auth/apple-revocation";
+import {
+  askAppleForDeletionCode,
+  linkedAppleUserIds,
+  needsAppleSheet,
+  signedInWithApple,
+} from "@/auth/apple-revocation";
 import { useOptionalAuth } from "@/auth/clerk";
 import { endGoogleSession } from "@/auth/google-session";
 import { AuthStalled } from "@/components/auth-stalled";
@@ -191,8 +196,12 @@ function SignedInAccount() {
   // still there; a code followed by a Cancel on the final question is simply
   // dropped. A sheet that could not give a code (an error, its deadline) is
   // not the person's choice — the final question still comes, saying Matio
-  // stays connected to the Apple Account (auth/apple-revocation.ts). Every
-  // other account keeps the two confirmations and nothing between them.
+  // stays connected to the Apple Account (auth/apple-revocation.ts); so does
+  // a code for another Apple Account than the one linked — the sheet is
+  // handed the linked ids and drops it. An Apple account where the sheet
+  // cannot come up at all — Android, which has no native Apple flow — keeps
+  // the two confirmations, and the final one says the same: the grant stays.
+  // Every other account keeps the two confirmations and nothing between them.
   const confirmDelete = useCallback(() => {
     const deleteOrSay = async (appleAuthorizationCode?: string) => {
       setDeleting(true);
@@ -243,7 +252,7 @@ function SignedInAccount() {
     // request.
     const askAppleThenConfirm = async () => {
       setDeleting(true);
-      const apple = await askAppleForDeletionCode();
+      const apple = await askAppleForDeletionCode(linkedAppleUserIds(user));
       setDeleting(false);
       if (apple.status === "cancelled") {
         Alert.alert(t.app.account.deleteAppleCancelledTitle, t.app.account.deleteAppleCancelledBody);
@@ -254,6 +263,10 @@ function SignedInAccount() {
       }
     };
     const viaApple = needsAppleSheet(user);
+    const finalBody =
+      !viaApple && signedInWithApple(user)
+        ? t.app.account.deleteFinalBodyAppleFailed
+        : t.app.account.deleteFinalBody;
     Alert.alert(
       t.app.account.deleteConfirmTitle,
       viaApple
@@ -266,7 +279,7 @@ function SignedInAccount() {
           style: "destructive",
           onPress: viaApple
             ? () => void askAppleThenConfirm()
-            : () => confirmFinal(t.app.account.deleteFinalBody),
+            : () => confirmFinal(finalBody),
         },
       ],
     );
