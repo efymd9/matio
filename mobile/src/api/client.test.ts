@@ -368,6 +368,20 @@ describe("deleteAccount (#309) — the one request with a longer deadline", () =
     expect(headersOf(calls[0]).Authorization).toBe("Bearer sess_token");
   });
 
+  it("carries an Apple authorization code as its JSON body when it has one (#407)", async () => {
+    const { api, setAuthTokenProvider } = await loadClient();
+    setAuthTokenProvider(async () => "sess_token");
+
+    await expect(api.deleteAccount({ appleAuthorizationCode: "c0de-dummy" })).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ appleAuthorizationCode: "c0de-dummy" });
+    expect(headersOf(calls[0])["Content-Type"]).toBe("application/json");
+    expect(headersOf(calls[0]).Authorization).toBe("Bearer sess_token");
+  });
+
   it("never goes out anonymously when Clerk does not answer — a network error before any fetch", async () => {
     const { api, setAuthTokenProvider } = await loadClient();
     setAuthTokenProvider(NEVER);

@@ -69,6 +69,16 @@ Apple и Google появляются как **провайдеры входа** 
   входе; у Google — фото профиля; id пользователя у провайдера). Сверено по
   коду 04.10.2026; **классификация — вопрос юристу** (строка в
   `docs/registry.md`).
+  **Отзыв гранта Apple при удалении (#407, 09.10.2026)** классификацию не
+  меняет: маршрут `POST /api/v1/account/delete` отправляет Apple
+  (`appleid.apple.com/auth/token` → `/auth/revoke`) её же свежий
+  authorization code из листа на устройстве и наш client secret (JWT,
+  подписанный ключом Sign in with Apple); получает токены (id_token несёт
+  адрес Apple ID) и тут же отзывает refresh-токен — ничего не хранится и не
+  логируется (`lib/apple-revoke.ts`). Новых данных Apple не получает — это
+  указание контролёру забыть наш доступ к Apple ID (ст. 17), не поручение
+  обработки. Новый секрет в env Vercel: `APPLE_SIGN_IN_PRIVATE_KEY` (+ Key
+  ID, Team ID).
 
 ## Ops-хвосты для владельца (из колонки «DPA»)
 
