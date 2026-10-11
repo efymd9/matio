@@ -61,7 +61,7 @@ Any of the three unset → the revocation is skipped (`apple: {status: "skipped_
 
 **Used for**: subscription billing, Checkout, Customer Portal.
 
-**SDK**: `stripe@22.x` (Node, API 2024+). Be aware of moved fields — see [gotchas](./gotchas.md#stripe-api-2024-moves).
+**SDK**: `stripe@23.x` (Node, API `2026-09-30.endive`, pinned in `lib/stripe.ts`). Be aware of moved fields — see [gotchas](./gotchas.md#stripe-api-2024-moves).
 
 **Env vars**:
 | Name | Where to get it |
