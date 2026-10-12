@@ -1,5 +1,5 @@
 import { getPublishedShows } from "@/lib/catalog";
-import { paymentsEnabled } from "@/lib/free-mode";
+import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { SITE_URL } from "@/lib/seo";
 import { ALL_SOCIAL_PROFILES } from "@/lib/social-links";
 
@@ -19,16 +19,19 @@ function collapse(text: string): string {
 
 export async function GET() {
   const shows = await getPublishedShows();
-  const paymentsOn = paymentsEnabled();
+  // Free mode has two shapes (lib/free-mode.ts): behind REQUIRE_SIGNUP the
+  // admin's member/subscriber episodes ask for a free account, so "no account
+  // required" would be false there (#446). Paid mode ignores the gate.
+  const access = paymentsEnabled()
+    ? " Episodes stream with a paid membership; selected episodes and previews are free to watch."
+    : signupRequired()
+      ? " Every episode is free to watch; some episodes ask for a free account."
+      : " The full catalogue is currently free to watch — no account or payment required.";
 
   const lines = [
     "# Matio",
     "",
-    `> Matio (${SITE_URL}) is a streaming platform for original short-form series produced by the Matio studio, operated by DEEP ORDINARY LTD (registered in England and Wales, company no. 17381666).${
-      paymentsOn
-        ? " Episodes stream with a paid membership; selected episodes and previews are free to watch."
-        : " The full catalogue is currently free to watch — no account or payment required."
-    }`,
+    `> Matio (${SITE_URL}) is a streaming platform for original short-form series produced by the Matio studio, operated by DEEP ORDINARY LTD (registered in England and Wales, company no. 17381666).${access}`,
     "",
     `- Site: ${SITE_URL}`,
     "- Operated by: DEEP ORDINARY LTD, registered in England and Wales, no. 17381666 (London, UK) — https://find-and-update.company-information.service.gov.uk/company/17381666",
