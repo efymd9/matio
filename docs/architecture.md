@@ -506,10 +506,10 @@ startCheckout (app/subscribe/actions.ts)
    │       there's no show context — /account is gone)
    │     - automatic_tax + customer_update.address + billing_address_
    │       collection (Stripe Tax; $0 until a registration is added)
-   │     - consent_collection.terms_of_service:"required" + localized
+   │     - consent_collection.terms_of_service:"required" + English
    │       custom_text (EU 14-day withdrawal waiver; needs ToS URL in
    │       Stripe Public details)
-   │     - locale (Stripe-hosted page matches site language)
+   │     - locale (always "en" — the site is English-only since #445)
    └── redirect(session.url)
    │
    ▼ Stripe Checkout (hosted)

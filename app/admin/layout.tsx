@@ -12,8 +12,9 @@ export default async function AdminLayout({
 }) {
   await requireAdmin();
   // Admin-only locale (Russian default, `admin_locale` cookie) — separate
-  // from the public es/en system so the panel language never leaks into
-  // the visitor-facing site. See lib/i18n/admin-server.ts.
+  // from the public site's language (English only since #445) so the panel
+  // language never leaks into the visitor-facing site. See
+  // lib/i18n/admin-server.ts.
   const { locale, t } = await getAdminDict();
   return (
     <AdminLocaleProvider locale={locale}>

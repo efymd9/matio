@@ -76,7 +76,7 @@ pnpm-workspace.yaml  ← + packages: ['apps/*', 'packages/*']
 | `lib/utm.ts` + `lib/tracked-links.ts` | byte-identical normalization is a hard invariant |
 | `lib/watch-segments.ts` | bucket size must match the server's validator |
 | `lib/episode-access.ts` (client half) | the lock rule; a second copy = a paywall bug |
-| `lib/i18n/dictionaries.ts` + `negotiate.ts` + `shared.ts` | es/en copy, one source |
+| `lib/i18n/dictionaries.ts` + `negotiate.ts` | es/en copy, one source (`shared.ts` left with the site's Spanish in #445; the site is English-only, `es` keeps only the sections the app reads) |
 | `lib/design.ts` | brand tokens — app and web must not drift |
 | `lib/slug.ts`, `lib/seo.ts`, `lib/continue-watching.ts`, `lib/flags.ts` | shared rules |
 

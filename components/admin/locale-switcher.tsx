@@ -11,9 +11,9 @@ import {
 } from "@/lib/i18n/admin-dictionaries";
 import { cn } from "@/lib/utils";
 
-// Compact RU | EN segmented toggle for the admin nav. Only two locales,
-// so a one-click toggle beats the public header's dropdown
-// (components/site/language-switcher.tsx). Flips are optimistic — the
+// Compact RU | EN segmented toggle for the admin nav — the only language
+// switch left in the web app since #445 (the public site is English-only).
+// Flips are optimistic — the
 // AdminLocaleProvider updates context + the client-visible cookie
 // synchronously; the server action + router.refresh reconciles in the
 // background.

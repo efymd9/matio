@@ -24,6 +24,7 @@ vi.mock("@/lib/free-mode", () => ({ paymentsEnabled: () => true }));
 import CookiesPage, { generateMetadata as cookiesMetadata } from "./cookies/page";
 import PrivacyPage, { generateMetadata as privacyMetadata } from "./privacy/page";
 import TermsPage, { generateMetadata as termsMetadata } from "./terms/page";
+import { TOS_VERSION } from "@/lib/wallet-checkout";
 
 const PAGES = [
   { path: "/terms", Page: TermsPage, metadata: termsMetadata, others: ["/privacy", "/cookies"] },
@@ -90,5 +91,28 @@ describe.each(PAGES)("$path", ({ path, Page, metadata, others }) => {
     const html = await render(Page);
     for (const link of hrefs(html)) expect(link).not.toMatch(/^\/es(?:\/|$|\?)/);
     for (const other of others) expect(hrefs(html)).toContain(`${other}?embed=app`);
+  });
+});
+
+// Withdrawing the Spanish translation (#445) is not a new edition of a
+// document whose English text did not change by a word: /terms and /privacy
+// keep the dates they had, /cookies moves because its table lost the `locale`
+// row. /terms is tied to the wallet checkbox's TOS_VERSION (#214) — a stored
+// acceptance has to name the edition the page shows.
+describe("«Last updated»", () => {
+  it("/terms shows the TOS_VERSION edition", async () => {
+    const edition = new Date(`${TOS_VERSION}T00:00:00Z`).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+    expect(edition).toBe("September 9, 2026");
+    expect(await render(TermsPage)).toContain(`Last updated: ${edition}`);
+  });
+
+  it("/privacy keeps its edition, /cookies has the #445 one", async () => {
+    expect(await render(PrivacyPage)).toContain("Last updated: October 11, 2026");
+    expect(await render(CookiesPage)).toContain("Last updated: October 12, 2026");
   });
 });

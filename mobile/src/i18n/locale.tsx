@@ -115,7 +115,8 @@ const LocaleCtx = createContext<Ctx>({ locale: DEFAULT_LOCALE, setLocale: () => 
 export function LocaleProvider({ initial, children }: { initial: Locale; children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(initial);
 
-  // Optimistic, like the web's switcher: every useT() consumer re-renders
+  // Optimistic, like the admin's RU|EN toggle (and the public site's switcher
+  // until #445): every useT() consumer re-renders
   // with the new dictionary immediately; the persistence is fire-and-forget
   // (a failed write costs the user one more tap next launch, nothing else).
   const setLocale = useCallback((next: Locale) => {

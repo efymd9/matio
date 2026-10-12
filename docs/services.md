@@ -245,7 +245,7 @@ CLI equivalent for step 1: `vercel blob create-store <name>` (note: `create-stor
 3. Recommended while in there: add a starter DMARC record at `_dmarc.matio.tv` — `v=DMARC1; p=none; rua=mailto:maksym@matio.tv;` (none exists today; monitor first, tighten later — the rua mailbox must actually exist).
 4. Wait for the domain to verify, create the API key, then `vercel env add RESEND_API_KEY production` (+ `.env.local`) and redeploy.
 
-**Sending model**: admin-triggered only — the "Episode reminders" panel on the show edit page claims pending `show_reminders` rows by stamping `notified_at` and batch-sends (≤100/call) with per-recipient locale, unsubscribe footer link, and RFC 8058 one-click `List-Unsubscribe` headers. A failed batch un-claims its rows. See the "Episode reminder emails" rule in CLAUDE.md.
+**Sending model**: admin-triggered only — the "Episode reminders" panel on the show edit page claims pending `show_reminders` rows by stamping `notified_at` and batch-sends (≤100/call) in English (since #445; `show_reminders.locale` is no longer read), with an unsubscribe footer link and RFC 8058 one-click `List-Unsubscribe` headers. A failed batch un-claims its rows. See the "Episode reminder emails" rule in CLAUDE.md.
 
 **Limits**: free tier 100 emails/day, 3,000/month, 1 domain; API ~5 req/s. Pro ($20/mo, 50k included) removes the daily cap.
 

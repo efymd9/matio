@@ -321,9 +321,9 @@ Everything here gates on `cookie_consent.marketing` — nothing fires until the 
 
 Needs `RESEND_API_KEY` set (see [services.md → Resend](./services.md#resend-email)); without it, step 3 shows the "connect Resend" hint instead of the form.
 
-1. Watch a show's **final** episode to the end (or fire the player's `ended` on the last episode) → the series-end overlay shows the email form. Submit an address you control → a `show_reminders` row appears (`notified_at IS NULL`, `locale` = the site language you were browsing in).
+1. Watch a show's **final** episode to the end (or fire the player's `ended` on the last episode) → the series-end overlay shows the email form. Submit an address you control → a `show_reminders` row appears (`notified_at IS NULL`, `locale` = `en` — the site is English-only since #445, and the email is English for every row).
 2. `/admin/shows/<id>` → **Episode reminders** panel shows "1 address waiting". Pick the episode to announce (newest ready is preselected) → **Send** → confirm.
-3. The email arrives from `Matio <updates@matio.tv>` in the row's locale, deep-linking `/watch/<slug>?ep=<episode id>&utm_source=email…`. Check Gmail → ⋮ → Show original: SPF/DKIM/DMARC should all pass, and the `List-Unsubscribe` headers should be present (Gmail renders its native "Unsubscribe" chip next to the sender).
+3. The email arrives from `Matio <updates@matio.tv>` in English (every row since #445), deep-linking `/watch/<slug>?ep=<episode id>&utm_source=email…`. Check Gmail → ⋮ → Show original: SPF/DKIM/DMARC should all pass, and the `List-Unsubscribe` headers should be present (Gmail renders its native "Unsubscribe" chip next to the sender).
 4. The row now has `notified_at` set; the panel badge drops to 0 and "Sent so far" increments. Re-clicking Send reports "no addresses waiting" — the claim stamp is the idempotency.
 5. Footer **Unsubscribe** link → `/unsubscribe` confirm page → button → "Done" state, and every `show_reminders` row for that address is deleted. Gmail's native Unsubscribe chip exercises the one-click POST (`/api/email/unsubscribe`) instead — same deletion, no confirm step.
 

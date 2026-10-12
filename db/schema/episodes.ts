@@ -69,9 +69,11 @@ export const episodes = pgTable(
       (): AnyPgColumn => episodes.id,
       { onDelete: "set null" },
     ),
-    // Viewer-facing fork prompt, one per SITE locale (es/en — the admin
-    // panel's ru/en is a different system). Shown only when the episode has
-    // ≥2 rows in episode_choices; see lib/branching.ts for the semantics.
+    // Viewer-facing fork prompt, es/en (the site's locales until #445; the
+    // web now reads the English, Spanish only as a fallback — docs/registry.md;
+    // the admin panel's ru/en is a different system). Shown only when the
+    // episode has ≥2 rows in episode_choices; see lib/branching.ts for the
+    // semantics.
     forkPromptEn: text("fork_prompt_en"),
     forkPromptEs: text("fork_prompt_es"),
     // Seconds before the end at which the prompt appears — also the length

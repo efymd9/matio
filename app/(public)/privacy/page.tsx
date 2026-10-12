@@ -27,7 +27,8 @@
 // as §3, and the §4 Meta / PostHog / Google rows plus Mux (now with Mux Data)
 // say that rule instead of «after you accept» to everyone.
 // English only since #445 (2026-10-12): the Spanish version was withdrawn
-// with the site's Spanish — it is in git history.
+// with the site's Spanish — it is in git history. Not a new edition: the
+// English text did not change, so "Last updated" stays at 2026-10-11.
 // matio.tv/ideas is
 // plain text on purpose: every internal link here must survive ?embed=app
 // (app/(public)/legal-embed.test.tsx).
@@ -48,7 +49,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "October 12, 2026";
+const LAST_UPDATED = "October 11, 2026";
 
 export default async function PrivacyPage() {
   const { t } = await getDict();

@@ -3,7 +3,10 @@
 // & Wales). The Stripe Checkout consent_collection.terms_of_service flow
 // (digital-content waiver, §6) is wired in app/subscribe/actions.ts. English
 // only since #445 (2026-10-12): the Spanish version was withdrawn with the
-// site's Spanish — it is in git history.
+// site's Spanish — it is in git history. Withdrawing a translation is not a
+// new edition: the English text did not change by a word, so "Last updated"
+// stays at the 2026-09-09 edition and keeps matching lib/wallet-checkout.ts
+// TOS_VERSION (#214).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalLink } from "@/components/site/legal-link";
@@ -22,7 +25,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "October 12, 2026";
+const LAST_UPDATED = "September 9, 2026";
 
 export default async function TermsPage() {
   const { t } = await getDict();

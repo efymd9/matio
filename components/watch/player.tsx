@@ -103,7 +103,8 @@ export type PlayerEpisode = {
   // but unlisted: it stays in the Player's `episodes` array so a choice or
   // a ?ep= deep link can land on it, while every list the player renders
   // goes through listedEpisodes(). `forkPrompt` and the choice labels are
-  // already in the site locale (the watch page picks es/en); `choices` is
+  // already one string each (the watch page picks the English, the site's
+  // only language since #445, Spanish only as a fallback); `choices` is
   // null on a plain linear episode. What an edge set MEANS is decided by
   // lib/branching.ts:resolveCandidates.
   branchOfEpisodeId: string | null;

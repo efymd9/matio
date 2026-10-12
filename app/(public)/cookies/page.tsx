@@ -7,7 +7,9 @@
 // Analytics (GA4) disclosure added 2026-06-24. English only since #445
 // (2026-10-12): the Spanish version was withdrawn with the site's Spanish (it
 // is in git history), and the `locale` row left the table — nothing sets that
-// cookie any more.
+// cookie any more. That row changes the English text, hence the new "Last
+// updated" (2026-10-12); /terms and /privacy, whose English did not change,
+// keep their dates.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalLink } from "@/components/site/legal-link";
