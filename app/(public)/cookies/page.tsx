@@ -86,8 +86,7 @@ function CookiesEn() {
           The list below covers every cookie this site sets directly or via
           our processors. Categories follow the ePrivacy / GDPR conventions:
           <strong> strictly necessary</strong> cookies don&rsquo;t need
-          consent; <strong>preferences</strong> and <strong>marketing</strong>{" "}
-          cookies do.
+          consent; <strong>marketing</strong> cookies do.
         </p>
 
         <CookieTable

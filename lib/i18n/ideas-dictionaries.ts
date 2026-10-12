@@ -208,7 +208,7 @@ export const en = {
     },
     language: {
       q: "Which language should I write in?",
-      a: "English or Spanish. Use whichever one you tell stories in.",
+      a: "English.",
     },
     after: {
       q: "What happens after I send it?",
