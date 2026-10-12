@@ -167,9 +167,20 @@ const actions = vi.hoisted(() => ({
   saveWatchProgress: vi.fn(async () => undefined),
   saveTrialPosition: vi.fn(async () => undefined),
   saveWatchSegments: vi.fn(async () => undefined),
+  // The SignupWall's impression stamp (the #446 wall test renders it).
+  markSignupWallShown: vi.fn(async () => undefined),
 }));
 vi.mock("@/app/watch/actions", () => actions);
-vi.mock("@/lib/posthog-events", () => ({ capturePostHog: vi.fn() }));
+vi.mock("@/lib/posthog-events", () => ({
+  capturePostHog: vi.fn(),
+  onPostHogReady: vi.fn(() => () => undefined),
+}));
+// The SignupWall's auth arms; both render — the wall's copy is the subject.
+vi.mock("@clerk/nextjs", () => ({
+  Show: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SignInButton: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SignUpButton: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 vi.mock("@/lib/meta-pixel-events", () => ({
   onPixelReady: vi.fn(() => () => undefined),
   trackPixel: vi.fn(),
@@ -908,5 +919,45 @@ describe("Player — branching video (#144)", () => {
     const rows = [...dialog.querySelectorAll("li")];
     const playing = rows.find((li) => li.textContent?.includes(en.episodesOverlay.nowPlaying));
     expect(playing?.textContent).toContain("2. Episode 2");
+  });
+});
+
+describe("Player → SignupWall — the payment fine print follows the kill-switch (#446)", () => {
+  // A member-tier episode opened anonymously: the player renders the wall
+  // from the prop alone (no token fetch). What it says under the CTA is the
+  // player's `freeMode` handed down — the wall cannot read the flag itself.
+  const LOCKED: PlayerEpisode[] = [
+    episode("ep-1", 1, { tier: "member" }),
+    episode("ep-2", 2, { tier: "member" }),
+  ];
+
+  function renderWall(freeMode: boolean) {
+    return render(
+      <Player
+        episodes={LOCKED}
+        initialEpisodeId="ep-1"
+        mode="free"
+        showId="show-1"
+        showSlug="the-scarlet-oath"
+        showTitle="The Scarlet Oath"
+        autoplay={false}
+        freeMode={freeMode}
+        signupGate={freeMode}
+      />,
+    );
+  }
+
+  it("free mode (signup gate): the wall says nothing about a card", async () => {
+    renderWall(true);
+    await screen.findByText(en.signupWall.gateKicker, undefined, LONG);
+
+    expect(screen.queryByText(en.signupWall.noCardNeeded)).toBeNull();
+  });
+
+  it("paid mode: the wall keeps 'No card needed'", async () => {
+    renderWall(false);
+    await screen.findByText(en.signupWall.kicker, undefined, LONG);
+
+    expect(screen.getByText(en.signupWall.noCardNeeded)).toBeTruthy();
   });
 });
