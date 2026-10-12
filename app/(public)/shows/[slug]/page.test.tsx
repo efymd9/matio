@@ -69,7 +69,7 @@ vi.mock("@/components/site/share-button", () => ({ ShareButton: () => null }));
 vi.mock("@/components/site/actor-chip", () => ({ ActorChip: () => null }));
 vi.mock("next/link", async () => await import("@/tools/test/next-link-probe"));
 
-import ShowDetailPage from "./page";
+import ShowDetailPage, { generateMetadata } from "./page";
 
 async function renderPage() {
   rows.queue = [
@@ -114,5 +114,21 @@ describe("/shows/[slug] — which images go through /_next/image (#306)", () => 
     expect(hero).toBeDefined();
     expect(new URLSearchParams(hero!.getAttribute("src")!.split("?")[1]).get("url")).toBe(HERO);
     expect(hero!.getAttribute("srcset")).toContain("/_next/image?url=");
+  });
+});
+
+// #445 — English only: the show page is its own canonical, with no hreflang
+// cluster pointing at an /es twin.
+describe("/shows/[slug] — metadata", () => {
+  it("names the bare canonical and no other language", async () => {
+    const meta = await generateMetadata({
+      params: Promise.resolve({ slug: "the-scarlet-oath" }),
+    });
+    expect(meta.alternates).toEqual({
+      canonical: "https://matio.tv/shows/the-scarlet-oath",
+    });
+    expect(meta.openGraph).toMatchObject({
+      url: "https://matio.tv/shows/the-scarlet-oath",
+    });
   });
 });

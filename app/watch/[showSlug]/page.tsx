@@ -22,8 +22,7 @@ import { PurchaseBeacon } from "@/components/site/purchase-beacon";
 import { verifyCheckoutReturn } from "@/lib/checkout-return-verify";
 import { Icon } from "@/components/site/icon";
 import { muxThumbnailUrl } from "@/lib/mux-token";
-import { getDict, getLocale } from "@/lib/i18n/server";
-import type { Locale } from "@/lib/i18n/dictionaries";
+import { getDict } from "@/lib/i18n/server";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import {
   applyUserAttribution,
@@ -52,16 +51,13 @@ export const metadata: Metadata = {
   robots: { index: false, follow: true },
 };
 
-// Fork copy lives on the rows in both site locales (#143); the player gets
-// ONE string per field, picked here. A row missing one locale falls back to
-// the other rather than to nothing — the admin form requires both for a
-// real fork, so this only ever covers a half-typed silent transition.
-function inLocale(
-  locale: Locale,
-  es: string | null,
-  en: string | null,
-): string | null {
-  return locale === "es" ? (es || en) : (en || es);
+// Fork copy lives on the rows in es/en (#143); the player gets ONE string per
+// field, picked here — the English one, the site's only language since #445.
+// A row missing it falls back to the Spanish rather than to nothing — the
+// admin form requires both for a real fork, so this only ever covers a
+// half-typed silent transition.
+function englishFirst(en: string | null, es: string | null): string | null {
+  return en || es;
 }
 
 export default async function WatchPage({
@@ -149,16 +145,15 @@ export default async function WatchPage({
   });
 
   // Branching (#144): the edges of every ready episode in one query,
-  // grouped by parent. Labels and the prompt are picked in the SITE locale
-  // here — the player never reads the locale for row copy (its dictionary
-  // covers only the prompt's own chrome). Targets are resolved against the
+  // grouped by parent. Labels and the prompt are picked here (englishFirst)
+  // — the player never reads a language for row copy (its dictionary covers
+  // only the prompt's own chrome). Targets are resolved against the
   // playable array client-side (resolveCandidates drops a missing one).
   // The query runs only for a show that HAS a branch — this page is
   // force-dynamic, so a linear show would otherwise pay it on every render
   // (a choice between two listed episodes with no branch anywhere in the
   // show is not a case the admin form produces on purpose, and is not
   // honoured).
-  const locale = await getLocale();
   const hasBranches = ordered.some((e) => e.branchOfEpisodeId !== null);
   const edges = hasBranches
     ? await db
@@ -185,7 +180,7 @@ export default async function WatchPage({
     list.push({
       toEpisodeId: edge.toEpisodeId,
       position: edge.position,
-      label: inLocale(locale, edge.labelEs, edge.labelEn) ?? "",
+      label: englishFirst(edge.labelEn, edge.labelEs) ?? "",
       isDefault: edge.isDefault,
     });
     choicesByParent.set(edge.fromEpisodeId, list);
@@ -248,7 +243,7 @@ export default async function WatchPage({
         thumbnailUrl,
         tier: resolveEffectiveTier(e.access, { paymentsOn, signupGate }),
         branchOfEpisodeId: e.branchOfEpisodeId,
-        forkPrompt: inLocale(locale, e.forkPromptEs, e.forkPromptEn),
+        forkPrompt: englishFirst(e.forkPromptEn, e.forkPromptEs),
         forkWindowSeconds: e.forkWindowSeconds,
         choices: choicesByParent.get(e.id) ?? null,
       };

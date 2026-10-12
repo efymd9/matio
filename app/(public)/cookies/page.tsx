@@ -4,29 +4,31 @@
 // marketing cookies are gated on cookie_consent.marketing via proxy.ts + the
 // consent banner. Contact details filled 2026-05-27; Meta Pixel + Conversions
 // API disclosure added 2026-05-29; PostHog disclosure added 2026-05-30; Google
-// Analytics (GA4) disclosure added 2026-06-24.
+// Analytics (GA4) disclosure added 2026-06-24. English only since #445
+// (2026-10-12): the Spanish version was withdrawn with the site's Spanish (it
+// is in git history), and the `locale` row left the table — nothing sets that
+// cookie any more.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalLink } from "@/components/site/legal-link";
 import { isAppEmbed, legalPageRobots } from "@/lib/app-embed-server";
 import { getDict } from "@/lib/i18n/server";
-import { localeAlternates } from "@/lib/seo";
+import { canonicalUrl } from "@/lib/seo";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { locale, t } = await getDict();
+  const { t } = await getDict();
   return {
     title: t.legal.cookiesTitle,
     description: t.legal.cookiesDescription,
-    alternates: localeAlternates("/cookies", locale),
+    alternates: { canonical: canonicalUrl("/cookies") },
     robots: await legalPageRobots(),
   };
 }
 
-const LAST_UPDATED_ES = "24 de junio de 2026";
-const LAST_UPDATED_EN = "June 24, 2026";
+const LAST_UPDATED = "October 12, 2026";
 
 export default async function CookiesPage() {
-  const { locale, t } = await getDict();
+  const { t } = await getDict();
   const embed = await isAppEmbed();
   return (
     <main
@@ -45,10 +47,10 @@ export default async function CookiesPage() {
             {t.legal.cookiesTitle}
           </h1>
           <p className="font-mono text-[11px] text-cream/45">
-            {t.legal.lastUpdated(locale === "en" ? LAST_UPDATED_EN : LAST_UPDATED_ES)}
+            {t.legal.lastUpdated(LAST_UPDATED)}
           </p>
         </header>
-        {locale === "en" ? <CookiesEn /> : <CookiesEs />}
+        <CookiesEn />
         {/* No way «home» in the app's embed (#310): home is the full site. */}
         {!embed && (
           <div className="mt-12 border-t border-white/[0.06] pt-6">
@@ -108,12 +110,6 @@ function CookiesEn() {
                 "First-party audience measurement. A random anonymous identifier we use to count unique visitors and which pages were viewed (home page, show pages, sign-up wall). First-party only — never shared with third parties, never used for advertising or cross-site tracking — so it needs no consent.",
               expiry: "13 months (not refreshed)",
               category: "Strictly necessary",
-            },
-            {
-              name: "locale",
-              purpose: "Remembers your language preference (Spanish / English).",
-              expiry: "1 year",
-              category: "Preferences",
             },
             {
               name: "__stripe_mid, __stripe_sid (Stripe)",
@@ -247,205 +243,6 @@ function CookiesEn() {
           and{" "}
           <LegalLink href="/terms" className="underline underline-offset-2 hover:text-white">
             Terms of Service
-          </LegalLink>
-          .
-        </p>
-      </Section>
-    </div>
-  );
-}
-
-function CookiesEs() {
-  return (
-    <div className="prose-legal space-y-8 text-[15px] leading-relaxed text-white/75">
-      <Section id="que" title="1. Qué son las cookies">
-        <p>
-          Las cookies son pequeños archivos de texto que un sitio web guarda
-          en tu dispositivo para reconocerte entre visitas. Algunas son
-          imprescindibles para que el sitio funcione; otras nos ayudan a
-          entender cómo llega la gente al servicio para invertir mejor el
-          presupuesto de marketing.
-        </p>
-      </Section>
-
-      <Section id="usamos" title="2. Cookies que utilizamos">
-        <p>
-          Esta lista incluye todas las cookies que el sitio coloca
-          directamente o a través de nuestros encargados. Las categorías
-          siguen las convenciones de ePrivacy / RGPD: las{" "}
-          <strong>estrictamente necesarias</strong> no requieren
-          consentimiento; las de <strong>preferencia</strong> y{" "}
-          <strong>marketing</strong> sí.
-        </p>
-
-        <CookieTable
-          rows={[
-            {
-              name: "__session, __client_uat (Clerk)",
-              purpose:
-                "Autenticación. Mantiene tu sesión iniciada entre páginas y permite que el servidor verifique tu identidad.",
-              expiry: "Sesión y corta duración",
-              category: "Estrictamente necesaria",
-            },
-            {
-              name: "trial_session",
-              purpose:
-                "Controla tu vista previa gratuita de 60 segundos por serie para que no pueda reiniciarse recargando la página. Token aleatorio opaco, sin datos personales.",
-              expiry: "1 año",
-              category: "Estrictamente necesaria",
-            },
-            {
-              name: "matio_aid",
-              purpose:
-                "Medición de audiencia de origen propio. Un identificador anónimo aleatorio que usamos para contar visitantes únicos y qué páginas se han visto (página de inicio, páginas de serie, muro de registro). Es exclusivamente de origen propio: nunca se comparte con terceros ni se utiliza para publicidad o seguimiento entre sitios, por lo que no requiere consentimiento.",
-              expiry: "13 meses (no se renueva)",
-              category: "Estrictamente necesaria",
-            },
-            {
-              name: "locale",
-              purpose: "Recuerda tu idioma preferido (español o inglés).",
-              expiry: "1 año",
-              category: "Preferencia",
-            },
-            {
-              name: "__stripe_mid, __stripe_sid (Stripe)",
-              purpose:
-                "Prevención de fraude en las páginas de pago de Stripe. Las coloca directamente Stripe cuando inicias el pago.",
-              expiry: "Hasta 1 año",
-              category: "Estrictamente necesaria",
-            },
-            {
-              name: "attribution_first",
-              purpose:
-                "Primera fuente / medio / campaña UTM por la que llegaste. Sirve para atribuir las suscripciones de pago a la campaña que te dio a conocer matio originalmente.",
-              expiry: "90 días",
-              category: "Marketing",
-            },
-            {
-              name: "attribution_last",
-              purpose:
-                "Última fuente / medio / campaña UTM. Permite cuadrar nuestra atribución con los paneles de las plataformas publicitarias.",
-              expiry: "30 días",
-              category: "Marketing",
-            },
-            {
-              name: "_fbp (Meta)",
-              purpose:
-                "La coloca el Meta Pixel para identificar tu navegador en la medición publicitaria y atribuir conversiones a nuestras campañas de Meta. Solo se coloca tras aceptar las cookies de marketing.",
-              expiry: "90 días",
-              category: "Marketing",
-            },
-            {
-              name: "_fbc / fbclid (Meta)",
-              purpose:
-                "Guarda el identificador de clic de Meta cuando llegas desde un anuncio de Facebook o Instagram, para vincular un registro o suscripción posterior a ese anuncio. Solo se usa tras aceptar las cookies de marketing.",
-              expiry: "90 días",
-              category: "Marketing",
-            },
-            {
-              name: "muxData / mux_viewer_id (Mux)",
-              purpose:
-                "La coloca Mux Data (la analítica de nuestro proveedor de vídeo) para medir el tiempo de visionado, los espectadores únicos y la calidad de reproducción. Solo se usa tras aceptar las cookies de marketing.",
-              expiry: "Hasta 1 año",
-              category: "Marketing",
-            },
-            {
-              name: "ph_* (PostHog)",
-              purpose:
-                "La coloca PostHog, nuestra herramienta de analítica de producto, para identificar tu sesión en el navegador y medir cómo los visitantes avanzan por el sitio (análisis de embudo, vistas de página, interacciones). Las sesiones también se graban con todos los campos e textos enmascarados. Solo se coloca tras aceptar las cookies de marketing.",
-              expiry: "Hasta 1 año",
-              category: "Marketing",
-            },
-            {
-              name: "_ga, _ga_* (Google)",
-              purpose:
-                "Las coloca Google Analytics (GA4) para distinguir tu navegador y medir el tráfico del sitio, las vistas de página y cómo lo utilizan los visitantes. Solo se colocan tras aceptar las cookies de marketing.",
-              expiry: "Hasta 2 años",
-              category: "Marketing",
-            },
-            {
-              name: "__oppref, __oaiq_consent (OpenAI)",
-              purpose:
-                "Las coloca el píxel de medición de ChatGPT Ads (OpenAI) para guardar el identificador de clic cuando llegas desde un anuncio mostrado en ChatGPT, de modo que un registro posterior pueda atribuirse a ese anuncio, y para recordar tu elección de consentimiento. Solo se colocan tras aceptar las cookies de marketing.",
-              expiry: "Elección de consentimiento: 30 días; id de clic: lo establece OpenAI",
-              category: "Marketing",
-            },
-          ]}
-        />
-        <p>
-          Utilizamos el <strong>Meta Pixel</strong> y la{" "}
-          <strong>API de Conversiones</strong> de Meta para medir el
-          rendimiento de nuestra publicidad en Facebook e Instagram. Solo se
-          activan <strong>después de que aceptes las cookies de marketing</strong>{" "}
-          en el banner. Cuando están activos, comparten un conjunto limitado de
-          datos con <strong>Meta Platforms Ireland Ltd</strong>: una versión
-          cifrada (hash SHA-256) de tu correo electrónico, tu dirección IP y
-          señales de eventos como visitas de página, registros y suscripciones.
-          También usamos <strong>Google Analytics</strong> (GA4) para medir el
-          tráfico del sitio y cómo lo utilizan los visitantes. Solo se activa{" "}
-          <strong>tras aceptar las cookies de marketing</strong> &mdash; hasta
-          entonces se retienen las señales del modo de consentimiento de Google
-          &mdash; y comparte datos de uso y de dispositivo con{" "}
-          <strong>Google Ireland Ltd</strong>. También usamos el{" "}
-          <strong>píxel de medición de ChatGPT Ads</strong> para medir el
-          rendimiento de nuestra publicidad en ChatGPT; se activa{" "}
-          <strong>solo tras aceptar las cookies de marketing</strong> y
-          comparte señales de eventos (vistas de página, registros) con{" "}
-          <strong>OpenAI Ireland Ltd</strong>. Nuestro proveedor de vídeo{" "}
-          <strong>Mux</strong> mide la calidad de reproducción y el tiempo de
-          visionado mediante <strong>Mux Data</strong>; al igual que el Pixel,
-          esto se ejecuta <strong>solo tras aceptar las cookies de
-          marketing</strong> y coloca un identificador de espectador para contar
-          espectadores únicos. También usamos <strong>PostHog</strong> (EU
-          Cloud) para analítica de producto, midiendo qué pasos del embudo de
-          registro alcanzan los visitantes y dónde abandonan. PostHog solo se
-          carga <strong>tras aceptar las cookies de marketing</strong>, con la
-          captura automática desactivada, las grabaciones de sesión completamente
-          enmascaradas y los datos procesados en servidores de la Unión Europea
-          (PostHog Cloud EU).
-        </p>
-      </Section>
-
-      <Section id="gestionar" title="3. Cómo gestionar las cookies">
-        <p>
-          En la UE, el EEE, el Reino Unido y Suiza, las cookies de marketing se
-          colocan <strong>solo después de que las aceptes</strong> en el banner.
-          En otros lugares (donde la ley lo permite) pueden activarse por
-          defecto; en cualquier caso, puedes{" "}
-          <strong>desactivarlas en cualquier momento</strong>.
-        </p>
-        <p>
-          Puedes rechazar o retirar tu consentimiento para las cookies no
-          esenciales en cualquier momento desde nuestro banner de cookies:
-          reábrelo cuando quieras desde el enlace &laquo;Preferencias de
-          cookies&raquo; del pie de página.
-        </p>
-        <p>
-          También puedes eliminar las cookies directamente desde la
-          configuración del navegador. Las cookies estrictamente necesarias
-          se volverán a establecer en tu próxima visita porque el servicio
-          no puede funcionar sin ellas.
-        </p>
-      </Section>
-
-      <Section id="cambios" title="4. Cambios en esta política">
-        <p>
-          Podemos actualizar esta Política de cookies a medida que añadamos
-          o eliminemos encargados. La versión vigente lleva la fecha
-          indicada arriba.
-        </p>
-      </Section>
-
-      <Section id="contacto" title="5. Contacto">
-        <p>
-          Consultas sobre cookies: <strong>maksym@matio.tv</strong>. Consulta
-          también nuestra{" "}
-          <LegalLink href="/privacy" className="underline underline-offset-2 hover:text-white">
-            Política de privacidad
-          </LegalLink>{" "}
-          y los{" "}
-          <LegalLink href="/terms" className="underline underline-offset-2 hover:text-white">
-            Términos del servicio
           </LegalLink>
           .
         </p>

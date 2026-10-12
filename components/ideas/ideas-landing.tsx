@@ -25,8 +25,7 @@ import {
   HERO_SCRIM_SIDE,
   toneFor,
 } from "@/lib/design";
-import type { Locale } from "@/lib/i18n/dictionaries";
-import { ideasDictFor, type IdeasDict } from "@/lib/i18n/ideas-dictionaries";
+import { en as ideasEn, type IdeasDict } from "@/lib/i18n/ideas-dictionaries";
 import {
   IDEA_LIMITS,
   NEW_SERIES_VALUE,
@@ -40,7 +39,6 @@ import {
 } from "@/lib/idea-submission";
 import { trackPixel } from "@/lib/meta-pixel-events";
 import { capturePostHog } from "@/lib/posthog-events";
-import { localizedPath } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 import {
   CARD,
@@ -258,7 +256,6 @@ function RailCheck({ done, label }: { done: boolean; label: string }) {
 }
 
 export function IdeasLanding({
-  locale,
   shows,
   preselectedSlug,
   heroImageUrl,
@@ -266,7 +263,6 @@ export function IdeasLanding({
   submitIdea,
   children,
 }: {
-  locale: Locale;
   /** Published shows in catalog order — slug, title and poster only. */
   shows: IdeasShow[];
   /** A published show's slug from `?show=` (the page validated it), or null. */
@@ -281,13 +277,13 @@ export function IdeasLanding({
   /** The server-rendered How-it-works + FAQ, under the form. */
   children?: ReactNode;
 }) {
-  const t = ideasDictFor(locale);
+  const t = ideasEn;
   const uid = useId();
   const id = (name: string) => `${uid}-${name}`;
   const format = useMemo(() => {
-    const nf = new Intl.NumberFormat(locale);
+    const nf = new Intl.NumberFormat("en");
     return (n: number) => nf.format(n);
-  }, [locale]);
+  }, []);
 
   const [draft, setDraft] = useState<Draft>(() => ({
     ...EMPTY_DRAFT,
@@ -1143,7 +1139,7 @@ export function IdeasLanding({
                       <p className="text-[13px] leading-[1.55] text-cream/70">
                         {t.privacy.before}
                         <a
-                          href={`${localizedPath("/privacy", locale)}#ideas`}
+                          href="/privacy#ideas"
                           target="_blank"
                           rel="noopener"
                           className={cn(TEXT_LINK, "font-semibold")}
@@ -1210,7 +1206,6 @@ export function IdeasLanding({
         open={termsOpen}
         onOpenChange={setTermsOpen}
         t={t}
-        locale={locale}
         finalFocus={termsRef}
       />
     </TermsOpenerProvider>

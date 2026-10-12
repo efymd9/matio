@@ -12,16 +12,6 @@ vi.mock("next/link", async () => await import("@/tools/test/next-link-probe"));
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 
-// The real module pulls the locale server action in; the footer only reads.
-vi.mock("@/lib/i18n/client", async () => {
-  const { en } = await import("@/lib/i18n/dictionaries");
-  return {
-    useT: () => en,
-    useLocale: () => "en",
-    useSetLocale: () => ({ setLocale: () => undefined, isPending: false }),
-  };
-});
-
 import { SiteFooter } from "./site-footer";
 
 afterEach(cleanup);
@@ -103,5 +93,26 @@ describe("SiteFooter — links that must not be prefetched (#259)", () => {
     expect(screen.queryAllByRole("link", { name: en.footer.subscribe })).toEqual(
       [],
     );
+  });
+});
+
+// #445 — the site is English-only: no link to a Spanish twin, and the social
+// row carries the English TikTok (it used to follow the visitor's language).
+describe("SiteFooter — English only", () => {
+  it("links nowhere under /es and names no other language", () => {
+    const { container } = render(<SiteFooter paymentsEnabled />);
+
+    expect(container.querySelector("[hreflang]")).toBeNull();
+    expect(screen.queryByText("Español")).toBeNull();
+    for (const a of container.querySelectorAll("a")) {
+      expect(a.getAttribute("href") ?? "").not.toMatch(/^\/es(?:\/|$)/);
+    }
+  });
+
+  it("shows the English TikTok, not the Spanish one", () => {
+    render(<SiteFooter paymentsEnabled />);
+
+    expect(screen.getByRole("link", { name: "TikTok (English)" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "TikTok (Español)" })).toBeNull();
   });
 });

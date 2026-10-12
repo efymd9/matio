@@ -146,7 +146,6 @@ export async function sendShowReminders(
         .returning({
           id: showReminders.id,
           email: showReminders.email,
-          locale: showReminders.locale,
         });
 
       if (batch.length === 0) {
@@ -159,7 +158,6 @@ export async function sendShowReminders(
       const payload = batch.map((row) => {
         const { page, oneClick } = unsubscribeUrls(row.email);
         const rendered = renderShowReminderEmail({
-          locale: row.locale,
           showTitle: target.showTitle,
           seasonNumber: target.seasonNumber,
           episodeNumber: target.episodeNumber,

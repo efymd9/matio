@@ -17,14 +17,14 @@ import {
   dictFor,
   pickFromLanguageTags,
   type AppDict,
-  type Dict,
+  type SharedDict,
   type Locale,
 } from "@/shared/i18n";
 
-// The app's locale: the web's es/en dictionaries, resolved the way the web
-// resolves them — an explicit choice first, the device's language second,
-// English last — minus the cookie and the URL, which a native client has
-// neither of.
+// The app's locale: es/en over the dictionaries it shares with the web
+// (lib/i18n/dictionaries.ts — the site itself is English-only since #445,
+// Spanish there is kept for the app), resolved as an explicit choice first,
+// the device's language second, English last.
 //
 // The explicit choice persists in SecureStore under its own key. Not the
 // obvious store for a two-letter preference, but it is the ONE persistence
@@ -38,9 +38,10 @@ const LOCALE_KEY = "matio_locale";
 // SecureStore must degrade to "detect", never hold the splash forever.
 const READ_TIMEOUT_MS = 3_000;
 
-// Every dictionary the app renders from: the web's public copy plus the
-// app-only strings under `app`.
-export type AppT = Dict & { app: AppDict };
+// Every dictionary the app renders from: the sections of the web's public
+// copy it shares (`SharedDict` — the only ones with Spanish) plus the app-only
+// strings under `app`.
+export type AppT = SharedDict & { app: AppDict };
 
 function isLocale(value: unknown): value is Locale {
   return typeof value === "string" && (SUPPORTED_LOCALES as readonly string[]).includes(value);

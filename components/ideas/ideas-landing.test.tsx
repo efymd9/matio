@@ -83,13 +83,12 @@ function setup(
 ) {
   render(
     <IdeasLanding
-      locale="en"
       shows={SHOWS}
       preselectedSlug={props.preselectedSlug ?? null}
       heroImageUrl={null}
       submitIdea={submitIdea}
     >
-      {props.withFaq ? <IdeasFaq t={en} locale="en" /> : null}
+      {props.withFaq ? <IdeasFaq t={en} /> : null}
     </IdeasLanding>,
   );
   const field = {
@@ -581,7 +580,6 @@ describe("hero focus (#370): which part of a 16:9 still a phone keeps", () => {
   it("the landing's own photo is anchored on the heroine", () => {
     const { container } = render(
       <IdeasLanding
-        locale="en"
         shows={SHOWS}
         preselectedSlug={null}
         heroImageUrl="/ideas/hero.jpg"
@@ -597,7 +595,6 @@ describe("hero focus (#370): which part of a 16:9 still a phone keeps", () => {
   it("a show hero keeps the show anchor (the default)", () => {
     const { container } = render(
       <IdeasLanding
-        locale="en"
         shows={SHOWS}
         preselectedSlug="morelli"
         heroImageUrl="/shows/morelli-hero.png"

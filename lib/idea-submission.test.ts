@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { en, es } from "./i18n/ideas-dictionaries";
+import { en } from "./i18n/ideas-dictionaries";
 import {
   IDEA_LIMITS,
   IDEA_TERMS_VERSION,
@@ -211,11 +211,9 @@ describe("normalizeIdeaInput", () => {
 });
 
 describe("the Terms version", () => {
-  it("the sheet shows, in both languages, the version the server stamps on the row", () => {
+  it("the sheet shows the version the server stamps on the row", () => {
     // A bump of IDEA_TERMS_VERSION must move the displayed line with it —
     // otherwise rows record one text while fans read another.
-    for (const dict of [en, es]) {
-      expect(dict.terms.version).toContain(IDEA_TERMS_VERSION);
-    }
+    expect(en.terms.version).toContain(IDEA_TERMS_VERSION);
   });
 });

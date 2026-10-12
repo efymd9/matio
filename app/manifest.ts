@@ -3,10 +3,7 @@ import { paymentsEnabled } from "@/lib/free-mode";
 import { en } from "@/lib/i18n/dictionaries";
 
 // Web app manifest. Next auto-emits <link rel="manifest"> from this file.
-// It's a cached route, so hard-code the English (indexed-default) copy —
-// getLocale() can't run here (it reads headers()/cookies(), which would opt
-// the route into per-request rendering and is wrong for a crawler/install
-// artifact anyway).
+// English — the site's only language since #445.
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Matio",

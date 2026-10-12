@@ -119,7 +119,8 @@ export function websiteJsonLd(): JsonLd {
     "@id": WEBSITE_ID,
     url: SITE_URL,
     name: SITE_NAME,
-    inLanguage: ["en", "es"],
+    // English only since #445 (the site dropped its Spanish /es twin).
+    inLanguage: "en",
     publisher: { "@id": ORG_ID },
   };
 }

@@ -13,7 +13,6 @@ vi.mock("server-only", () => ({}));
 // failing query answers `server_error` and reports class + SQLSTATE only.
 const h = vi.hoisted(() => ({
   headers: new Headers(),
-  locale: "en" as "en" | "es",
   attribution: {
     first: { source: null, medium: null, campaign: null } as Record<string, string | null>,
     last: { source: null, medium: null, campaign: null } as Record<string, string | null>,
@@ -43,7 +42,7 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined }),
 }));
 vi.mock("@/lib/checkout-rate-limit", () => ({ checkoutRateLimited: h.rateLimited }));
-vi.mock("@/lib/i18n/server", () => ({ getLocale: async () => h.locale }));
+vi.mock("@/lib/i18n/server", () => ({ getLocale: async () => "en" }));
 vi.mock("@/lib/attribution", async (importOriginal) => {
   // The column mapping is the real one — only the cookie read is faked.
   const actual = await importOriginal<typeof import("@/lib/attribution")>();
@@ -129,7 +128,6 @@ const consoleCalls = () =>
 
 beforeEach(() => {
   h.headers = new Headers({ "x-vercel-forwarded-for": CLIENT_IP });
-  h.locale = "en";
   h.attribution = {
     first: { source: null, medium: null, campaign: null },
     last: { source: null, medium: null, campaign: null },
@@ -154,7 +152,6 @@ afterEach(() => {
 
 describe("submitIdea — the happy path", () => {
   it("writes exactly one row with exactly the data map's columns", async () => {
-    h.locale = "es";
     h.attribution = {
       first: { source: "fb", medium: "paid", campaign: "ideas_launch" },
       last: { source: "ig", medium: "social", campaign: "ideas_retarget" },
@@ -197,7 +194,7 @@ describe("submitIdea — the happy path", () => {
       workingTitle: "The Last Letter",
       authorName: "Ana",
       email: "ana@example.com",
-      locale: "es",
+      locale: "en",
       termsVersion: IDEA_TERMS_VERSION,
       marketingOptIn: true,
       attributionFirstSource: "fb",

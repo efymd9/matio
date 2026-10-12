@@ -56,7 +56,7 @@ Hot-path indexes (migration 0010): `subscriptions(user_id, updated_at DESC)` for
 - Clerk owns identity + sessions.
 - `users` table mirrors Clerk via `user.created` webhook (`app/api/webhooks/clerk/route.ts`) — handler is idempotent (`onConflictDoNothing` on `users.id`) and asks Clerk `users.getUser(<id>)` before it writes: Svix redelivers a failed event for hours, and a late delivery for an account deleted meanwhile must not put the address back — a 404 writes nothing (200), any other Clerk failure is a 500 so Svix retries (#336); the write is `lib/user-mirror.ts:mirrorClerkUser`, shared with `getOrSyncCurrentUser`, which resolves an address already held by a row under another Clerk id by asking Clerk about that id (404 → the same `eraseUser`, as a late erasure that searches and deletes nothing by the address the new account may own; alive with a changed address → the stale row gets the current one; otherwise reported by id — #380). The same handler answers `user.deleted` with `DELETE FROM users` (art. 17 erasure: FK cascades + an explicit `show_reminders` delete by the account's address + an explicit `idea_submissions` delete by the same (lowercased) address, #297 — that table has no FK on `users`, so nothing else would reach it; a missing row is a 200 no-op, so redeliveries are safe), after setting a live Stripe subscription to `cancel_at_period_end` (best-effort) and tombstoning the Stripe customer id in `erased_customers` (not best-effort — the tombstone is what keeps a guest-checkout webhook from re-creating the account, see [services → Stripe](./services.md#stripe-subscriptions)). Deleting the account in Clerk is the ONLY erasure mechanism — a manual GDPR request is executed there, never by SQL.
 - `users.role` is the **only** source of truth for admin — never Clerk metadata alone.
-- Clerk's hosted UI (sign-in modal, sign-up modal, UserButton dropdown, validation copy) is localized to match the site dictionary via `ClerkProvider`'s `localization` prop in `app/layout.tsx` — `enUS` by default (English is the site default since 2026-07-04), `esES` when negotiation or the locale cookie resolves Spanish. Adding a locale to the site = also add its `@clerk/localizations` bundle to the `CLERK_LOCALIZATIONS` map.
+- Clerk's hosted UI (sign-in modal, sign-up modal, UserButton dropdown, validation copy) is English: `ClerkProvider`'s `localization` prop in `app/layout.tsx` is `enUS` — the site is English-only since #445 (see [Locale resolution](#locale-resolution-i18n)).
 - `proxy.ts` is the first line of defense; pages/actions use `lib/admin.ts` helpers as belt-and-braces:
   - `getCurrentUser()` — pure read, returns the local row or `null`. Use for pages that can tolerate a missing mirror (e.g. analytics-only callsites).
   - `getOrSyncCurrentUser()` — read-or-upsert from `currentUser()` if the local row is missing. Use anywhere a missing mirror would block the user from making progress (e.g. `/subscribe` page render before `linkTrialSessionsToCurrentUser`, `startCheckout` server action, `/api/billing-portal` route). Closes the race where a brand-new signup hits these surfaces before the `user.created` webhook lands.
@@ -416,45 +416,29 @@ Only one non-essential category (`marketing`) so no "Customize" sub-flow. If a s
 
 ## Locale resolution (i18n)
 
-`lib/i18n/server.ts:getLocale()` resolves the UI language once per request (wrapped in React `cache()` so layout `generateMetadata` + `RootLayout` + every page's `getDict()` share one resolution instead of re-parsing per RSC segment):
+**The website speaks one language — English — since #445 (2026-10-12).** There is nothing to resolve any more:
 
 ```
-locale cookie present + valid ──────────────► that locale  (explicit choice
-   │ absent                                    always wins; written ONLY by
-   ▼                                           the language switcher)
-Accept-Language header
-   │
-   ├─ missing/empty ───────────────────────► en (DEFAULT_LOCALE — English
-   │                                           since 2026-07-04, was es.
-   │                                           Crawlers: Googlebot crawls
-   │                                           from US IPs with NO
-   │                                           Accept-Language, so this arm
-   │                                           IS the site's indexed
-   │                                           language; geo deliberately
-   │                                           NOT consulted)
-   ├─ names es/en (q-values, base-subtag   ─► highest-q supported language
-   │   match: es-419→es, en-GB→en)            (how Spanish-preferring
-   │                                           browsers keep getting es)
-   └─ exists but matches neither           ─► en. (Geo tiebreak REMOVED
-       (fr-FR, ru, de, pt-BR, bare *)         2026-08-31, owner decision:
-                                              ES_AFFINITY_COUNTRIES handed
-                                              Spanish to every ru/de/fr
-                                              browser in Spain/LatAm, and a
-                                              single /es visit then pinned
-                                              it via the sticky cookie. Geo
-                                              is not consulted for language
-                                              at all any more.)
+any request ──► getLocale() = "en", getDict() = { locale: "en", t: en }   (lib/i18n/server.ts)
+                useT() = en                                              (lib/i18n/client.tsx, client components)
+                ClerkProvider localization = enUS                        (app/layout.tsx)
+
+/es, /es/*  ──► proxy.ts: 308 to the bare path, query kept — nothing written on the redirect
 ```
 
-The negotiation itself lives in `lib/i18n/negotiate.ts` — pure + universal (no `next/headers`), so the same matching rules serve `getLocale()`, the `global-error.tsx` boundary (which can't reach the failed layout's `LocaleProvider` and falls back cookie → `navigator.languages` → en), and `pnpm test:locale` (`lib/i18n/negotiate.test.ts` + `lib/seo.test.ts` under vitest, covering RFC 9110 q-values, q=0 exclusion, wildcard, hostile multi-KB headers, the full ladder and the bilingual URL helpers).
+What went with Spanish, and why it is not coming back by accident:
 
-Detection **persists nothing** — no cookie, no storage. It re-derives per request, so a user who changes their browser language self-heals on the next visit, and there is no ePrivacy/consent question (consent gates storage/access *on the device*; reading a header the browser already sent is neither — worth knowing before "fixing" it by adding a cookie). The explicit switcher choice writes the `locale` cookie (1y), which short-circuits detection entirely.
+- **No negotiation, no cookie, no URL locale.** `Accept-Language` is not read, the `locale` cookie is written by nothing (the `setLocale` server action, `lib/i18n/shared.ts`, the `LocaleProvider` context and the header / footer / `/ideas` switchers were deleted), and no `x-matio-locale` header is stamped. Old `locale` cookies in browsers expire on their own (≤1 year) and are read by nothing.
+- **The `/es` twins are redirects.** From 2026-07-24 to 2026-10-12 the indexable set (`/`, `/shows/*`, `/actors/*`, `/about`, `/press`, `/ideas`, the legal pages) was served under `/es` too, with reciprocal hreflang. Those URLs were indexed and linked from ads, so `proxy.ts` answers **every** `/es` and `/es/*` with a permanent 308 to the bare path, keeping `?utm_*` / `?fbclid` (the bare request then does the consent / attribution / `matio_aid` work). A redirect, not a rewrite, so `/es/admin` is just `/admin` behind its gate. The split is `lib/seo.ts:stripLocalePrefix`.
+- **No hreflang.** Pages set `alternates: { canonical: canonicalUrl(path) }` only; the sitemap lists each route once at its bare URL; `websiteJsonLd.inLanguage` is `"en"`; `og:locale` is `en_US` with no alternate; `/llms.txt` says English.
+- **Analytics.** PostHog no longer registers `locale` / `locale_source`, and `unregister`s the pair on load — posthog-js persists super-properties, so a returning browser would otherwise keep stamping `locale: "es"`.
+- **Emails.** The reminder email is English for every row (`show_reminders.locale` is still written, as `en`, and no longer read).
 
-Parser hardening: entry cap bounds work on hostile multi-KB headers, malformed q-values degrade to 1, and the whole negotiation is wrapped in try/catch → `DEFAULT_LOCALE` — a throw inside `getLocale()` would white-screen every page via `global-error`.
+**Spanish lives on in the Expo app.** The app renders es/en from `lib/i18n/dictionaries.ts`: `Dict = typeof en` is the whole site's copy, and `es` carries only the sections the app reads (`SharedDict`), handed out by `dictFor(locale)` to the app's `useT()` (`mobile/src/i18n/locale.tsx`). The app detects the device language with `lib/i18n/negotiate.ts` (`pickFromLanguageTags` — the only negotiation code left). Shipped app builds still open the legal pages as `/es/terms?embed=app` for a viewer who chose Español (`lib/seo.ts:localizedPath`); those land on the English document through the 308.
 
-Cache-safety notes: every public route is already dynamic (each calls `getDict()` → `cookies()`), so `headers()` inside `getLocale()` changes the rendering mode of nothing, and Next's framework `Cache-Control: private, no-store` on dynamic HTML overrides the `vercel.json` `public, max-age=31536000` rule for `/shows/(.*)` (verified live — that rule only bites on true static assets like the legacy same-origin poster PNGs), so per-header variation cannot be cache-poisoned. `getLocale()` must never be called inside an `unstable_cache` / `use cache` scope (`headers()` throws there); no current caller does.
+Cache-safety note that still holds: the root layout reads `cookies()` (consent) and `headers()` (the app-embed flag), so every page stays dynamic even though `getDict()` no longer touches the request.
 
-PostHog events carry `locale` + `locale_source: "chosen" | "detected"` as super-properties (registered in `posthog-provider.tsx` before the first `$pageview`), so funnels can segment es vs en and measure how often detection gets overridden.
+The admin panel's own ru/en switch is a separate system (`lib/i18n/admin-*`, `admin_locale` cookie) and is unchanged.
 
 ## Catalog cache
 

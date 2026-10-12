@@ -1,6 +1,7 @@
 // The legal documents as the app shows them (#310).
 //
-// The Expo app opens /terms, /privacy and /cookies (and their /es twins) in an
+// The Expo app opens /terms, /privacy and /cookies (an /es URL from a build
+// that asks for one is redirected (308) to the bare one first, #445) in an
 // in-app browser. The full site page carries the header, and in paid mode the
 // header's «Subscribe» link leads to a Stripe purchase outside the App Store
 // (guideline 3.1.1). Outside the EU/EEA/UK/CH the same page also loads the
@@ -21,8 +22,8 @@ export const APP_EMBED_VALUE = "app";
 // reaches them (a layout gets no searchParams).
 export const APP_EMBED_HEADER = "x-matio-embed";
 
-// Only the three legal documents have an embed variant. Base (English) paths:
-// the /es prefix is stripped before this is asked.
+// Only the three legal documents have an embed variant. Bare paths: an /es
+// URL is redirected away before this is asked.
 const EMBEDDABLE_PATHS: ReadonlySet<string> = new Set([
   "/terms",
   "/privacy",

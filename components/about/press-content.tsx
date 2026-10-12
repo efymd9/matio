@@ -1,5 +1,5 @@
 import Image from "next/image";
-import type { Dict, Locale } from "@/lib/i18n/dictionaries";
+import type { Dict } from "@/lib/i18n/dictionaries";
 import { PressContact } from "./press-contact";
 
 // The /press page body («About page v3» mock, press view): press-room hero
@@ -11,11 +11,9 @@ import { PressContact } from "./press-contact";
 
 export function PressContent({
   t,
-  locale,
   paymentsOn,
 }: {
   t: Dict;
-  locale: Locale;
   paymentsOn: boolean;
 }) {
   return (
@@ -151,7 +149,7 @@ export function PressContent({
       </section>
 
       <div className="mt-20 tablet:mt-24">
-        <PressContact t={t} locale={locale} />
+        <PressContact t={t} />
       </div>
     </>
   );

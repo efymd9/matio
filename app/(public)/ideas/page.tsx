@@ -2,9 +2,8 @@ import type { Metadata } from "next";
 import { IdeasLanding, type IdeasShow } from "@/components/ideas/ideas-landing";
 import { IdeasFaq, IdeasHowItWorks } from "@/components/ideas/ideas-sections";
 import { getPublishedShows } from "@/lib/catalog";
-import { getLocale } from "@/lib/i18n/server";
-import { ideasDictFor } from "@/lib/i18n/ideas-dictionaries";
-import { localeAlternates } from "@/lib/seo";
+import { en as t } from "@/lib/i18n/ideas-dictionaries";
+import { canonicalUrl } from "@/lib/seo";
 import { submitIdea } from "./actions";
 
 // The landing's own background (#370, the owner's photo): a static file, not
@@ -12,18 +11,17 @@ import { submitIdea } from "./actions";
 // sRGB; its framing is written into the hero's "landing" focus.
 const LANDING_HERO_URL = "/ideas/hero.jpg";
 
-// /ideas (+ /es/ideas) — the landing where fans send Matio a story idea
-// (#297, design variant A). Bilingual and indexed; the canonical never
-// carries `?show=`. Copy comes from lib/i18n/ideas-dictionaries.ts (not the
-// shared dictionaries.ts — see its header). The server action is handed to
-// the client form as a prop, so the form never imports a server module.
+// /ideas — the landing where fans send Matio a story idea (#297, design
+// variant A). Indexed, English only since #445 (/es/ideas 308s here); the
+// canonical never carries `?show=`. Copy comes from
+// lib/i18n/ideas-dictionaries.ts (not the shared dictionaries.ts — see its
+// header). The server action is handed to the client form as a prop, so the
+// form never imports a server module.
 export async function generateMetadata(): Promise<Metadata> {
-  const locale = await getLocale();
-  const t = ideasDictFor(locale);
   return {
     title: t.meta.title,
     description: t.meta.description,
-    alternates: localeAlternates("/ideas", locale),
+    alternates: { canonical: canonicalUrl("/ideas") },
     robots: { index: true, follow: true },
   };
 }
@@ -33,12 +31,10 @@ export default async function IdeasPage({
 }: {
   searchParams: Promise<{ show?: string | string[] }>;
 }) {
-  const [{ show }, locale, published] = await Promise.all([
+  const [{ show }, published] = await Promise.all([
     searchParams,
-    getLocale(),
     getPublishedShows(),
   ]);
-  const t = ideasDictFor(locale);
 
   // `?show=<slug>` preselects a series only when it names a published show;
   // a repeated `?show=a&show=b` arrives as an array and preselects nothing.
@@ -64,7 +60,6 @@ export default async function IdeasPage({
   return (
     <main>
       <IdeasLanding
-        locale={locale}
         shows={shows}
         preselectedSlug={preselected?.slug ?? null}
         heroImageUrl={heroImageUrl}
@@ -72,7 +67,7 @@ export default async function IdeasPage({
         submitIdea={submitIdea}
       >
         <IdeasHowItWorks t={t} />
-        <IdeasFaq t={t} locale={locale} />
+        <IdeasFaq t={t} />
       </IdeasLanding>
     </main>
   );

@@ -1,8 +1,6 @@
 import type { ReactNode } from "react";
 import { Icon } from "@/components/site/icon";
-import type { Locale } from "@/lib/i18n/dictionaries";
 import type { IdeasDict, IdeasLinked } from "@/lib/i18n/ideas-dictionaries";
-import { localizedPath } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 import { CARD, GUTTER, SectionHeading, TEXT_LINK } from "./ideas-parts";
 import { IdeasTermsLink } from "./ideas-terms";
@@ -69,7 +67,7 @@ function Linked({ text, link }: { text: IdeasLinked; link: ReactNode }) {
   );
 }
 
-export function IdeasFaq({ t, locale }: { t: IdeasDict; locale: Locale }) {
+export function IdeasFaq({ t }: { t: IdeasDict }) {
   const f = t.faq;
   const owns = (
     <Question q={f.owns.q}>
@@ -85,7 +83,7 @@ export function IdeasFaq({ t, locale }: { t: IdeasDict; locale: Locale }) {
         text={f.keep.a}
         link={
           <a
-            href={`${localizedPath("/privacy", locale)}#ideas`}
+            href="/privacy#ideas"
             target="_blank"
             rel="noopener"
             className={TEXT_LINK}

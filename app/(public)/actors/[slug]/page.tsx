@@ -10,7 +10,6 @@ import { getDict } from "@/lib/i18n/server";
 import {
   SITE_URL,
   canonicalUrl,
-  localeAlternates,
   metaDescription,
 } from "@/lib/seo";
 import {
@@ -44,10 +43,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const actor = await getActorBySlug(slug);
-  const { locale, t } = await getDict();
+  const { t } = await getDict();
   if (!actor) return { title: t.actorPage.notFound };
-  const alternates = localeAlternates(`/actors/${slug}`, locale);
-  const url = alternates.canonical;
+  const url = canonicalUrl(`/actors/${slug}`);
+  const alternates = { canonical: url };
   const description = metaDescription(
     actor.bio ?? t.actorPage.metaDescription(actor.name),
   );

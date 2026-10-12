@@ -1,5 +1,3 @@
-import type { Locale } from "./i18n/dictionaries";
-
 // Official Matio social profiles — the single source of truth consumed by the
 // footer icon row, the Organization JSON-LD `sameAs`, and /llms.txt. URLs are
 // canonical (share-tracking params like ?_t/igsh/si stripped) so the same
@@ -15,9 +13,8 @@ export type SocialPlatform =
 
 export type SocialProfile = {
   platform: SocialPlatform;
-  // Accessible / crawler-facing name. Platform names are proper nouns and
-  // identical in both site languages, so this is deliberately not in the
-  // i18n dictionaries.
+  // Accessible / crawler-facing name. Platform names are proper nouns, so
+  // this is deliberately not in the i18n dictionaries.
   label: string;
   url: string;
 };
@@ -59,12 +56,15 @@ const SHARED_PROFILES: SocialProfile[] = [
   },
 ];
 
-// Footer row: one TikTok per language — the account matching the visitor's
-// locale — plus the shared profiles. Both TikToks stay discoverable to
-// crawlers via ALL_SOCIAL_PROFILES / sameAs.
-export function socialProfilesForLocale(locale: Locale): SocialProfile[] {
-  return [locale === "es" ? TIKTOK_ES : TIKTOK_EN, ...SHARED_PROFILES];
-}
+// Footer row (and the about/press contact band): the English TikTok plus the
+// shared profiles — the site is English-only since #445, and the row used to
+// follow the visitor's language. The Spanish TikTok is still the studio's
+// own account, so it stays discoverable to crawlers via ALL_SOCIAL_PROFILES /
+// sameAs.
+export const FOOTER_SOCIAL_PROFILES: SocialProfile[] = [
+  TIKTOK_EN,
+  ...SHARED_PROFILES,
+];
 
 // Every official profile, for sameAs + llms.txt.
 export const ALL_SOCIAL_PROFILES: SocialProfile[] = [

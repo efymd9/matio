@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CONSENT_VERSION, type ConsentRecord } from "@/lib/cookie-consent";
@@ -14,7 +14,6 @@ vi.mock("@clerk/nextjs", () => ({
   useAuth: () => ({ isSignedIn: false, userId: null }),
   useUser: () => ({ user: null }),
 }));
-vi.mock("@/lib/i18n/client", () => ({ useLocale: () => "en" }));
 
 // POSTHOG_KEY is a module-level env read — pinned here so the init path runs
 // the same way locally (.env.local may hold a key) and in CI (it holds none).
@@ -59,5 +58,32 @@ describe("PostHogProvider — init options", () => {
     expect(options.advanced_disable_decide).toBeUndefined();
     expect(options.disable_session_recording).toBe(false);
     expect(options.enable_heatmaps).toBe(true);
+  });
+});
+
+// #445 — the site is English-only, so the language super-properties are gone;
+// posthog-js persists super-properties, so the stale ones a returning browser
+// still holds are dropped before the first event.
+describe("PostHogProvider — no language super-properties", () => {
+  it("unregisters locale / locale_source on load, registers nothing, then sends the first $pageview", async () => {
+    const options = await initOptions();
+    const calls: string[] = [];
+    const sdk = {
+      unregister: vi.fn((p: string) => calls.push(`unregister:${p}`)),
+      register: vi.fn(() => calls.push("register")),
+      capture: vi.fn((e: string) => calls.push(`capture:${e}`)),
+      opt_out_capturing: vi.fn(),
+    };
+
+    await act(async () => {
+      (options.loaded as (instance: typeof sdk) => void)(sdk);
+    });
+
+    expect(sdk.register).not.toHaveBeenCalled();
+    expect(calls).toEqual([
+      "unregister:locale",
+      "unregister:locale_source",
+      "capture:$pageview",
+    ]);
   });
 });

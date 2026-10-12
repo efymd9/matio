@@ -17,11 +17,11 @@ import "server-only";
 //
 // Copy lives HERE, not in lib/i18n/dictionaries.ts: the public dict is a
 // universal module bundled into every client, and email strings would be
-// dead weight there. Emails render server-side at send time in the locale
-// captured on the reminder row (show_reminders.locale).
+// dead weight there. English only since #445 (the site speaks one language):
+// every row gets this email, one captured with `show_reminders.locale = 'es'`
+// before then included — the column is no longer read.
 
 type ReminderEmailInput = {
-  locale: string; // "es" | "en" (free text from the DB; anything non-"es" renders English)
   showTitle: string;
   seasonNumber: number;
   episodeNumber: number;
@@ -38,36 +38,19 @@ type ReminderEmailInput = {
 };
 
 const COPY = {
-  es: {
-    subject: (show: string) => `Nuevo episodio de ${show} — ya disponible`,
-    preheader: (show: string) =>
-      `El siguiente episodio de ${show} ya está listo para ver.`,
-    badge: "Nuevo episodio",
-    kicker: (show: string, season: number, ep: number) =>
-      season > 1 ? `${show} · T${season} · E${ep}` : `${show} · Episodio ${ep}`,
-    minutes: (m: number) => `${m} min`,
-    cta: "Ver ahora — gratis",
-    heroAlt: (title: string, show: string) =>
-      `${title} — fotograma de ${show}`,
-    footerReason: (show: string) =>
-      `Recibes este correo porque pediste que te avisáramos del próximo episodio de ${show} en matio.tv.`,
-    unsubscribe: "Darse de baja",
-  },
-  en: {
-    subject: (show: string) => `New episode of ${show} — out now`,
-    preheader: (show: string) =>
-      `The next episode of ${show} is ready to watch.`,
-    badge: "New episode",
-    kicker: (show: string, season: number, ep: number) =>
-      season > 1 ? `${show} · S${season} · E${ep}` : `${show} · Episode ${ep}`,
-    minutes: (m: number) => `${m} min`,
-    cta: "Watch now — free",
-    heroAlt: (title: string, show: string) =>
-      `${title} — still from ${show}`,
-    footerReason: (show: string) =>
-      `You're getting this because you asked to be notified when a new episode of ${show} drops on matio.tv.`,
-    unsubscribe: "Unsubscribe",
-  },
+  subject: (show: string) => `New episode of ${show} — out now`,
+  preheader: (show: string) =>
+    `The next episode of ${show} is ready to watch.`,
+  badge: "New episode",
+  kicker: (show: string, season: number, ep: number) =>
+    season > 1 ? `${show} · S${season} · E${ep}` : `${show} · Episode ${ep}`,
+  minutes: (m: number) => `${m} min`,
+  cta: "Watch now — free",
+  heroAlt: (title: string, show: string) =>
+    `${title} — still from ${show}`,
+  footerReason: (show: string) =>
+    `You're getting this because you asked to be notified when a new episode of ${show} drops on matio.tv.`,
+  unsubscribe: "Unsubscribe",
 } as const;
 
 // Sender identification in the footer (UK PECR); matches the legal pages'
@@ -95,7 +78,7 @@ export function renderShowReminderEmail(input: ReminderEmailInput): {
   html: string;
   text: string;
 } {
-  const c = input.locale === "es" ? COPY.es : COPY.en;
+  const c = COPY;
   const title = input.episodeTitle?.trim() || input.showTitle;
   const kicker = c.kicker(
     input.showTitle,
@@ -145,7 +128,7 @@ export function renderShowReminderEmail(input: ReminderEmailInput): {
     : "";
 
   const html = `<!DOCTYPE html>
-<html lang="${input.locale === "es" ? "es" : "en"}" xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

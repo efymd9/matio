@@ -30,16 +30,6 @@ vi.mock("@clerk/nextjs", () => ({
   ClerkProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@/lib/free-mode", () => ({ paymentsEnabled: () => true }));
-// The real provider pulls the locale server action in; the header only reads.
-vi.mock("@/lib/i18n/client", async () => {
-  const { en } = await import("@/lib/i18n/dictionaries");
-  return {
-    LocaleProvider: ({ children }: { children: ReactNode }) => children,
-    useT: () => en,
-    useLocale: () => "en",
-    useSetLocale: () => ({ setLocale: () => undefined, isPending: false }),
-  };
-});
 vi.mock("@/components/site/user-menu", () => ({ UserMenu: () => null }));
 
 function marker(name: string) {
@@ -59,7 +49,7 @@ vi.mock("@/components/site/google-analytics", () => ({
 vi.mock("@/components/site/openai-pixel", () => ({ OpenAIPixel: marker("openai-pixel") }));
 vi.mock("@/components/site/visit-beacon", () => ({ VisitBeacon: marker("visit-beacon") }));
 
-import RootLayout from "./layout";
+import RootLayout, { generateMetadata } from "./layout";
 
 const LOADERS = [
   "cookie-banner",
@@ -116,5 +106,25 @@ describe("RootLayout — the app's embed variant (#310)", () => {
 
     expect(html).toContain("<header");
     expect(html).toContain('data-mounted="meta-pixel"');
+  });
+});
+
+// #445 — the site speaks English only: the page says so, the chrome carries no
+// language switcher, and the home metadata names no Spanish twin.
+describe("RootLayout — English only (#445)", () => {
+  it('renders <html lang="en"> with no language switcher in the header or footer', async () => {
+    const html = await render();
+
+    expect(html).toContain('lang="en"');
+    expect(html).not.toContain("Español");
+    expect(html).not.toMatch(/href="\/es(?:[/"?])/);
+  });
+
+  it("emits a canonical with no hreflang cluster and no Spanish OG locale", async () => {
+    const meta = await generateMetadata();
+
+    expect(meta.alternates).toEqual({ canonical: "https://matio.tv" });
+    expect(meta.openGraph).toMatchObject({ url: "https://matio.tv", locale: "en_US" });
+    expect(meta.openGraph).not.toHaveProperty("alternateLocale");
   });
 });

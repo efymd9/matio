@@ -60,6 +60,10 @@ describe("websiteJsonLd", () => {
     const site = websiteJsonLd();
     expect(site.publisher).toEqual({ "@id": ORG_ID });
   });
+
+  it("declares English as the site's only language (#445)", () => {
+    expect(websiteJsonLd().inLanguage).toBe("en");
+  });
 });
 
 describe("jsonLdScript", () => {

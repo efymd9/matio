@@ -3,9 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { COOKIE_PREFS_EVENT } from "@/lib/cookie-consent";
-import { useLocale, useT } from "@/lib/i18n/client";
-import { socialProfilesForLocale } from "@/lib/social-links";
-import { AlternateLanguageLink } from "./language-switcher";
+import { useT } from "@/lib/i18n/client";
+import { FOOTER_SOCIAL_PROFILES } from "@/lib/social-links";
 import { MatioLogo } from "./matio-logo";
 import { SocialIcon } from "./social-icon";
 
@@ -29,9 +28,8 @@ export function SiteFooter({
 
 function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
   const t = useT();
-  const locale = useLocale();
   const year = new Date().getFullYear();
-  const socials = socialProfilesForLocale(locale);
+  const socials = FOOTER_SOCIAL_PROFILES;
 
   return (
     <footer className="border-t border-rust/30 bg-espresso pl-[max(env(safe-area-inset-left),1.5rem)] pr-[max(env(safe-area-inset-right),1.5rem)] sm:pl-[max(env(safe-area-inset-left),3rem)] sm:pr-[max(env(safe-area-inset-right),3rem)]">
@@ -106,11 +104,6 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
               {t.footer.cookiePreferences}
             </button>
           </li>
-          {/* Crawlable link to this page's translation — see
-              AlternateLanguageLink. Renders null off the localized routes. */}
-          <li>
-            <AlternateLanguageLink className="transition-colors hover:text-cream" />
-          </li>
         </ul>
 
         {/* Tablet + desktop: two labeled columns. */}
@@ -128,9 +121,6 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
             <FooterLink href="/api/billing-portal" routeHandler>
               {t.footer.manage}
             </FooterLink>
-            <li>
-              <AlternateLanguageLink className="transition-colors hover:text-cream" />
-            </li>
           </FooterColumn>
           <FooterColumn heading={t.footer.sectionLegal}>
             <FooterLink href="/terms">{t.footer.terms}</FooterLink>

@@ -6,10 +6,8 @@ import { usePathname } from "next/navigation";
 import { Menu } from "@base-ui/react/menu";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n/client";
-import { stripLocalePrefix } from "@/lib/seo";
 import { MatioLogo } from "./matio-logo";
 import { Icon } from "./icon";
-import { InlineLanguageToggle, LanguageSwitcher } from "./language-switcher";
 
 // Sticky transparent → frosted-dark header. Hides on /watch (immersive
 // fullscreen player) and /admin (own nav).
@@ -37,11 +35,10 @@ export function SiteHeader({
   // (circular back/share buttons over the hero, no site header below the
   // tablet breakpoint) — the persistent nav only appears from 834px up.
   const showDetail = pathname?.startsWith("/shows/") ?? false;
-  // The /ideas landing (#297) gets a trimmed header — the logo and EN · ES,
-  // nothing else: every other exit from a half-written story loses the draft.
-  // Stripped of the locale prefix so both /ideas and /es/ideas match,
-  // whatever usePathname() reports behind the /es rewrite.
-  const minimal = stripLocalePrefix(pathname ?? "").path === "/ideas";
+  // The /ideas landing (#297) gets a trimmed header — the logo and nothing
+  // else: every other exit from a half-written story loses the draft. (Until
+  // #445 it also carried the EN · ES toggle; the site is English-only now.)
+  const minimal = pathname === "/ideas";
   return (
     <SiteHeaderContent
       authSlot={authSlot}
@@ -72,7 +69,7 @@ function SiteHeaderContent({
   authSlot: React.ReactNode;
   paymentsEnabled: boolean;
   mobileHidden?: boolean;
-  // Logo + inline language toggle only: no nav, no account slot, no menu.
+  // Logo only: no nav, no account slot, no menu.
   minimal?: boolean;
 }) {
   const scrolled = useSyncExternalStore(
@@ -109,11 +106,7 @@ function SiteHeaderContent({
           <MatioLogo size={22} className="tablet:hidden" />
           <MatioLogo size={24} className="hidden tablet:block" />
         </Link>
-        {minimal ? (
-          <div className="ml-auto flex items-center">
-            <InlineLanguageToggle />
-          </div>
-        ) : (
+        {minimal ? null : (
           <>
             {/* Negative-margin padding trick: visually compact but exposes a
                 ~40px-tall hit area to touch + keyboard users without inflating
@@ -142,7 +135,6 @@ function SiteHeaderContent({
               )}
             </nav>
             <div className="ml-auto flex items-center gap-3 sm:gap-4">
-              <LanguageSwitcher />
               {authSlot}
               {/* Mobile-only nav disclosure — without it phones can't reach
                   /about or /subscribe from the header (the inline nav above is

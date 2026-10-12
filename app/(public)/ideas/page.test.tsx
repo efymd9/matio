@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { IdeasLanding } from "@/components/ideas/ideas-landing";
 import { IdeasFaq, IdeasHowItWorks } from "@/components/ideas/ideas-sections";
-import { en, es } from "@/lib/i18n/ideas-dictionaries";
+import { en } from "@/lib/i18n/ideas-dictionaries";
 
 // The /ideas route wrapper (#297): metadata, the ?show= preselect, the hero
 // pick and what crosses to the client. Inspected as a JSX tree, not rendered
@@ -13,10 +13,8 @@ import { en, es } from "@/lib/i18n/ideas-dictionaries";
 vi.mock("server-only", () => ({}));
 
 const state = vi.hoisted(() => ({
-  locale: "en" as "en" | "es",
   shows: [] as Record<string, unknown>[],
 }));
-vi.mock("@/lib/i18n/server", () => ({ getLocale: async () => state.locale }));
 vi.mock("@/lib/catalog", () => ({ getPublishedShows: async () => state.shows }));
 // The hero no longer reads the featured show (#370): the landing has its own
 // photo, and only `?show=` swaps in a series' hero.
@@ -56,7 +54,6 @@ async function landing(show?: string | string[]) {
 }
 
 beforeEach(() => {
-  state.locale = "en";
   state.shows = [
     row("fallen", { heroImageUrl: null }),
     row("the-scarlet-oath", { featured: true }),
@@ -65,27 +62,12 @@ beforeEach(() => {
 });
 
 describe("/ideas metadata", () => {
-  it("English: own canonical, the hreflang cluster, indexed", async () => {
+  it("English, own canonical, no hreflang cluster (#445), indexed", async () => {
     const meta = await generateMetadata();
     expect(meta.title).toBe(en.meta.title);
     expect(meta.description).toBe(en.meta.description);
-    expect(meta.alternates?.canonical).toBe("https://matio.tv/ideas");
-    expect(meta.alternates?.languages).toEqual({
-      en: "https://matio.tv/ideas",
-      es: "https://matio.tv/es/ideas",
-      "x-default": "https://matio.tv/ideas",
-    });
+    expect(meta.alternates).toEqual({ canonical: "https://matio.tv/ideas" });
     expect(meta.robots).toMatchObject({ index: true, follow: true });
-  });
-
-  it("Spanish: the /es twin is its own canonical", async () => {
-    state.locale = "es";
-    const meta = await generateMetadata();
-    expect(meta.title).toBe(es.meta.title);
-    expect(meta.alternates?.canonical).toBe("https://matio.tv/es/ideas");
-    expect(
-      (meta.alternates?.languages as Record<string, string>)["x-default"],
-    ).toBe("https://matio.tv/ideas");
   });
 });
 
@@ -143,15 +125,14 @@ describe("/ideas page", () => {
     }
   });
 
-  it("hands the form the server action, the locale and the server-rendered blocks", async () => {
-    state.locale = "es";
+  it("hands the form the server action and the server-rendered blocks, in English", async () => {
     const props = await landing();
     expect(props.submitIdea).toBe(action.submitIdea);
-    expect(props.locale).toBe("es");
-    const children = props.children as ReactElement<{ t: unknown; locale?: string }>[];
+    expect(props).not.toHaveProperty("locale");
+    const children = props.children as ReactElement<{ t: unknown }>[];
     expect(children.every((c) => isValidElement(c))).toBe(true);
     expect(children.map((c) => c.type)).toEqual([IdeasHowItWorks, IdeasFaq]);
-    expect(children[0].props.t).toBe(es);
-    expect(children[1].props).toMatchObject({ t: es, locale: "es" });
+    expect(children[0].props.t).toBe(en);
+    expect(children[1].props).toEqual({ t: en });
   });
 });

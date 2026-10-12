@@ -25,36 +25,21 @@ export function canonicalUrl(path: string): string {
   return `${SITE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-// ── Bilingual URL scheme (en/es) ─────────────────────────────────────────
-// English lives at the bare path (canonical + x-default); Spanish lives under
-// a /es prefix. This is the single source of truth for the split, shared by
-// proxy.ts (rewrite + redirect), every generateMetadata (hreflang), the
-// sitemap, and the client language switcher (navigation). Kept dependency-free
-// so it's safe in the middleware and client bundles.
+// ── The retired /es prefix ───────────────────────────────────────────────
+// The site served Spanish under /es until #445 (2026-10-12); it is
+// English-only now, at the bare path. The /es URLs were indexed and linked,
+// so proxy.ts answers every /es and /es/* with a permanent 308 to the bare
+// path (query kept) — stripLocalePrefix is the rule it reads. localizedPath
+// stays for the Expo app (mobile/src/shared/seo.ts → legalUrl), whose
+// shipped builds still open the legal pages under /es for a viewer who chose
+// Español: those land on the English page through that same 308. Kept
+// dependency-free so it's safe in the middleware and the app's bundle.
 export type SeoLocale = "en" | "es";
 export const ES_PREFIX = "/es";
 
-// The indexable public routes that get an /es twin + reciprocal hreflang.
-// Everything else (admin, api, /watch [noindex], /subscribe, /checkout, …)
-// stays single-URL. A crafted /es/admin therefore does NOT match here and is
-// never rewritten onto the gated route — it just 404s.
-export function isLocalizablePath(path: string): boolean {
-  return (
-    path === "/" ||
-    path === "/about" ||
-    path === "/press" ||
-    path === "/ideas" ||
-    path === "/terms" ||
-    path === "/privacy" ||
-    path === "/cookies" ||
-    path.startsWith("/shows/") ||
-    path.startsWith("/actors/")
-  );
-}
-
-// Split an incoming request pathname into { locale, base English path }.
+// Split an incoming request pathname into { locale, base path }.
 // "/es/shows/x" → { es, "/shows/x" }; "/es" → { es, "/" }; "/shows/x" → { en,
-// "/shows/x" }.
+// "/shows/x" }. Only a whole segment counts: "/espanol" is not under /es.
 export function stripLocalePrefix(pathname: string): {
   locale: SeoLocale;
   path: string;
@@ -67,6 +52,7 @@ export function stripLocalePrefix(pathname: string): {
 }
 
 // Prefix a base (English) path with the locale segment. English is identity.
+// The app's — the site itself links nowhere under /es any more.
 export function localizedPath(basePath: string, locale: SeoLocale): string {
   const clean =
     basePath === ""
@@ -76,22 +62,6 @@ export function localizedPath(basePath: string, locale: SeoLocale): string {
         : `/${basePath}`;
   if (locale === "en") return clean;
   return clean === "/" ? ES_PREFIX : `${ES_PREFIX}${clean}`;
-}
-
-// hreflang alternates for a Next `alternates` metadata field. `basePath` is the
-// English route; `current` is the locale actually being rendered (so the page
-// self-canonicalises correctly). Emits en + es + x-default (English is the
-// default). All absolute apex URLs — never preview hosts.
-export function localeAlternates(
-  basePath: string,
-  current: SeoLocale,
-): { canonical: string; languages: Record<string, string> } {
-  const enUrl = canonicalUrl(basePath);
-  const esUrl = canonicalUrl(localizedPath(basePath, "es"));
-  return {
-    canonical: current === "es" ? esUrl : enUrl,
-    languages: { en: enUrl, es: esUrl, "x-default": enUrl },
-  };
 }
 
 // Meta-description sanitizer for DB-sourced copy. Admin-entered synopses

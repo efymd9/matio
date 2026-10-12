@@ -33,13 +33,6 @@ vi.mock("@/lib/stripe-browser", () => stripeBrowser);
 const nav = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => nav }));
 
-// The site locale the card speaks in; English unless a test switches it.
-const i18n = vi.hoisted(() => ({ locale: "en" as "en" | "es" }));
-vi.mock("@/lib/i18n/client", async () => {
-  const { dictFor } = await import("@/lib/i18n/dictionaries");
-  return { useT: () => dictFor(i18n.locale) };
-});
-
 import { CheckoutClient } from "./checkout-client";
 
 const PROPS = {
@@ -89,7 +82,6 @@ async function mountLiveForm() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  i18n.locale = "en";
   actions.createCheckoutSession.mockResolvedValue({
     kind: "embedded",
     clientSecret: "cs_test_1_secret",
@@ -163,23 +155,6 @@ describe("CheckoutClient — over the hourly checkout budget (#233)", () => {
     // Nothing gets mounted and nothing is created a second time.
     expect(stripeBrowser.getStripeBrowser).not.toHaveBeenCalled();
     expect(actions.createCheckoutSession).toHaveBeenCalledTimes(1);
-  });
-
-  it("speaks the site's language", async () => {
-    i18n.locale = "es";
-    actions.createCheckoutSession.mockResolvedValue({
-      kind: "rate_limited",
-    } as never);
-    render(<CheckoutClient {...PROPS} />);
-
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          "Demasiados intentos de pago. Vuelve a intentarlo dentro de una hora.",
-        ),
-      ).toBeTruthy(),
-    );
-    expect(screen.queryByRole("button")).toBeNull();
   });
 });
 

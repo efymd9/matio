@@ -295,11 +295,10 @@ describe("proxy — Clerk authorized parties (wiring)", () => {
 
 // #310 — a legal document opened by the app (`?embed=app`). The rule itself
 // is lib/app-embed.ts; what is proved here is the wiring: exactly the three
-// documents (bare and /es) get the request stamped for the bare layout, /es
-// is authoritative, a bare URL renders in the language the normal page would
-// 307 to — in place, so the embed survives (builds from before #288 open the
-// bare /v1/config URL as is) — and nothing is written back: no consent
-// default, no visitor id.
+// documents get the request stamped for the bare layout, in English whatever
+// the phone says (#445 — the site has no Spanish; an app build that still
+// asks for the /es URL is 308'd to the bare one with its query), and nothing
+// is written back: no consent default, no visitor id.
 describe("proxy — the app's embed of the legal documents", () => {
   // What the page render will see: NextResponse.next/rewrite({ request })
   // forwards request headers as x-middleware-request-*.
@@ -310,67 +309,38 @@ describe("proxy — the app's embed of the legal documents", () => {
   // default marketing consent ON and mint matio_aid.
   const firstVisit = { "x-vercel-ip-country": "US" };
 
-  it("stamps a bare /terms?embed=app for the bare layout — Spanish phone, Spanish page, no 307", async () => {
+  it("stamps a bare /terms?embed=app for the bare layout — a Spanish phone too, in place, nothing written", async () => {
     vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
 
     const res = await proxy(
-      request("/terms?embed=app", { ...firstVisit, "accept-language": "es-ES,es;q=0.9" }),
+      request("/terms?embed=app", {
+        ...firstVisit,
+        "accept-language": "es-ES,es;q=0.9",
+        cookie: "locale=es",
+      }),
       event,
     );
 
     expect(forwarded(res, "x-matio-embed")).toBe("app");
-    // The same answer the normal page gives by redirecting to /es — here
-    // rendered in place, because a 307 would be fine but a lost embed is not.
-    expect(forwarded(res, "x-matio-locale")).toBe("es");
+    // No language is stamped any more: the page is English for everyone.
+    expect(forwarded(res, "x-matio-locale")).toBeNull();
     expect(res?.status).not.toBe(307);
     expect(res?.headers.get("location")).toBeNull();
     expect(res?.headers.get("Set-Cookie")).toBeNull();
   });
 
-  it("renders a bare embed URL in English for an English phone or no header at all", async () => {
-    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
-
-    const en = await proxy(request("/terms?embed=app", { "accept-language": "en-GB,en;q=0.9" }), event);
-    const none = await proxy(request("/privacy?embed=app"), event);
-
-    expect(forwarded(en, "x-matio-locale")).toBe("en");
-    expect(forwarded(none, "x-matio-locale")).toBe("en");
-  });
-
-  it("lets the switcher's cookie decide a bare embed URL, like the normal page", async () => {
-    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
-
-    const es = await proxy(
-      request("/cookies?embed=app", { cookie: "locale=es", "accept-language": "en-US" }),
-      event,
-    );
-    const en = await proxy(
-      request("/cookies?embed=app", { cookie: "locale=en", "accept-language": "es-ES" }),
-      event,
-    );
-
-    expect(forwarded(es, "x-matio-locale")).toBe("es");
-    expect(forwarded(en, "x-matio-locale")).toBe("en");
-  });
-
-  it("rewrites /es/privacy?embed=app onto /privacy, Spanish whatever the phone or cookie says", async () => {
+  it("308s the /es embed URL an app build still opens onto the bare one, embed kept, nothing written", async () => {
     vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
 
     const res = await proxy(
-      request("/es/privacy?embed=app", {
-        ...firstVisit,
-        "accept-language": "en-US,en;q=0.9",
-        cookie: "locale=en",
-      }),
+      request("/es/privacy?embed=app", { ...firstVisit, "accept-language": "es-MX" }),
       event,
     );
 
-    const rewrite = new URL(res!.headers.get("x-middleware-rewrite")!);
-    expect(rewrite.pathname).toBe("/privacy");
-    expect(rewrite.searchParams.get("embed")).toBe("app");
-    expect(forwarded(res, "x-matio-embed")).toBe("app");
-    expect(forwarded(res, "x-matio-locale")).toBe("es");
-    // Not even the sticky locale cookie an /es visit normally sets.
+    expect(res?.status).toBe(308);
+    const location = new URL(res!.headers.get("location")!);
+    expect(location.pathname).toBe("/privacy");
+    expect(location.searchParams.get("embed")).toBe("app");
     expect(res?.headers.get("Set-Cookie")).toBeNull();
   });
 
@@ -390,17 +360,6 @@ describe("proxy — the app's embed of the legal documents", () => {
     expect(forwarded(res, "x-matio-embed")).toBeNull();
     expect(res?.headers.get("Set-Cookie")).toContain("matio_aid");
     expect(res?.headers.get("Set-Cookie")).toContain("cookie_consent");
-
-    // …and a Spanish browser on it is still sent to the /es twin — the rule
-    // the bare embed URL now shares, unchanged for the web.
-    const es = await proxy(request("/terms?utm_source=x", { "accept-language": "es-ES,es;q=0.9" }), event);
-    expect(es?.status).toBe(307);
-    expect(new URL(es!.headers.get("location")!).pathname).toBe("/es/terms");
-    const pinned = await proxy(
-      request("/terms", { cookie: "locale=en", "accept-language": "es-ES,es;q=0.9" }),
-      event,
-    );
-    expect(pinned?.status).not.toBe(307);
   });
 
   it("gives no other page an embed variant, and no other value counts", async () => {
@@ -474,22 +433,109 @@ describe("proxy — the matcher keeps /api/healthz out, and only it", () => {
   });
 });
 
-// #297 — /ideas joined the localized set through lib/seo.ts alone; proxy.ts
-// was not touched. What is proved here is that the wiring picks it up: a
-// Spanish-preferring person landing on the bare URL from an ad is sent to
-// the /es twin with the campaign parameters intact.
-describe("proxy — the /ideas landing is a localized page", () => {
-  it("307s a Spanish browser from /ideas to /es/ideas, keeping ?utm_*", async () => {
+// #445 — the site is English-only. The /es URLs it served until then were
+// indexed and linked from ads, so every /es and /es/* is a permanent redirect
+// to the bare path with the query intact; and nothing is decided from the
+// visitor's language any more — no 307 to an /es twin, no `locale` cookie,
+// no locale header for the render.
+describe("proxy — the retired /es URLs", () => {
+  const forwarded = (res: Awaited<ReturnType<typeof proxy>>, name: string) =>
+    (res && res.headers.get(`x-middleware-request-${name}`)) ?? null;
+  const setsLocaleCookie = (res: Awaited<ReturnType<typeof proxy>>) =>
+    /(?:^|[\s,;])locale=/.test(res?.headers.get("Set-Cookie") ?? "");
+
+  it("308s an /es page to its bare path, keeping ?utm_* and ?fbclid", async () => {
     vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
 
     const res = await proxy(
-      request("/ideas?utm_source=x", { "accept-language": "es-MX,es;q=0.9" }),
+      request("/es/shows/some-show?utm_source=x&utm_campaign=y&fbclid=abc", {
+        "x-vercel-ip-country": "MX",
+      }),
       event,
     );
 
-    expect(res?.status).toBe(307);
+    expect(res?.status).toBe(308);
     const location = new URL(res!.headers.get("location")!);
-    expect(location.pathname).toBe("/es/ideas");
+    expect(location.pathname).toBe("/shows/some-show");
     expect(location.searchParams.get("utm_source")).toBe("x");
+    expect(location.searchParams.get("utm_campaign")).toBe("y");
+    expect(location.searchParams.get("fbclid")).toBe("abc");
+    // The redirect writes nothing — the bare request that follows does.
+    expect(res?.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("308s the /es home, with or without the trailing slash, to /", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    for (const path of ["/es", "/es/", "/es?utm_source=x"]) {
+      const res = await proxy(request(path), event);
+      expect(res?.status, path).toBe(308);
+      const location = new URL(res!.headers.get("location")!);
+      expect(location.pathname, path).toBe("/");
+      expect(location.search, path).toBe(path.includes("?") ? "?utm_source=x" : "");
+    }
+  });
+
+  it("redirects every path under /es, never rewrites it — /es/admin lands on /admin, outside any gate bypass", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(request("/es/admin"), event);
+
+    expect(res?.status).toBe(308);
+    expect(new URL(res!.headers.get("location")!).pathname).toBe("/admin");
+    expect(res?.headers.get("x-middleware-rewrite")).toBeNull();
+  });
+
+  it("leaves a path that merely starts with the letters alone", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(request("/espanol"), event);
+
+    expect(res?.status).not.toBe(308);
+    expect(res?.headers.get("location")).toBeNull();
+  });
+
+  it("does not redirect a Spanish browser on a bare page, and sets no locale cookie", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    for (const path of ["/", "/shows/some-show", "/ideas?utm_source=x", "/terms"]) {
+      const res = await proxy(
+        request(path, {
+          "x-vercel-ip-country": "MX",
+          "accept-language": "es-MX,es;q=0.9",
+        }),
+        event,
+      );
+      expect(res?.status, path).not.toBe(307);
+      expect(res?.headers.get("location"), path).toBeNull();
+      expect(forwarded(res, "x-matio-locale"), path).toBeNull();
+      expect(setsLocaleCookie(res), path).toBe(false);
+      // The rest of the landing machinery is untouched.
+      expect(res?.headers.get("Set-Cookie"), path).toContain("matio_aid");
+    }
+  });
+
+  it("ignores an old `locale=es` cookie too", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(request("/about", { cookie: "locale=es" }), event);
+
+    expect(res?.status).not.toBe(307);
+    expect(res?.headers.get("location")).toBeNull();
+    expect(forwarded(res, "x-matio-locale")).toBeNull();
+  });
+
+  it("stays behind the staging lock — the bench asks for the password first", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", PASSWORD);
+
+    const locked = await proxy(request("/es/about"), event);
+    expect(locked?.status).toBe(401);
+
+    const open = await proxy(
+      request("/es/about", authHeader("matio", PASSWORD)),
+      event,
+    );
+    expect(open?.status).toBe(308);
+    expect(new URL(open!.headers.get("location")!).pathname).toBe("/about");
   });
 });
