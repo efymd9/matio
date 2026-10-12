@@ -112,7 +112,7 @@ describe("«Last updated»", () => {
   });
 
   it("/privacy keeps its edition, /cookies has the #445 one", async () => {
-    expect(await render(PrivacyPage)).toContain("Last updated: October 11, 2026");
+    expect(await render(PrivacyPage)).toContain("Last updated: October 12, 2026");
     expect(await render(CookiesPage)).toContain("Last updated: October 12, 2026");
   });
 });
