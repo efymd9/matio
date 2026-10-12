@@ -42,9 +42,10 @@ export const showReminders = pgTable(
     userId: text("user_id").references(() => users.id, {
       onDelete: "set null",
     }),
-    // Site locale at capture time — the reminder email is rendered in
-    // this language. Rows predating the column (form was hidden then,
-    // so realistically none) default to the site-default English.
+    // Site locale at capture time. Read by nothing since #445: the site is
+    // English-only and every reminder email is English, an older `es` row
+    // included. Kept as data (expand-contract: dropping it is its own
+    // decision); new rows write "en".
     locale: text("locale").notNull().default("en"),
     // HMAC'd client IP (same hashClientIp as trial_sessions — never raw
     // IPs) for the capture rate limit: the submit action counts rows

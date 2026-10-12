@@ -33,7 +33,7 @@ export async function GET() {
     `- Site: ${SITE_URL}`,
     "- Operated by: DEEP ORDINARY LTD, registered in England and Wales, no. 17381666 (London, UK) — https://find-and-update.company-information.service.gov.uk/company/17381666",
     "- Contact: maksym@matio.tv",
-    "- Site languages: English (default, at the bare path) and Spanish (under an /es prefix, e.g. /es/shows/<slug>); every page cross-links its translation via hreflang",
+    "- Site language: English (the former Spanish /es URLs redirect permanently to their English pages)",
     "",
     "## Shows",
     "",

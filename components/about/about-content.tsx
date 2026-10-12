@@ -1,12 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
-import type { Dict, Locale } from "@/lib/i18n/dictionaries";
+import type { Dict } from "@/lib/i18n/dictionaries";
 import { PressContact } from "./press-contact";
 
 // The /about page body («About page v3» mock): 4K hero with the duotone
 // treatment, mission/vision splits, the one-principle manifest, the values
 // grid and the press hand-off banner. Presentational —
-// the route wrapper resolves dict/locale/payments and passes them down, so
+// the route wrapper resolves dict/payments and passes them down, so
 // the Lab renders this exactly as production does.
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -25,11 +25,9 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 export function AboutContent({
   t,
-  locale,
   paymentsOn,
 }: {
   t: Dict;
-  locale: Locale;
   paymentsOn: boolean;
 }) {
   const principles = paymentsOn
@@ -189,7 +187,7 @@ export function AboutContent({
         </div>
       </section>
 
-      <PressContact t={t} locale={locale} />
+      <PressContact t={t} />
     </>
   );
 }

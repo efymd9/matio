@@ -79,7 +79,6 @@ vi.mock("@/db/schema", () => ({
     notifiedAt: "show_reminders.notified_at",
     createdAt: "show_reminders.created_at",
     email: "show_reminders.email",
-    locale: "show_reminders.locale",
   },
 }));
 vi.mock("drizzle-orm", () => ({

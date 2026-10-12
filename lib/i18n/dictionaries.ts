@@ -3,22 +3,39 @@
 // separate ru/en system in admin-dictionaries.ts (Russian default, own
 // admin_locale cookie) that never affects the visitor-facing language.
 //
-// English is the default (since 2026-07-04 — was Spanish). Spanish is
-// served ONLY on explicit signals: an es Accept-Language, the switcher
-// cookie, or an /es URL. The geo tiebreak (Hispanophone-country guess for
-// unmatched headers) was removed 2026-08-31 — see negotiate.ts for why.
-// Both dicts import here, so they can be referenced from server and
-// client components alike without crossing the React Server Component
-// boundary — the LocaleProvider only passes the locale string, the
-// dict itself is bundled.
+// The WEBSITE is English-only since #445 (2026-10-12): it renders `en`, the
+// full dictionary, through getDict() / useT(). Spanish stays here ONLY for
+// the Expo app, which renders es/en from this file (mobile/src/shared/i18n.ts
+// → dictFor) — so `es` carries exactly the sections the app reads
+// (`SharedDict`), whole sections, and nothing the site alone shows. A section
+// the app starts reading joins `SharedSection` and gets its Spanish back.
 
 export type Locale = "es" | "en";
 
 export const SUPPORTED_LOCALES: readonly Locale[] = ["es", "en"];
 export const DEFAULT_LOCALE: Locale = "en";
 
-export const es = {
-  htmlLang: "es-ES",
+// The sections the app renders (its `useT()` — mobile/src/i18n/locale.tsx).
+// The compiler holds the app to it: a section missing here fails
+// `cd mobile && npm run typecheck`.
+type SharedSection =
+  | "language"
+  | "header"
+  | "home"
+  | "hero"
+  | "showDetail"
+  | "watch"
+  | "watchError"
+  | "player"
+  | "episodesOverlay"
+  | "upNextOverlay"
+  | "seriesEndOverlay"
+  | "signupWall"
+  | "welcome"
+  | "appError"
+  | "footer";
+
+export const es: SharedDict = {
   language: {
     label: "Idioma",
     es: "Español",
@@ -33,9 +50,6 @@ export const es = {
     signIn: "Iniciar sesión",
     signUp: "Crear cuenta",
     menuAria: "Abrir menú",
-  },
-  userMenu: {
-    manageSubscription: "Gestionar suscripción",
   },
   home: {
     comingSoonKicker: "Próximamente",
@@ -54,9 +68,6 @@ export const es = {
     moreInfo: "Más información",
     watchFree: "Ver gratis",
     premiereBadge: "Original · Estreno",
-  },
-  genreRow: {
-    seeAll: "Ver todo →",
   },
   showDetail: {
     notFound: "No encontrado",
@@ -94,15 +105,6 @@ export const es = {
     castTitle: "Actores virtuales",
     castAs: (c: string) => `como ${c}`,
     castViewProfile: "Ver perfil →",
-  },
-  actorPage: {
-    notFound: "No encontrado",
-    virtualActor: "Actor virtual",
-    appearsIn: "Aparece en",
-    noShowsYet: "Todavía no aparece en ninguna serie.",
-    metaTitle: (name: string) => `${name} — Actor virtual`,
-    metaDescription: (name: string) =>
-      `${name}: actor virtual de Matio. Biografía y series en las que aparece.`,
   },
   watch: {
     comingSoonTitle: "Próximamente",
@@ -169,14 +171,6 @@ export const es = {
     cancel: "Cancelar",
     playingIn: (s: number) => `Empieza en ${s} s`,
   },
-  // Chrome of the fork prompt only — the prompt itself and the option
-  // labels are viewer copy on the episode rows (fork_prompt_es / label_es).
-  forkOverlay: {
-    label: "Tú decides",
-    autoTag: "Auto",
-    chosenTag: "Elegido",
-    autoIn: (s: number) => `Automático en ${s} s`,
-  },
   seriesEndOverlay: {
     label: "Aviso para el próximo episodio",
     kicker: "Eso es todo · por ahora",
@@ -195,50 +189,6 @@ export const es = {
     errorRateLimited:
       "Demasiados intentos desde tu red. Inténtalo de nuevo en un rato.",
     errorGeneric: "Algo salió mal. Inténtalo de nuevo.",
-  },
-  unsubscribe: {
-    metaTitle: "Darse de baja",
-    heading: "Darse de baja",
-    confirmBody: (email: string) =>
-      `¿Quieres dejar de recibir avisos de nuevos episodios en ${email}?`,
-    confirmCta: "Sí, darme de baja",
-    doneHeading: "Listo",
-    doneBody:
-      "Hemos eliminado tu correo. No volveremos a enviarte avisos de episodios.",
-    invalidHeading: "Enlace no válido",
-    invalidBody:
-      "Este enlace de baja no es válido. Escríbenos a maksym@matio.tv y nos encargamos.",
-    backHome: "Volver al inicio",
-  },
-  paywall: {
-    previewComplete: "Vista previa terminada",
-    continueWatching: "Continúa viendo",
-    yourStory: "Tu historia",
-    pickUpWhereLeftOff: "Retoma justo donde lo dejaste.",
-    signUpToContinue: "Crea una cuenta gratis para seguir viendo.",
-    signUpCta: "Crear cuenta",
-    payFirstBody:
-      "25 $/mes. Creamos tu cuenta con el correo del pago y cancelas cuando quieras.",
-    payFirstCta: "Hazte miembro · 25 $/mes",
-    alreadyMember: "¿Ya tienes cuenta?",
-    signInLink: "Inicia sesión",
-    continuingToCheckout: "Yendo al pago…",
-    continueSubscribe: "Continuar · Suscribirse",
-    cancelAnytimeFromAccount: "Cancela cuando quieras desde tu cuenta.",
-    allFreeWatched: "Episodios gratis completados",
-    subscribeBody:
-      "Suscríbete para ver todo el catálogo y los próximos episodios.",
-    benefits:
-      "Todos los episodios · Catálogo completo · Cancela cuando quieras",
-    openInBrowserHeading: "Ábrelo en tu navegador",
-    openInBrowserIos:
-      "Para pagar y entrar a tu cuenta sin problemas, toca ••• arriba y elige «Abrir en Safari» — o copia el enlace y pégalo en tu navegador.",
-    openInBrowserAndroid:
-      "Para pagar y entrar a tu cuenta sin problemas, ábrelo en Chrome.",
-    openInBrowserAndroidCta: "Abrir en Chrome",
-    openInBrowserCopy: "Copiar enlace",
-    openInBrowserCopied: "Enlace copiado",
-    openInBrowserDismiss: "Cerrar",
   },
   signupWall: {
     kicker: "Continúa gratis",
@@ -260,56 +210,6 @@ export const es = {
     alreadyMember: "¿Ya tienes cuenta?",
     signInLink: "Inicia sesión",
     noCardNeeded: "Sin tarjeta. Solo un email.",
-  },
-  subscribe: {
-    membershipKicker: "Membresía",
-    membershipHeadline: "Hazte miembro.",
-    watchEverything: "Disfruta de todo.",
-    cancelAnytimeAll: "Cancela cuando quieras. Todos los originales incluidos.",
-    monthly: "Membresía",
-    monthlyPrice: "25 $",
-    monthlyInterval: "mes",
-    monthlySub: "Se cobra hoy · cancela cuando quieras",
-    secureCheckout: "Pago seguro con Stripe",
-    cancelInOneClick: "Cancela con un clic",
-    fourKWhenAvailable: "4K cuando está disponible",
-    redirectingToCheckout: "Redirigiendo al pago…",
-    continueSubscribe: "Continuar · Suscribirse",
-    withdrawalWaiver:
-      "Solicito que matio comience la reproducción de inmediato y reconozco que pierdo mi derecho de desistimiento de 14 días una vez que comience la reproducción.",
-    // The paywall wallet's one required checkbox (#214): Terms acceptance AND
-    // the withdrawal waiver. Split around the links so the component renders
-    // /terms and /privacy as anchors. Legal copy: approved by the owner
-    // 2026-09-10 (#214); counsel review pending together with /terms.
-    walletConsent: {
-      beforeTerms: "Acepto los ",
-      terms: "Términos del servicio",
-      afterTerms:
-        " y solicito que matio comience la reproducción de inmediato. Entiendo que pierdo mi derecho de desistimiento de 14 días una vez que comience la reproducción.",
-      privacyBefore: "Consulta nuestra ",
-      privacy: "Política de privacidad",
-      privacyAfter: ".",
-    },
-    alreadyMemberKicker: "Ya eres miembro",
-    youreSubscribed: "Estás suscrito.",
-    yourPlanIs: (plan: string, status: string) =>
-      `Tu plan ${plan} está ${status}. Cambia o cancela cuando quieras en tu cuenta.`,
-    manageSubscription: "Gestionar suscripción",
-    backToBrowse: "Volver a explorar",
-  },
-  checkout: {
-    kicker: "Pago seguro",
-    title: "Completa tu membresía.",
-    back: "Volver",
-    loading: "Cargando el pago seguro…",
-    errorBody: "No pudimos cargar el pago. Inténtalo de nuevo.",
-    rateLimitedBody:
-      "Demasiados intentos de pago. Vuelve a intentarlo dentro de una hora.",
-    expiredBody:
-      "Este pago caducó porque empezaste otro más reciente — en otra pestaña o desde el reproductor. Inténtalo de nuevo para continuar aquí.",
-    walletFailed:
-      "El pago con el monedero no se completó. Puedes seguir uniéndote con tarjeta.",
-    retry: "Reintentar",
   },
   welcome: {
     kicker: "Membresía activa",
@@ -342,12 +242,6 @@ export const es = {
     codeWrong: "Código incorrecto o caducado. Inténtalo de nuevo.",
     wrongEmail: "¿No es tu correo? Escríbenos a maksym@matio.tv",
   },
-  notFound: {
-    code: "404",
-    title: "No está en el catálogo.",
-    body: "Esta página se movió, dejó de publicarse o nunca existió. Vuelve al catálogo y continúa donde lo dejaste.",
-    backHome: "Volver al inicio",
-  },
   appError: {
     kicker: "Algo falló",
     title: "Cogeremos la siguiente toma.",
@@ -355,119 +249,6 @@ export const es = {
     refLabel: "ref",
     tryAgain: "Intentar de nuevo",
     backHome: "Volver al inicio",
-  },
-  globalError: {
-    kicker: "Algo falló",
-    title: "Cogeremos la siguiente toma.",
-    body: "El diseño base no pudo cargarse. Actualiza la página o inténtalo dentro de un momento.",
-    refLabel: "ref",
-    tryAgain: "Intentar de nuevo",
-  },
-  metadata: {
-    siteTitle: "matio — historias originales en streaming",
-    siteTitleTemplate: "%s · matio",
-    siteDescription:
-      "El hogar en streaming por suscripción para historias originales en formato corto. Mira los primeros 60 segundos gratis.",
-    // Payments-off variants (lib/free-mode.ts): the indexed copy must not
-    // promise a subscription gate or a 60s preview that no longer exists.
-    siteDescriptionFree:
-      "El hogar en streaming de historias originales en formato corto. Todo el catálogo, gratis.",
-    twitterTitle: "matio",
-    twitterDescription:
-      "Historias originales en streaming. Mira los primeros 60 segundos gratis.",
-    twitterDescriptionFree:
-      "Historias originales en streaming. Todo el catálogo, gratis.",
-  },
-  og: {
-    kicker: "Streaming de originales",
-    title: ["Historias originales,", "en streaming."],
-    tagline: "Mira los primeros 60 segundos gratis.",
-    taglineFree: "Míralo todo gratis.",
-  },
-  about: {
-    metaTitle: "Acerca de Matio",
-    metaDescription:
-      "Matio es un estudio independiente: historias románticas oscuras y series cortas creadas con más de 12 herramientas de IA, del guion al fotograma final.",
-    heroBadge: "Acerca de matio",
-    heroTitle1: "Mundos de historias.",
-    heroTitle2: "Un estudio.",
-    // La variante «free» añade la frase de gratuidad; con pagos activados se
-    // muestra la neutra (la página está indexada — nada de afirmar «gratis»
-    // cuando no lo es).
-    heroSub:
-      "Historias románticas oscuras y series cortas — escritas, producidas y estrenadas bajo un mismo techo.",
-    heroSubFree:
-      "Historias románticas oscuras y series cortas — escritas, producidas y estrenadas bajo un mismo techo. Míralo todo gratis.",
-    heroAlt: "Fotograma de una producción de Matio",
-    browseCta: "Explorar el catálogo",
-    pressCta: "Prensa y partners",
-    missionLabel: "Nuestra misión",
-    missionHeading:
-      "Creamos historias románticas oscuras y series cortas usando más de 12 herramientas de IA.",
-    missionBody:
-      "Todo el proceso — del guion al fotograma final — ocurre dentro del equipo, sin intermediarios y sin comprometer la calidad.",
-    missionAlt: "Still de producción de Matio",
-    visionLabel: "Nuestra visión",
-    visionHeading:
-      "La producción con IA no es un atajo: es un nuevo instrumento para el cine de autor.",
-    visionBody:
-      "La tecnología libera al equipo del trabajo rutinario y nos da más tiempo para la historia, la atmósfera y los personajes. Nuestra meta es ser un estudio cuyas series se reconozcan por un solo fotograma, no por un título.",
-    visionAlt: "Still de producción de Matio",
-    manifestLine1: "Atrapa al espectador desde la primera escena.",
-    manifestLine2: "No lo sueltes hasta el final.",
-    manifestCaption: "EL PRINCIPIO QUE SOSTIENE CADA EPISODIO",
-    // El principio «nunca pagan» solo puede imprimirse mientras el sitio es
-    // gratuito; en modo de pago la lista se reduce a tres.
-    principlesFree: [
-      "La historia la decide la idea, no el presupuesto",
-      "Cada detalle sirve a la atmósfera",
-      "Los espectadores nunca pagan",
-      "Hacemos lo que nosotros mismos querríamos ver",
-    ],
-    principlesPaid: [
-      "La historia la decide la idea, no el presupuesto",
-      "Cada detalle sirve a la atmósfera",
-      "Hacemos lo que nosotros mismos querríamos ver",
-    ],
-    pressBannerKicker: "¿Periodista o partner?",
-    pressBannerHeading: "Boilerplate, stills y datos — en la página de prensa.",
-    pressBannerCta: "Ir a la página de prensa",
-    bodyWho:
-      "Matio es un proyecto de DEEP ORDINARY LTD, sociedad registrada en Inglaterra y Gales (n.º 17381666).",
-  },
-  press: {
-    metaTitle: "Prensa — Matio",
-    metaDescription:
-      "Sala de prensa de Matio: boilerplate, kit de prensa con marcas y stills, y contacto para entrevistas y screeners.",
-    kicker: "Matio · Prensa y partners",
-    title1: "Sala de",
-    title2: "prensa.",
-    boilerplate:
-      "Matio es un estudio independiente que crea historias románticas oscuras y series cortas con más de 12 herramientas de IA. Todo el proceso — del guion al fotograma final — ocurre dentro del equipo. Matio es un proyecto de DEEP ORDINARY LTD, sociedad registrada en Inglaterra y Gales (n.º 17381666).",
-    boilerplateFree:
-      "Matio es un estudio independiente que crea historias románticas oscuras y series cortas con más de 12 herramientas de IA. Todo el proceso — del guion al fotograma final — ocurre dentro del equipo. Cada episodio se puede ver gratis. Matio es un proyecto de DEEP ORDINARY LTD, sociedad registrada en Inglaterra y Gales (n.º 17381666).",
-    boilerplateNote: "USA ESTE PÁRRAFO TAL CUAL COMO BOILERPLATE.",
-    kitKicker: "Kit de prensa",
-    kitHeading: "Todo en una carpeta.",
-    kitBody:
-      "Marcas, wordmark y stills de producción — listos para uso editorial.",
-    kitDownload: "Descargar el kit · ZIP",
-    cardLogomark: "Logomark",
-    cardLogomarkMeta: "PNG",
-    cardWordmark: "Wordmark",
-    cardWordmarkMeta: "PNG",
-    cardStills: "Stills",
-    cardStillsMeta: "4 × JPEG",
-    usageLabel: "Uso —",
-    usageBody:
-      "la marca dorada solo sobre espresso o rojo de marca. No la recolorees, contornees ni rotes.",
-    contactKicker: "Contacto de prensa",
-    contactBody:
-      "Entrevistas, screeners, stills más allá del kit — respondemos en dos días laborables.",
-    websiteAria: "Sitio web",
-    logomarkAlt: "Logomark de Matio",
-    wordmarkAlt: "Wordmark de Matio",
-    stillsAlt: "Still de producción de Matio",
   },
   footer: {
     sectionLegal: "Legal",
@@ -486,34 +267,15 @@ export const es = {
     tagline: "Mundos de historias. Un estudio.",
     copyright: (year: number) => `© ${year} matio · DEEP ORDINARY LTD`,
   },
-  cookieBanner: {
-    title: "Cookies en matio",
-    body: "Usamos cookies esenciales para que el servicio funcione y cookies de marketing para entender qué campañas funcionan. Tú decides.",
-    learnMore: "Más información",
-    acceptAll: "Aceptar todas",
-    essentialOnly: "Solo esenciales",
-  },
-  legal: {
-    backHome: "Volver al inicio",
-    lastUpdated: (date: string) => `Última actualización: ${date}`,
-    termsTitle: "Términos del servicio",
-    privacyTitle: "Política de privacidad",
-    cookiesTitle: "Política de cookies",
-    termsDescription:
-      "Términos del servicio de Matio: uso de la plataforma, cuentas, contenido y facturación.",
-    privacyDescription:
-      "Cómo Matio recoge, usa y protege tus datos personales, y qué derechos tienes.",
-    cookiesDescription:
-      "Qué cookies usa Matio, para qué sirven y cómo gestionar tu consentimiento.",
-  },
 };
 
-// `Dict` is structurally defined by the Spanish dictionary so the English
-// one is type-checked against the same shape. Functions stay typed
-// (parameter + return type are inferred via `typeof es`).
-export type Dict = typeof es;
+// `Dict` is structurally defined by the English dictionary — the whole site's
+// copy; `SharedDict` is the part of it the app also renders in Spanish.
+// Functions stay typed (parameter + return type are inferred via `typeof en`).
+export type Dict = typeof en;
+export type SharedDict = Pick<Dict, SharedSection>;
 
-export const en: Dict = {
+export const en = {
   htmlLang: "en",
   language: {
     label: "Language",
@@ -996,8 +758,8 @@ export const en: Dict = {
   },
 };
 
-export const DICTS = { es, en } as const;
-
-export function dictFor(locale: Locale): Dict {
+// The app's dictionary for its chosen language. The site never calls this —
+// it renders `en`.
+export function dictFor(locale: Locale): SharedDict {
   return locale === "en" ? en : es;
 }

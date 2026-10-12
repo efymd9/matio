@@ -5,37 +5,11 @@
 // etc.). Must declare <html>/<body> because the root layout is what
 // failed, so no other layout is wrapping us.
 //
-// The LocaleProvider lives inside the failed root layout, so we can't
-// useT() here. Instead we read the locale cookie directly off
-// document.cookie via useSyncExternalStore (SSR-safe; returns the
-// default locale on the server) and pluck the right dict from there.
-// With no cookie we fall back to navigator.languages — the client-side
-// mirror of the Accept-Language detection getLocale() does on the server
-// (lib/i18n/negotiate.ts) — so a detected-ES visitor doesn't get an
-// English crash screen. Geo isn't available client-side; default copy is
-// fine for that sliver.
+// English, like the rest of the site (#445) — the dictionary is imported
+// directly, so nothing here depends on the layout that just failed.
 
-import { useEffect, useSyncExternalStore } from "react";
-import { dictFor, DEFAULT_LOCALE, type Locale } from "@/lib/i18n/dictionaries";
-import { pickFromLanguageTags } from "@/lib/i18n/negotiate";
-
-const LOCALE_COOKIE = "locale";
-
-function readClientLocale(): Locale {
-  if (typeof document === "undefined") return DEFAULT_LOCALE;
-  const match = document.cookie.match(
-    new RegExp(`(?:^|; )${LOCALE_COOKIE}=([^;]+)`),
-  );
-  const value = match?.[1];
-  if (value === "en" || value === "es") return value;
-  return (
-    pickFromLanguageTags(
-      typeof navigator !== "undefined" ? navigator.languages ?? [] : [],
-    ) ?? DEFAULT_LOCALE
-  );
-}
-
-const subscribe = () => () => {};
+import { useEffect } from "react";
+import { en as t } from "@/lib/i18n/dictionaries";
 
 export default function GlobalError({
   error,
@@ -44,13 +18,6 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const locale = useSyncExternalStore(
-    subscribe,
-    readClientLocale,
-    () => DEFAULT_LOCALE,
-  );
-  const t = dictFor(locale);
-
   useEffect(() => {
     console.error(error);
   }, [error]);

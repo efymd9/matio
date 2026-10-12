@@ -2,14 +2,15 @@ import { prerender } from "react-dom/static";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // #312 — /privacy §11 «Our mobile app» (App Store 5.1.1(i), art. 13): the
-// notice for what the app collects, in both languages, and in the `?embed=app`
-// variant the app itself opens (#310) — the same page component, so the app's
-// readers get the same section. The section is DRAFT legal copy; what these
-// cases pin is that it is there, in the reader's language, and that its
-// numbers are the code's: the retention windows are read from lib/retention.ts,
-// and §6 — which that module cites — keeps its number.
+// notice for what the app collects, and in the `?embed=app` variant the app
+// itself opens (#310) — the same page component, so the app's readers get the
+// same section. The section is DRAFT legal copy; what these cases pin is that
+// it is there and that its numbers are the code's: the retention windows are
+// read from lib/retention.ts, and §6 — which that module cites — keeps its
+// number. English only since #445: the Spanish twin of the page is gone, and
+// `otherHeading` proves it never renders.
 //
-// Real getDict/getLocale and LegalLink: only the request is faked, as in
+// Real getDict and LegalLink: only the request is faked, as in
 // ../legal-embed.test.tsx.
 
 const h = vi.hoisted(() => ({ headers: new Map<string, string>() }));
@@ -27,8 +28,8 @@ vi.mock("@sentry/nextjs", () => ({ captureMessage: () => undefined }));
 import { RETENTION_POLICIES } from "@/lib/retention";
 import PrivacyPage from "./page";
 
-function request(opts: { embed?: boolean; locale: "en" | "es" }) {
-  h.headers = new Map([["x-matio-locale", opts.locale]]);
+function request(opts: { embed?: boolean }) {
+  h.headers = new Map();
   if (opts.embed) h.headers.set("x-matio-embed", "app");
 }
 
@@ -96,47 +97,16 @@ const CASES = [
       "maksym@matio.tv",
     ],
   },
-  {
-    locale: "es",
-    id: "aplicacion",
-    heading: "11. Nuestra aplicación móvil",
-    otherHeading: "11. Our mobile app",
-    contact: "12. Contacto",
-    retentionHeading: "6. Cuánto los conservamos",
-    facts: [
-      "identificador aleatorio (un UUID)",
-      "llavero",
-      "puede conservar el identificador después de eliminar la aplicación",
-      "no vincula el identificador a tu cuenta",
-      "interés legítimo",
-      "tramos de 10 segundos",
-      "no contienen ningún",
-      `se eliminan ${trialWindowDays} días`,
-      "seis horas",
-      "puede quedar vinculado a esa cuenta",
-      "Clerk",
-      "progreso de reproducción",
-      `hasta ${watchDaysWindowMonths} meses`,
-      "Vercel y Neon",
-      "Mux",
-      "Informes de errores",
-      "Functional Software, Inc.",
-      "nunca una captura",
-      "Cuenta → Eliminar cuenta",
-      "Registros de pago y fiscales",
-      "maksym@matio.tv",
-    ],
-  },
 ] as const;
 
-beforeEach(() => request({ locale: "en" }));
+beforeEach(() => request({}));
 
 describe.each(CASES)("/privacy ($locale) — the app section", (c) => {
   it.each([
     { variant: "the normal page", embed: false },
     { variant: "the app's embed page", embed: true },
-  ])("is in $variant, in the reader's language, with its facts", async ({ embed }) => {
-    request({ locale: c.locale, embed });
+  ])("is in $variant, with its facts", async ({ embed }) => {
+    request({ embed });
     const html = await render();
 
     const titles = headings(html);
@@ -150,7 +120,7 @@ describe.each(CASES)("/privacy ($locale) — the app section", (c) => {
   });
 
   it("slots in as §11 before Contact, leaving §1–§10 — and §6, which the retention cron cites — where they were", async () => {
-    request({ locale: c.locale });
+    request({});
     const titles = headings(await render());
 
     expect(titles.map((t) => Number.parseInt(t, 10))).toEqual(

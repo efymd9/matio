@@ -144,9 +144,9 @@ export const LongLabels: Story = {
   },
 };
 
-// Spanish row copy — the layout has to hold longer strings; the chrome
-// strings follow the site locale (the Lab has no provider, so they stay
-// English here).
+// Spanish row copy — the layout has to hold longer strings (the watch page
+// still falls back to a row's Spanish when its English is missing); the
+// chrome strings are English, the site's only language since #445.
 export const SpanishCopy: Story = {
   args: {
     prompt: "¿Le besa o se marcha?",

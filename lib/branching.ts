@@ -62,8 +62,9 @@ export function resolveNextStep<
 // ---------- player: candidates, listing, display numbers (#144) ----------
 
 // One option of a fork as the PLAYER receives it: the label is already
-// localized by the watch page (app/watch/[showSlug]/page.tsx picks es/en
-// from the row; the player never reads the locale for database copy).
+// picked by the watch page (app/watch/[showSlug]/page.tsx takes the English
+// from the row, Spanish only as a fallback — the site is English-only since
+// #445; the player never reads the locale for database copy).
 export type PlayerChoice = {
   toEpisodeId: string;
   position: number;
@@ -384,9 +385,10 @@ export function validateForkDraft(
     };
   }
 
-  // A real fork: viewer copy in BOTH site locales, and every option must be
-  // a branch of THIS episode (a fork into a listed episode would make it
-  // reachable twice — by position and by choice).
+  // A real fork: viewer copy in BOTH es and en (still required although the
+  // web shows only the English since #445 — docs/registry.md), and every
+  // option must be a branch of THIS episode (a fork into a listed episode
+  // would make it reachable twice — by position and by choice).
   if (!promptEn || !promptEs) return fail("fork_prompt_required");
   for (const c of draft.choices) {
     if (!c.labelEn.trim() || !c.labelEs.trim()) {

@@ -850,15 +850,17 @@ Safe orders, by migration type:
 
 ## i18n / locale switching
 
+The public site is English-only since #445 — its switcher, `LocaleProvider` and `locale` cookie are gone. Both notes below now describe the **admin panel's** ru/en switch (`lib/i18n/admin-client.tsx` + `admin-actions.ts`), which was built on the same pattern and keeps it.
+
 ### Optimistic locale state, not just context
 
-The `LocaleProvider` (`lib/i18n/client.tsx`) holds the current locale in `useState` seeded from a server prop. `useSetLocale` flips state + writes `document.cookie` synchronously, then fires the `setLocale` server action + `router.refresh()` in the background. The whole tree re-renders with the new dictionary on the same tick the user clicks — without the optimistic state, every locale change blocked on a server action + `revalidatePath` + `router.refresh()` roundtrip and felt molasses-slow.
+The `AdminLocaleProvider` (`lib/i18n/admin-client.tsx`) holds the current locale in `useState` seeded from a server prop. Its setter flips state + writes `document.cookie` synchronously, then fires the `setAdminLocale` server action + `router.refresh()` in the background. The whole tree re-renders with the new dictionary on the same tick the user clicks — without the optimistic state, every locale change blocked on a server action + `revalidatePath` + `router.refresh()` roundtrip and felt molasses-slow.
 
 An "adjust state during render" block reconciles state if the prop later changes (e.g. another tab flipped the cookie and a refresh streamed in new RSC for this tab). React's `useState` initial value is sticky after mount — without the reconciliation, cross-tab updates would never propagate to the React tree. The earlier `useEffect(() => setLocaleState(initialLocale), [initialLocale])` version was the obvious shape but tripped React 19's `react-hooks/set-state-in-effect` rule; comparing the prop against a `prevInitialLocale` state during render is React's documented replacement and avoids the cascading render the rule warns about.
 
 ### Locale cookie is intentionally `httpOnly: false`
 
-`actions.ts` sets the locale cookie with `httpOnly: false` so the optimistic provider can mirror the value via `document.cookie` before the server action's `Set-Cookie` lands. This isn't a security regression — the locale isn't an auth token, just a UI preference. Anything authentication-related stays `httpOnly: true`.
+`admin-actions.ts` sets the `admin_locale` cookie with `httpOnly: false` so the optimistic provider can mirror the value via `document.cookie` before the server action's `Set-Cookie` lands. This isn't a security regression — the locale isn't an auth token, just a UI preference. Anything authentication-related stays `httpOnly: true`.
 
 ## TypeScript / build
 

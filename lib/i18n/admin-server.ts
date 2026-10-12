@@ -11,7 +11,7 @@ import {
 } from "./admin-dictionaries";
 import { ADMIN_LOCALE_COOKIE_NAME } from "./admin-shared";
 
-// Mirrors the public LOCALE_COOKIE re-export naming (lib/i18n/server.ts).
+// The cookie's name, re-exported for server-side callers.
 export const ADMIN_LOCALE_COOKIE = ADMIN_LOCALE_COOKIE_NAME;
 
 // Resolve the admin locale for this request. Russian is the default; the

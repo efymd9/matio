@@ -1,30 +1,34 @@
 // DRAFT pending legal-counsel review. Trading party + contact details
 // filled 2026-05-27; entity updated 2026-08-16; §5 price rewritten 2026-09-09 (#208) — visible "Last updated" set to that edition in #214 (DEEP ORDINARY LTD, England
 // & Wales). The Stripe Checkout consent_collection.terms_of_service flow
-// (digital-content waiver, §6) is wired in app/subscribe/actions.ts.
+// (digital-content waiver, §6) is wired in app/subscribe/actions.ts. English
+// only since #445 (2026-10-12): the Spanish version was withdrawn with the
+// site's Spanish — it is in git history. Withdrawing a translation is not a
+// new edition: the English text did not change by a word, so "Last updated"
+// stays at the 2026-09-09 edition and keeps matching lib/wallet-checkout.ts
+// TOS_VERSION (#214).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalLink } from "@/components/site/legal-link";
 import { isAppEmbed, legalPageRobots } from "@/lib/app-embed-server";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { getDict } from "@/lib/i18n/server";
-import { localeAlternates } from "@/lib/seo";
+import { canonicalUrl } from "@/lib/seo";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { locale, t } = await getDict();
+  const { t } = await getDict();
   return {
     title: t.legal.termsTitle,
     description: t.legal.termsDescription,
-    alternates: localeAlternates("/terms", locale),
+    alternates: { canonical: canonicalUrl("/terms") },
     robots: await legalPageRobots(),
   };
 }
 
-const LAST_UPDATED_ES = "9 de septiembre de 2026";
-const LAST_UPDATED_EN = "September 9, 2026";
+const LAST_UPDATED = "September 9, 2026";
 
 export default async function TermsPage() {
-  const { locale, t } = await getDict();
+  const { t } = await getDict();
   const embed = await isAppEmbed();
   // Free pivot: with payments off, §4 (60s preview) and §5-6 (pricing /
   // billing / withdrawal) describe a purchase flow that doesn't currently
@@ -49,36 +53,21 @@ export default async function TermsPage() {
             {t.legal.termsTitle}
           </h1>
           <p className="font-mono text-[11px] text-cream/45">
-            {t.legal.lastUpdated(locale === "en" ? LAST_UPDATED_EN : LAST_UPDATED_ES)}
+            {t.legal.lastUpdated(LAST_UPDATED)}
           </p>
         </header>
         {!paymentsOn && (
           <div className="mb-10 rounded-lg border border-white/[0.12] bg-white/[0.04] p-4 text-sm leading-relaxed text-white/75">
-            {locale === "en" ? (
-              <>
-                <strong>Notice:</strong> payments are currently disabled on
-                matio — all content is free to watch and no new subscriptions
-                or trials can be purchased. The preview, pricing and billing
-                sections below apply only while payments are enabled and to
-                memberships purchased before this change; existing memberships
-                can still be managed and cancelled via the Stripe Customer
-                Portal.
-              </>
-            ) : (
-              <>
-                <strong>Aviso:</strong> los pagos están desactivados
-                actualmente en matio: todo el contenido puede verse gratis y no
-                se pueden comprar nuevas suscripciones ni pruebas. Las
-                secciones sobre vista previa, precios y facturación se aplican
-                solo mientras los pagos estén activados y a las membresías
-                compradas antes de este cambio; las membresías existentes
-                pueden gestionarse y cancelarse desde el Portal de cliente de
-                Stripe.
-              </>
-            )}
+            <strong>Notice:</strong> payments are currently disabled on
+            matio — all content is free to watch and no new subscriptions
+            or trials can be purchased. The preview, pricing and billing
+            sections below apply only while payments are enabled and to
+            memberships purchased before this change; existing memberships
+            can still be managed and cancelled via the Stripe Customer
+            Portal.
           </div>
         )}
-        {locale === "en" ? <TermsEn /> : <TermsEs />}
+        <TermsEn />
         {/* No way «home» in the app's embed (#310): home is the full site. */}
         {!embed && (
           <div className="mt-12 border-t border-white/[0.06] pt-6">
@@ -283,218 +272,6 @@ function TermsEn() {
           See also the <LegalLink href="/privacy" className="underline underline-offset-2 hover:text-white">Privacy Policy</LegalLink>{" "}
           and{" "}
           <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</LegalLink>.
-        </p>
-      </Section>
-    </div>
-  );
-}
-
-function TermsEs() {
-  return (
-    <div className="prose-legal space-y-8 text-[15px] leading-relaxed text-white/75">
-      <Section id="aceptacion" title="1. Aceptación de estos términos">
-        <p>
-          Estos Términos del servicio (los &laquo;Términos&raquo;) constituyen un
-          contrato vinculante entre tú y DEEP ORDINARY LTD (&laquo;matio&raquo;,
-          &laquo;nosotros&raquo;), sociedad registrada en Inglaterra y Gales
-          (n.º&nbsp;17381666), con domicilio social en 66 Paul Street, Londres
-          EC2A&nbsp;4NA, Reino Unido. Al crear
-          una cuenta o pagar una suscripción, confirmas que has leído,
-          comprendido y aceptado estos Términos. Si no los aceptas, no utilices
-          el servicio.
-        </p>
-        <p>
-          Debes tener al menos 16 años para crear una cuenta. Si eres menor, un
-          padre, madre o tutor legal debe aceptar en tu nombre.
-        </p>
-      </Section>
-
-      <Section id="servicio" title="2. El servicio">
-        <p>
-          matio es un servicio de streaming de vídeo por suscripción que ofrece
-          contenido original de formato corto (el &laquo;Contenido&raquo;) en{" "}
-          <strong>matio.tv</strong> y dominios sucesores. El acceso se presta a
-          través de internet en navegadores y dispositivos compatibles. Podemos
-          añadir, modificar o eliminar Contenido en cualquier momento a nuestra
-          discreción editorial.
-        </p>
-      </Section>
-
-      <Section id="cuenta" title="3. Tu cuenta">
-        <p>
-          Utilizamos Clerk para gestionar el registro y el inicio de sesión.
-          Eres responsable de mantener la confidencialidad de tus credenciales y
-          de todo lo que ocurra en tu cuenta. Avísanos de inmediato si sospechas
-          un uso no autorizado.
-        </p>
-      </Section>
-
-      <Section id="vista-previa" title="4. Vista previa gratuita">
-        <p>
-          Cada serie ofrece una vista previa gratuita de 60 segundos por sesión
-          de navegador, sin necesidad de cuenta. Usamos una cookie HTTP-only y
-          un hash HMAC de tu dirección IP para limitar las vistas previas a
-          tres por red y hora, evitando que se conviertan en un sustituto del
-          servicio de pago. La vista previa es una cortesía comercial y puede
-          modificarse o eliminarse sin previo aviso.
-        </p>
-      </Section>
-
-      <Section id="suscripcion" title="5. Suscripción, precio y renovación">
-        <p>
-          La membresía cuesta <strong>25 USD al mes</strong>, con cargo hoy y
-          después automáticamente cada mes hasta que se cancele, más el IVA,
-          impuesto sobre ventas u otro tributo indirecto aplicable en tu país
-          de facturación (calculado automáticamente por Stripe Tax al pagar).
-          No hay periodo de prueba ni cuota introductoria aparte.
-        </p>
-        <p>
-          Puedes cancelar en cualquier momento desde el Portal del Cliente de
-          Stripe — accesible a través del menú &laquo;Gestionar
-          suscripción&raquo; — y la cancelación surtirá efecto al final del
-          periodo facturado en curso. No reembolsamos meses parciales. Si un
-          pago falla, lo reintentamos; el acceso puede suspenderse o cancelarse
-          si la incidencia no se resuelve.
-        </p>
-        <p>
-          Podemos modificar el precio o la estructura del plan. Te avisaremos
-          por correo electrónico con al menos 30 días de antelación y el cambio
-          se aplicará a partir de la siguiente renovación: puedes cancelar antes
-          si no aceptas las nuevas condiciones.
-        </p>
-      </Section>
-
-      <Section id="desistimiento" title="6. Contenido digital — derecho de desistimiento">
-        <p>
-          El servicio matio es contenido digital que se entrega de forma
-          inmediata al contratar la suscripción. Al suscribirte{" "}
-          <strong>solicitas expresamente que iniciemos el suministro de
-          inmediato y reconoces que pierdes tu derecho legal de desistimiento
-          de 14 días en cuanto comienza la reproducción</strong>{" "}
-          (artículo 16.m de la Directiva 2011/83/UE y normativa española y
-          europea equivalente). Si eres consumidor en la UE o el Reino Unido,
-          debes marcar la casilla de consentimiento en el pago para
-          confirmarlo; sin ese consentimiento, la suscripción no puede
-          iniciarse.
-        </p>
-      </Section>
-
-      <Section id="licencia" title="7. Licencia y uso aceptable">
-        <p>
-          Mientras tu suscripción esté activa, te concedemos una licencia
-          personal, intransferible, no exclusiva y revocable para reproducir el
-          Contenido en tus dispositivos con fines privados y no comerciales.
-        </p>
-        <p>Te comprometes a no:</p>
-        <ul className="ml-5 list-disc space-y-1">
-          <li>descargar, copiar, grabar la pantalla, transcodificar, recopilar o redistribuir el Contenido;</li>
-          <li>eludir o intentar eludir cualquier control de acceso, marca de agua, token o protección técnica;</li>
-          <li>compartir tu cuenta, contraseña o sesión con nadie;</li>
-          <li>utilizar el servicio para emisiones comerciales o representaciones públicas;</li>
-          <li>utilizar bots, herramientas automatizadas o pruebas de carga contra el servicio.</li>
-        </ul>
-        <p>
-          Podemos suspender o cancelar el acceso si tenemos motivos razonables
-          para creer que has incumplido estos Términos.
-        </p>
-      </Section>
-
-      <Section id="propiedad" title="8. Propiedad intelectual">
-        <p>
-          Todo el Contenido, software, diseño, marcas y demás material del
-          servicio son propiedad de matio o de nuestros licenciantes y están
-          protegidos por la legislación de propiedad intelectual. Nada en
-          estos Términos transfiere esos derechos.
-        </p>
-      </Section>
-
-      <Section id="pagos" title="9. Pagos y Stripe">
-        <p>
-          Los pagos los procesa Stripe Payments Europe Ltd y sus afiliadas. Al
-          suscribirte aceptas también los términos aplicables de Stripe. No
-          vemos ni almacenamos los datos completos de tu tarjeta de pago.
-        </p>
-      </Section>
-
-      <Section id="garantia" title="10. Exención de garantías">
-        <p>
-          El servicio se presta <em>tal cual</em> y <em>según disponibilidad</em>.
-          En la máxima medida permitida por la ley, declinamos las garantías
-          implícitas de comerciabilidad, idoneidad para un fin concreto y no
-          infracción. No prometemos disponibilidad ininterrumpida, ni que un
-          Contenido específico permanezca disponible, ni que el servicio esté
-          libre de defectos o errores. Nada en estos Términos limita los
-          derechos del consumidor que no pueden limitarse o excluirse según la
-          legislación aplicable.
-        </p>
-      </Section>
-
-      <Section id="responsabilidad" title="11. Limitación de responsabilidad">
-        <p>
-          En la máxima medida permitida por la ley, nuestra responsabilidad
-          total agregada derivada de o relacionada con estos Términos o con el
-          servicio se limita a la cantidad mayor entre (a) lo que nos hayas
-          pagado en los 12 meses anteriores al hecho que dio lugar a la
-          reclamación, o (b) 100 USD. No respondemos por daños indirectos,
-          incidentales, consecuenciales o punitivos, lucro cesante, pérdida de
-          datos o de oportunidades de negocio. Nada de esto excluye la
-          responsabilidad por fallecimiento, lesiones personales por
-          negligencia, dolo, ni cualquier otra responsabilidad que la ley no
-          permita excluir.
-        </p>
-      </Section>
-
-      <Section id="terminacion" title="12. Terminación">
-        <p>
-          Puedes dejar de usar el servicio en cualquier momento. Podemos
-          suspender o cancelar tu acceso si incumples estos Términos o por
-          motivos legales, regulatorios u operativos. Tras la terminación,
-          permanecerán vigentes las secciones 7 (Licencia), 8 (Propiedad
-          intelectual), 10 (Exención de garantías), 11 (Responsabilidad), 13
-          (Legislación aplicable) y cualquier otra que deba sobrevivir
-          razonablemente.
-        </p>
-      </Section>
-
-      <Section id="ley" title="13. Legislación aplicable y resolución de litigios">
-        <p>
-          Estos Términos se rigen por la legislación de England and Wales. Los
-          tribunales de England and Wales tienen jurisdicción exclusiva sobre los
-          litigios, salvo que el consumidor pueda invocar protecciones
-          imperativas de la ley de su residencia habitual. También puedes
-          recurrir a la plataforma europea de resolución de litigios en línea
-          en{" "}
-          <a
-            href="https://ec.europa.eu/consumers/odr"
-            className="underline underline-offset-2 hover:text-white"
-          >
-            ec.europa.eu/consumers/odr
-          </a>
-          .
-        </p>
-      </Section>
-
-      <Section id="cambios" title="14. Cambios en estos términos">
-        <p>
-          Podemos actualizar estos Términos. Si un cambio es sustancial te
-          avisaremos con un plazo razonable (normalmente por correo electrónico
-          y mediante un aviso en el servicio). El uso continuado tras la
-          entrada en vigor del cambio constituye aceptación.
-        </p>
-      </Section>
-
-      <Section id="contacto" title="15. Contacto">
-        <p>
-          Para cualquier consulta sobre estos Términos o el servicio:{" "}
-          <strong>maksym@matio.tv</strong>. Consulta también la{" "}
-          <LegalLink href="/privacy" className="underline underline-offset-2 hover:text-white">
-            Política de privacidad
-          </LegalLink>{" "}
-          y la{" "}
-          <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">
-            Política de cookies
-          </LegalLink>
-          .
         </p>
       </Section>
     </div>

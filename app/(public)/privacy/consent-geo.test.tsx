@@ -23,11 +23,11 @@ vi.mock("next/headers", () => ({
 vi.mock("next/link", async () => await import("@/tools/test/next-link-probe"));
 
 import { marketingConsentRequired } from "@/lib/cookie-consent";
-import { en, es } from "@/lib/i18n/dictionaries";
+import { en } from "@/lib/i18n/dictionaries";
 import PrivacyPage from "./page";
 
-async function render(locale: "en" | "es"): Promise<string> {
-  h.headers = new Map([["x-matio-locale", locale]]);
+async function render(): Promise<string> {
+  h.headers = new Map();
   const { prelude } = await prerender(await PrivacyPage());
   return new Response(prelude).text();
 }
@@ -65,16 +65,6 @@ const CASES = [
     footerLabel: `“${en.footer.cookiePreferences}” in the footer`,
     basis: "consent",
   },
-  {
-    locale: "es",
-    purposes: "finalidades",
-    collect: "datos",
-    ideasMarker: "Ideas de historias",
-    regions: "UE/EEE, el Reino Unido y Suiza",
-    onByDefault: "en el resto del mundo están activadas por defecto",
-    footerLabel: `«${es.footer.cookiePreferences}», en el pie de página`,
-    basis: "consentimiento",
-  },
 ] as const;
 
 describe("/privacy §3 — marketing measurement and the geo-aware consent default (#342)", () => {
@@ -91,7 +81,7 @@ describe("/privacy §3 — marketing measurement and the geo-aware consent defau
   it.each(CASES)(
     "($locale) asks for consent only where the banner does, and points everyone else to the footer opt-out",
     async (c) => {
-      const html = await render(c.locale);
+      const html = await render();
       const marketing = item(section(html, c.purposes), "attribution_first");
       expect(marketing).not.toBe("");
 
@@ -112,7 +102,7 @@ describe("/privacy §3 — marketing measurement and the geo-aware consent defau
   it.each(CASES)(
     "($locale) says the same as the §2 ideas item: the same regions, the same footer control",
     async (c) => {
-      const html = await render(c.locale);
+      const html = await render();
       const ideas = item(section(html, c.collect), c.ideasMarker);
       const marketing = item(section(html, c.purposes), "attribution_first");
       expect(ideas).not.toBe("");
@@ -148,27 +138,13 @@ const TOOL_CASES = [
       "Mux Data",
     ],
   },
-  {
-    locale: "es",
-    purposes: "finalidades",
-    improveMarker: "Para mejorar el servicio",
-    regions: "UE/EEE, el Reino Unido y Suiza",
-    tools: [
-      "Meta Pixel",
-      "API de Conversiones de Meta",
-      "PostHog",
-      "Google Analytics",
-      "píxel de medición de ChatGPT Ads",
-      "Mux Data",
-    ],
-  },
 ] as const;
 
 describe("/privacy §3 — every consent-gated measurement tool sits under the consent item (#420)", () => {
   it.each(TOOL_CASES)(
     "($locale) names Mux Data and the ChatGPT Ads pixel in the consent item, before its basis sentence",
     async (c) => {
-      const html = await render(c.locale);
+      const html = await render();
       const marketing = item(section(html, c.purposes), "attribution_first");
       const basisAt = marketing.indexOf(c.regions);
       expect(basisAt).toBeGreaterThan(-1);
@@ -183,7 +159,7 @@ describe("/privacy §3 — every consent-gated measurement tool sits under the c
   it.each(TOOL_CASES)(
     "($locale) no longer files Mux Data under the legitimate-interests item — §3 names it once",
     async (c) => {
-      const purposes = section(await render(c.locale), c.purposes);
+      const purposes = section(await render(), c.purposes);
       const improve = item(purposes, c.improveMarker);
       expect(improve).not.toBe("");
       expect(improve).not.toContain("Mux");
@@ -219,18 +195,6 @@ const ELSEWHERE_CASES = [
       "after you accept marketing cookies",
     ],
   },
-  {
-    ...CASES[1],
-    tools: TOOL_CASES[1].tools,
-    sharing: "encargados",
-    attributionMarker: "Datos de atribución",
-    defaultWord: "por defecto",
-    consentPhrase: "cookies de marketing",
-    oldPhrases: [
-      "Si aceptas las cookies de marketing",
-      "tras aceptar las cookies de marketing",
-    ],
-  },
 ] as const;
 
 // The §4 rows whose processing the marketing switch turns on: Meta (Pixel +
@@ -246,7 +210,7 @@ describe("/privacy §2 and §4 — the same geo rule and the same tools as §3 (
   it.each(ELSEWHERE_CASES)(
     "($locale) §2 names every tool §3 names, then the banner regions and the footer opt-out — no «if you accept» for everyone",
     async (c) => {
-      const html = await render(c.locale);
+      const html = await render();
       const attribution = item(section(html, c.collect), c.attributionMarker);
       expect(attribution).not.toBe("");
       for (const old of c.oldPhrases) expect(attribution).not.toContain(old);
@@ -266,7 +230,7 @@ describe("/privacy §2 and §4 — the same geo rule and the same tools as §3 (
   it.each(ELSEWHERE_CASES)(
     "($locale) §4: the Meta, PostHog, Google Analytics and Mux rows — and any row that names the consent — carry the geo rule",
     async (c) => {
-      const sharing = section(await render(c.locale), c.sharing);
+      const sharing = section(await render(), c.sharing);
       for (const marker of GATED_ROWS) {
         expect(item(sharing, marker), marker).toContain(c.consentPhrase);
       }

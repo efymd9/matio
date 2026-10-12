@@ -1,64 +1,24 @@
 import "server-only";
 
-import { cache } from "react";
-import { cookies, headers } from "next/headers";
-import {
-  DEFAULT_LOCALE,
-  SUPPORTED_LOCALES,
-  dictFor,
-  type Dict,
-  type Locale,
-} from "./dictionaries";
-import { negotiateLocale } from "./negotiate";
-import { LOCALE_COOKIE_NAME, URL_LOCALE_HEADER } from "./shared";
+import { en, type Dict } from "./dictionaries";
 
-// Re-exported under its historical name so server-side callers don't break.
-export const LOCALE_COOKIE = LOCALE_COOKIE_NAME;
+// The website speaks one language — English — since #445 (2026-10-12): no
+// /es URLs (proxy.ts 308s them to the bare path), no Accept-Language
+// negotiation, no `locale` cookie, no switcher. These two stay as the one
+// place a server component, a route handler or a server action asks "which
+// language?", so the answer cannot drift between callers. Spanish lives on
+// only in the Expo app (lib/i18n/dictionaries.ts → `es`).
+export const SITE_LOCALE = "en" as const;
 
-// Resolve the locale for this request. An explicit choice (the `locale`
-// cookie the language switcher writes) always wins; with no cookie we
-// negotiate from Accept-Language
-// (lib/i18n/negotiate.ts — nothing is persisted, so a changed browser
-// language re-detects on the next visit). Crawlers send no Accept-Language
-// and get the English default (the site's indexed language since
-// 2026-07-04); Spanish-preferring browsers negotiate to Spanish.
-//
-// Wrapped in React cache() so layout generateMetadata + RootLayout + every
-// page's getDict() share one resolution per request instead of re-parsing
-// the header per RSC segment. headers() is request-scoped like the
-// cookies() call that was always here, so this stays exactly as dynamic as
-// before — but it still must never be called inside an unstable_cache /
-// "use cache" scope (it would throw; no current caller does).
-export const getLocale = cache(async (): Promise<Locale> => {
-  try {
-    const h = await headers();
-    // 1. URL-derived locale (the /es rewrite in proxy.ts stamps this). It's
-    //    authoritative so a Spanish URL always renders Spanish regardless of
-    //    the sticky cookie — otherwise canonical/hreflang would lie.
-    const urlLocale = h.get(URL_LOCALE_HEADER);
-    if (urlLocale && (SUPPORTED_LOCALES as readonly string[]).includes(urlLocale)) {
-      return urlLocale as Locale;
-    }
-    // 2. Explicit switcher choice (sticky preference for the non-localized
-    //    app surfaces: /watch, /subscribe, …).
-    const value = (await cookies()).get(LOCALE_COOKIE)?.value;
-    if (value && (SUPPORTED_LOCALES as readonly string[]).includes(value)) {
-      return value as Locale;
-    }
-    // 3. Accept-Language negotiation (persists nothing; geo is not
-    //    consulted for language since 2026-08-31 — see negotiate.ts).
-    return negotiateLocale(h.get("accept-language"));
-  } catch {
-    // Never let locale resolution take down a render — a throw here would
-    // white-screen every page via global-error. Worst case: default copy.
-    return DEFAULT_LOCALE;
-  }
-});
+export async function getLocale(): Promise<typeof SITE_LOCALE> {
+  return SITE_LOCALE;
+}
 
-// Convenience: read locale + return the matching dictionary in one call.
-// Server components and route handlers use this when they need to render
-// translated copy directly without going through the React context.
-export async function getDict(): Promise<{ locale: Locale; t: Dict }> {
-  const locale = await getLocale();
-  return { locale, t: dictFor(locale) };
+// Locale + the matching dictionary in one call — what server components and
+// route handlers use to render copy directly.
+export async function getDict(): Promise<{
+  locale: typeof SITE_LOCALE;
+  t: Dict;
+}> {
+  return { locale: SITE_LOCALE, t: en };
 }

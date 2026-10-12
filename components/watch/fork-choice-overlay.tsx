@@ -10,8 +10,9 @@ const subscribe = () => () => {};
 const getClientSnapshot = () => true;
 const getServerSnapshot = () => false;
 
-// One option of the fork prompt. `label` is already in the site locale
-// (the watch page picks label_es / label_en); the component adds only its
+// One option of the fork prompt. `label` is already one string (the watch
+// page picks label_en, label_es only as a fallback — the site is
+// English-only since #445); the component adds only its
 // own chrome copy (kicker, tags, countdown) from the dictionary.
 export type ForkChoiceOption = {
   episodeId: string;

@@ -1,304 +1,39 @@
 // Copy for the public /ideas landing (#297) — the story-idea form, its
-// How-it-works / FAQ blocks and the Idea Submission Terms sheet, es + en.
+// How-it-works / FAQ blocks and the Idea Submission Terms sheet. English
+// only since #445 (2026-10-12) — the site has no Spanish any more; the
+// Spanish translation this file carried until then is in git history (rows
+// sent under it say `locale = 'es'`).
 //
 // A separate module rather than an `ideas` section in dictionaries.ts, for
 // the same reason admin-dictionaries.ts and app-dictionaries.ts are separate:
 // dictionaries.ts ships in the client bundle of EVERY page (the header calls
 // useT()) and Metro bundles it into the app (mobile/src/shared/i18n.ts). The
-// Terms, seven FAQ answers and the form copy in two languages would bloat
-// both. Only app/(public)/ideas/* and components/ideas/* import this file.
-// Universal — no imports beyond the Locale type.
+// Terms, seven FAQ answers and the form copy would bloat both. Only
+// app/(public)/ideas/* and components/ideas/* import this file. Universal.
 //
 // LEGAL STATUS: the Idea Submission Terms, the "Before you send it" summary,
 // the privacy line and the FAQ promises are a DRAFT pending counsel review
-// (docs/registry.md, #168). English is the text the owner approved; Spanish
-// is a translation, and which language version prevails is a question for
-// counsel. The mockup's inline notes addressed to counsel are
-// deliberately NOT rendered — they live in the registry row and in #168.
+// (docs/registry.md, #168). English is the text the owner approved. The
+// mockup's inline notes addressed to counsel are deliberately NOT rendered —
+// they live in the registry row and in #168.
 //
-// Any edit to the Terms or to the wording of ticks 1–3, in EITHER language,
-// must bump IDEA_TERMS_VERSION in lib/idea-submission.ts — the version
-// stamped on every row is the only proof of which text a fan agreed to.
+// Any edit to the Terms or to the wording of ticks 1–3 must bump
+// IDEA_TERMS_VERSION in lib/idea-submission.ts — the version stamped on
+// every row is the only proof of which text a fan agreed to.
 
 import { IDEA_TERMS_VERSION } from "../idea-submission";
-import type { Locale } from "./dictionaries";
 
 /** A sentence with one inline link: `before` + <link>{link}</link> + `after`. */
 export type IdeasLinked = { before: string; link: string; after: string };
 
-export const es = {
-  meta: {
-    title: "Escribe lo que pasa después",
-    description:
-      "Continúa una serie de Matio o propón una totalmente nueva. Las mejores ideas pueden llegar a una serie, con tu nombre en los créditos.",
-  },
-  formAria: "Envía a Matio una idea de historia",
-  h1: ["Tu historia", "podría ser la próxima"] as [string, string],
-  chapter: (n: number) => `Capítulo ${n} / 3`,
-  chapterLabels: {
-    1: "Capítulo 1 / 3 · Premisa",
-    2: "Capítulo 2 / 3 · Tu historia",
-    3: "Capítulo 3 / 3 · Tu crédito",
-  },
-  headings: { story: "Tu historia", credit: "Tu crédito" },
-  barNext: "Siguiente",
-  whatIf: "¿Y si…?",
-  logline: {
-    placeholder:
-      "p. ej., Un cartero desterrado de su reino tiene una última carta que entregar: al rey que lo exilió.",
-    help: "Una o dos frases, hasta 300 caracteres.",
-  },
-  pitchCta: "Cuenta tu historia",
-  notContest:
-    "Esto no es un concurso y no hay premio. Es la oportunidad de ver tu historia hecha realidad. Las mejores ideas pueden llegar a una serie de Matio, con tu nombre en los créditos.",
-  series: {
-    label: "¿Qué historia vas a escribir?",
-    placeholder: "Elige una serie…",
-    help: "¿Continúas una serie? Elige cuál. ¿Empiezas de cero? Elige «Una serie totalmente nueva».",
-    newOption: "Una serie totalmente nueva",
-  },
-  workingTitle: {
-    label: "Título provisional (opcional)",
-    placeholder: "p. ej., La última carta",
-    help: "Un nombre para tu idea. Sáltatelo si aún no lo tienes.",
-  },
-  story: {
-    label: "Tu historia",
-    help1:
-      "Cuenta la historia. Sinopsis, escenas, giros: hasta 10.000 caracteres. Solo texto. No abrimos enlaces ni archivos adjuntos.",
-    help2:
-      "Solo ficción. No incluyas nombres de personas reales ni datos privados, tampoco los tuyos. Y, por favor, no tomes prestados personajes de historias de otros estudios.",
-    placeholderShow: (show: string) =>
-      `Continúa después del último episodio de ${show}. ¿Quién está en la escena, qué sale mal, cuál es el giro?`,
-    placeholderNew:
-      "¿Dónde estamos, a quién seguimos y qué se interpone en su camino? Escenas, giros y el final, si ya lo tienes.",
-  },
-  /** The counter's over-the-cap tail: "10.240 / 10.000 · {over}". */
-  over: (k: string) => `${k} de más`,
-  name: {
-    label: "Nombre o seudónimo",
-    placeholder: "Cómo quieres que aparezca tu crédito",
-    help: "Así te daríamos crédito en pantalla.",
-  },
-  email: {
-    label: "Correo electrónico",
-    placeholder: "tu@ejemplo.com",
-    help: "Es la única vía por la que te contactaremos.",
-  },
-  beforeYouSend: {
-    title: "Antes de enviarla",
-    items: [
-      {
-        lead: "Es tuya.",
-        body: "La escribiste tú, no es una copia y no la has vendido.",
-      },
-      {
-        lead: "Podemos usarla.",
-        body: "Das a Matio una licencia gratuita y no exclusiva para usar, adaptar y desarrollar tu idea. Tú también puedes seguir usándola.",
-      },
-      {
-        lead: "Sin obligación ni pago.",
-        body: "Puede que nunca la produzcamos, y no pagamos por las ideas que se envían aquí.",
-      },
-      {
-        lead: "Las grandes mentes piensan igual.",
-        body: "Desarrollamos muchas historias. Si hacemos algo parecido, puede que no venga de la tuya.",
-      },
-      {
-        lead: "Crédito a quien lo merece.",
-        body: "Si convertimos tu idea en una serie o un episodio de Matio, te daremos crédito en pantalla con el nombre que nos indiques.",
-      },
-    ],
-    draft: "(Borrador, pendiente de revisión legal.)",
-  },
-  ticks: {
-    age: "Tengo 18 años o más.",
-    terms: {
-      before:
-        "Esta idea es obra original mía (o tengo el visto bueno de mis coautores) y acepto las ",
-      link: "Condiciones de envío de ideas",
-      after: ".",
-    },
-    termsHelp:
-      "Las condiciones completas se abren sobre esta página. Tu borrador se queda donde está.",
-    optIn:
-      "Quiero recibir correos sobre nuevos episodios de Matio y futuras convocatorias de historias. Puedo darme de baja cuando quiera.",
-    optInHelp: "Opcional. No lo necesitas para enviar tu idea.",
-  },
-  privacy: {
-    before:
-      "Matio (DEEP ORDINARY LTD) guarda tu idea, tu nombre y tu correo para revisar tu idea y contactarte sobre ella. Los conservamos hasta 24 meses, o más solo si desarrollamos tu idea contigo. Nunca los vendemos ni se los mostramos a otros fans. Cómo tratamos tus datos y cuáles son tus derechos: ",
-    link: "Política de privacidad",
-    after: ".",
-  },
-  submit: "Enviar mi idea",
-  sending: "Enviando…",
-  errors: {
-    summary: "Hay algunas cosas que revisar antes de poder enviarla.",
-    series:
-      "Elige la serie que continúas o selecciona «Una serie totalmente nueva».",
-    title: "Deja el título por debajo de 100 caracteres.",
-    loglineRequired: "Añade una premisa: una o dos frases.",
-    loglineTooLong: "Tu premisa supera los 300 caracteres. Hazla más concisa.",
-    storyRequired: "Cuéntanos la historia. Unas pocas líneas ya son un comienzo.",
-    storyTooLong: "Tu historia supera los 10.000 caracteres. Recórtala un poco.",
-    nameRequired: "Dinos cómo llamarte.",
-    nameTooLong: "Que no pase de 80 caracteres.",
-    email: "Ese correo no parece correcto.",
-    age: "Marca la casilla para confirmar que tienes 18 años o más.",
-    terms:
-      "Marca la casilla para confirmar que la idea es tuya y que aceptas las condiciones.",
-    rateLimited:
-      "Son muchas ideas desde una misma red. Espera una hora y vuelve a intentarlo. Tu texto sigue aquí.",
-    generic:
-      "Algo salió mal por nuestra parte. Tu historia sigue aquí. Inténtalo de nuevo.",
-  },
-  success: {
-    title: "Idea recibida",
-    // "Gracias, {name}. Si tu idea encaja …, te escribiremos a {email}. …"
-    thanks: "Gracias, ",
-    afterName: ". Si tu idea encaja en una serie de Matio, te escribiremos a ",
-    afterEmail: ". No podemos responder a todas las ideas.",
-    onList:
-      "Estás en la lista para nuevos episodios y futuras convocatorias de historias.",
-    again: "Enviar otra idea →",
-  },
-  rail: {
-    title: "Tu propuesta",
-    steps: ["1 · Premisa", "2 · Tu historia", "3 · Tu crédito"] as [string, string, string],
-    story: "Historia",
-    newSeries: "Una serie totalmente nueva",
-    choose: "Elige una serie…",
-    done: "Hecho",
-  },
-  how: {
-    title: "Cómo funciona",
-    steps: [
-      {
-        num: "01",
-        title: "Elige tu mundo",
-        body: "Continúa una de nuestras series o empieza algo que aún no hayamos hecho.",
-      },
-      {
-        num: "02",
-        title: "Escríbela",
-        body: "Una premisa y después la historia: sinopsis, escenas, giros. Solo texto, directamente desde tu móvil.",
-      },
-      {
-        num: "03",
-        title: "Nosotros nos encargamos",
-        body: "Nuestro equipo revisa las ideas. Si la tuya encaja en una serie de Matio, te escribiremos. Si llega a la pantalla, el crédito es tuyo.",
-      },
-    ],
-  },
-  faq: {
-    title: "Preguntas",
-    owns: {
-      q: "¿De quién es mi idea?",
-      a: {
-        before:
-          "Tuya. Al enviarla, das a Matio una licencia gratuita y no exclusiva para usarla, adaptarla y desarrollarla, y tú puedes seguir usándola. El texto completo está en las ",
-        link: "Condiciones de envío de ideas",
-        after: ".",
-      },
-    },
-    paid: {
-      q: "¿Me pagarán?",
-      a: "No. Esto no es un concurso y no pagamos por las ideas enviadas a través de esta página. Si convertimos tu idea en una serie o un episodio de Matio, te daremos crédito en pantalla con el nombre que nos indiques. Si queremos seguir trabajando contigo, te contactaremos, y cualquier otra cosa se acuerda por separado y por escrito.",
-    },
-    more: {
-      q: "¿Puedo enviar más de una idea?",
-      a: "Sí. Envía cada idea en su propio formulario, para que cada historia se sostenga por sí sola.",
-    },
-    language: {
-      q: "¿En qué idioma debo escribir?",
-      a: "En inglés o en español. Usa el idioma en el que cuentas historias.",
-    },
-    after: {
-      q: "¿Qué pasa después de enviarla?",
-      a: "Nuestro equipo revisa las ideas. Si la tuya encaja en una serie de Matio, te escribiremos. No podemos responder a todas las ideas y no hay un plazo fijo.",
-    },
-    keep: {
-      q: "¿Cuánto tiempo guardan mi historia?",
-      a: {
-        before:
-          "Hasta 24 meses, o más solo si desarrollamos tu idea contigo. Nunca la vendemos ni se la mostramos a otros fans. Los detalles están en nuestra ",
-        link: "Política de privacidad",
-        after: ".",
-      },
-    },
-    delete: {
-      q: "¿Cómo elimino mi envío?",
-      // The link is the address itself (mailto:).
-      a: {
-        before: "Escribe a ",
-        link: "maksym@matio.tv",
-        after:
-          " desde la dirección que usaste y lo eliminaremos. También puedes pedirnos una copia de lo que tenemos.",
-      },
-    },
-  },
-  terms: {
-    title: "Condiciones de envío de ideas",
-    close: "Cerrar",
-    scrimAria: "Cerrar las Condiciones de envío de ideas",
-    // Built from the constant: the sheet shows the SAME version the server
-    // stamps on the row, and a bump cannot leave the displayed one behind.
-    version: `Versión ${IDEA_TERMS_VERSION} · Borrador, pendiente de revisión legal`,
-    intro:
-      "Estas condiciones se aplican cuando envías una idea de historia a DEEP ORDINARY LTD («Matio», «nosotros»), 66 Paul Street, Londres EC2A 4NA, a través de matio.tv.",
-    items: [
-      { lead: "1. Quién puede enviar.", body: "Debes tener 18 años o más." },
-      {
-        lead: "2. Es tu idea.",
-        body: "Confirmas que la escribiste tú (o que todas las personas que la coescribieron aceptan estas condiciones), que no está copiada de la obra de nadie y que no has vendido ni cedido en exclusiva sus derechos a nadie.",
-      },
-      {
-        lead: "3. Lo que nos permites hacer.",
-        body: "Das a Matio una licencia gratuita, mundial, no exclusiva, perpetua e irrevocable para leer, usar, adaptar, modificar, combinar y desarrollar tu idea, en cualquier serie, episodio u otra producción y en cualquier medio, y para permitir que nuestros socios de producción hagan lo mismo para producciones de Matio. La licencia no es exclusiva, así que conservas el derecho a usar tu idea tú mismo.",
-      },
-      {
-        lead: "4. Sin obligación.",
-        body: "No estamos obligados a usar ni a desarrollar tu idea, a responderte ni a explicar nuestras decisiones.",
-      },
-      {
-        lead: "5. Ideas parecidas.",
-        body: "Creamos muchas historias, y es habitual que distintas personas tengan ideas parecidas. Puede que ya estemos desarrollando, o que desarrollemos más adelante por nuestra cuenta, historias parecidas a la tuya. Eso no significa que hayamos usado tu idea y no te da ningún derecho a reclamarnos.",
-      },
-      {
-        lead: "6. Sin pago.",
-        body: "No pagamos por las ideas enviadas a través de esta página. Si queremos trabajar contigo en una producción, te contactaremos, y cualquier otra cosa se acordará por separado y por escrito.",
-      },
-      {
-        lead: "7. Crédito.",
-        body: "Si convertimos tu idea en una serie o un episodio de Matio, te daremos crédito en pantalla con el nombre o seudónimo que nos indicaste (por ejemplo, «Idea original de …»).",
-      },
-    ],
-    // Item 8 carries the Privacy Policy link, so it is split out.
-    data: {
-      lead: "8. Tus datos personales.",
-      before:
-        "Tratamos tu nombre, tu correo y tu envío según lo descrito en nuestra ",
-      link: "Política de privacidad",
-      after: ".",
-    },
-    law: {
-      lead: "9. Ley aplicable.",
-      body: "Estas condiciones se rigen por las leyes de Inglaterra y Gales. Si eres consumidor, conservas la protección de la ley de tu lugar de residencia.",
-    },
-  },
-};
-
-export type IdeasDict = typeof es;
-
-export const en: IdeasDict = {
+export const en = {
   meta: {
     title: "Write what happens next",
     description:
       "Continue a Matio series or pitch a brand-new one. The best ideas may make it into a series, with your name in the credits.",
   },
   formAria: "Send Matio a story idea",
-  h1: ["Your story", "could be next"],
+  h1: ["Your story", "could be next"] as [string, string],
   chapter: (n: number) => `Chapter ${n} / 3`,
   chapterLabels: {
     1: "Chapter 1 / 3 · Logline",
@@ -426,7 +161,7 @@ export const en: IdeasDict = {
   },
   rail: {
     title: "Your pitch",
-    steps: ["1 · Logline", "2 · Your story", "3 · Your credit"],
+    steps: ["1 · Logline", "2 · Your story", "3 · Your credit"] as [string, string, string],
     story: "Story",
     newSeries: "A brand-new series",
     choose: "Choose a series…",
@@ -473,7 +208,7 @@ export const en: IdeasDict = {
     },
     language: {
       q: "Which language should I write in?",
-      a: "English or Spanish. Use whichever one you tell stories in.",
+      a: "English.",
     },
     after: {
       q: "What happens after I send it?",
@@ -545,6 +280,4 @@ export const en: IdeasDict = {
   },
 };
 
-export function ideasDictFor(locale: Locale): IdeasDict {
-  return locale === "es" ? es : en;
-}
+export type IdeasDict = typeof en;

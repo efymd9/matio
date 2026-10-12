@@ -6,9 +6,8 @@ import { en } from "@/lib/i18n/dictionaries";
 // canonical OG card size used by Twitter, Slack, iMessage, and LinkedIn.
 // Per-show pages override this with their own OG via generateMetadata.
 //
-// Social-media crawlers don't carry our locale cookie, so the OG renders
-// in the site's default locale (English). Per-show OGs still surface the
-// show's own title/description verbatim from the database.
+// English, like the whole site (#445). Per-show OGs still surface the show's
+// own title/description verbatim from the database.
 
 export const runtime = "edge";
 export const alt = en.metadata.siteTitle;

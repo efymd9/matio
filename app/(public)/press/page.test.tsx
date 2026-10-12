@@ -15,13 +15,11 @@ vi.mock("@/lib/free-mode", () => ({ paymentsEnabled: () => false }));
 import PressPage, { generateMetadata } from "./page";
 
 describe("/press page wrapper", () => {
-  it("emits localized metadata with the hreflang cluster", async () => {
+  it("emits English metadata with a bare canonical and no hreflang cluster (#445)", async () => {
     const meta = await generateMetadata();
     expect(meta.title).toBe(en.press.metaTitle);
     expect(meta.description).toBe(en.press.metaDescription);
-    const languages = meta.alternates?.languages as Record<string, string>;
-    expect(languages.en).toContain("/press");
-    expect(languages.es).toContain("/es/press");
+    expect(meta.alternates).toEqual({ canonical: "https://matio.tv/press" });
     expect(meta.robots).toMatchObject({ index: true });
   });
 
@@ -31,7 +29,6 @@ describe("/press page wrapper", () => {
     const body = el.props.children;
     expect(body.type).toBe(PressContent);
     expect(body.props.t).toBe(en);
-    expect(body.props.locale).toBe("en");
     expect(body.props.paymentsOn).toBe(false);
   });
 });

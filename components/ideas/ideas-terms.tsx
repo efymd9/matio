@@ -4,9 +4,7 @@ import { createContext, useContext, type ReactNode, type RefObject } from "react
 import { Dialog } from "@base-ui/react/dialog";
 import { Icon } from "@/components/site/icon";
 import { BURGUNDY_GLOW } from "@/lib/design";
-import type { Locale } from "@/lib/i18n/dictionaries";
 import type { IdeasDict } from "@/lib/i18n/ideas-dictionaries";
-import { localizedPath } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 import { TEXT_LINK } from "./ideas-parts";
 
@@ -54,13 +52,11 @@ export function IdeasTermsSheet({
   open,
   onOpenChange,
   t,
-  locale,
   finalFocus,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   t: IdeasDict;
-  locale: Locale;
   finalFocus: RefObject<HTMLElement | null>;
 }) {
   return (
@@ -123,7 +119,7 @@ export function IdeasTermsSheet({
               <span className="font-semibold text-cream">{t.terms.data.lead}</span>{" "}
               {t.terms.data.before}
               <a
-                href={`${localizedPath("/privacy", locale)}#ideas`}
+                href="/privacy#ideas"
                 target="_blank"
                 rel="noopener"
                 className={TEXT_LINK}

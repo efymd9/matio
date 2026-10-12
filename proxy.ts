@@ -33,20 +33,7 @@ import {
   serializeConsent,
 } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
-import { negotiateLocale } from "@/lib/i18n/negotiate";
-import {
-  LOCALE_COOKIE_MAX_AGE,
-  LOCALE_COOKIE_NAME,
-  URL_LOCALE_HEADER,
-} from "@/lib/i18n/shared";
-import {
-  isLocalizablePath,
-  LEGACY_ALIAS_HOST,
-  localizedPath,
-  type SeoLocale,
-  SITE_URL,
-  stripLocalePrefix,
-} from "@/lib/seo";
+import { LEGACY_ALIAS_HOST, SITE_URL, stripLocalePrefix } from "@/lib/seo";
 import {
   evaluateStagingLock,
   NOINDEX_HEADER,
@@ -115,10 +102,8 @@ type MarketingDecision = {
   consentRecord: string | null;
 };
 
-// Evaluate what marketing state this request warrants — split out from the
-// cookie writing so the normal pass-through path AND the /es rewrite path can
-// share one decision (an es ad landing on /es/shows/* must capture UTM/_fbc
-// and auto-grant consent exactly like a bare landing does).
+// Evaluate what marketing state this request warrants — kept apart from the
+// cookie writing below (applyMarketingCookies runs both).
 function evaluateMarketing(req: NextRequest): MarketingDecision {
   const existing = parseConsent(req.cookies.get(CONSENT_COOKIE)?.value);
   const country = req.headers.get("x-vercel-ip-country");
@@ -148,29 +133,22 @@ function evaluateMarketing(req: NextRequest): MarketingDecision {
   };
 }
 
-// Build the base response (pass-through or rewrite). Injects REQUEST headers
-// when the same render must see either the auto-granted consent cookie (banner
-// hidden + pixel on the very first page) or the URL-derived locale.
+// Build the pass-through response. Injects a REQUEST header when the same
+// render must see the auto-granted consent cookie (banner hidden + pixel on
+// the very first page).
 function buildBaseResponse(
   req: NextRequest,
   d: MarketingDecision,
-  opts: { rewriteTo?: URL; localeHeader?: string } = {},
 ): NextResponse {
-  const needHeaders = d.autoGrant || !!opts.localeHeader;
-  if (!needHeaders && !opts.rewriteTo) return NextResponse.next();
+  if (!d.autoGrant || !d.consentRecord) return NextResponse.next();
   const headers = new Headers(req.headers);
-  if (opts.localeHeader) headers.set(URL_LOCALE_HEADER, opts.localeHeader);
-  if (d.autoGrant && d.consentRecord) {
-    const cookieHeader = headers.get("cookie");
-    headers.set(
-      "cookie",
-      (cookieHeader ? `${cookieHeader}; ` : "") +
-        `${CONSENT_COOKIE}=${encodeURIComponent(d.consentRecord)}`,
-    );
-  }
-  return opts.rewriteTo
-    ? NextResponse.rewrite(opts.rewriteTo, { request: { headers } })
-    : NextResponse.next({ request: { headers } });
+  const cookieHeader = headers.get("cookie");
+  headers.set(
+    "cookie",
+    (cookieHeader ? `${cookieHeader}; ` : "") +
+      `${CONSENT_COOKIE}=${encodeURIComponent(d.consentRecord)}`,
+  );
+  return NextResponse.next({ request: { headers } });
 }
 
 // Write the consent / attribution / _fbc cookies onto a response.
@@ -230,59 +208,17 @@ function applyMarketingCookies(req: NextRequest): NextResponse | null {
   return res;
 }
 
-// Rewrite a Spanish subpath (/es/<base>) to its base route, stamping the locale
-// on the request so the components render Spanish. Runs the SAME marketing +
-// visitor cookie machinery as a bare landing, and sets the sticky locale cookie
-// so the non-localized app surfaces (/watch, /subscribe) also render Spanish.
-function applyLocalizedRewrite(req: NextRequest, basePath: string): NextResponse {
-  const url = req.nextUrl.clone();
-  url.pathname = basePath;
-  const d = evaluateMarketing(req);
-  const res = buildBaseResponse(req, d, { rewriteTo: url, localeHeader: "es" });
-  writeMarketingCookies(res, req, d);
-  res.cookies.set(LOCALE_COOKIE_NAME, "es", {
-    maxAge: LOCALE_COOKIE_MAX_AGE,
-    sameSite: "lax",
-    path: "/",
-    // httpOnly:false — mirrors the switcher cookie so client code reads it.
-    secure: process.env.NODE_ENV === "production",
-  });
-  return applyVisitorCookie(req, res) ?? res;
-}
-
-// The language a visitor prefers on a bare (English) URL: the switcher's sticky
-// cookie when there is one, Accept-Language otherwise. One rule for the /es
-// redirect below and for the app's bare embed URLs, so the two cannot drift.
-function preferredLocale(req: NextRequest): SeoLocale {
-  const cookieLocale = req.cookies.get(LOCALE_COOKIE_NAME)?.value;
-  if (cookieLocale) return cookieLocale === "es" ? "es" : "en";
-  return negotiateLocale(req.headers.get("accept-language"));
-}
-
 // A legal document in the app's in-app browser (`?embed=app`, #310 — the rule
 // is lib/app-embed.ts). The request is stamped so the layout renders the page
-// alone. /es is authoritative and rewritten like any /es page; a bare URL gets
-// the language the normal page would redirect to (preferredLocale) — builds
-// from before #288 open /v1/config's bare URL as is, and a Spanish phone must
-// still read Spanish — rendered in place, without the 307, so the embed stays.
+// alone, in English like the rest of the site (#445; an app build that asks
+// for the /es URL arrives here through the 308 below, query and all).
 // Nothing is written back — no consent default, no attribution or _fbc, no
-// matio_aid, no sticky locale: the page loads no tracker and no beacon that
-// could use them, and the app's own browser is no audience to measure.
-function applyAppEmbed(
-  req: NextRequest,
-  basePath: string,
-  urlLocale: SeoLocale,
-): NextResponse {
+// matio_aid: the page loads no tracker and no beacon that could use them, and
+// the app's own browser is no audience to measure.
+function applyAppEmbed(req: NextRequest): NextResponse {
   const headers = new Headers(req.headers);
   headers.set(APP_EMBED_HEADER, APP_EMBED_VALUE);
-  if (urlLocale === "en") {
-    headers.set(URL_LOCALE_HEADER, preferredLocale(req));
-    return NextResponse.next({ request: { headers } });
-  }
-  headers.set(URL_LOCALE_HEADER, "es");
-  const url = req.nextUrl.clone();
-  url.pathname = basePath;
-  return NextResponse.rewrite(url, { request: { headers } });
+  return NextResponse.next({ request: { headers } });
 }
 
 // Mints the first-party audience-measurement cookie (matio_aid) when the
@@ -355,20 +291,25 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
   // unchanged.
   if (req.nextUrl.pathname.startsWith(NATIVE_API_PREFIX)) return;
 
-  // Spanish subpath (/es/*): rewrite to the base route with the locale stamped
-  // on the request. Only the indexable public set is localized — anything else
-  // under /es (e.g. /es/admin) doesn't match isLocalizablePath, so it falls
-  // through and 404s rather than bypassing the gates below.
-  {
-    const { locale, path } = stripLocalePrefix(req.nextUrl.pathname);
-    // A legal document opened by the app (#310) — ahead of the /es rewrite
-    // and the language redirect below, both of which it replaces.
-    if (isAppEmbedRequest(path, req.nextUrl.searchParams)) {
-      return applyAppEmbed(req, path, locale);
-    }
-    if (locale === "es" && isLocalizablePath(path)) {
-      return applyLocalizedRewrite(req, path);
-    }
+  // The retired Spanish URLs (#445): the site is English-only, and /es and
+  // /es/* were indexed and linked. A permanent (308) redirect to the bare path
+  // hands their signals to the English page and keeps every link working —
+  // the query rides along, so an /es ad landing still carries its ?utm_* /
+  // ?fbclid to the page that captures them. Every path under /es, not only
+  // the pages that had a twin: it is a redirect, not a rewrite, so a crafted
+  // /es/admin just lands on /admin and meets the gate below like any request.
+  // Nothing is written on the redirect itself — the bare request that follows
+  // does the cookie work.
+  const { locale, path } = stripLocalePrefix(req.nextUrl.pathname);
+  if (locale === "es") {
+    const url = req.nextUrl.clone();
+    url.pathname = path;
+    return NextResponse.redirect(url, 308);
+  }
+
+  // A legal document opened by the app (#310).
+  if (isAppEmbedRequest(path, req.nextUrl.searchParams)) {
+    return applyAppEmbed(req);
   }
 
   if (isAdminRoute(req)) {
@@ -401,25 +342,6 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
     // Attribution still captured for signed-in /subscribe visits — e.g.
     // a remarketing campaign that links a returning user straight here.
     return applyVisitorCookie(req, applyMarketingCookies(req)) ?? undefined;
-  }
-
-  // Spanish-preferring humans on a bare (English) localizable URL → 307 to the
-  // /es twin so the URL matches the content and reinforces hreflang. Bots are
-  // NOT redirected, so the English page stays the indexed default at the bare
-  // path (Googlebot sends no Accept-Language → negotiateLocale → en anyway;
-  // this is belt-and-braces for AI/es-header crawlers).
-  if (
-    req.method === "GET" &&
-    isLocalizablePath(req.nextUrl.pathname) &&
-    !userAgent({ headers: req.headers }).isBot
-  ) {
-    if (preferredLocale(req) === "es") {
-      const url = req.nextUrl.clone();
-      url.pathname = localizedPath(req.nextUrl.pathname, "es");
-      // 307 preserves method + query, so ?utm_*/?fbclid ride along to the /es
-      // landing, where applyLocalizedRewrite captures them.
-      return NextResponse.redirect(url, 307);
-    }
   }
 
   // Catch-all: every other passthrough route captures attribution + _fbc. Ad

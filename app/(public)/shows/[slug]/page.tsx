@@ -17,7 +17,6 @@ import { getShowBySlug } from "@/lib/show-query";
 import {
   SITE_URL,
   canonicalUrl,
-  localeAlternates,
   metaDescription,
 } from "@/lib/seo";
 import {
@@ -44,10 +43,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug } = await params;
   const show = await getShowBySlug(slug);
-  const { locale, t } = await getDict();
+  const { t } = await getDict();
   if (!show) return { title: t.showDetail.notFound };
-  const alternates = localeAlternates(`/shows/${slug}`, locale);
-  const url = alternates.canonical;
+  const url = canonicalUrl(`/shows/${slug}`);
+  const alternates = { canonical: url };
   // Null-description shows otherwise ship with NO meta description; synthesize
   // a unique, genre-varied line (anti-thin-content) instead of a constant.
   // metaDescription() collapses the DB synopsis's raw \r\n breaks and

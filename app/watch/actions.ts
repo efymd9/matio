@@ -289,8 +289,9 @@ export async function subscribeToShowReminder(input: {
   // Best-effort link to the user when auth is available.
   const { userId } = await auth();
 
-  // Snapshot the site locale so the reminder email renders in the
-  // language the viewer was watching in.
+  // Snapshot of the site locale — "en" since #445 (the site is English-only).
+  // The column stays as data; the reminder email no longer reads it (every
+  // row, an older `es` one included, gets the English email).
   const locale = await getLocale();
 
   // Conflict path (same show + email) UPDATES instead of no-oping: it

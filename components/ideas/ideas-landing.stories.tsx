@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import type { IdeaSubmissionResult } from "@/lib/idea-submission";
-import { en, ideasDictFor } from "@/lib/i18n/ideas-dictionaries";
+import { en } from "@/lib/i18n/ideas-dictionaries";
 import { IdeasLanding, type IdeasShow } from "./ideas-landing";
 import { IdeasFaq, IdeasHowItWorks } from "./ideas-sections";
 
@@ -58,21 +58,17 @@ const meta = {
     ),
   ],
   args: {
-    locale: "en",
     shows: SHOWS,
     preselectedSlug: null,
     heroImageUrl: "/shows/juego-de-seduccion-hero.png",
     submitIdea: ok(false),
   },
-  render: (args) => {
-    const t = ideasDictFor(args.locale);
-    return (
-      <IdeasLanding {...args}>
-        <IdeasHowItWorks t={t} />
-        <IdeasFaq t={t} locale={args.locale} />
-      </IdeasLanding>
-    );
-  },
+  render: (args) => (
+    <IdeasLanding {...args}>
+      <IdeasHowItWorks t={en} />
+      <IdeasFaq t={en} />
+    </IdeasLanding>
+  ),
 } satisfies Meta<typeof IdeasLanding>;
 
 export default meta;
@@ -117,13 +113,6 @@ async function expectDraftKept(canvasElement: HTMLElement) {
 }
 
 export const EmptyEN: Story = {};
-
-// Spanish runs 20–30% longer — the H1, the CTA and the bar label have to
-// hold at 390.
-export const EmptyES: Story = {
-  args: { locale: "es" },
-  globals: { viewport: { value: "mobile", isRotated: false } },
-};
 
 export const PreselectedShow: Story = {
   args: {

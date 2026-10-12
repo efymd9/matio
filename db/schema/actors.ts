@@ -11,7 +11,8 @@ import { shows } from "./shows";
 
 // Virtual actors — a global roster, reusable across shows (the same virtual
 // actor can appear in several series). Content fields are single-language,
-// matching how show titles/descriptions work (only UI chrome is bilingual).
+// matching how show titles/descriptions work (UI chrome is English — the
+// site's only language since #445).
 export const actors = pgTable("actors", {
   id: uuid("id").primaryKey().defaultRandom(),
   // Public URL segment: /actors/<slug>. Same charset rule as shows.slug.

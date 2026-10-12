@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Anton, Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
-import { enUS, esES } from "@clerk/localizations";
+import { enUS } from "@clerk/localizations";
 import { cookies } from "next/headers";
 import { SiteHeader } from "@/components/site/site-header";
 import { SiteFooter } from "@/components/site/site-footer";
@@ -16,23 +16,14 @@ import { UserMenu } from "@/components/site/user-menu";
 import { isAppEmbed } from "@/lib/app-embed-server";
 import { CONSENT_COOKIE, parseConsent } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
-import { LocaleProvider } from "@/lib/i18n/client";
 import { getDict } from "@/lib/i18n/server";
-import { localeAlternates, SITE_URL } from "@/lib/seo";
+import { canonicalUrl, SITE_URL } from "@/lib/seo";
 import {
   jsonLdScript,
   organizationJsonLd,
   websiteJsonLd,
 } from "@/lib/structured-data";
 import "./globals.css";
-
-// Clerk's hosted UI (sign-in modal, sign-up modal, UserButton dropdown,
-// any form copy + validation messages) speaks the locale matching the
-// site dictionary. English is the default (since 2026-07-04); Spanish
-// when negotiation / geo affinity / the cookie resolves to "es". Both
-// bundles ship server-side; only the chosen one crosses the
-// server→client boundary via the ClerkProvider prop.
-const CLERK_LOCALIZATIONS = { es: esES, en: enUS } as const;
 
 const geistSans = Geist({
   variable: "--font-sans",
@@ -69,7 +60,7 @@ export const viewport: Viewport = {
 };
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { locale, t } = await getDict();
+  const { t } = await getDict();
   // Payments off → the indexed descriptions must not promise a subscription
   // gate / 60s preview that doesn't exist (Google snippets read this).
   const paymentsOn = paymentsEnabled();
@@ -84,23 +75,22 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     description,
     applicationName: "matio",
-    // Canonical + hreflang for the home page. English lives at the apex bare
-    // path (canonical + x-default); Spanish at /es. Absolute apex URLs (not
-    // metadataBase, which is preview-host-overridable) so the resolving
-    // hostnames + ?utm_* variants consolidate onto matio.tv. Each localized
-    // page sets its own via localeAlternates(); this is the home entry.
-    alternates: localeAlternates("/", locale),
+    // Canonical for the home page — the site is English-only since #445, so
+    // no hreflang cluster. Absolute apex URL (not metadataBase, which is
+    // preview-host-overridable) so the resolving hostnames + ?utm_* variants
+    // consolidate onto matio.tv. Each indexed page sets its own canonical;
+    // this is the home entry.
+    alternates: { canonical: canonicalUrl("/") },
     openGraph: {
       type: "website",
       siteName: "matio",
-      url: locale === "es" ? `${SITE_URL}/es` : SITE_URL,
+      url: SITE_URL,
       title: t.metadata.siteTitle,
       description,
-      // Social-platform locale hints only — Google ignores og:locale for
-      // language detection (it reads visible text). First-class fields so
-      // Next emits valid `property="og:locale[:alternate]"` meta.
-      locale: locale === "es" ? "es_ES" : "en_US",
-      alternateLocale: locale === "es" ? "en_US" : "es_ES",
+      // Social-platform locale hint only — Google ignores og:locale for
+      // language detection (it reads visible text). A first-class field so
+      // Next emits a valid `property="og:locale"` meta.
+      locale: "en_US",
     },
     twitter: {
       card: "summary_large_image",
@@ -128,7 +118,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const { locale, t } = await getDict();
+  const { t } = await getDict();
   // Read consent server-side so the banner doesn't flash in for users who
   // already chose. Layout is already dynamic via Clerk so reading cookies
   // here doesn't cost a static-generation opt-out.
@@ -144,7 +134,9 @@ export default async function RootLayout({
   const embed = await isAppEmbed();
   return (
     <ClerkProvider
-      localization={CLERK_LOCALIZATIONS[locale]}
+      // Clerk's hosted UI (sign-in / sign-up modals, UserButton dropdown,
+      // form copy + validation) in the site's one language (#445).
+      localization={enUS}
       appearance={{
         // Official Clerk-designed dark theme. Handles the navbar / panel
         // split, hover states, and opacity ramps so every surface stays
@@ -175,9 +167,8 @@ export default async function RootLayout({
       >
         <body className="min-h-full bg-background font-sans text-foreground selection:bg-accent/40">
           {/* Site-wide structured data. Server-rendered into the HTML so
-              HTML-only crawlers read it. Locale-invariant brand graph
-              (English-default semantics since 2026-07-04); never varied by
-              getLocale(). */}
+              HTML-only crawlers read it. English, like the whole site
+              (#445). */}
           <script
             type="application/ld+json"
             dangerouslySetInnerHTML={{ __html: jsonLdScript(organizationJsonLd()) }}
@@ -186,50 +177,48 @@ export default async function RootLayout({
             type="application/ld+json"
             dangerouslySetInnerHTML={{ __html: jsonLdScript(websiteJsonLd()) }}
           />
-          <LocaleProvider locale={locale}>
-            {embed ? (
-              <div id="main-content">{children}</div>
-            ) : (
-              <>
-                <a
-                  href="#main-content"
-                  className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-gold focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-gold-deep focus:shadow-lg"
-                >
-                  Skip to content
-                </a>
-                <SiteHeader authSlot={<UserMenu />} paymentsEnabled={paymentsOn} />
-                <div id="main-content">
-                  {children}
-                </div>
-                <SiteFooter paymentsEnabled={paymentsOn} />
-                <CookieBanner initialConsent={initialConsent} />
-                {/* Consent-gated Meta Pixel — only injects fbevents.js after the
-                    visitor accepts marketing cookies. Shares the same
-                    initialConsent the banner uses so it can fire on first paint
-                    for already-consented visitors. */}
-                <MetaPixel initialConsent={initialConsent} />
-                {/* Consent-gated PostHog — dynamically loads posthog-js only after
-                    the visitor accepts marketing cookies. Same initialConsent as
-                    the banner + Meta Pixel for first-paint tracking of returning
-                    consented visitors. */}
-                <PostHogProvider initialConsent={initialConsent} />
-                {/* Consent-gated Google Analytics 4 — only injects gtag.js after
-                    the visitor accepts marketing cookies. Same initialConsent as
-                    the other trackers; blank NEXT_PUBLIC_GA_MEASUREMENT_ID → off. */}
-                <GoogleAnalytics initialConsent={initialConsent} />
-                {/* Consent-gated ChatGPT Ads pixel (OpenAI oaiq) — only injects
-                    the SDK after the visitor accepts marketing cookies. Same
-                    initialConsent as the other trackers; blank
-                    NEXT_PUBLIC_OPENAI_PIXEL_ID → off. */}
-                <OpenAIPixel initialConsent={initialConsent} />
-                {/* First-party visit beacon — consent-EXEMPT audience
-                    measurement (strictly first-party, documented on /cookies).
-                    Deliberately outside the consent gate the trackers above
-                    live behind; skips /admin paths itself. */}
-                <VisitBeacon />
-              </>
-            )}
-          </LocaleProvider>
+          {embed ? (
+            <div id="main-content">{children}</div>
+          ) : (
+            <>
+              <a
+                href="#main-content"
+                className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-gold focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-gold-deep focus:shadow-lg"
+              >
+                Skip to content
+              </a>
+              <SiteHeader authSlot={<UserMenu />} paymentsEnabled={paymentsOn} />
+              <div id="main-content">
+                {children}
+              </div>
+              <SiteFooter paymentsEnabled={paymentsOn} />
+              <CookieBanner initialConsent={initialConsent} />
+              {/* Consent-gated Meta Pixel — only injects fbevents.js after the
+                  visitor accepts marketing cookies. Shares the same
+                  initialConsent the banner uses so it can fire on first paint
+                  for already-consented visitors. */}
+              <MetaPixel initialConsent={initialConsent} />
+              {/* Consent-gated PostHog — dynamically loads posthog-js only after
+                  the visitor accepts marketing cookies. Same initialConsent as
+                  the banner + Meta Pixel for first-paint tracking of returning
+                  consented visitors. */}
+              <PostHogProvider initialConsent={initialConsent} />
+              {/* Consent-gated Google Analytics 4 — only injects gtag.js after
+                  the visitor accepts marketing cookies. Same initialConsent as
+                  the other trackers; blank NEXT_PUBLIC_GA_MEASUREMENT_ID → off. */}
+              <GoogleAnalytics initialConsent={initialConsent} />
+              {/* Consent-gated ChatGPT Ads pixel (OpenAI oaiq) — only injects
+                  the SDK after the visitor accepts marketing cookies. Same
+                  initialConsent as the other trackers; blank
+                  NEXT_PUBLIC_OPENAI_PIXEL_ID → off. */}
+              <OpenAIPixel initialConsent={initialConsent} />
+              {/* First-party visit beacon — consent-EXEMPT audience
+                  measurement (strictly first-party, documented on /cookies).
+                  Deliberately outside the consent gate the trackers above
+                  live behind; skips /admin paths itself. */}
+              <VisitBeacon />
+            </>
+          )}
         </body>
       </html>
     </ClerkProvider>

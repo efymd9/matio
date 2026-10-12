@@ -1,16 +1,16 @@
-import type { Dict, Locale } from "@/lib/i18n/dictionaries";
-import { socialProfilesForLocale } from "@/lib/social-links";
+import type { Dict } from "@/lib/i18n/dictionaries";
+import { FOOTER_SOCIAL_PROFILES } from "@/lib/social-links";
 import { SocialIcon } from "@/components/site/social-icon";
 
 // «Press contact» band shared by /about and /press (the mock renders it on
 // both pages, above the site footer): mailto headline, social row, entity
-// line. Presentational on purpose — dict and locale arrive as props so the
-// Lab can render it without a request context.
+// line. Presentational on purpose — the dict arrives as a prop so the Lab can
+// render it without a request context.
 
 const CIRCLE =
   "flex size-10 items-center justify-center rounded-full border border-cream/25 text-cream/85 transition-colors hover:bg-cream/10";
 
-export function PressContact({ t, locale }: { t: Dict; locale: Locale }) {
+export function PressContact({ t }: { t: Dict }) {
   return (
     <section className="bg-linear-160 from-burgundy to-umber text-center">
       <div className="mx-auto flex max-w-4xl flex-col items-center gap-3.5 px-6 py-18 sm:px-12">
@@ -50,7 +50,7 @@ export function PressContact({ t, locale }: { t: Dict; locale: Locale }) {
               </svg>
             </a>
           </li>
-          {socialProfilesForLocale(locale).map((profile) => (
+          {FOOTER_SOCIAL_PROFILES.map((profile) => (
             <li key={profile.url}>
               <a
                 href={profile.url}

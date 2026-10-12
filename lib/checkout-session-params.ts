@@ -70,8 +70,9 @@ export function buildCheckoutSessionParams({
   //     session.
   //
   // So on the wallet surface WE collect it — one required checkbox that is
-  // BOTH the Terms acceptance and the withdrawal waiver, in the buyer's
-  // language, before the wallet sheet can open — and record which terms were
+  // BOTH the Terms acceptance and the withdrawal waiver, in English (the
+  // site's only language since #445), before the wallet sheet can open — and
+  // record which terms were
   // accepted in subscription metadata (see lib/wallet-checkout.ts, #214).
   // Dropping these two params is therefore not a loosening — the consent
   // moves, it does not disappear. Everything that decides WHAT IS SOLD stays identical, which is

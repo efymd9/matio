@@ -21,7 +21,9 @@ import { episodes } from "./episodes";
 //             be any ready episode of the show);
 //   0 rows  — a branch with none is an ending; a regular episode with none
 //             keeps today's linear `episodes[idx+1]` behaviour.
-// Labels are viewer copy, so es/en (site locales). The branch rows
+// Labels are viewer copy, stored es/en (the site's two locales until #445;
+// the web now reads the English, Spanish only as a fallback — the admin
+// still requires both, docs/registry.md). The branch rows
 // themselves are ordinary `episodes` — nothing about playback, tokens or
 // progress changes; this table only tells the player where to go next.
 export const episodeChoices = pgTable(
