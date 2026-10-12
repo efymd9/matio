@@ -124,3 +124,166 @@ describe("/privacy §3 — marketing measurement and the geo-aware consent defau
     },
   );
 });
+
+// #420 — the same §3 item is where every tool the marketing-consent gate
+// switches on has to be named, because its basis sentence covers "these".
+// Mux Data is one of them (both players pass disableTracking/disableCookies
+// and no envKey without consent — lib/use-marketing-consent.ts, pinned by
+// components/watch/player.test.tsx and components/site/hero-banner.test.tsx),
+// and so is the ChatGPT Ads pixel (components/site/openai-pixel.tsx); /cookies
+// §2 names both under that consent. §3 once filed Mux Data under the
+// legitimate-interests "improve the service" item and left the pixel out.
+const TOOL_CASES = [
+  {
+    locale: "en",
+    purposes: "purposes",
+    improveMarker: "To improve the service",
+    regions: "EU/EEA, the UK and Switzerland",
+    tools: [
+      "Meta Pixel",
+      "Meta Conversions API",
+      "PostHog",
+      "Google Analytics",
+      "ChatGPT Ads measurement pixel",
+      "Mux Data",
+    ],
+  },
+  {
+    locale: "es",
+    purposes: "finalidades",
+    improveMarker: "Para mejorar el servicio",
+    regions: "UE/EEE, el Reino Unido y Suiza",
+    tools: [
+      "Meta Pixel",
+      "API de Conversiones de Meta",
+      "PostHog",
+      "Google Analytics",
+      "píxel de medición de ChatGPT Ads",
+      "Mux Data",
+    ],
+  },
+] as const;
+
+describe("/privacy §3 — every consent-gated measurement tool sits under the consent item (#420)", () => {
+  it.each(TOOL_CASES)(
+    "($locale) names Mux Data and the ChatGPT Ads pixel in the consent item, before its basis sentence",
+    async (c) => {
+      const html = await render(c.locale);
+      const marketing = item(section(html, c.purposes), "attribution_first");
+      const basisAt = marketing.indexOf(c.regions);
+      expect(basisAt).toBeGreaterThan(-1);
+      for (const tool of c.tools) {
+        const at = marketing.indexOf(tool);
+        expect(at, tool).toBeGreaterThan(-1);
+        expect(at, tool).toBeLessThan(basisAt);
+      }
+    },
+  );
+
+  it.each(TOOL_CASES)(
+    "($locale) no longer files Mux Data under the legitimate-interests item — §3 names it once",
+    async (c) => {
+      const purposes = section(await render(c.locale), c.purposes);
+      const improve = item(purposes, c.improveMarker);
+      expect(improve).not.toBe("");
+      expect(improve).not.toContain("Mux");
+
+      const withMux = purposes
+        .split("<li")
+        .slice(1)
+        .filter((li) => li.includes("Mux Data"));
+      expect(withMux).toHaveLength(1);
+      expect(withMux[0]).toContain("attribution_first");
+    },
+  );
+});
+
+// #443 — §2 «Marketing-attribution data» and the §4 rows of the tools behind
+// that consent are the other places the policy names it. They once said
+// «if / after you accept marketing cookies» to every visitor, while the code
+// asks only in the EU/EEA, UK and CH and turns the switch on by default
+// elsewhere (lib/cookie-consent.ts:marketingConsentRequired, proxy.ts
+// autoGrant) — and §2 did not name the ChatGPT Ads pixel or Mux Data, which
+// read the same cookie_consent.marketing (components/site/openai-pixel.tsx,
+// lib/use-marketing-consent.ts). They now carry the §3 rule and the §3 list.
+const ELSEWHERE_CASES = [
+  {
+    ...CASES[0],
+    tools: TOOL_CASES[0].tools,
+    sharing: "sharing",
+    attributionMarker: "Marketing-attribution data",
+    defaultWord: "by default",
+    consentPhrase: "marketing cookies",
+    oldPhrases: [
+      "If you accept marketing cookies",
+      "after you accept marketing cookies",
+    ],
+  },
+  {
+    ...CASES[1],
+    tools: TOOL_CASES[1].tools,
+    sharing: "encargados",
+    attributionMarker: "Datos de atribución",
+    defaultWord: "por defecto",
+    consentPhrase: "cookies de marketing",
+    oldPhrases: [
+      "Si aceptas las cookies de marketing",
+      "tras aceptar las cookies de marketing",
+    ],
+  },
+] as const;
+
+// The §4 rows whose processing the marketing switch turns on: Meta (Pixel +
+// CAPI), PostHog, Google Analytics — and Mux, for Mux Data.
+const GATED_ROWS = [
+  "Meta Platforms Ireland Ltd",
+  "PostHog Inc.",
+  "Google Analytics 4",
+  "Mux Inc.",
+] as const;
+
+describe("/privacy §2 and §4 — the same geo rule and the same tools as §3 (#443)", () => {
+  it.each(ELSEWHERE_CASES)(
+    "($locale) §2 names every tool §3 names, then the banner regions and the footer opt-out — no «if you accept» for everyone",
+    async (c) => {
+      const html = await render(c.locale);
+      const attribution = item(section(html, c.collect), c.attributionMarker);
+      expect(attribution).not.toBe("");
+      for (const old of c.oldPhrases) expect(attribution).not.toContain(old);
+
+      const regionsAt = attribution.indexOf(c.regions);
+      expect(regionsAt).toBeGreaterThan(-1);
+      expect(attribution.toLowerCase()).toContain(c.onByDefault.toLowerCase());
+      expect(attribution).toContain(c.footerLabel);
+      for (const tool of c.tools) {
+        const at = attribution.indexOf(tool);
+        expect(at, tool).toBeGreaterThan(-1);
+        expect(at, tool).toBeLessThan(regionsAt);
+      }
+    },
+  );
+
+  it.each(ELSEWHERE_CASES)(
+    "($locale) §4: the Meta, PostHog, Google Analytics and Mux rows — and any row that names the consent — carry the geo rule",
+    async (c) => {
+      const sharing = section(await render(c.locale), c.sharing);
+      for (const marker of GATED_ROWS) {
+        expect(item(sharing, marker), marker).toContain(c.consentPhrase);
+      }
+      expect(item(sharing, "Mux Inc.")).toContain("Mux Data");
+
+      const consentRows = sharing
+        .split("<li")
+        .slice(1)
+        .map((li) => item(`<li${li}`, c.consentPhrase))
+        .filter((row) => row !== "");
+      expect(consentRows.length).toBeGreaterThanOrEqual(GATED_ROWS.length);
+      for (const row of consentRows) {
+        for (const old of c.oldPhrases) expect(row).not.toContain(old);
+        expect(row).toContain(c.regions);
+        expect(row).toContain(c.defaultWord);
+        expect(row).toContain(c.footerLabel);
+      }
+    },
+  );
+});
