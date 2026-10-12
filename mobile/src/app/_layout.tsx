@@ -8,7 +8,6 @@ import { useEffect } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConfigProvider } from "@/api/config-context";
 import { AuthProvider } from "@/auth/clerk";
-import { LocaleProvider, useInitialLocale } from "@/i18n/locale";
 import { initObservability } from "@/observability";
 import { readObservabilityEnv } from "@/observability-env";
 import { lockOrientation, PORTRAIT_LOCK } from "@/orientation";
@@ -24,10 +23,10 @@ initObservability(readObservabilityEnv());
 // than a marginally longer splash.
 SplashScreen.preventAutoHideAsync();
 
-// The «Play next episode automatically» setting, read from the keychain now,
-// alongside the language the splash waits for — so the cache is primed
-// before Settings ever mounts and its switch renders the stored value rather
-// than «on» flipping to «off» on the first open after a launch.
+// The «Play next episode automatically» setting, read from the keychain now
+// — so the cache is primed before Settings ever mounts and its switch renders
+// the stored value rather than «on» flipping to «off» on the first open after
+// a launch.
 void loadAutoplayNext();
 
 // The tabs sit under every other screen of the root stack, even when the app
@@ -57,11 +56,6 @@ export default function RootLayout() {
     Geist_600SemiBold,
     GeistMono_400Regular,
   });
-  // The stored language choice (or the device's) — held behind the splash
-  // for the same reason as the fonts: a first frame in the wrong language
-  // that then flips is worse than a few more milliseconds of splash.
-  const initialLocale = useInitialLocale();
-
   // Portrait is the app's orientation (#252): `app.json` allows every
   // orientation so the landscape player can take one, and this lock — once,
   // at launch — is what keeps the tabs, the show page and sign-in upright.
@@ -73,9 +67,8 @@ export default function RootLayout() {
 
   // Render nothing while loading, but do NOT block forever on a font failure —
   // shipping a blank app because a typeface didn't decode is a worse outcome
-  // than shipping one in the system font. (The locale read has its own
-  // deadline and always resolves.)
-  if ((!fontsLoaded && !fontError) || !initialLocale) return null;
+  // than shipping one in the system font.
+  if (!fontsLoaded && !fontError) return null;
   void SplashScreen.hideAsync();
 
   // SafeAreaProvider is declared explicitly rather than relying on whatever
@@ -85,33 +78,29 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ThemeProvider value={navTheme}>
         <StatusBar style="light" />
-        {/* Locale outermost: every provider below renders copy (the config
-            error state, the update wall) and reads it through useT(). */}
-        <LocaleProvider initial={initialLocale}>
-          {/* Auth outside Config: the token provider must be installed before
-              any /v1 request goes out, or the first calls of a signed-in
-              session silently look anonymous. */}
-          <AuthProvider>
-            <ConfigProvider>
-              {/* The root stack (#245): the tab group is one screen of it,
-                  and the show page, the player and sign-in are its siblings
-                  — pushed OVER the tabs, so none of them ever has the tab
-                  bar. That is the "bar hidden on the show page" decision,
-                  by construction rather than by a per-screen style. */}
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: colors.bg },
-                }}
-              >
-                <Stack.Screen name="(tabs)" />
-                <Stack.Screen name="show/[slug]" />
-                <Stack.Screen name="watch/[episodeId]" />
-                <Stack.Screen name="sign-in" />
-              </Stack>
-            </ConfigProvider>
-          </AuthProvider>
-        </LocaleProvider>
+        {/* Auth outside Config: the token provider must be installed before
+            any /v1 request goes out, or the first calls of a signed-in
+            session silently look anonymous. */}
+        <AuthProvider>
+          <ConfigProvider>
+            {/* The root stack (#245): the tab group is one screen of it, and
+                the show page, the player and sign-in are its siblings —
+                pushed OVER the tabs, so none of them ever has the tab bar.
+                That is the "bar hidden on the show page" decision, by
+                construction rather than by a per-screen style. */}
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: colors.bg },
+              }}
+            >
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="show/[slug]" />
+              <Stack.Screen name="watch/[episodeId]" />
+              <Stack.Screen name="sign-in" />
+            </Stack>
+          </ConfigProvider>
+        </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );
@@ -119,6 +108,6 @@ export default function RootLayout() {
 
 // The last resort (#308): a render crash in this layout — a provider, the
 // stack — that no screen's own boundary caught. «Try again» only; the copy
-// cannot lean on the LocaleProvider above, which is part of what crashed.
-// See components/route-error.tsx.
+// is read with no provider above it (useT reads no context, #447). See
+// components/route-error.tsx.
 export { RootErrorBoundary as ErrorBoundary } from "@/components/route-error";

@@ -1,11 +1,11 @@
 // Unit tests for lib/seo.ts — the canonical URL rule every indexed page reads,
 // and what is left of the retired /es prefix (#445): the split proxy.ts reads
-// to 308 an /es URL to its bare English path, and the prefixing the Expo app
-// still applies to its legal links.
+// to 308 an /es URL to its bare English path. The prefixing the Expo app used
+// to apply to its legal links went with the app's Spanish (#447).
 
 import { describe, expect, it } from "vitest";
 
-import { canonicalUrl, localizedPath, stripLocalePrefix } from "./seo";
+import { canonicalUrl, stripLocalePrefix } from "./seo";
 
 describe("canonicalUrl", () => {
   it("is the bare apex for the home page and apex + path elsewhere", () => {
@@ -36,20 +36,5 @@ describe("stripLocalePrefix", () => {
       locale: "en",
       path: "/espanol",
     });
-  });
-});
-
-describe("localizedPath (the app's legal links)", () => {
-  it("is the identity for English and prefixes Spanish", () => {
-    expect(localizedPath("/", "en")).toBe("/");
-    expect(localizedPath("/", "es")).toBe("/es");
-    expect(localizedPath("/terms", "en")).toBe("/terms");
-    expect(localizedPath("/terms", "es")).toBe("/es/terms");
-  });
-
-  it("round-trips through the split proxy.ts redirects with", () => {
-    for (const path of ["/", "/terms", "/shows/x"]) {
-      expect(stripLocalePrefix(localizedPath(path, "es")).path).toBe(path);
-    }
   });
 });

@@ -7,8 +7,8 @@ import { CLERK_PUBLISHABLE_KEY } from "@/auth/clerk";
 import { GlassSurface } from "@/components/glass";
 import { SocialSignIn } from "@/components/social-sign-in";
 import { ErrorState, GoldButton, Pill } from "@/components/ui";
-import { useLocale, useT } from "@/i18n/locale";
-import { legalUrl } from "@/i18n/localized-url";
+import { legalUrl } from "@/i18n/legal-url";
+import { useT } from "@/i18n/locale";
 import { body, colors, display, fonts, radius, space } from "@/theme";
 
 // Passwordless email-code sign-in — the two-step form itself, shared by the
@@ -117,7 +117,6 @@ function ClerkSignInForm({
   signInHint = false,
 }: SignInFormProps) {
   const t = useT();
-  const locale = useLocale();
   const config = useConfig();
 
   const [step, setStep] = useState<Step>("email");
@@ -191,7 +190,7 @@ function ClerkSignInForm({
   const { signIn } = useSignIn();
   const { signUp } = useSignUp();
 
-  // The failures this form can meet, in the viewer's language. Clerk's own
+  // The failures this form can meet, in the app's words. Clerk's own
   // text is English only and its runtime errors are developer strings
   // (`Clerk: Network request failed … (code="network_error")`), so no Clerk
   // message is ever shown: an unmapped code gets the generic line.
@@ -241,8 +240,8 @@ function ClerkSignInForm({
 
       // The app's language rides along (#304 item 3): with none, Clerk
       // records no locale and any email it localises goes out in the
-      // instance's default language.
-      const created = await signUp.create({ emailAddress: address, locale });
+      // instance's default language. English, the app's only one since #447.
+      const created = await signUp.create({ emailAddress: address, locale: "en" });
       if (created.error) {
         fail(messageFor(created.error));
         return;
@@ -436,8 +435,8 @@ function ClerkSignInForm({
 
       {/* The step that collects the address says what it is taken under
           (#312, App Store 5.1.1(i)). The two documents open the way Settings
-          opens them — the chosen language's embed page (#310), through the
-          same legalUrl. Nested Text links: VoiceOver and TalkBack reach each
+          opens them — the embed page (#310), through the same legalUrl.
+          Nested Text links: VoiceOver and TalkBack reach each
           one as its own link, named by its words; an inline link inside a
           sentence is the target the size rules exempt (WCAG 2.5.8, «Inline»). */}
       {step === "email" ? (
@@ -446,7 +445,7 @@ function ClerkSignInForm({
           <Text
             style={styles.consentLink}
             accessibilityRole="link"
-            onPress={() => void openBrowserAsync(legalUrl(config.urls.terms, locale))}
+            onPress={() => void openBrowserAsync(legalUrl(config.urls.terms))}
           >
             {t.app.signIn.consentTerms}
           </Text>
@@ -454,7 +453,7 @@ function ClerkSignInForm({
           <Text
             style={styles.consentLink}
             accessibilityRole="link"
-            onPress={() => void openBrowserAsync(legalUrl(config.urls.privacy, locale))}
+            onPress={() => void openBrowserAsync(legalUrl(config.urls.privacy))}
           >
             {t.app.signIn.consentPrivacy}
           </Text>
@@ -486,7 +485,12 @@ function ClerkSignInForm({
         </Pressable>
       ) : null}
 
-      <Text style={styles.fine}>{t.signupWall.noCardNeeded}</Text>
+      {/* «No card needed» only says something where there is something to
+          pay for: with payments off (free mode) the line is not drawn (#447,
+          from the #446 audit). The key stays, for paid mode. */}
+      {config.flags.paymentsEnabled ? (
+        <Text style={styles.fine}>{t.signupWall.noCardNeeded}</Text>
+      ) : null}
 
       {signInHint && step === "email" ? (
         <Pressable

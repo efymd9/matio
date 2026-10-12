@@ -132,6 +132,7 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 // browser its links open — inert here, tested in sign-in-form.test.tsx.
 vi.mock("@/api/config-context", () => ({
   useConfig: () => ({
+    flags: { paymentsEnabled: true, downloadsEnabled: false, castEnabled: false },
     urls: {
       terms: "https://matio.tv/terms?embed=app",
       privacy: "https://matio.tv/privacy?embed=app",

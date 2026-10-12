@@ -29,11 +29,11 @@ export function canonicalUrl(path: string): string {
 // The site served Spanish under /es until #445 (2026-10-12); it is
 // English-only now, at the bare path. The /es URLs were indexed and linked,
 // so proxy.ts answers every /es and /es/* with a permanent 308 to the bare
-// path (query kept) — stripLocalePrefix is the rule it reads. localizedPath
-// stays for the Expo app (mobile/src/shared/seo.ts → legalUrl), whose
-// shipped builds still open the legal pages under /es for a viewer who chose
-// Español: those land on the English page through that same 308. Kept
-// dependency-free so it's safe in the middleware and the app's bundle.
+// path (query kept) — stripLocalePrefix is the rule it reads. Expo builds
+// from before #447 still open the legal pages under /es for a viewer who
+// chose Español; those land on the English page through that same 308 (the
+// app itself has been English-only since #447 and builds no /es URL). Kept
+// dependency-free so it's safe in the middleware bundle.
 export type SeoLocale = "en" | "es";
 export const ES_PREFIX = "/es";
 
@@ -49,19 +49,6 @@ export function stripLocalePrefix(pathname: string): {
     return { locale: "es", path: pathname.slice(ES_PREFIX.length) };
   }
   return { locale: "en", path: pathname };
-}
-
-// Prefix a base (English) path with the locale segment. English is identity.
-// The app's — the site itself links nowhere under /es any more.
-export function localizedPath(basePath: string, locale: SeoLocale): string {
-  const clean =
-    basePath === ""
-      ? "/"
-      : basePath.startsWith("/")
-        ? basePath
-        : `/${basePath}`;
-  if (locale === "en") return clean;
-  return clean === "/" ? ES_PREFIX : `${ES_PREFIX}${clean}`;
 }
 
 // Meta-description sanitizer for DB-sourced copy. Admin-entered synopses

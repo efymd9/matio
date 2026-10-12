@@ -154,7 +154,7 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
 import { CatalogProvider } from "@/api/catalog-context";
 import HomeScreen from "@/app/(tabs)/index";
-import { appDictFor } from "@/shared/i18n";
+import { appEn } from "@/shared/i18n";
 import { colors } from "@/theme";
 
 function show(slug: string, title: string): ShowSummary {
@@ -312,7 +312,7 @@ describe("Home pull-to-refresh (#313)", () => {
     expect(text()).toContain("Second Hand");
     // No drop back to the error screen or the spinner of a first load.
     expect(container.querySelector('[role="progressbar"]')).toBeNull();
-    expect(text()).not.toContain(appDictFor("en").common.loadFailed);
+    expect(text()).not.toContain(appEn.common.loadFailed);
   });
 
   it("an anonymous pull reloads the catalog only, and the spinner clears when it settles", async () => {

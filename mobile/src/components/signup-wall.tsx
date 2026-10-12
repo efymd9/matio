@@ -1,4 +1,5 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useConfig } from "@/api/config-context";
 import { GoldButton, Pill } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import { body, colors, display, SCREEN_PAD, space } from "@/theme";
@@ -11,6 +12,7 @@ import { body, colors, display, SCREEN_PAD, space } from "@/theme";
 // stalled player).
 export function SignupWall({ onSignIn, onBack }: { onSignIn: () => void; onBack: () => void }) {
   const t = useT();
+  const { flags } = useConfig();
   return (
     <View style={styles.wall}>
       <Pill label={t.signupWall.kicker} />
@@ -24,7 +26,11 @@ export function SignupWall({ onSignIn, onBack }: { onSignIn: () => void; onBack:
       <Pressable onPress={onBack} accessibilityRole="link" style={{ marginTop: space(5) }} hitSlop={8}>
         <Text style={styles.wallSecondary}>{t.app.common.notNow}</Text>
       </Pressable>
-      <Text style={styles.wallFine}>{t.signupWall.noCardNeeded}</Text>
+      {/* Paid mode only, like the sign-in form's: with payments off there is
+          no card to not need (#447, from the #446 audit). */}
+      {flags.paymentsEnabled ? (
+        <Text style={styles.wallFine}>{t.signupWall.noCardNeeded}</Text>
+      ) : null}
     </View>
   );
 }

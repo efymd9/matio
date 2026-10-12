@@ -1,6 +1,6 @@
 import "server-only";
 import type Stripe from "stripe";
-import type { Locale } from "@/lib/i18n/dictionaries";
+import type { SITE_LOCALE } from "@/lib/i18n/server";
 
 // The Checkout Session both flows create, in one place. Signed-in and guest
 // checkout differ in exactly three fields (an existing customer, the address
@@ -30,8 +30,8 @@ export type CheckoutSessionInput = {
   urlParams: Record<string, unknown>;
   /** Written onto the SUBSCRIPTION, where the webhook mirror reads it. */
   subscriptionMetadata: Record<string, string>;
-  /** Checkout's own language. */
-  locale: Locale;
+  /** Checkout's own language — the site's (lib/i18n/server.ts). */
+  locale: typeof SITE_LOCALE;
   /** The EU/UK 14-day withdrawal waiver shown next to the ToS checkbox. */
   withdrawalWaiver: string;
   /** Signed-in flow only: the existing Stripe customer. */

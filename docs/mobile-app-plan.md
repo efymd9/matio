@@ -76,7 +76,7 @@ pnpm-workspace.yaml  ← + packages: ['apps/*', 'packages/*']
 | `lib/utm.ts` + `lib/tracked-links.ts` | byte-identical normalization is a hard invariant |
 | `lib/watch-segments.ts` | bucket size must match the server's validator |
 | `lib/episode-access.ts` (client half) | the lock rule; a second copy = a paywall bug |
-| `lib/i18n/dictionaries.ts` + `negotiate.ts` | es/en copy, one source (`shared.ts` left with the site's Spanish in #445; the site is English-only, `es` keeps only the sections the app reads) |
+| `lib/i18n/dictionaries.ts` | the copy, one source — English only for the site (#445) and the app (#447); `shared.ts` and `negotiate.ts` left with the Spanish |
 | `lib/design.ts` | brand tokens — app and web must not drift |
 | `lib/slug.ts`, `lib/seo.ts`, `lib/continue-watching.ts`, `lib/flags.ts` | shared rules |
 
@@ -814,6 +814,19 @@ on leave — still to be confirmed on a phone (registry). No new dependencies; A
 Control Center (an in-chrome route picker is a native module — registry). Tests:
 `src/components/landscape-chrome.test.tsx`, `src/watch/storyboard.test.tsx`, the #375 block of
 `src/watch/episode-feed.test.tsx`, `lib/mux-token.test.ts`, the route test.
+
+**English only, 2026-10-12 (#447)** — after the site (#445); the owner: «убери испанский из
+мобилки пока». `src/i18n/locale.ts`'s `useT()` returns the English copy and reads no context:
+no device-language detection, no `LocaleProvider`, no splash wait on the keychain, and the
+`matio_locale` key earlier builds wrote is neither read nor written (left where it is). The
+Language group left Settings (its radio row, `Radio` and the globe icon went with it); the
+legal links are the English embed URLs (`src/i18n/legal-url.ts`); `signUp.create` passes
+`locale: "en"`; `ios.infoPlist.CFBundleLocalizations` is `["en"]` (native config — the next
+EAS build). The same build hides the Account tab's «Member» pill and the «No card needed» line
+(wall + sign-in form) unless `/v1/config` `flags.paymentsEnabled` (the #446 audit). The
+Phase 1 and #245 notes above describe the es/en app as it was. Tests:
+`src/i18n/locale.test.tsx` (a Spanish phone through the real root layout), the account-tab,
+sign-in-form and episode-feed cases.
 
 ## 15. Traps
 

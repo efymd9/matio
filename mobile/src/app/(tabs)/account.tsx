@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, settleOr } from "@/api/client";
+import { useConfig } from "@/api/config-context";
 import {
   askAppleForDeletionCode,
   linkedAppleUserIds,
@@ -113,6 +114,7 @@ function sessionState(getToken: ReturnType<typeof useAuth>["getToken"]): Promise
 // provider is mounted whenever isSignedIn can be true.
 function SignedInAccount() {
   const t = useT();
+  const { flags } = useConfig();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const clearance = useTabBarClearance();
@@ -307,11 +309,15 @@ function SignedInAccount() {
           <Text style={styles.email} numberOfLines={1}>
             {email}
           </Text>
-          {/* Always «Member»: /v1 does not carry subscription state yet, so
-              the app cannot honestly say «Subscriber» (registry). */}
-          <View style={{ marginTop: space(1.5) }}>
-            <Pill label={t.app.account.member} tone="gold" />
-          </View>
+          {/* «Member» in paid mode only: in Matio's copy a member is someone
+              who pays, so with payments off (free mode) the pill is not drawn
+              (#447, from the #446 audit). And «Member», never «Subscriber»:
+              /v1 does not carry subscription state yet (registry). */}
+          {flags.paymentsEnabled ? (
+            <View style={{ marginTop: space(1.5) }}>
+              <Pill label={t.app.account.member} tone="gold" />
+            </View>
+          ) : null}
         </View>
       </View>
 

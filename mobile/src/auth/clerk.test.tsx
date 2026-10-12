@@ -61,6 +61,7 @@ vi.mock("expo-web-browser", () => ({ openBrowserAsync: async () => ({}) }));
 // The sign-in form's Terms / Privacy line (#312) reads the legal URLs.
 vi.mock("@/api/config-context", () => ({
   useConfig: () => ({
+    flags: { paymentsEnabled: true, downloadsEnabled: false, castEnabled: false },
     urls: {
       terms: "https://matio.tv/terms?embed=app",
       privacy: "https://matio.tv/privacy?embed=app",

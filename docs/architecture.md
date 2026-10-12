@@ -434,7 +434,7 @@ What went with Spanish, and why it is not coming back by accident:
 - **Analytics.** PostHog no longer registers `locale` / `locale_source`, and `unregister`s the pair on load — posthog-js persists super-properties, so a returning browser would otherwise keep stamping `locale: "es"`.
 - **Emails.** The reminder email is English for every row (`show_reminders.locale` is still written, as `en`, and no longer read).
 
-**Spanish lives on in the Expo app.** The app renders es/en from `lib/i18n/dictionaries.ts`: `Dict = typeof en` is the whole site's copy, and `es` carries only the sections the app reads (`SharedDict`), handed out by `dictFor(locale)` to the app's `useT()` (`mobile/src/i18n/locale.tsx`). The app detects the device language with `lib/i18n/negotiate.ts` (`pickFromLanguageTags` — the only negotiation code left). Shipped app builds still open the legal pages as `/es/terms?embed=app` for a viewer who chose Español (`lib/seo.ts:localizedPath`); those land on the English document through the 308.
+**No Spanish in the Expo app either (#447).** The app renders `en` from `lib/i18n/dictionaries.ts` plus its own `app-dictionaries.ts` (`useT()` in `mobile/src/i18n/locale.ts`, no context); it reads neither the device language nor a stored choice, and Settings has no Language group. `es`, `dictFor`, `Locale` and `lib/i18n/negotiate.ts` are gone. App builds from before #447 still open the legal pages as `/es/terms?embed=app` for a viewer who chose Español; those land on the English document through the 308.
 
 Cache-safety note that still holds: the root layout reads `cookies()` (consent) and `headers()` (the app-embed flag), so every page stays dynamic even though `getDict()` no longer touches the request.
 

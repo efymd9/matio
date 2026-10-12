@@ -8,8 +8,8 @@ import { closeStage, openStage, stillLive, type Stage } from "@/testing/stage";
 // relaunched, opened Settings, and watched the switch render ON and then
 // animate to OFF: the value is read from the keychain, and nothing had read
 // it before Settings mounted. The root layout now starts that read at launch,
-// next to the language read the splash waits on, so the switch's first frame
-// is the stored value.
+// at module load — long before anyone can open the Settings tab — so the
+// switch's first frame is the stored value.
 
 const store = vi.hoisted(() => ({
   values: new Map<string, string>(),

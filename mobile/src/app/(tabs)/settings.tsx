@@ -6,24 +6,22 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConfig } from "@/api/config-context";
 import { APP_BUILD } from "@/build";
 import { useTabBarClearance } from "@/components/glass-tab-bar";
-import { Card, Chevron, GroupLabel, Radio, Row } from "@/components/ui";
-import { useLocale, useSetLocale, useT } from "@/i18n/locale";
-import { legalUrl } from "@/i18n/localized-url";
+import { Card, Chevron, GroupLabel, Row } from "@/components/ui";
+import { legalUrl } from "@/i18n/legal-url";
+import { useT } from "@/i18n/locale";
 import { useAutoplayNext } from "@/prefs/autoplay";
 import { body, colors, display, SCREEN_PAD, space } from "@/theme";
 
-// Settings (#245): language (the switcher that used to be a pill in the home
-// header), playback, and the About group with the legal links from
-// /v1/config. Notifications (#98) and Downloads (`flags.downloadsEnabled`)
-// are deliberately NOT drawn — a control without a function behind it is a
+// Settings (#245): playback, and the About group with the legal links from
+// /v1/config. No language group since #447 — the app is English-only.
+// Notifications (#98) and Downloads (`flags.downloadsEnabled`) are
+// deliberately NOT drawn — a control without a function behind it is a
 // promise the app cannot keep.
 export default function SettingsScreen() {
   const t = useT();
   const insets = useSafeAreaInsets();
   const clearance = useTabBarClearance();
   const config = useConfig();
-  const locale = useLocale();
-  const setLocale = useSetLocale();
   const [autoplay, setAutoplay] = useAutoplayNext();
 
   // «0.1.0 (1)»: the store version from app.json and the native build number
@@ -45,26 +43,6 @@ export default function SettingsScreen() {
       >
         {t.app.tabs.settings}
       </Text>
-
-      <Group label={t.language.label} hint={t.app.settings.langHint}>
-        <Row
-          first
-          icon="language"
-          label={t.language.en}
-          trailing={<Radio selected={locale === "en"} />}
-          onPress={() => setLocale("en")}
-          role="radio"
-          selected={locale === "en"}
-        />
-        <Row
-          iconSpacer
-          label={t.language.es}
-          trailing={<Radio selected={locale === "es"} />}
-          onPress={() => setLocale("es")}
-          role="radio"
-          selected={locale === "es"}
-        />
-      </Group>
 
       {/* The toggle governs landscape shows only — a vertical show is a feed
           and its `ended` always continues (episode-feed.tsx); the hint says
@@ -89,24 +67,23 @@ export default function SettingsScreen() {
 
       <Group label={t.footer.about}>
         <Row first label={t.app.settings.version} value={version} mono />
-        {/* In the language chosen above, not the phone's (the /es twin), and
-            as the bare embed page — no site header or trackers (#310). */}
+        {/* As the bare embed page — no site header or trackers (#310). */}
         <Row
           label={t.footer.terms}
           trailing={<Chevron external />}
-          onPress={() => void openBrowserAsync(legalUrl(config.urls.terms, locale))}
+          onPress={() => void openBrowserAsync(legalUrl(config.urls.terms))}
           role="link"
         />
         <Row
           label={t.footer.privacy}
           trailing={<Chevron external />}
-          onPress={() => void openBrowserAsync(legalUrl(config.urls.privacy, locale))}
+          onPress={() => void openBrowserAsync(legalUrl(config.urls.privacy))}
           role="link"
         />
         <Row
           label={t.footer.cookies}
           trailing={<Chevron external />}
-          onPress={() => void openBrowserAsync(legalUrl(config.urls.cookies, locale))}
+          onPress={() => void openBrowserAsync(legalUrl(config.urls.cookies))}
           role="link"
         />
         <Row

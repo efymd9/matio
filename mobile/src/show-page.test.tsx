@@ -70,8 +70,6 @@ vi.mock("expo-glass-effect", () => ({
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
 import ShowScreen from "@/app/show/[slug]";
-import { LocaleProvider } from "@/i18n/locale";
-import type { Locale } from "@/shared/i18n";
 import { AA_TEXT, contrastRatio, paintedBackground, parseColor } from "@/testing/contrast";
 import { colors } from "@/theme";
 
@@ -118,14 +116,10 @@ let container: HTMLDivElement;
 let root: Root;
 const text = () => container.textContent ?? "";
 
-async function renderShow(show: ShowDetail, locale: Locale = "en") {
+async function renderShow(show: ShowDetail) {
   current.show = show;
   await act(async () => {
-    root.render(
-      <LocaleProvider initial={locale}>
-        <ShowScreen />
-      </LocaleProvider>,
-    );
+    root.render(<ShowScreen />);
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
@@ -173,27 +167,22 @@ afterEach(() => {
 describe("a subscriber-only episode row names no purchase (#311 item 1)", () => {
   // «Subscribers only» contains the letters «Subscribe»; the call to action
   // is the WORD, hence the word boundary.
-  const cases = [
-    { locale: "en", neutral: "Subscribers only", signup: "Create account", cta: /\bsubscribe\b/i },
-    { locale: "es", neutral: "Solo para suscriptores", signup: "Crea una cuenta", cta: /suscr[ií]bete/i },
-  ] as const;
+  const cta = /\bsubscribe\b/i;
 
-  for (const { locale, neutral, signup, cta } of cases) {
-    it(`${locale}: reads «${neutral}» on screen and to VoiceOver, and «${cta.source}» nowhere`, async () => {
-      await renderShow(makeShow(), locale);
+  it("reads «Subscribers only» on screen and to VoiceOver, and «subscribe» nowhere", async () => {
+    await renderShow(makeShow());
 
-      expect(rowLabel("Episode 3")).toBe(`Ep. 3, Episode 3, 10 min, ${neutral}`);
-      expect(leaves(neutral)).toHaveLength(1);
-      // The sign-up wall's row is untouched.
-      expect(rowLabel("Episode 2")).toBe(`Ep. 2, Episode 2, 10 min, ${signup}`);
+    expect(rowLabel("Episode 3")).toBe("Ep. 3, Episode 3, 10 min, Subscribers only");
+    expect(leaves("Subscribers only")).toHaveLength(1);
+    // The sign-up wall's row is untouched.
+    expect(rowLabel("Episode 2")).toBe("Ep. 2, Episode 2, 10 min, Create account");
 
-      const spoken = Array.from(container.querySelectorAll("[aria-label]")).map((el) =>
-        el.getAttribute("aria-label"),
-      );
-      expect(text()).not.toMatch(cta);
-      for (const label of spoken) expect(label).not.toMatch(cta);
-    });
-  }
+    const spoken = Array.from(container.querySelectorAll("[aria-label]")).map((el) =>
+      el.getAttribute("aria-label"),
+    );
+    expect(text()).not.toMatch(cta);
+    for (const label of spoken) expect(label).not.toMatch(cta);
+  });
 });
 
 describe("no generated synopsis (#311 item 2)", () => {
@@ -205,14 +194,6 @@ describe("no generated synopsis (#311 item 2)", () => {
     expect(tabs()).toEqual(["Episodes"]);
     // The episode list is still there under it.
     expect(rowLabel("Episode 1")).toBe("Ep. 1, Episode 1, 10 min");
-  });
-
-  it("nor in Spanish", async () => {
-    await renderShow(makeShow({ genre: ["Drama"] }), "es");
-
-    expect(text()).not.toContain("Míralo gratis");
-    expect(text()).not.toContain("serie original de Matio");
-    expect(tabs()).toEqual(["Episodios"]);
   });
 
   it("a show with one keeps both: two lines under Episodes, the full text under About", async () => {

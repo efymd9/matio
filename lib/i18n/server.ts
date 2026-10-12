@@ -6,8 +6,8 @@ import { en, type Dict } from "./dictionaries";
 // /es URLs (proxy.ts 308s them to the bare path), no Accept-Language
 // negotiation, no `locale` cookie, no switcher. These two stay as the one
 // place a server component, a route handler or a server action asks "which
-// language?", so the answer cannot drift between callers. Spanish lives on
-// only in the Expo app (lib/i18n/dictionaries.ts → `es`).
+// language?", so the answer cannot drift between callers. The Expo app went
+// English-only too (#447), so the dictionaries carry no Spanish at all.
 export const SITE_LOCALE = "en" as const;
 
 export async function getLocale(): Promise<typeof SITE_LOCALE> {

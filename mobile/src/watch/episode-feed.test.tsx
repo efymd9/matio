@@ -177,8 +177,14 @@ vi.mock("@/orientation", () => ({
 }));
 
 let gate: SignupGate = { mode: "tiers" };
+// Payments on (paid mode, live since 2026-09-09) unless a case says otherwise
+// — the sign-up wall's «No card needed» follows it (#447).
+let paymentsEnabled = true;
 vi.mock("@/api/config-context", () => ({
-  useConfig: (): Partial<AppConfig> => ({ signupGate: gate }),
+  useConfig: (): Partial<AppConfig> => ({
+    signupGate: gate,
+    flags: { paymentsEnabled, downloadsEnabled: false, castEnabled: false },
+  }),
 }));
 
 // The safe-area insets a case runs under — none by default; the landscape
@@ -346,6 +352,7 @@ beforeEach(() => {
   tokens.calls.length = 0;
   tokens.answer = async (episodeId) => granted(episodeId);
   gate = { mode: "tiers" };
+  paymentsEnabled = true;
   onSignIn.mockClear();
   onBack.mockClear();
   container = document.createElement("div");
@@ -441,6 +448,21 @@ describe("EpisodeFeed — which answer a locked page gives (#288 item 1)", () =>
     press(WALL_CTA);
     expect(onSignIn).toHaveBeenCalledTimes(1);
     expect(tokens.calls).toEqual([]);
+  });
+
+  // #447 (the #446 audit): «No card needed. Just an email.» only says
+  // something where there is something to pay for.
+  it("the wall says «No card needed» in paid mode — and not in free mode", async () => {
+    await renderFeed(makeShow("horizontal", ["member"]));
+    expect(text()).toContain(WALL_CTA);
+    expect(text()).toContain("No card needed. Just an email.");
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    paymentsEnabled = false;
+    await renderFeed(makeShow("horizontal", ["member"]));
+    expect(text()).toContain(WALL_CTA);
+    expect(text()).not.toContain("No card needed");
   });
 
   it("a member episode plays once signed in", async () => {

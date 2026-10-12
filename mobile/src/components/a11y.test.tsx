@@ -108,6 +108,7 @@ vi.mock("@/api/client", async (importOriginal) => {
 });
 vi.mock("@/api/config-context", () => ({
   useConfig: (): Partial<AppConfig> => ({
+    flags: { paymentsEnabled: true, downloadsEnabled: false, castEnabled: false },
     signupGate: { mode: "tiers" },
     // Settings' About group.
     urls: {
@@ -176,7 +177,7 @@ import { GlassTabBar } from "@/components/glass-tab-bar";
 import { HeroCard } from "@/components/home-feed";
 import { SignInForm } from "@/components/sign-in-form";
 import { SignupWall } from "@/components/signup-wall";
-import { Chevron, GoldButton, GroupLabel, PosterCard, Row, SectionHeader } from "@/components/ui";
+import { Chevron, GoldButton, GroupLabel, PosterCard, SectionHeader } from "@/components/ui";
 import { VerticalChrome } from "@/components/vertical-chrome";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -297,7 +298,7 @@ describe("Home hero card — one VoiceOver element with a Play action (#288 item
   });
 });
 
-describe("buttons, links and radios say what they are (#288 item 8)", () => {
+describe("buttons and links say what they are (#288 item 8)", () => {
   // react-native-web's Pressable writes aria-disabled from its own `disabled`
   // prop only (which GoldButton deliberately leaves alone — the handler
   // guards the tap), so the dimmed/busy state is read from what the
@@ -318,21 +319,6 @@ describe("buttons, links and radios say what they are (#288 item 8)", () => {
   it("a poster is a button", () => {
     render(<PosterCard title="Fallen" posterUrl={null} slug="fallen" onPress={() => undefined} />);
     expect(roleOf("Fallen")).toBe("button");
-  });
-
-  it("a language row is a radio announced checked, not «selected»", () => {
-    render(
-      <>
-        <Row label="English" role="radio" selected onPress={() => undefined} />
-        <Row label="Español" role="radio" selected={false} onPress={() => undefined} />
-      </>,
-    );
-    const radios = container.querySelectorAll('[role="radio"]');
-
-    expect(radios).toHaveLength(2);
-    expect(radios[0].getAttribute("aria-checked")).toBe("true");
-    expect(radios[1].getAttribute("aria-checked")).toBe("false");
-    expect(radios[0].hasAttribute("aria-selected")).toBe(false);
   });
 
   it("«Not now» and the sign-in form's text actions are links; its CTA is dimmed until Clerk is ready", () => {

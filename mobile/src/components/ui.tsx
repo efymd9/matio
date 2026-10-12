@@ -359,13 +359,11 @@ export function Card({ children }: { children: ReactNode }) {
   return <View style={styles.card}>{children}</View>;
 }
 
-// One row: a leading icon (or an equal-width spacer so a group with an icon
-// on its first row keeps its labels aligned, or any element — the Account
-// tab's episode thumb), a label with an optional second line, an optional
-// value on the right, and a trailing control.
+// One row: a leading icon (or any element — the Account tab's episode
+// thumb), a label with an optional second line, an optional value on the
+// right, and a trailing control.
 export function Row({
   icon,
-  iconSpacer = false,
   leading,
   label,
   titleCase = false,
@@ -377,11 +375,9 @@ export function Row({
   danger = false,
   first = false,
   role = "button",
-  selected,
   accessibilityLabel,
 }: {
   icon?: IconName;
-  iconSpacer?: boolean;
   leading?: ReactNode;
   label: string;
   // Anton, one line — a show title rather than a setting's name.
@@ -394,7 +390,6 @@ export function Row({
   danger?: boolean;
   first?: boolean;
   role?: AccessibilityRole;
-  selected?: boolean;
   // What VoiceOver / TalkBack say for a pressable row; without it, the text.
   accessibilityLabel?: string;
 }) {
@@ -402,7 +397,6 @@ export function Row({
     <>
       {leading}
       {icon ? <Icon name={icon} size={22} color={colors.gold} /> : null}
-      {!icon && iconSpacer ? <View style={{ width: 22 }} /> : null}
       {/* A danger row's label is cream like any other — rust text on the card
           is 3.0:1, under AA's 4.5 (#314); the rust is this tick, the section
           header's. */}
@@ -434,27 +428,15 @@ export function Row({
   );
   const rowStyle = [styles.row, !first && styles.rowDivider];
   if (!onPress) return <View style={rowStyle}>{content}</View>;
-  // A radio row announces its CHECKED state; «selected» is the vocabulary of
-  // tabs and chips, and made the language rows read wrong.
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole={role}
       accessibilityLabel={accessibilityLabel}
-      aria-checked={role === "radio" ? selected : undefined}
-      aria-selected={role === "radio" ? undefined : selected}
       style={({ pressed }) => [rowStyle, pressed && { opacity: 0.7 }]}
     >
       {content}
     </Pressable>
-  );
-}
-
-export function Radio({ selected }: { selected: boolean }) {
-  return (
-    <View style={[styles.radio, selected && styles.radioOn]}>
-      {selected ? <View style={styles.radioDot} /> : null}
-    </View>
   );
 }
 
@@ -630,17 +612,6 @@ const styles = StyleSheet.create({
   rowTitle: { ...display, fontSize: 13, letterSpacing: 0.3 },
   rowSub: { ...body, color: colors.inkDim, fontSize: 12, marginTop: 1 },
   rowValue: { ...body, color: colors.inkDim, fontSize: 14, flexShrink: 1 },
-  radio: {
-    width: 22,
-    height: 22,
-    borderRadius: radius.pill,
-    borderWidth: 1.5,
-    borderColor: colors.inkFaint,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radioOn: { borderColor: colors.gold },
-  radioDot: { width: 10, height: 10, borderRadius: radius.pill, backgroundColor: colors.gold },
   chevron: { color: colors.inkFaint, fontSize: 20, lineHeight: 22 },
   chevronExternal: { fontSize: 14, lineHeight: 18 },
   centred: { flex: 1, alignItems: "center", justifyContent: "center", padding: SCREEN_PAD },
