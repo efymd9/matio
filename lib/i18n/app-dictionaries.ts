@@ -75,6 +75,18 @@ export const appEs = {
     // (#398): nothing was erased, and deleting takes a new sign-in.
     deleteSessionEndedTitle: "Tu sesión ha terminado",
     deleteSessionEndedBody: "Tu cuenta no se ha eliminado. Vuelve a iniciar sesión para eliminarla.",
+    // An account that signed in with Apple (#407, the owner's option (а)):
+    // Apple's sheet sits between the two confirmations. The first one warns
+    // it is coming; a dismissed sheet stops the deletion, calmly; a sheet that
+    // could not give a code (an error, its deadline, another Apple Account's
+    // code) leads to the final confirmation with the Apple consequence
+    // spelled out — as does an Apple account deleted on Android (no sheet).
+    deleteConfirmAppleNote:
+      "Después, Apple te pedirá de nuevo «Iniciar sesión con Apple»: continúa para que Matio se desconecte también de tu cuenta de Apple.",
+    deleteAppleCancelledTitle: "Tu cuenta sigue aquí",
+    deleteAppleCancelledBody: "No se ha eliminado nada. Puedes volver a intentarlo cuando quieras.",
+    deleteFinalBodyAppleFailed:
+      "«Iniciar sesión con Apple» no se completó, así que Matio seguirá conectado a tu cuenta de Apple; puedes quitarlo tú en Ajustes, en «Iniciar sesión con Apple». Tu cuenta de Matio se elimina igualmente para siempre y no se puede recuperar.",
   },
   settings: {
     langHint: "Sigue el idioma del dispositivo hasta que elijas.",
@@ -208,6 +220,12 @@ export const appEn: AppDict = {
     deleteFailed: "Couldn't delete your account",
     deleteSessionEndedTitle: "Your session has ended",
     deleteSessionEndedBody: "Your account was not deleted. Sign in again to delete it.",
+    deleteConfirmAppleNote:
+      "Next, Apple asks you to Sign in with Apple once more — continue, so Matio is disconnected from your Apple Account too.",
+    deleteAppleCancelledTitle: "Your account is still here",
+    deleteAppleCancelledBody: "Nothing was deleted. You can try again whenever you like.",
+    deleteFinalBodyAppleFailed:
+      "Sign in with Apple didn't go through, so Matio stays connected to your Apple Account — you can remove it yourself in Settings, under Sign in with Apple. Your Matio account is still deleted for good and can't be restored.",
   },
   settings: {
     langHint: "Follows your device language until you choose.",

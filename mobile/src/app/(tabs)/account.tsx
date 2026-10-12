@@ -13,6 +13,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, settleOr } from "@/api/client";
+import {
+  askAppleForDeletionCode,
+  linkedAppleUserIds,
+  needsAppleSheet,
+  signedInWithApple,
+} from "@/auth/apple-revocation";
 import { useOptionalAuth } from "@/auth/clerk";
 import { endGoogleSession } from "@/auth/google-session";
 import { AuthStalled } from "@/components/auth-stalled";
@@ -181,11 +187,27 @@ function SignedInAccount() {
   // could erase anything (no token, or an anonymous 401), the account is
   // intact, and the viewer is told so and signed out: the tab turns into the
   // sign-in form, and a fresh session can delete.
+  //
+  // An account that signed in with Apple (on iOS) passes through Apple's
+  // sheet once more (#407): its fresh authorization code lets the server
+  // revoke the app's grant on the Apple ID. The sheet sits BETWEEN the two
+  // confirmations (the owner's option (а), PR #427), so a Cancel at any step
+  // means «not yet»: a dismissed sheet sends nothing and says the account is
+  // still there; a code followed by a Cancel on the final question is simply
+  // dropped. A sheet that could not give a code (an error, its deadline) is
+  // not the person's choice — the final question still comes, saying Matio
+  // stays connected to the Apple Account (auth/apple-revocation.ts); so does
+  // a code for another Apple Account than the one linked — the sheet is
+  // handed the linked ids and drops it. An Apple account where the sheet
+  // cannot come up at all — Android, which has no native Apple flow — keeps
+  // the two confirmations, and the final one says the same: the grant stays.
+  // Every other account keeps the two confirmations and nothing between them.
   const confirmDelete = useCallback(() => {
-    const deleteOrSay = async () => {
+    const deleteOrSay = async (appleAuthorizationCode?: string) => {
       setDeleting(true);
       try {
         await api.deleteAccount({
+          appleAuthorizationCode,
           onSentWithToken: () => {
             deleteSent.current = true;
           },
@@ -217,20 +239,51 @@ function SignedInAccount() {
       }
       router.replace("/");
     };
-    const confirmFinal = () =>
-      Alert.alert(t.app.account.deleteFinalTitle, t.app.account.deleteFinalBody, [
+    const confirmFinal = (body: string, appleAuthorizationCode?: string) =>
+      Alert.alert(t.app.account.deleteFinalTitle, body, [
         { text: t.app.common.cancel, style: "cancel" },
         {
           text: t.app.account.deleteFinalCta,
           style: "destructive",
-          onPress: () => void deleteOrSay(),
+          onPress: () => void deleteOrSay(appleAuthorizationCode),
         },
       ]);
-    Alert.alert(t.app.account.deleteConfirmTitle, t.app.account.deleteConfirmBody, [
-      { text: t.app.common.cancel, style: "cancel" },
-      { text: t.app.account.deleteAccount, style: "destructive", onPress: confirmFinal },
-    ]);
-  }, [getToken, router, signOut, t]);
+    // While Apple's sheet is up the row is not pressable, as during the
+    // request.
+    const askAppleThenConfirm = async () => {
+      setDeleting(true);
+      const apple = await askAppleForDeletionCode(linkedAppleUserIds(user));
+      setDeleting(false);
+      if (apple.status === "cancelled") {
+        Alert.alert(t.app.account.deleteAppleCancelledTitle, t.app.account.deleteAppleCancelledBody);
+      } else if (apple.status === "failed") {
+        confirmFinal(t.app.account.deleteFinalBodyAppleFailed);
+      } else {
+        confirmFinal(t.app.account.deleteFinalBody, apple.code);
+      }
+    };
+    const viaApple = needsAppleSheet(user);
+    const finalBody =
+      !viaApple && signedInWithApple(user)
+        ? t.app.account.deleteFinalBodyAppleFailed
+        : t.app.account.deleteFinalBody;
+    Alert.alert(
+      t.app.account.deleteConfirmTitle,
+      viaApple
+        ? `${t.app.account.deleteConfirmBody}\n\n${t.app.account.deleteConfirmAppleNote}`
+        : t.app.account.deleteConfirmBody,
+      [
+        { text: t.app.common.cancel, style: "cancel" },
+        {
+          text: t.app.account.deleteAccount,
+          style: "destructive",
+          onPress: viaApple
+            ? () => void askAppleThenConfirm()
+            : () => confirmFinal(finalBody),
+        },
+      ],
+    );
+  }, [getToken, router, signOut, t, user]);
 
   return (
     <ScrollView
