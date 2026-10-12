@@ -273,10 +273,10 @@ export default defineConfig({
       //   прогона 38259150956 этой ветки: 58.18/50.72/50.96/57.41, минус
       //   0.1, вниз до десятых).
       thresholds: {
-        lines: 58.0,
-        functions: 50.6,
-        branches: 50.8,
-        statements: 57.3,
+        lines: 58.1,
+        functions: 50.8,
+        branches: 51.0,
+        statements: 57.4,
       },
     },
 
