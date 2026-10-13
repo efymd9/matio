@@ -48,8 +48,7 @@ export function GlassTabBar({ state, descriptors, navigation }: BottomTabBarProp
     >
       {state.routes.map((route, index) => {
         const focused = state.index === index;
-        // The (tabs) layout sets each screen's `title` from the live
-        // dictionary, so a language change re-labels the bar in place.
+        // The (tabs) layout sets each screen's `title` from the dictionary.
         const { title } = descriptors[route.key].options;
         const label = title ?? route.name;
         const icon = TAB_ICONS[route.name] ?? "home";

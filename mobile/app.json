@@ -15,7 +15,7 @@
       "usesAppleSignIn": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "CFBundleLocalizations": ["en", "es"]
+        "CFBundleLocalizations": ["en"]
       }
     },
     "android": {

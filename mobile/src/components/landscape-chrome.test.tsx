@@ -3,7 +3,6 @@ import { act, createElement, forwardRef, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PanelEpisode } from "@/components/episodes-panel";
-import { LocaleProvider } from "@/i18n/locale";
 import type { Storyboard } from "@/watch/storyboard";
 
 // The landscape player's glass chrome (#375, board E «Стекло») on its own,
@@ -79,7 +78,7 @@ vi.mock("expo-image", () => ({
   },
 }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
-// The locale module's own reach (the language choice in the keychain).
+// The keychain, for the modules under the chrome that load it.
 vi.mock("expo-secure-store", () => ({
   getItemAsync: async () => null,
   setItemAsync: async () => undefined,
@@ -326,40 +325,6 @@ describe("LandscapeChrome — three glass capsules (#375)", () => {
     const bar = byLabel("Playback position");
     expect(bar?.getAttribute("role")).toBe("slider");
     expect(bar?.getAttribute("aria-valuetext")).toBe("6:12 of 16:00");
-  });
-
-  it("speaks the app's language: in Spanish the pill, the bar's value and the PiP button too", async () => {
-    act(() =>
-      root.render(
-        <LocaleProvider initial="es">
-          <LandscapeChrome
-            showTitle="The Scarlet Oath"
-            episodeTitle="Ecos"
-            episodeNumber={2}
-            positionSeconds={372}
-            durationSeconds={960}
-            paused={false}
-            buffering={false}
-            intro={null}
-            upNext={UP_NEXT}
-            autoplay
-            endDismissed={false}
-            storyboard={null}
-            episodes={EPISODES}
-            seasonNumber={1}
-            {...handlers}
-          />
-        </LocaleProvider>,
-      ),
-    );
-    await flush();
-
-    expect(leaf("Pausa")).toBeTruthy();
-    expect(byLabel("Posición de reproducción")?.getAttribute("aria-valuetext")).toBe(
-      "6:12 de 16:00",
-    );
-    expect(byLabel("Imagen en imagen")).not.toBeNull();
-    expect(byLabel("Reproducir / Pausar")?.getAttribute("aria-valuetext")).toBe("Reproduciendo");
   });
 
   it("«‹» goes back; the picture-in-picture button asks for the window", async () => {

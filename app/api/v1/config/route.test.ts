@@ -92,9 +92,9 @@ describe("GET /api/v1/config", () => {
     expect(body.latestBuild).toBe(15);
   });
 
-  it("hands the app absolute legal + support URLs and both locales", async () => {
+  it("hands the app absolute legal + support URLs and its one locale (#447)", async () => {
     const body = await config();
-    expect(body.locales).toEqual(["en", "es"]);
+    expect(body.locales).toEqual(["en"]);
     for (const url of [body.urls.web, body.urls.terms, body.urls.privacy]) {
       expect(url).toMatch(/^https:\/\//);
     }

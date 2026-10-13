@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { appDictFor, appEn, appEs } from "./app-dictionaries";
+import { appEn } from "./app-dictionaries";
 
-// The app-only copy. The web dictionaries are typed against each other
-// (`en: Dict`), which already guarantees the same KEYS — what it cannot
-// guarantee is that a value was actually translated rather than pasted, or
-// that a template still interpolates. Both are the kind of drift a store
-// build ships silently.
+// The app-only copy. English only since #447: the translation checks that
+// used to pair it with a Spanish twin went with the twin; what a store build
+// can still ship silently is an empty leaf or a template that no longer
+// interpolates.
 
 type Leaf = string | ((...args: never[]) => string);
 
@@ -18,47 +17,23 @@ function leaves(dict: object, prefix = ""): Array<[string, Leaf]> {
   });
 }
 
-describe("app dictionaries", () => {
-  it("resolves the locale to its own dictionary", () => {
-    expect(appDictFor("es")).toBe(appEs);
-    expect(appDictFor("en")).toBe(appEn);
-  });
-
-  // Leaves that are legitimately the same word in both languages. Every
-  // entry is a deliberate exception, named so a pasted sentence can never
-  // hide behind it: the Browse chip «Vertical» (#245) is a one-word loanword
-  // — Spanish has no other word for the orientation.
-  const SAME_IN_BOTH = new Set(["browse.vertical"]);
-
-  it("has every leaf translated, not pasted between locales", () => {
-    const es = new Map(leaves(appEs));
-    for (const [path, en] of leaves(appEn)) {
-      const esValue = es.get(path);
-      expect(esValue, path).toBeDefined();
-      if (typeof en === "string") {
-        // A brand name alone ("Matio") is the same in both; every other
-        // leaf here carries a sentence, so identical text means untranslated
-        // — unless it is one of the named loanwords above.
-        if (SAME_IN_BOTH.has(path)) expect(esValue, path).toBe(en);
-        else expect(esValue, path).not.toBe(en);
-        expect(en.trim().length, path).toBeGreaterThan(0);
-      }
+describe("app dictionary", () => {
+  it("has no empty leaf", () => {
+    for (const [path, value] of leaves(appEn)) {
+      if (typeof value === "string") expect(value.trim().length, path).toBeGreaterThan(0);
+      else expect(value, path).toBeTypeOf("function");
     }
   });
 
-  it("keeps the loanword allowlist honest — every entry exists and is a single word", () => {
-    const en = new Map(leaves(appEn));
-    for (const path of SAME_IN_BOTH) {
-      const value = en.get(path);
-      expect(value, path).toBeTypeOf("string");
-      expect((value as string).trim(), path).toMatch(/^\S+$/);
-    }
-  });
-
-  it("interpolates the address into the code-sent line in both locales", () => {
-    expect(appEs.signIn.codeSent("a@example.invalid")).toContain("a@example.invalid");
+  it("interpolates the address into the code-sent line", () => {
     expect(appEn.signIn.codeSent("a@example.invalid")).toBe(
       "We sent a code to a@example.invalid.",
     );
+  });
+
+  it("is one dictionary, with no copy left for a language switcher", async () => {
+    const mod: Record<string, unknown> = await import("./app-dictionaries");
+    expect(Object.keys(mod).sort()).toEqual(["appEn"]);
+    expect(appEn.settings).not.toHaveProperty("langHint");
   });
 });

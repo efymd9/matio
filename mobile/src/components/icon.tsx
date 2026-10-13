@@ -3,7 +3,6 @@ import { SymbolView, type SFSymbol } from "expo-symbols";
 import { Platform } from "react-native";
 import chevronRightSvg from "@/assets/icons/chevron-right.svg";
 import closeSvg from "@/assets/icons/close.svg";
-import languageSvg from "@/assets/icons/language.svg";
 import lockSvg from "@/assets/icons/lock.svg";
 import playbackSvg from "@/assets/icons/playback.svg";
 import back10Svg from "@/assets/icons/player-back10.svg";
@@ -31,7 +30,6 @@ export type IconName =
   | "account"
   | "settings"
   | "search"
-  | "language"
   | "playback"
   | "play"
   | "pause"
@@ -50,7 +48,6 @@ const ICONS: Record<IconName, { symbol: SFSymbol; svg: number }> = {
   account: { symbol: "person.crop.circle.fill", svg: accountSvg },
   settings: { symbol: "gearshape.fill", svg: settingsSvg },
   search: { symbol: "magnifyingglass", svg: searchSvg },
-  language: { symbol: "globe", svg: languageSvg },
   playback: { symbol: "play.rectangle.fill", svg: playbackSvg },
   play: { symbol: "play.fill", svg: playSvg },
   pause: { symbol: "pause.fill", svg: pauseSvg },

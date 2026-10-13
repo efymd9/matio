@@ -52,7 +52,7 @@ const CONFIG: AppConfig = {
   latestBuild: 6,
   flags: { paymentsEnabled: true, downloadsEnabled: false, castEnabled: false },
   signupGate: { mode: "tiers" },
-  locales: ["es", "en"],
+  locales: ["en"],
   urls: {
     web: "https://matio.tv",
     terms: "https://matio.tv/terms",
@@ -79,7 +79,6 @@ let onAppState: ((state: string) => void) | null = null;
 let listenersRemoved = 0;
 
 async function renderProvider(
-  locale: "en" | "es" = "en",
   body: (mod: ConfigModule) => ReactNode = () => <span>the app</span>,
 ) {
   const own = stage;
@@ -98,15 +97,10 @@ async function renderProvider(
     } as ReturnType<typeof AppState.addEventListener>;
   });
   const mod = await import("@/api/config-context");
-  const { LocaleProvider } = await import("@/i18n/locale");
   stillLive(own);
   own.root = createRoot(own.container);
   await act(async () => {
-    own.root?.render(
-      <LocaleProvider initial={locale}>
-        <mod.ConfigProvider>{body(mod)}</mod.ConfigProvider>
-      </LocaleProvider>,
-    );
+    own.root?.render(<mod.ConfigProvider>{body(mod)}</mod.ConfigProvider>);
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
   stillLive(own);
@@ -130,7 +124,6 @@ describe("ConfigProvider (#288)", () => {
     vi.stubGlobal("__DEV__", false); // client.ts reads it at load
     await import("react-native");
     await import("@/api/config-context");
-    await import("@/i18n/locale");
     vi.unstubAllGlobals();
   }, 60_000);
 
@@ -209,14 +202,6 @@ describe("ConfigProvider (#288)", () => {
 
       expect(spy.mock.calls).toEqual([["itms-beta://"], ["https://testflight.apple.com/"]]);
     });
-
-    it("reads Spanish to a Spanish viewer", async () => {
-      config.answer = async () => ({ ...CONFIG, minSupportedBuild: 7 });
-      await renderProvider("es");
-
-      expect(text()).toContain("Actualizar");
-      expect(text()).not.toContain("matio.tv");
-    });
   });
 
   it("an unreachable Matio reads as a connection problem — no English error, no API address", async () => {
@@ -232,16 +217,16 @@ describe("ConfigProvider (#288)", () => {
     expect(text()).not.toContain("https://matio.tv");
   });
 
-  it("a Spanish viewer reads Spanish, never the server's English sentence", async () => {
+  it("a server error reads as the app's own line, never the server's sentence", async () => {
     const { ApiError } = await import("@/api/client");
     const error = new ApiError("server_error", "Your preview has ended.", 503);
     config.answer = async () => {
       throw error;
     };
-    await renderProvider("es");
+    await renderProvider();
 
-    expect(text()).toContain("No conseguimos conectar con Matio");
-    expect(text()).toContain("Algo salió mal. Inténtalo de nuevo.");
+    expect(text()).toContain("Couldn't reach Matio");
+    expect(text()).toContain("Something went wrong. Please try again.");
     expect(text()).not.toContain("Your preview has ended.");
     expect(text()).not.toContain("Request failed");
   });
@@ -318,7 +303,7 @@ describe("ConfigProvider (#288)", () => {
     });
 
     it("a floor raised while the app was away walls this build at the next return", async () => {
-      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      const { CONFIG_STALE_MS } = await renderProvider(probe);
       expect(text()).toContain("the app");
 
       config.answer = async () => ({ ...CONFIG, minSupportedBuild: 7 });
@@ -330,7 +315,7 @@ describe("ConfigProvider (#288)", () => {
     });
 
     it("a quick return does not refetch; the first return past five minutes does", async () => {
-      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      const { CONFIG_STALE_MS } = await renderProvider(probe);
       expect(CONFIG_STALE_MS).toBe(5 * 60_000);
 
       await foregroundAfter(CONFIG_STALE_MS - 1_000);
@@ -345,7 +330,7 @@ describe("ConfigProvider (#288)", () => {
       config.answer = async () => {
         throw error;
       };
-      await renderProvider("en", probe);
+      await renderProvider(probe);
       expect(text()).toContain("Couldn't reach Matio");
 
       config.answer = async () => CONFIG;
@@ -359,7 +344,7 @@ describe("ConfigProvider (#288)", () => {
     it("an unchanged config keeps its object, and still restarts the five minutes", async () => {
       // A fresh object per answer, as JSON.parse hands one back.
       config.answer = async () => structuredClone(CONFIG);
-      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      const { CONFIG_STALE_MS } = await renderProvider(probe);
 
       await foregroundAfter(CONFIG_STALE_MS);
       expect(config.requests).toBe(2);
@@ -374,7 +359,7 @@ describe("ConfigProvider (#288)", () => {
     });
 
     it("a refresh never drops the app back to a spinner, and a new answer swaps in", async () => {
-      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      const { CONFIG_STALE_MS } = await renderProvider(probe);
       expect(text()).toContain("payments on");
 
       const answer = deferAnswer();
@@ -393,7 +378,7 @@ describe("ConfigProvider (#288)", () => {
     });
 
     it("a refresh that fails keeps the app — never the unreachable screen over a working app", async () => {
-      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      const { CONFIG_STALE_MS } = await renderProvider(probe);
       const error = await networkError();
       config.answer = async () => {
         throw error;
@@ -410,7 +395,7 @@ describe("ConfigProvider (#288)", () => {
     it("one request at a time: a return during the launch request, or two quick returns, share it", async () => {
       // A return while the launch request is still out does not send a second.
       const launch = deferAnswer();
-      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      const { CONFIG_STALE_MS } = await renderProvider(probe);
       await foregroundAfter(CONFIG_STALE_MS);
       expect(config.requests).toBe(1);
       await act(async () => {
@@ -440,7 +425,7 @@ describe("ConfigProvider (#288)", () => {
     });
 
     it("unmounting removes the listener, and an answer still in flight lands nowhere", async () => {
-      const { CONFIG_STALE_MS } = await renderProvider("en", probe);
+      const { CONFIG_STALE_MS } = await renderProvider(probe);
       const answer = deferAnswer();
       await foregroundAfter(CONFIG_STALE_MS);
       expect(config.requests).toBe(2);

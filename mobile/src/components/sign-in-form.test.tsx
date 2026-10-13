@@ -148,9 +148,12 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 
 // #312 — the consent line's two links. The legal URLs exactly as /v1/config
 // sends them (already the embed variant, #310); the in-app browser is a spy,
-// so a test reads the URL a tap would open.
+// so a test reads the URL a tap would open. Payments on (paid mode, live
+// since 2026-09-09) unless a case switches them off (#447: «No card needed»).
+const mode = vi.hoisted(() => ({ paymentsEnabled: true }));
 vi.mock("@/api/config-context", () => ({
   useConfig: () => ({
+    flags: { paymentsEnabled: mode.paymentsEnabled, downloadsEnabled: false, castEnabled: false },
     urls: {
       web: "https://matio.tv",
       terms: "https://matio.tv/terms?embed=app",
@@ -340,24 +343,13 @@ async function press(label: string) {
   });
 }
 
-async function renderForm(
-  locale: "en" | "es" = "en",
-  onDone = vi.fn(),
-  extra: { signInHint?: boolean } = {},
-) {
+async function renderForm(onDone = vi.fn(), extra: { signInHint?: boolean } = {}) {
   const own = stage;
   vi.stubEnv("EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY", "pk_test_dummy");
   const SignInForm = await loadSignInForm();
-  const { LocaleProvider } = await import("@/i18n/locale");
   stillLive(own);
   own.root = createRoot(own.container);
-  act(() =>
-    own.root?.render(
-      <LocaleProvider initial={locale}>
-        <SignInForm {...props} {...extra} onDone={onDone} />
-      </LocaleProvider>,
-    ),
-  );
+  act(() => own.root?.render(<SignInForm {...props} {...extra} onDone={onDone} />));
   return onDone;
 }
 
@@ -402,19 +394,6 @@ describe("SignInForm — the email-code flow (#288)", { timeout: COLD_IMPORT_TIM
     expect(signUp.create).toHaveBeenCalledWith({ emailAddress: "new@example.com", locale: "en" });
     expect(signUp.verifications.sendEmailCode).toHaveBeenCalledTimes(1);
     expect(text()).toContain("Check your email");
-  });
-
-  it("a Spanish viewer's account is created with the Spanish locale (#304 item 3)", async () => {
-    const { signIn, signUp } = clerkResources();
-    signIn.emailCode.sendCode.mockResolvedValueOnce({
-      error: apiError("form_identifier_not_found", "Couldn't find your account."),
-    });
-    await renderForm("es");
-
-    typeInto("nueva@example.com");
-    await press(props.cta);
-
-    expect(signUp.create).toHaveBeenCalledWith({ emailAddress: "nueva@example.com", locale: "es" });
   });
 
   it("a rate limit on sign-in is shown as itself — never a sign-up that says the address is taken", async () => {
@@ -519,20 +498,6 @@ describe("SignInForm — the email-code flow (#288)", { timeout: COLD_IMPORT_TIM
     expect(signIn.finalize).toHaveBeenCalledTimes(1);
     expect(onDone).toHaveBeenCalledTimes(1);
   });
-
-  it("speaks Spanish to a Spanish viewer — Clerk only ever answers in English", async () => {
-    const { signIn } = clerkResources();
-    signIn.emailCode.sendCode.mockResolvedValueOnce({
-      error: apiError("too_many_requests", "Too many requests. Please try again in a bit."),
-    });
-    await renderForm("es");
-
-    typeInto("socia@example.com");
-    await press(props.cta);
-
-    expect(text()).toContain("Demasiados intentos. Inténtalo de nuevo en un momento.");
-    expect(text()).not.toContain("Too many requests");
-  });
 });
 
 // ------------------------------------------------------- #292 visible polish
@@ -561,7 +526,7 @@ function flowSuite(name: string, body: () => void) {
 flowSuite("SignInForm — «Already have an account? Sign in» (#292 item 7)", () => {
   it("turns the headline and the CTA into a sign-in, and «Create account» turns them back", async () => {
     clerkResources();
-    await renderForm("en", vi.fn(), { signInHint: true });
+    await renderForm(vi.fn(), { signInHint: true });
     expect(text()).toContain(props.headline);
     expect(text()).toContain(props.cta);
 
@@ -585,7 +550,7 @@ flowSuite("SignInForm — «Already have an account? Sign in» (#292 item 7)", (
 
   it("the flow behind the sign-in wording is the same one", async () => {
     const { signIn, signUp } = clerkResources();
-    await renderForm("en", vi.fn(), { signInHint: true });
+    await renderForm(vi.fn(), { signInHint: true });
 
     await press("Sign in");
     typeInto("member@example.com");
@@ -594,17 +559,6 @@ flowSuite("SignInForm — «Already have an account? Sign in» (#292 item 7)", (
     expect(signIn.emailCode.sendCode).toHaveBeenCalledWith({ emailAddress: "member@example.com" });
     expect(signUp.create).not.toHaveBeenCalled();
     expect(text()).toContain("Check your email");
-  });
-
-  it("reads Spanish to a Spanish viewer", async () => {
-    clerkResources();
-    await renderForm("es", vi.fn(), { signInHint: true });
-
-    await press("Inicia sesión");
-
-    expect(text()).toContain("Enviar código");
-    expect(text()).toContain("¿No tienes cuenta?");
-    expect(text()).toContain("Crear cuenta");
   });
 });
 
@@ -763,17 +717,6 @@ flowSuite("SignInForm — the code step (#292 item 4)", () => {
     expect(codeInput()?.getAttribute("placeholder")).toBe("000000");
   });
 
-  it("names the fields in Spanish for a Spanish viewer (#304 item 1)", async () => {
-    clerkResources();
-    await renderForm("es");
-    expect(codeInput()?.getAttribute("aria-label")).toBe("Correo electrónico");
-
-    typeInto("socia@example.com");
-    await press(props.cta);
-
-    expect(codeInput()?.getAttribute("aria-label")).toBe("Código de verificación");
-  });
-
   it("a failure is announced, queued, and drawn as a polite alert (#304 item 1)", async () => {
     a11y.announce.mockClear();
     const { signIn } = clerkResources();
@@ -873,7 +816,7 @@ flowSuite("SignInForm — the Terms / Privacy line under the email CTA (#312)", 
 
   it("each link opens its document's embed page in English", async () => {
     clerkResources();
-    await renderForm("en");
+    await renderForm();
 
     await press("Terms");
     expect(browser.open).toHaveBeenLastCalledWith("https://matio.tv/terms?embed=app");
@@ -881,23 +824,6 @@ flowSuite("SignInForm — the Terms / Privacy line under the email CTA (#312)", 
     await press("Privacy Policy");
     expect(browser.open).toHaveBeenLastCalledWith("https://matio.tv/privacy?embed=app");
     expect(browser.open).toHaveBeenCalledTimes(2);
-  });
-
-  it("a Spanish viewer reads the line in Spanish and gets the /es documents", async () => {
-    clerkResources();
-    await renderForm("es");
-
-    expect(text()).toContain(
-      "Al continuar, aceptas los Términos y reconoces haber leído la Política de privacidad",
-    );
-    expect(leaf("Términos")?.getAttribute("role")).toBe("link");
-    expect(leaf("Política de privacidad")?.getAttribute("role")).toBe("link");
-
-    await press("Términos");
-    expect(browser.open).toHaveBeenLastCalledWith("https://matio.tv/es/terms?embed=app");
-
-    await press("Política de privacidad");
-    expect(browser.open).toHaveBeenLastCalledWith("https://matio.tv/es/privacy?embed=app");
   });
 
   it("the line goes with the email step — the code step does not repeat it", async () => {
@@ -910,6 +836,31 @@ flowSuite("SignInForm — the Terms / Privacy line under the email CTA (#312)", 
     expect(text()).toContain("Check your email");
     expect(text()).not.toContain("By continuing you agree");
     expect(leaf("Terms")).toBeUndefined();
+  });
+});
+
+// #447 (the #446 audit) — «No card needed. Just an email.» only says
+// something where there is something to pay for: with payments off (free
+// mode) the form does not draw it.
+flowSuite("SignInForm — «No card needed» only while payments are on (#447)", () => {
+  afterEach(() => {
+    mode.paymentsEnabled = true;
+  });
+
+  it("free mode: the line is not drawn", async () => {
+    mode.paymentsEnabled = false;
+    clerkResources();
+    await renderForm();
+
+    expect(text()).toContain("By continuing you agree to the");
+    expect(text()).not.toContain("No card needed");
+  });
+
+  it("paid mode: the line is under the form", async () => {
+    clerkResources();
+    await renderForm();
+
+    expect(text()).toContain("No card needed. Just an email.");
   });
 });
 
@@ -969,7 +920,6 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
       os = "ios",
       ids = true,
       extra = undefined as Record<string, unknown> | undefined,
-      locale = "en" as "en" | "es",
       onDone = vi.fn(),
     } = {},
   ) {
@@ -977,7 +927,7 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
     social.lever = lever;
     social.extra = extra ?? (ids ? GOOGLE_IDS : {});
     const resources = clerkResources();
-    await renderForm(locale, onDone);
+    await renderForm(onDone);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
@@ -1191,23 +1141,5 @@ flowSuite("SignInForm — Sign in with Apple and Google under the email form (#2
     expect(text()).toContain("Check your email");
     expect(appleButton()).toBeNull();
     expect(text()).not.toContain("Continue with Google");
-  });
-
-  it("speaks Spanish to a Spanish viewer: the line, Google's words, and the failures", async () => {
-    await renderSocial({ apple: true, google: true }, { locale: "es" });
-
-    expect(text()).toContain("o continúa con");
-    expect(text()).toContain("Continuar con Google");
-
-    social.appleStart.mockResolvedValueOnce({
-      createdSessionId: null,
-      signUp: { id: "sua_apple", status: "missing_requirements" },
-    });
-    await press("Continue with Apple");
-    expect(text()).toContain("No recibimos tu correo. Continúa con tu correo electrónico.");
-
-    social.googleStart.mockRejectedValueOnce(new Error("boom"));
-    await press("Continuar con Google");
-    expect(text()).toContain("No se pudo iniciar sesión. Inténtalo de nuevo o usa tu correo.");
   });
 });

@@ -122,11 +122,8 @@ vi.mock("expo-screen-orientation", () => ({
   lockAsync: orientation.lockAsync,
 }));
 
-// The keychain answers «es» for the stored language: a fallback rendered
-// INSIDE the locale provider would come out in Spanish.
-const keychain = vi.hoisted(() => ({ locale: null as string | null }));
 vi.mock("expo-secure-store", () => ({
-  getItemAsync: async (key: string) => (key === "matio_locale" ? keychain.locale : null),
+  getItemAsync: async () => null,
   setItemAsync: async () => undefined,
 }));
 vi.mock("expo-crypto", () => ({
@@ -201,7 +198,6 @@ import * as TabsRoute from "@/app/(tabs)/_layout";
 import * as ShowRoute from "@/app/show/[slug]";
 import * as SignInRoute from "@/app/sign-in";
 import * as WatchRoute from "@/app/watch/[episodeId]";
-import { LocaleProvider } from "@/i18n/locale";
 import { initObservability, resetObservabilityForTests } from "@/observability";
 import * as Sentry from "@sentry/react-native";
 
@@ -323,7 +319,6 @@ beforeEach(() => {
   crash.clerkHook = false;
   crash.rootProvider = false;
   feed.mounted = false;
-  keychain.locale = null;
   container = document.createElement("div");
   document.body.appendChild(container);
   // React's own report of a caught error is not under test (and is a
@@ -418,24 +413,10 @@ describe("a crash in a tab stays in the tab group (#308)", () => {
     await press("Try again");
     expect(text()).toContain("home tab");
   });
-
-  it("speaks the viewer's language — it renders inside the locale provider", async () => {
-    crash.tab = new Error(CRASH_MESSAGE);
-    await render(
-      <LocaleProvider initial="es">
-        <Route module={TabsRoute} />
-      </LocaleProvider>,
-    );
-
-    expect(text()).toContain("Algo falló");
-    expect(text()).toContain("Intentar de nuevo");
-    expect(text()).toContain("Volver");
-  });
 });
 
 describe("the root layout's last resort (#308)", () => {
-  it("catches a crashing provider — outside the locale provider, in English, Try again only", async () => {
-    keychain.locale = "es";
+  it("catches a crashing provider — outside every provider, Try again only", async () => {
     crash.rootProvider = true;
     await render(<Route module={RootLayoutRoute} />);
 

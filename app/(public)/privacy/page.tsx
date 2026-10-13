@@ -49,7 +49,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "October 11, 2026";
+const LAST_UPDATED = "October 12, 2026";
 
 export default async function PrivacyPage() {
   const { t } = await getDict();
@@ -532,10 +532,8 @@ function PrivacyEn() {
             account.
           </li>
           <li>
-            <strong>Kept only on your device</strong> — the autoplay setting,
-            and the language you choose in the app (apart from passing it to
-            Clerk when you create an account with your email address, as
-            above). If you continue with Google, Google&rsquo;s own sign-in
+            <strong>Kept only on your device</strong> — the autoplay setting.
+            If you continue with Google, Google&rsquo;s own sign-in
             component also keeps your Google session (your Google account
             details and its sign-in tokens) in the device&rsquo;s secure
             storage, so it can recognise you next time; the app does not read

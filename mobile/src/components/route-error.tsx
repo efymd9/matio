@@ -16,7 +16,7 @@ import { colors } from "@/theme";
 // Account tab, #247).
 //
 // The copy is the web's route-error kicker and title (app/error.tsx) — the
-// same situation, already in both languages. Its body is not used: «we've
+// same situation, already written. Its body is not used: «we've
 // logged it» is true only in a build with a Sentry DSN (#317).
 
 // Both boundaries render this, so it is the one place the error tracker
@@ -55,9 +55,9 @@ export function RouteErrorBoundary(props: ErrorBoundaryProps) {
 }
 
 // The last resort, for a crash in the root layout itself — the providers,
-// the stack. It renders in place of all of it: outside the locale provider
-// (useT answers in DEFAULT_LOCALE there, from the context's own default),
-// outside the navigator's themed background (hence the espresso here), and
+// the stack. It renders in place of all of it: outside every provider (useT
+// reads no context, so its copy is there all the same), outside the
+// navigator's themed background (hence the espresso here), and
 // with nothing to go back to — so «Try again» only.
 export function RootErrorBoundary(props: ErrorBoundaryProps) {
   return (

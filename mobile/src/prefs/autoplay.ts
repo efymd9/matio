@@ -3,9 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { settleOrNull } from "@/api/client";
 
 // The «Play next episode automatically» setting (Settings → Playback, #245).
-// A device-local preference, on by default; persisted the way the language
-// choice is (SecureStore — the one store the app already has — behind
-// settleOrNull, so a hung keychain can never block anything).
+// A device-local preference, on by default; persisted in SecureStore — the
+// one store the app already has — behind settleOrNull, so a hung keychain
+// can never block anything.
 //
 // Two readers with different needs: the Settings row wants a hook; the feed
 // wants a SYNCHRONOUS answer at `ended`, where there is no room for a

@@ -45,7 +45,9 @@ export async function GET() {
     // has set up the consoles and flips APP_SOCIAL_SIGNIN — then on for the
     // builds already installed, with no store release.
     socialSignIn: resolveSocialSignIn(),
-    locales: ["en", "es"],
+    // The app is English-only since #447. No build reads this field; it
+    // stays in the wire shape (lib/api/types.ts) and now says just that.
+    locales: ["en"],
     urls: {
       web: SITE_URL,
       // The embed variant (#310, lib/app-embed.ts): the document alone — no

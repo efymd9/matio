@@ -9,8 +9,7 @@ import { colors } from "@/theme";
 // UITabBar) because the bar is a custom floating pill — style B on board 1;
 // NativeTabs can only do style A.
 //
-// Titles come from the live dictionary so the bar re-labels itself the
-// moment the language changes in Settings. Home and Browse read ONE catalog
+// Titles come from the dictionary (useT). Home and Browse read ONE catalog
 // (api/catalog-context.tsx), held here for as long as the tabs live.
 export default function TabsLayout() {
   const t = useT();

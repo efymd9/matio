@@ -16,10 +16,11 @@ vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
 import { SiteHeader } from "./site-header";
 
 // The language switcher is gone with Spanish (#445): no trigger, no EN · ES
-// group, no link under /es — on any route.
+// group, no link under /es — on any route. Its labels are spelled out here:
+// the dictionary section they came from went with the app's switcher (#447).
 function expectNoLanguageSwitcher(container: HTMLElement) {
-  expect(screen.queryByRole("button", { name: en.language.switchAria })).toBeNull();
-  expect(screen.queryByRole("group", { name: en.language.label })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Switch language" })).toBeNull();
+  expect(screen.queryByRole("group", { name: "Language" })).toBeNull();
   expect(container.querySelector("[hreflang]")).toBeNull();
   for (const a of container.querySelectorAll("a")) {
     expect(a.getAttribute("href") ?? "").not.toMatch(/^\/es(?:\/|$)/);

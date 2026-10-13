@@ -26,7 +26,7 @@ The app imports a few genuinely universal modules straight from the web app's `l
 | `src/shared/design.ts` | `../../../lib/design` | brand tokens — colours must not drift between surfaces |
 | `src/shared/api-types.ts` | `../../../lib/api/types` | the `/api/v1` wire contract, so a DTO change fails compilation instead of failing on a user's phone |
 | `src/shared/observability.ts` | `../../../lib/observability` | the Sentry privacy contract (scrubbers + `sentryAppPrivacyOptions()`) — the app's error reports are scrubbed by the same code as the site's (#317) |
-| `src/shared/i18n.ts` | `../../../lib/i18n/dictionaries`, `…/app-dictionaries`, `…/negotiate` | the site's es/en copy (rails, walls, player labels) — the app never re-types a string; `app-dictionaries.ts` holds the app-only copy (sign-in steps, the update wall); `negotiate.ts` is the tag-matching rule the device language goes through |
+| `src/shared/i18n.ts` | `../../../lib/i18n/dictionaries`, `…/app-dictionaries` | the site's copy (rails, walls, player labels) — the app never re-types a string; `app-dictionaries.ts` holds the app-only copy (sign-in steps, the update wall). English only (#447) |
 
 The files in `src/shared/` are the **only** places holding a path across the project boundary. Import
 `@/shared/...` everywhere else. Do not extend this to modules that aren't universal — anything
@@ -35,15 +35,12 @@ exactly such a module and is deliberately not re-exported).
 
 ## Language
 
-`src/i18n/locale.tsx` resolves the locale the way the site does, minus cookie and URL: the
-stored choice (SecureStore, key `matio_locale`) → the device language → English. Device
-detection uses `I18nManager.getConstants().localeIdentifier` (Android) and
-`Intl.DateTimeFormat().resolvedOptions().locale` (iOS — RN 0.86's `RCTI18nManager` does not
-export the constant), both through the web's `pickFromLanguageTags`, with **no new dependency**.
-On iOS that `Intl` tag carries the language of the bundle's localizations, so `app.json` declares
-`CFBundleLocalizations: ["en", "es"]` — without it a Spanish iPhone reads English (#307).
-The manual switcher is the Language group of the Settings tab (`src/app/(tabs)/settings.tsx`);
-screens read copy via `useT()`, and the tab bar's own labels follow the switch in place.
+English only since #447 (2026-10-12), like the site (#445). Screens read copy via `useT()`
+(`src/i18n/locale.ts`), which returns the English dictionaries and reads no context — so it
+works anywhere, the root error boundary included. The device language is not read, Settings
+has no Language group, and the `matio_locale` key earlier builds wrote to SecureStore is
+neither read nor written. `app.json` declares `CFBundleLocalizations: ["en"]` (it was
+`["en", "es"]` for the device detection of #307). A second language back is a task of its own.
 
 Navigation (#245): `src/app/(tabs)/` — Home · Browse · Account · Settings under the floating
 glass tab bar (`src/components/glass-tab-bar.tsx`) — is one screen of the root `Stack`;
@@ -186,5 +183,3 @@ The repo's convention is to ask before adding a dependency. Still pending the ow
 
 - `eslint-config-expo` (+ a flat config here) — `npm run lint` does not work today; the app
   source is unlinted. Tracked in `docs/registry.md`.
-- `expo-localization` — only if device-language detection (see "Language") proves wrong on a
-  real device; today it is done without it.

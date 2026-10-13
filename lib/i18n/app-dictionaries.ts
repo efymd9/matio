@@ -3,183 +3,24 @@
 // errors, the native shell's tab titles / Browse / Account / Settings (#245)
 // and the Home feed's two strings (#248). Everything the web already says (rails, walls, player labels,
 // durations, legal links, the sign-up wall) the app reads straight from
-// dictionaries.ts; nothing is copied.
+// dictionaries.ts; nothing is copied. English only, like the rest of the app
+// since #447 (2026-10-12).
 //
 // A separate file rather than an `app` section in dictionaries.ts for the
 // same reason admin-dictionaries.ts is separate: dictionaries.ts ships in the
 // web's client bundle, and these strings never render there. Universal — no
-// imports beyond the Locale type — so Metro can bundle it (mobile/src/shared/
-// i18n.ts re-exports it).
+// imports at all — so Metro can bundle it (mobile/src/shared/i18n.ts
+// re-exports it).
 
-import type { Locale } from "./dictionaries";
-
-export const appEs = {
-  common: {
-    loadFailed: "No pudimos cargar Matio",
-    unreachable: "No conseguimos conectar con Matio",
-    showLoadFailed: "No pudimos cargar esta serie",
-    notNow: "Ahora no",
-    pleaseWait: "Un momento…",
-    // The show page's «‹» to VoiceOver (#288), and the visible way out of an
-    // error on a pushed screen (#292).
-    back: "Volver",
-    cancel: "Cancelar",
-  },
-  tabs: {
-    home: "Inicio",
-    browse: "Explorar",
-    account: "Cuenta",
-    settings: "Ajustes",
-  },
-  browse: {
-    all: "Todo",
-    vertical: "Vertical",
-    noResults: "Ninguna serie coincide.",
-    // Spoken only (VoiceOver): the search field's «×» (#288).
-    clearSearch: "Borrar búsqueda",
-  },
-  // The Home feed under the carousel (#248): the signed-in «Up next» block and
-  // its resume pill. Everything else the feed prints — Just released, Popular
-  // now, New, Ep. n, Play, minutes, the episode count, the tagline — is the
-  // web's copy, read straight from dictionaries.ts.
-  home: {
-    upNext: "A continuación",
-    resume: "Continuar",
-  },
-  account: {
-    member: "Miembro",
-    signOut: "Cerrar sesión",
-    whyKicker: "Tu progreso, en todos tus dispositivos",
-    whyBody: "Sigue viendo donde lo dejaste, también en matio.tv.",
-    // Clerk would not load — a vendor error, no network, an outage (#253).
-    stalledTitle: "No se puede iniciar sesión ahora mismo",
-    stalledBody: "Revisa tu conexión e inténtalo de nuevo.",
-    // The sign-out confirmation and its failure (#292) — getting back in
-    // costs an email round trip, so one stray tap must not end the session.
-    signOutConfirmTitle: "¿Cerrar sesión?",
-    signOutConfirmBody: "Para volver a entrar te enviaremos un código a tu correo.",
-    signOutFailed: "No se pudo cerrar la sesión",
-    // «Delete account» (#309, App Store 5.1.1(v)): two confirmations — what is
-    // erased and what happens to a subscription, then that it is final — and
-    // the failure, which keeps the session so the row can be tapped again.
-    deleteAccount: "Eliminar cuenta",
-    deleteConfirmTitle: "¿Eliminar tu cuenta?",
-    deleteConfirmBody:
-      "Se borrarán tu cuenta, tu progreso y tus avisos de nuevos episodios. Si tienes una suscripción activa, se cancelará al final del periodo de facturación en curso y no se te volverá a cobrar.",
-    deleteFinalTitle: "Esta acción no se puede deshacer",
-    deleteFinalBody:
-      "Tu cuenta se elimina para siempre: no podremos recuperarla y, si vuelves a registrarte, empezarás de cero.",
-    deleteFinalCta: "Eliminar definitivamente",
-    deleteFailed: "No se pudo eliminar la cuenta",
-    // The session ended on its own before a deletion request could carry it
-    // (#398): nothing was erased, and deleting takes a new sign-in.
-    deleteSessionEndedTitle: "Tu sesión ha terminado",
-    deleteSessionEndedBody: "Tu cuenta no se ha eliminado. Vuelve a iniciar sesión para eliminarla.",
-    // An account that signed in with Apple (#407, the owner's option (а)):
-    // Apple's sheet sits between the two confirmations. The first one warns
-    // it is coming; a dismissed sheet stops the deletion, calmly; a sheet that
-    // could not give a code (an error, its deadline, another Apple Account's
-    // code) leads to the final confirmation with the Apple consequence
-    // spelled out — as does an Apple account deleted on Android (no sheet).
-    deleteConfirmAppleNote:
-      "Después, Apple te pedirá de nuevo «Iniciar sesión con Apple»: continúa para que Matio se desconecte también de tu cuenta de Apple.",
-    deleteAppleCancelledTitle: "Tu cuenta sigue aquí",
-    deleteAppleCancelledBody: "No se ha eliminado nada. Puedes volver a intentarlo cuando quieras.",
-    deleteFinalBodyAppleFailed:
-      "«Iniciar sesión con Apple» no se completó, así que Matio seguirá conectado a tu cuenta de Apple; puedes quitarlo tú en Ajustes, en «Iniciar sesión con Apple». Tu cuenta de Matio se elimina igualmente para siempre y no se puede recuperar.",
-  },
-  settings: {
-    langHint: "Sigue el idioma del dispositivo hasta que elijas.",
-    playback: "Reproducción",
-    autoplayNext: "Reproducir el siguiente episodio",
-    autoplayHint: "Solo en series horizontales; el feed vertical siempre continúa.",
-    version: "Versión",
-  },
-  update: {
-    title: "Actualiza Matio",
-    body: "Esta versión ya no puede reproducir. Actualiza la app para seguir viendo.",
-    // Opens TestFlight (#292) — the app is not in the App Store yet.
-    cta: "Actualizar",
-  },
-  signIn: {
-    checkEmail: "Revisa tu correo",
-    codeSent: (email: string) => `Hemos enviado un código a ${email}.`,
-    invalidEmail: "Introduce un correo válido.",
-    invalidCode: "Introduce el código de tu correo.",
-    sendCode: "Enviar código",
-    verify: "Entrar",
-    differentEmail: "Usar otro correo",
-    unavailable: "Inicio de sesión no disponible",
-    unavailableHint: "Esta versión no tiene configurada la clave de Clerk.",
-    // Clerk's answers, which it only gives in English (#288): the form maps
-    // their codes here and never shows Clerk's own text.
-    codeIncorrect: "El código no es correcto.",
-    codeExpired: "El código ha caducado. Pide uno nuevo.",
-    codeFailed: "Demasiados intentos fallidos. Pide un código nuevo.",
-    tooManyRequests: "Demasiados intentos. Inténtalo de nuevo en un momento.",
-    // The code step's resend link and its cooldown (#292).
-    resend: "Reenviar código",
-    resendIn: (seconds: number) => `Reenviar código en ${seconds} s`,
-    // The form after «¿Ya tienes cuenta? Inicia sesión» (#292): the same
-    // email → code flow, worded for a returning member, and the way back.
-    signInHeadline: "Inicia sesión",
-    signInBody: "Te enviaremos un código a tu correo. Sin contraseña.",
-    noAccount: "¿No tienes cuenta?",
-    createAccount: "Crear cuenta",
-    // The line under the email step's CTA (#312, App Store 5.1.1(i)): split
-    // around its two links, which open /terms and /privacy as Settings does.
-    // Legal copy: merged only on the owner's approval in #312's PR thread;
-    // counsel review pending together with /terms and /privacy (#168).
-    consentBefore: "Al continuar, aceptas los ",
-    consentTerms: "Términos",
-    consentMiddle: " y reconoces haber leído la ",
-    consentPrivacy: "Política de privacidad",
-    // Apple / Google under the email form (#277, board variant B). The
-    // Apple button's words are drawn by iOS itself; Google's are its brand
-    // guide's own. The two failures are ours: a flow that broke, and an
-    // account the provider created without an address (an Apple ID with no
-    // shared email) — Clerk's own text is never shown.
-    orContinueWith: "o continúa con",
-    continueWithGoogle: "Continuar con Google",
-    socialFailed: "No se pudo iniciar sesión. Inténtalo de nuevo o usa tu correo.",
-    socialIncomplete: "No recibimos tu correo. Continúa con tu correo electrónico.",
-  },
-  watch: {
-    subscribersOnly: "Solo para suscriptores",
-    subscribersOnlyHint: "Este episodio requiere una suscripción activa.",
-  },
-  // Spoken only (VoiceOver): the vertical player's play/pause state — its
-  // value, read after «Reproducir / Pausar» (#304).
-  player: {
-    playing: "Reproduciendo",
-    paused: "En pausa",
-    // The landscape player's glass chrome (#375, board E «Стекло»). Its other
-    // words — Play, ±10 s, Next episode, Episodes, Skip intro, Up next,
-    // Watch now, Cancel, Now playing — are the web player's, read from
-    // dictionaries.ts. `pause` is the gold pill's label while playing.
-    pause: "Pausa",
-    // Spoken only: the picture-in-picture button, and the scrub bar — its
-    // name and its value («6:12 de 16:00»).
-    pip: "Imagen en imagen",
-    position: "Posición de reproducción",
-    positionValue: (elapsed: string, total: string) => `${elapsed} de ${total}`,
-    // Under the ±10 mark a double tap leaves on screen.
-    tenSeconds: "10 s",
-    // Spoken only: the picture's middle once the chrome has hidden itself —
-    // what Switch Control / Full Keyboard Access / Voice Control can reach.
-    showControls: "Mostrar controles del reproductor",
-  },
-};
-
-export type AppDict = typeof appEs;
-
-export const appEn: AppDict = {
+export const appEn = {
   common: {
     loadFailed: "Couldn't load Matio",
     unreachable: "Couldn't reach Matio",
     showLoadFailed: "Couldn't load this show",
     notNow: "Not now",
     pleaseWait: "Please wait…",
+    // The show page's «‹» to VoiceOver (#288), and the visible way out of an
+    // error on a pushed screen (#292).
     back: "Back",
     cancel: "Cancel",
   },
@@ -193,8 +34,13 @@ export const appEn: AppDict = {
     all: "All",
     vertical: "Vertical",
     noResults: "No shows match.",
+    // Spoken only (VoiceOver): the search field's «×» (#288).
     clearSearch: "Clear search",
   },
+  // The Home feed under the carousel (#248): the signed-in «Up next» block and
+  // its resume pill. Everything else the feed prints — Just released, Popular
+  // now, New, Ep. n, Play, minutes, the episode count, the tagline — is the
+  // web's copy, read straight from dictionaries.ts.
   home: {
     upNext: "Up next",
     resume: "Resume",
@@ -204,11 +50,17 @@ export const appEn: AppDict = {
     signOut: "Sign out",
     whyKicker: "Your progress, on every device",
     whyBody: "Pick up where you left off — on matio.tv too.",
+    // Clerk would not load — a vendor error, no network, an outage (#253).
     stalledTitle: "Sign-in is unavailable right now",
     stalledBody: "Check your connection and try again.",
+    // The sign-out confirmation and its failure (#292) — getting back in
+    // costs an email round trip, so one stray tap must not end the session.
     signOutConfirmTitle: "Sign out?",
     signOutConfirmBody: "To sign back in, we'll email you a code.",
     signOutFailed: "Couldn't sign out",
+    // «Delete account» (#309, App Store 5.1.1(v)): two confirmations — what is
+    // erased and what happens to a subscription, then that it is final — and
+    // the failure, which keeps the session so the row can be tapped again.
     deleteAccount: "Delete account",
     deleteConfirmTitle: "Delete your account?",
     deleteConfirmBody:
@@ -218,8 +70,16 @@ export const appEn: AppDict = {
       "Your account is deleted for good — we can't restore it, and signing up again starts from scratch.",
     deleteFinalCta: "Delete permanently",
     deleteFailed: "Couldn't delete your account",
+    // The session ended on its own before a deletion request could carry it
+    // (#398): nothing was erased, and deleting takes a new sign-in.
     deleteSessionEndedTitle: "Your session has ended",
     deleteSessionEndedBody: "Your account was not deleted. Sign in again to delete it.",
+    // An account that signed in with Apple (#407, the owner's option (а)):
+    // Apple's sheet sits between the two confirmations. The first one warns
+    // it is coming; a dismissed sheet stops the deletion, calmly; a sheet that
+    // could not give a code (an error, its deadline, another Apple Account's
+    // code) leads to the final confirmation with the Apple consequence
+    // spelled out — as does an Apple account deleted on Android (no sheet).
     deleteConfirmAppleNote:
       "Next, Apple asks you to Sign in with Apple once more — continue, so Matio is disconnected from your Apple Account too.",
     deleteAppleCancelledTitle: "Your account is still here",
@@ -228,7 +88,6 @@ export const appEn: AppDict = {
       "Sign in with Apple didn't go through, so Matio stays connected to your Apple Account — you can remove it yourself in Settings, under Sign in with Apple. Your Matio account is still deleted for good and can't be restored.",
   },
   settings: {
-    langHint: "Follows your device language until you choose.",
     playback: "Playback",
     autoplayNext: "Play next episode automatically",
     autoplayHint: "Applies to horizontal shows; vertical feeds always continue.",
@@ -237,6 +96,7 @@ export const appEn: AppDict = {
   update: {
     title: "Update Matio",
     body: "This version is out of date and can no longer play. Please update to keep watching.",
+    // Opens TestFlight (#292) — the app is not in the App Store yet.
     cta: "Update",
   },
   signIn: {
@@ -249,20 +109,34 @@ export const appEn: AppDict = {
     differentEmail: "Use a different email",
     unavailable: "Sign-in unavailable",
     unavailableHint: "This build has no Clerk publishable key configured.",
+    // Clerk's answers, which it only gives in English (#288): the form maps
+    // their codes here and never shows Clerk's own text.
     codeIncorrect: "Incorrect code.",
     codeExpired: "This code has expired. Request a new one.",
     codeFailed: "Too many failed attempts. Request a new code.",
     tooManyRequests: "Too many requests. Please try again in a moment.",
+    // The code step's resend link and its cooldown (#292).
     resend: "Resend code",
     resendIn: (seconds: number) => `Resend code in ${seconds}s`,
+    // The form after «Already have an account? Sign in» (#292): the same
+    // email → code flow, worded for a returning member, and the way back.
     signInHeadline: "Sign in",
     signInBody: "We'll email you a code. No password needed.",
     noAccount: "No account yet?",
     createAccount: "Create account",
+    // The line under the email step's CTA (#312, App Store 5.1.1(i)): split
+    // around its two links, which open /terms and /privacy as Settings does.
+    // Legal copy: merged only on the owner's approval in #312's PR thread;
+    // counsel review pending together with /terms and /privacy (#168).
     consentBefore: "By continuing you agree to the ",
     consentTerms: "Terms",
     consentMiddle: " and acknowledge the ",
     consentPrivacy: "Privacy Policy",
+    // Apple / Google under the email form (#277, board variant B). The
+    // Apple button's words are drawn by iOS itself; Google's are its brand
+    // guide's own. The two failures are ours: a flow that broke, and an
+    // account the provider created without an address (an Apple ID with no
+    // shared email) — Clerk's own text is never shown.
     orContinueWith: "or continue with",
     continueWithGoogle: "Continue with Google",
     socialFailed: "Couldn't sign you in. Try again or use your email.",
@@ -272,18 +146,28 @@ export const appEn: AppDict = {
     subscribersOnly: "Subscribers only",
     subscribersOnlyHint: "This episode needs an active subscription.",
   },
+  // Spoken only (VoiceOver): the vertical player's play/pause state — its
+  // value, read after «Play / Pause» (#304).
   player: {
     playing: "Playing",
     paused: "Paused",
+    // The landscape player's glass chrome (#375, board E «Стекло»). Its other
+    // words — Play, ±10 s, Next episode, Episodes, Skip intro, Up next,
+    // Watch now, Cancel, Now playing — are the web player's, read from
+    // dictionaries.ts. `pause` is the gold pill's label while playing.
     pause: "Pause",
+    // Spoken only: the picture-in-picture button, and the scrub bar — its
+    // name and its value («6:12 of 16:00»).
     pip: "Picture in Picture",
     position: "Playback position",
     positionValue: (elapsed: string, total: string) => `${elapsed} of ${total}`,
+    // Under the ±10 mark a double tap leaves on screen.
     tenSeconds: "10 sec",
+    // Spoken only: the picture's middle once the chrome has hidden itself —
+    // what Switch Control / Full Keyboard Access / Voice Control can reach.
     showControls: "Show player controls",
   },
 };
 
-export function appDictFor(locale: Locale): AppDict {
-  return locale === "en" ? appEn : appEs;
-}
+export type AppDict = typeof appEn;
+
