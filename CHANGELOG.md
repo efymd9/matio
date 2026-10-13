@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.20.0](https://github.com/efymd9/matio/compare/matio-v0.19.1...matio-v0.20.0) (2026-10-13)
+
+
+### Features
+
+* бесплатный режим без упоминаний оплаты — llms.txt под стеной регистрации, стена без «No card needed» ([#446](https://github.com/efymd9/matio/issues/446)) ([#449](https://github.com/efymd9/matio/issues/449)) ([5dde52d](https://github.com/efymd9/matio/commit/5dde52de5bb093275c72774488f0ab0408ad5ceb))
+* приложение только на английском — без определения языка и группы Language; «Member» и «No card needed» только при платежах ([#447](https://github.com/efymd9/matio/issues/447)) ([#450](https://github.com/efymd9/matio/issues/450)) ([05c9427](https://github.com/efymd9/matio/commit/05c94278394d3b06de1837cdf32753699b73712f))
+* сайт только на английском — /es отвечает 308, без переключателя языка и hreflang ([#445](https://github.com/efymd9/matio/issues/445)) ([#448](https://github.com/efymd9/matio/issues/448)) ([57301b4](https://github.com/efymd9/matio/commit/57301b444ab41b4a3897ea97683d2f684c791d5c))
+
+
+### Bug fixes
+
+* «Delete account» отзывает грант Sign in with Apple — свежий код с устройства, обмен и /auth/revoke на сервере ([#407](https://github.com/efymd9/matio/issues/407)) ([#427](https://github.com/efymd9/matio/issues/427)) ([72af553](https://github.com/efymd9/matio/commit/72af553d6b1c55f4e7b734cf229fa3c2d582d369))
+* /api/healthz вне matcher'а proxy.ts — превью отвечают версией, а не 500 Clerk ([#419](https://github.com/efymd9/matio/issues/419)) ([#428](https://github.com/efymd9/matio/issues/428)) ([a465815](https://github.com/efymd9/matio/commit/a465815e836ab4ce03e0bb58ae3e5e0c7c42c95e))
+* **deps:** Stripe — stripe 23, stripe-js 10, react-stripe-js 7, API 2026-09-30.endive ([#433](https://github.com/efymd9/matio/issues/433)) ([#441](https://github.com/efymd9/matio/issues/441)) ([1ea142e](https://github.com/efymd9/matio/commit/1ea142eaed1ebba26c6fe7e961cc563a7fe80d5d))
+* зависимости — sharp 0.35.5, proxy-addr 2.0.8, shell-quote, compression и др.; ignore двух advisory stream-json ([#417](https://github.com/efymd9/matio/issues/417)) ([#418](https://github.com/efymd9/matio/issues/418)) ([120e794](https://github.com/efymd9/matio/commit/120e794b6ffd0c30794a6d63def27cdbf81704d9))
+* лог-гигиена — остальные операторы с адресом (зеркало users, захват напоминания, гостевой клейм) больше не печатают email в лог ([#425](https://github.com/efymd9/matio/issues/425)) ([#436](https://github.com/efymd9/matio/issues/436)) ([8017c05](https://github.com/efymd9/matio/commit/8017c05126b2895ba257d42aab099309c7948b31))
+* лог-гигиена — сбой оператора по адресу в отписке и стирании больше не печатает email в лог и Sentry ([#350](https://github.com/efymd9/matio/issues/350)) ([#426](https://github.com/efymd9/matio/issues/426)) ([8bf5f74](https://github.com/efymd9/matio/commit/8bf5f7428152e343d7b581d437e7906808bf80bd))
+* приложение — вертикальный плеер больше не обещает Magic Tap: на Fabric жест не доходит до нативного вида ([#411](https://github.com/efymd9/matio/issues/411)) ([#422](https://github.com/efymd9/matio/issues/422)) ([7d9ebf2](https://github.com/efymd9/matio/commit/7d9ebf278dc73326de100da7f071a977dc8f7666))
+* скраббер спанов Sentry удаляет имя пользователя под ключом SDK user.name ([#438](https://github.com/efymd9/matio/issues/438)) ([#440](https://github.com/efymd9/matio/issues/440)) ([557d75f](https://github.com/efymd9/matio/commit/557d75fa76db377efddb3422236f79ddb6e66b6a))
+
+
+### Documentation
+
+* /privacy §2–§4 — Mux Data и пиксель ChatGPT Ads по согласию, геоправило в §2 и §4 ([#420](https://github.com/efymd9/matio/issues/420), [#443](https://github.com/efymd9/matio/issues/443)) ([#444](https://github.com/efymd9/matio/issues/444)) ([f04fe54](https://github.com/efymd9/matio/commit/f04fe546ed6f4b6dc2042c413dddad298d22e8c0))
+* /privacy §3 — маркетинговое измерение вне ЕС включено по умолчанию, ЧЕРНОВИК на «да» владельца ([#342](https://github.com/efymd9/matio/issues/342)) ([#421](https://github.com/efymd9/matio/issues/421)) ([a3d6c80](https://github.com/efymd9/matio/commit/a3d6c807eb1218d612e93477a949c658b2a758d7))
+
 ## [0.19.1](https://github.com/efymd9/matio/compare/matio-v0.19.0...matio-v0.19.1) (2026-10-08)
 
 
