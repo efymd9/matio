@@ -1377,6 +1377,7 @@ function EpisodePlayback({
         memberCount={memberCount}
         backdropThumbnailUrl={current.thumbnailUrl}
         gate={signupGate}
+        freeMode={freeMode}
       />
     );
   }

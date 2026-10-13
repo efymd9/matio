@@ -28,6 +28,7 @@ export function SignupWall({
   memberCount,
   backdropThumbnailUrl,
   gate = false,
+  freeMode = false,
 }: {
   showSlug: string;
   showId: string;
@@ -49,6 +50,10 @@ export function SignupWall({
   // copy gives way to the "watch for free" variant. Everything else —
   // Clerk redirect-back, analytics, layout — is identical.
   gate?: boolean;
+  // Payments kill-switch (the player's `freeMode`, i.e. !paymentsEnabled()):
+  // with nothing for sale, "No card needed" would bring up a payment that
+  // does not exist, so the fine print renders in paid mode only (#446).
+  freeMode?: boolean;
 }) {
   const t = useT();
 
@@ -191,9 +196,11 @@ export function SignupWall({
           </p>
         </Show>
 
-        <p className="text-center text-[10px] font-semibold tracking-[0.04em] text-cream/40">
-          {t.signupWall.noCardNeeded}
-        </p>
+        {freeMode ? null : (
+          <p className="text-center text-[10px] font-semibold tracking-[0.04em] text-cream/40">
+            {t.signupWall.noCardNeeded}
+          </p>
+        )}
       </div>
     </div>
   );
