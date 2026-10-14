@@ -159,6 +159,9 @@ export const appEn = {
     // Spoken only: the picture-in-picture button, and the scrub bar — its
     // name and its value («6:12 of 16:00»).
     pip: "Picture in Picture",
+    // Spoken only: the AirPlay button left of it (#451, iOS only) — Apple's
+    // name for the feature, as the system's own button says it.
+    airplay: "AirPlay",
     position: "Playback position",
     positionValue: (elapsed: string, total: string) => `${elapsed} of ${total}`,
     // Under the ±10 mark a double tap leaves on screen.

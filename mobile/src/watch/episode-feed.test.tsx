@@ -46,6 +46,7 @@ type VideoProps = {
   playWhenInactive?: boolean;
   enterPictureInPictureOnLeave?: boolean;
   showNotificationControls?: boolean;
+  allowsExternalPlayback?: boolean;
 };
 type VideoInstance = {
   props: VideoProps;
@@ -64,6 +65,9 @@ const h = vi.hoisted(() => ({
   mounts: [] as string[],
   chrome: new Map<string, { paused: boolean; buffering?: boolean; onTogglePlay: () => void }>(),
   allPages: false,
+  // Platform.OS as the app reads it: react-native-web's "web" unless a case
+  // is an iPhone (the landscape chrome's AirPlay button, #451).
+  os: "web" as string,
   // The feed list's props: its viewability callback is how a SWIPE changes
   // the page, and jsdom has no layout to fire it — a case calls it directly.
   list: null as null | {
@@ -99,7 +103,29 @@ vi.mock("react-native", async (importOriginal) => {
     isScreenReaderEnabled: async () => false,
     addEventListener: () => ({ remove: () => undefined }),
   };
-  return { ...rn, FlatList, AccessibilityInfo };
+  const Platform = {
+    ...rn.Platform,
+    get OS() {
+      return h.os;
+    },
+  };
+  return { ...rn, FlatList, AccessibilityInfo, Platform };
+});
+
+// The app's local AirPlay module (#451): a native AVRoutePickerView on iOS.
+// A plain view stands in for it; the chrome's own cases are in
+// components/landscape-chrome.test.tsx.
+vi.mock("../../modules/route-picker", async () => {
+  const React = await import("react");
+  const { View } = await import("react-native");
+  return {
+    RoutePickerView: ({
+      tintColor: _tint,
+      activeTintColor: _active,
+      onPresentingRoutesChange: _presenting,
+      ...view
+    }: Record<string, unknown>) => React.createElement(View as never, view),
+  };
 });
 
 vi.mock("react-native-video", async () => {
@@ -347,6 +373,7 @@ beforeEach(() => {
   h.mounts.length = 0;
   h.chrome.clear();
   h.allPages = false;
+  h.os = "web";
   screen.settled = true;
   safeArea.insets = NO_INSETS;
   tokens.calls.length = 0;
@@ -1641,7 +1668,21 @@ describe("EpisodeFeed — the landscape page's glass chrome, board E «Стек�
     }
     const title = container.querySelector<HTMLElement>('[data-testid="capsule-title"]');
     expect(getComputedStyle(title as HTMLElement).left).toBe("65px");
-    expect(container.innerHTML).not.toMatch(/airplay/i);
+  });
+
+  it("AirPlay on an iPhone: the button left of picture-in-picture — and the player lets the video go to the TV (#451)", async () => {
+    h.os = "ios";
+    await renderFeed(makeShow("horizontal", ["free"]));
+
+    const capsule = container.querySelector<HTMLElement>('[data-testid="capsule-pip"]');
+    const airplay = byLabel("AirPlay");
+    const pip = byLabel("Picture in Picture");
+    expect(capsule?.contains(airplay)).toBe(true);
+    expect(airplay.compareDocumentPosition(pip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The button only opens the system's list; what sends the VIDEO (not
+    // just the sound) to the chosen TV is the player's own flag — and it is
+    // what Control Center's AirPlay uses too.
+    expect(video("ep1").props.allowsExternalPlayback).toBe(true);
   });
 
   it("names the show and the episode in its own capsule — the lock screen still gets them from the source", async () => {

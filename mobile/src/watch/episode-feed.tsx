@@ -1099,8 +1099,12 @@ function FeedPage({
           enterPictureInPictureOnLeave={isCurrent}
           showNotificationControls={isCurrent}
           ignoreSilentSwitch="ignore"
-          // AirPlay: Control Center, in both orientations — an in-chrome route
-          // picker needs a native module, a new dependency (registry).
+          // AirPlay: Control Center in both orientations, and on iOS the
+          // landscape chrome's own button (#451, the local route-picker
+          // module). Either way it is this flag that sends the VIDEO to the
+          // TV. A token refresh mid-cast is the same source swap as on the
+          // phone: react-native-video keeps its AVPlayer (replaceCurrentItem),
+          // so the route stays, and onLoad lands back on the playhead.
           allowsExternalPlayback
           preventsDisplaySleepDuringVideoPlayback
         />

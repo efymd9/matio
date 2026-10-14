@@ -8,8 +8,9 @@ import type { Storyboard } from "@/watch/storyboard";
 // The landscape player's glass chrome (#375, board E «Стекло») on its own,
 // rendered for real on react-native-web: capsules, taps, the auto-hide, the
 // double tap, the scrub bar and its preview, «Skip intro», the end card, the
-// episodes panel, and what VoiceOver gets. The feed's wiring of it (the
-// <Video> it drives) is pinned in watch/episode-feed.test.tsx.
+// episodes panel, the AirPlay button (#451), and what VoiceOver gets. The
+// feed's wiring of it (the <Video> it drives) is pinned in
+// watch/episode-feed.test.tsx.
 
 vi.hoisted(() => {
   (globalThis as { __DEV__?: boolean }).__DEV__ = false;
@@ -29,6 +30,12 @@ const h = vi.hoisted(() => ({
     onAccessibilityTap?: () => void;
   }>,
   images: [] as Array<{ source: { uri: string }; style: Record<string, number | string> }>,
+  // Platform.OS as the chrome reads it — react-native-web's "web" unless a
+  // case is a phone (the AirPlay button is iOS-only, #451).
+  os: "web" as string,
+  // The props every render handed the AirPlay button (the native view is
+  // stubbed below).
+  routePickers: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("react-native", async (importOriginal) => {
@@ -57,6 +64,30 @@ vi.mock("react-native", async (importOriginal) => {
       announceForAccessibility: (message: string) => {
         h.announced.push(message);
       },
+    },
+    Platform: {
+      ...rn.Platform,
+      get OS() {
+        return h.os;
+      },
+    },
+  };
+});
+// The app's local AirPlay module (mobile/modules/route-picker): on iOS a
+// native AVRoutePickerView, which react-native-web cannot draw. Stood in for
+// by a plain view that keeps the layout and accessibility props (what the
+// chrome decides) and records the rest (colours, the device-list event).
+vi.mock("../../modules/route-picker", async () => {
+  const { View } = await import("react-native");
+  return {
+    RoutePickerView: ({
+      tintColor,
+      activeTintColor,
+      onPresentingRoutesChange,
+      ...view
+    }: Record<string, unknown>) => {
+      h.routePickers.push({ tintColor, activeTintColor, onPresentingRoutesChange, ...view });
+      return createElement(View as never, view);
     },
   };
 });
@@ -88,6 +119,7 @@ vi.mock("expo-crypto", () => ({
   randomUUID: () => "00000000-0000-4000-8000-000000000000",
 }));
 
+import { colors } from "@/theme";
 import {
   AUTO_HIDE_MS,
   DOUBLE_TAP_MS,
@@ -95,6 +127,7 @@ import {
   LandscapeChrome,
   type UpNext,
 } from "./landscape-chrome";
+import { VerticalChrome } from "./vertical-chrome";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -225,6 +258,8 @@ beforeEach(() => {
   h.announced.length = 0;
   h.actionable.length = 0;
   h.images.length = 0;
+  h.os = "web";
+  h.routePickers.length = 0;
   for (const fn of Object.values(handlers)) fn.mockClear();
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -278,7 +313,7 @@ function scrub(fromX: number, toX: number, { release = true } = {}) {
 }
 
 describe("LandscapeChrome — three glass capsules (#375)", () => {
-  it("the title capsule, the picture-in-picture capsule and the bar — and no AirPlay button", async () => {
+  it("the title capsule, the AirPlay / picture-in-picture capsule and the bar", async () => {
     await render();
 
     expect(byTestId("capsule-title")).not.toBeNull();
@@ -289,8 +324,6 @@ describe("LandscapeChrome — three glass capsules (#375)", () => {
     // Elapsed and remaining, either side of the bar.
     expect(text()).toContain("6:12");
     expect(text()).toContain("−9:48");
-    // AirPlay needs a native route picker — a new dependency (registry).
-    expect(container.innerHTML).not.toMatch(/airplay/i);
   });
 
   it("they keep 6pt inside the notch strip and 12pt off the top; the bar floats 8pt over the home indicator", async () => {
@@ -335,6 +368,126 @@ describe("LandscapeChrome — three glass capsules (#375)", () => {
 
     expect(handlers.onBack).toHaveBeenCalledTimes(1);
     expect(handlers.onPip).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("LandscapeChrome — AirPlay (#451)", () => {
+  const airplay = () => byTestId("airplay");
+  const lastPicker = () => {
+    const props = h.routePickers.at(-1);
+    if (!props) throw new Error("the AirPlay button was never rendered");
+    return props as {
+      onPresentingRoutesChange: (e: { nativeEvent: { presenting: boolean } }) => void;
+    } & Record<string, unknown>;
+  };
+
+  it("on iOS: Apple's route button in the top-right capsule, LEFT of picture-in-picture, with its 44pt hit area — «AirPlay» to VoiceOver", async () => {
+    h.os = "ios";
+    await render();
+
+    const button = airplay();
+    const pip = byLabel("Picture in Picture");
+    expect(button).not.toBeNull();
+    expect(byTestId("capsule-pip")?.contains(button)).toBe(true);
+    expect(byTestId("capsule-pip")?.contains(pip)).toBe(true);
+    // Before PiP in the capsule's row, i.e. to its left.
+    expect(button!.compareDocumentPosition(pip!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The same hit area as the PiP button beside it.
+    const size = (el: HTMLElement) => {
+      const style = getComputedStyle(el);
+      return { width: style.width, height: style.height };
+    };
+    expect(size(button!)).toEqual({ width: "44px", height: "44px" });
+    expect(size(button!)).toEqual(size(pip!));
+    // One VoiceOver element, a button, in the app's words.
+    expect(button!.getAttribute("aria-label")).toBe("AirPlay");
+    expect(button!.getAttribute("role")).toBe("button");
+    expect(byLabel("AirPlay")).toBe(button);
+    // The glass palette: cream glyph, gold while the video is on a TV.
+    expect(lastPicker()).toMatchObject({ tintColor: colors.ink, activeTintColor: colors.gold });
+  });
+
+  it("goes with the chrome: hidden 4 s into playback, back with it", async () => {
+    vi.useFakeTimers();
+    h.os = "ios";
+    await render();
+    expect(airplay()).not.toBeNull();
+
+    advance(AUTO_HIDE_MS);
+    expect(controlsShown()).toBe(false);
+    expect(airplay()).toBeNull();
+
+    click(byTestId("tap-centre"));
+    expect(airplay()).not.toBeNull();
+  });
+
+  it("while the system's device list is open the chrome stays; once it closes, the 4 s start over", async () => {
+    vi.useFakeTimers();
+    h.os = "ios";
+    await render();
+
+    advance(3_000);
+    act(() => lastPicker().onPresentingRoutesChange({ nativeEvent: { presenting: true } }));
+    advance(AUTO_HIDE_MS * 3);
+    expect(controlsShown()).toBe(true);
+
+    act(() => lastPicker().onPresentingRoutesChange({ nativeEvent: { presenting: false } }));
+    advance(AUTO_HIDE_MS - 1);
+    expect(controlsShown()).toBe(true);
+    advance(1);
+    expect(controlsShown()).toBe(false);
+  });
+
+  it("on Android there is none — the capsule holds picture-in-picture alone", async () => {
+    h.os = "android";
+    await render();
+
+    expect(airplay()).toBeNull();
+    expect(byLabel("AirPlay")).toBeNull();
+    expect(h.routePickers).toEqual([]);
+    expect(byTestId("capsule-pip")?.contains(byLabel("Picture in Picture"))).toBe(true);
+  });
+
+  it("the module's own entry off iOS — what an Android bundle gets — draws nothing", async () => {
+    // Metro takes RoutePickerView.ios.tsx on iOS only; Android and the web
+    // get RoutePickerView.tsx, the file resolved here (the stub above is
+    // only the iOS stand-in).
+    const real = await vi.importActual<typeof import("../../modules/route-picker")>(
+      "../../modules/route-picker",
+    );
+    act(() =>
+      root.render(
+        <real.RoutePickerView testID="airplay" accessible accessibilityLabel="AirPlay" style={{ width: 44 }} />,
+      ),
+    );
+
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("the vertical player has none, on iOS either — it is the landscape chrome's alone", async () => {
+    h.os = "ios";
+    act(() =>
+      root.render(
+        <VerticalChrome
+          showTitle="The Scarlet Oath"
+          episodeTitle="Echoes of Days Gone By"
+          episodeNumber={2}
+          positionSeconds={372}
+          durationSeconds={960}
+          paused={false}
+          muted={false}
+          onTogglePlay={() => undefined}
+          onToggleMute={() => undefined}
+          onBack={() => undefined}
+        />,
+      ),
+    );
+    await flush();
+
+    expect(byLabel("Play/Pause")).not.toBeNull();
+    expect(h.routePickers).toEqual([]);
+    expect(airplay()).toBeNull();
+    expect(container.innerHTML).not.toMatch(/airplay/i);
   });
 });
 
