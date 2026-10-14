@@ -828,6 +828,18 @@ Phase 1 and #245 notes above describe the es/en app as it was. Tests:
 `src/i18n/locale.test.tsx` (a Spanish phone through the real root layout), the account-tab,
 sign-in-form and episode-feed cases.
 
+**AirPlay button, 2026-10-14 (#451)** — the owner: «да, вариант 1, только горизонтальный». The
+⚑ board E left out in #375 is in: the landscape chrome's top-right capsule carries Apple's
+`AVRoutePickerView` left of PiP, iOS only. It is the app's first **local Expo module**,
+`mobile/modules/route-picker/` (`expo-module.config.json`, a podspec, a Swift `ExpoView` with
+`prioritizesVideoDevices`, tint props and an `onPresentingRoutesChange` event, and a TS entry —
+`requireNativeView` in `RoutePickerView.ios.tsx`, `null` in `RoutePickerView.tsx`); autolinking
+finds it in `modules/`, so no npm dependency. The chrome holds itself up while the system's
+device list is open. Control Center AirPlay is unchanged (`allowsExternalPlayback`), the vertical
+chrome has no button, the token refresh needed no change (the AVPlayer stays, onLoad seeks
+back). Device checks: registry «AirPlay — device check». Tests: the #451 block of
+`src/components/landscape-chrome.test.tsx`, one case in `src/watch/episode-feed.test.tsx`.
+
 ## 15. Traps
 
 - **`/api/v1` is inside the Clerk matcher already** — don't add a second auth layer. Do add

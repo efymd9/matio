@@ -92,6 +92,17 @@ env. Сами кнопки включает серверный рубильни�
 - `ios/` и `android/` в репо не коммитятся (CNG): EAS делает `expo prebuild`
   сам из `app.json`; локальные папки после `expo run:*` игнорируются gitignore
   и в облако не уходят.
+- **Свои нативные модули — в `mobile/modules/` (с #451: `route-picker`, кнопка
+  AirPlay).** Это локальные Expo-модули, не npm-пакеты: строки в
+  `package.json` и в локе нет, `expo-modules-autolinking` находит их в
+  `modules/` сам (папка по умолчанию). Отдельного шага для EAS нет — prebuild
+  и CocoaPods он делает сам, модуль собирается вместе с приложением. Проверка
+  без Xcode, что автолинковка его видит: `cd mobile && node
+  node_modules/expo-modules-autolinking/bin/expo-modules-autolinking.js
+  resolve --platform apple --json` — в `modules` должен быть под
+  `MatioRoutePicker`. Локальная сборка после нового или изменённого файла в
+  `modules/*/ios` — сначала `expo prebuild --clean`. Swift модуля собирается
+  только на сборке: ошибка в нём роняет `eas build` на шаге Xcode, а не тесты.
 - Внешние тестеры TestFlight и подача в App Store — после App Transfer на
   аккаунт компании (или осознанно с продавцом-физлицом).
 

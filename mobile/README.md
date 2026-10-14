@@ -138,6 +138,15 @@ PiP, background audio and lock-screen controls are `react-native-video` props on
 page; the native side (iOS `audio` background mode, the Android media-playback foreground
 service, `supportsPictureInPicture`) is written by the plugin options in `app.json`.
 
+AirPlay (#451): the landscape chrome's top-right capsule carries Apple's own route button,
+`AVRoutePickerView`, left of PiP — through the app's **local Expo module**
+`modules/route-picker/` (Swift view + `requireNativeView`, no npm package; iOS only, Android and
+the web get a component that renders nothing). `expo-modules-autolinking` finds it in
+`modules/` on its own — no line in `package.json`. A new or changed file under
+`modules/*/ios` is native code: `expo prebuild --clean` before the next local dev build; EAS
+runs prebuild (and CocoaPods) itself, so a cloud build needs no extra step. The player's `allowsExternalPlayback` is what sends
+the video to the chosen TV, from that button and from Control Center alike.
+
 Orientation (#252): the app is portrait — the root layout locks `PORTRAIT_UP` once at launch —
 and the horizontal player is landscape. The policy is `src/orientation.ts` on
 `expo-screen-orientation`: `app.json` allows every orientation (`"orientation": "default"`) and

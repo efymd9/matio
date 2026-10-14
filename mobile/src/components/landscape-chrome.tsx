@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -16,6 +17,7 @@ import { Artwork } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import { colors, display, fonts, radius } from "@/theme";
 import type { Storyboard } from "@/watch/storyboard";
+import { RoutePickerView } from "../../modules/route-picker";
 
 // The landscape player's own chrome (#375) — board E «Стекло», the owner's
 // pick of 04.10: the family of the floating tab bar (B1), not of the web
@@ -23,7 +25,7 @@ import type { Storyboard } from "@/watch/storyboard";
 // video shows through the glass:
 //
 //   top left   «‹» + the show (display face, caps) + «Ep. 2 · Title»
-//   top right  picture-in-picture
+//   top right  AirPlay (iOS — #451) and picture-in-picture
 //   bottom     a B1-shaped bar: the gold play/pause pill with its label,
 //              −10 / +10, elapsed, the scrub bar, remaining, Episodes, Next
 //
@@ -46,6 +48,12 @@ import type { Storyboard } from "@/watch/storyboard";
 // No Magic Tap: React Native 0.86 on Fabric never hands the JS `onMagicTap`
 // to the native view (it reads `onAccessibilityMagicTap`), so the play/pause
 // pill — always in reach under VoiceOver — is the way.
+//
+// AirPlay (#451): Apple's own route button, AVRoutePickerView, through the
+// app's local Expo module (mobile/modules/route-picker) — iOS only; Android
+// draws PiP alone. The device list it opens is the system's; while it is
+// open the chrome does not hide itself. Control Center reaches the same
+// player (`allowsExternalPlayback`, watch/episode-feed.tsx).
 
 export const AUTO_HIDE_MS = 4_000;
 export const DOUBLE_TAP_MS = 300;
@@ -141,6 +149,8 @@ export function LandscapeChrome({
   const [track, setTrack] = useState<{ x: number; width: number } | null>(null);
   // Bumped by every press: restarts the auto-hide countdown.
   const [armed, setArmed] = useState(0);
+  // The system's AirPlay device list is open over the picture.
+  const [routesOpen, setRoutesOpen] = useState(false);
 
   // A pause — the viewer's, the lock screen's, the end of the episode —
   // brings the chrome back, so a stopped picture always has its controls.
@@ -168,10 +178,10 @@ export function LandscapeChrome({
     !panelOpen;
 
   useEffect(() => {
-    if (!controls || paused || buffering || scrub !== null || screenReader) return;
+    if (!controls || paused || buffering || scrub !== null || screenReader || routesOpen) return;
     const timer = setTimeout(() => setVisible(false), AUTO_HIDE_MS);
     return () => clearTimeout(timer);
-  }, [controls, paused, buffering, scrub, screenReader, armed]);
+  }, [controls, paused, buffering, scrub, screenReader, routesOpen, armed]);
 
   useEffect(() => {
     if (mark === null) return;
@@ -212,6 +222,9 @@ export function LandscapeChrome({
     [],
   );
   const onZoneTap = (zone: Zone) => {
+    // A tap on the picture means the system device list is gone, whether or
+    // not its «ended presenting» delegate call arrived (#451 review).
+    setRoutesOpen(false);
     if (panelOpen) {
       setPanelOpen(false);
       return;
@@ -344,6 +357,21 @@ export function LandscapeChrome({
             style={[styles.topRight, { top: insets.top + TOP, right: insets.right + SIDE }]}
           >
             <GlassSurface interactive style={styles.pipCapsule}>
+              {Platform.OS === "ios" ? (
+                <RoutePickerView
+                  testID="airplay"
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel={t.app.player.airplay}
+                  tintColor={colors.ink}
+                  activeTintColor={colors.gold}
+                  onPresentingRoutesChange={(e) => {
+                    setRoutesOpen(e.nativeEvent.presenting);
+                    poke();
+                  }}
+                  style={styles.iconButton}
+                />
+              ) : null}
               <IconButton
                 icon="pip"
                 label={t.app.player.pip}
