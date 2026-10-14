@@ -15,7 +15,7 @@ import ExpoModulesCore
 // VoiceOver double tap lands there too: the element is this view (React
 // Native's `accessible`, label from the app's dictionary), and with no
 // accessibility action of ours iOS activates it with a tap at its centre.
-final class RoutePickerView: ExpoView, AVRoutePickerViewDelegate {
+final class RoutePickerView: ExpoView, @preconcurrency AVRoutePickerViewDelegate {
   private static let glyphSide: CGFloat = 24
 
   private let picker = AVRoutePickerView()

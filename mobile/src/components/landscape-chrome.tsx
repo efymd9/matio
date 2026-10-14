@@ -222,6 +222,9 @@ export function LandscapeChrome({
     [],
   );
   const onZoneTap = (zone: Zone) => {
+    // A tap on the picture means the system device list is gone, whether or
+    // not its «ended presenting» delegate call arrived (#451 review).
+    setRoutesOpen(false);
     if (panelOpen) {
       setPanelOpen(false);
       return;
