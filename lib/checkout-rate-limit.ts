@@ -40,7 +40,9 @@ const HOUR_MS = 60 * 60 * 1000;
 // HMAC of the client IP, the signed-in flow's `user:` + HMAC of the userId
 // (#227), the story-idea form's `idea:` + HMAC of the client IP or, for
 // IPv6, of its /64 (#297 —
-// app/(public)/ideas/actions.ts, IDEA_RATELIMIT_PER_HOUR). Only hashes reach
+// app/(public)/ideas/actions.ts, IDEA_RATELIMIT_PER_HOUR), the careers form's
+// `job:` + the same HMAC of the IP bucket (#376 —
+// app/(public)/careers/actions.ts, JOB_APPLICATION_RATELIMIT_PER_HOUR). Only hashes reach
 // the table — the column keeps its historical name `ip_hash` (renaming it is
 // a migration, and nothing reads the name back).
 export async function checkoutRateLimited(

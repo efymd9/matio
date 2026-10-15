@@ -12,6 +12,11 @@
 // The ids are also the values of the `job_position` enum (db/schema/
 // job_applications.ts) and the anchors on the page (#ai-creator,
 // #sales-distribution) — a new id needs a migration adding the enum value.
+//
+// Everything else that names or counts the roles reads them from here: the
+// page copy in lib/i18n/careers-dictionaries.ts (the meta description, the
+// hero's role line, "Two roles.", the phone bar, the FAQ answer — pinned by
+// its test), the position picker, and the admin filter.
 
 export const JOB_POSITIONS = ["ai-creator", "sales-distribution"] as const;
 export type JobPosition = (typeof JOB_POSITIONS)[number];

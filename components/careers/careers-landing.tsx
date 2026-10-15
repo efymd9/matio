@@ -103,6 +103,8 @@ function errorCopy(t: CareersDict, code: JobFieldCode): string {
       return t.errors.nameRequired;
     case "name_too_long":
       return t.errors.nameTooLong;
+    case "email_required":
+      return t.errors.emailRequired;
     case "email_invalid":
       return t.errors.email;
     case "location_required":
@@ -835,12 +837,14 @@ export function CareersLanding({
                 </div>
               </div>
             ) : (
-              // method="post" and NO `name` on any real field (only the
-              // honeypot has one): the draft is controlled state and the
-              // action takes an object. A form submitted before hydration
-              // would otherwise do a native GET and put the name, the address
-              // and the message into the URL — request logs, history, and
-              // the page URL every analytics tag reports.
+              // method="post", and `name` only where it carries nothing
+              // personal: the honeypot, and the role radios (a group needs
+              // one — arrow keys, one Tab stop, "1 of 2"; its value is a
+              // vacancy id). The draft is controlled state and the action
+              // takes an object; a form submitted before hydration must
+              // never do a native GET that puts the name, the address or the
+              // message into the URL — request logs, history, and the page
+              // URL every analytics tag reports.
               <form
                 method="post"
                 noValidate
@@ -891,6 +895,7 @@ export function CareersLanding({
                                 else positionInputs.current.delete(v.id);
                               }}
                               type="radio"
+                              name="position"
                               value={v.id}
                               checked={on}
                               onChange={() => setField("position", v.id)}

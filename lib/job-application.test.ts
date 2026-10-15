@@ -144,6 +144,10 @@ describe("normalizeJobApplication", () => {
     });
     expect(v.fullName).toBe("Ana Rivera");
     expect(v.email).toBe("ana@example.com");
+    // A forged NUL in the address goes too — Postgres text refuses it.
+    expect(normalizeJobApplication({ email: " Ana\u0000@Example.com " }).email).toBe(
+      "ana@example.com",
+    );
     expect(v.message).toBe("Line one\nLine two\nLine three");
     expect(v.ageConfirmed).toBe(false);
   });
@@ -201,7 +205,7 @@ describe("validateJobApplication", () => {
       }),
     ).toEqual([
       { field: "fullName", code: "name_required" },
-      { field: "email", code: "email_invalid" },
+      { field: "email", code: "email_required" },
       { field: "location", code: "location_required" },
       { field: "portfolio", code: "portfolio_required" },
       { field: "message", code: "message_required" },
@@ -295,6 +299,12 @@ describe("validateJobApplication", () => {
     ]);
     // 2,000 emoji are 4,000 UTF-16 units but exactly at the cap.
     expect(validateJobApplication(valid({ message: "🎬".repeat(2000) }))).toEqual([]);
+  });
+
+  it("an empty address is email_required, not email_invalid — its own message", () => {
+    expect(validateJobApplication(valid({ email: "   " }))).toEqual([
+      { field: "email", code: "email_required" },
+    ]);
   });
 
   it("refuses an address that is malformed or too long", () => {

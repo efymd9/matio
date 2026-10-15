@@ -246,7 +246,7 @@ describe("submitJobApplication — the cheap refusals", () => {
       errors: [
         { field: "position", code: "position_required" },
         { field: "fullName", code: "name_required" },
-        { field: "email", code: "email_invalid" },
+        { field: "email", code: "email_required" },
         { field: "location", code: "location_required" },
         { field: "message", code: "message_required" },
         { field: "age", code: "age_required" },

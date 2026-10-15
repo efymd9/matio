@@ -361,6 +361,7 @@ import { CONSENT_VERSION, serializeConsent } from "@/lib/cookie-consent";
 import { submitIdea } from "@/app/(public)/ideas/actions";
 import type { IdeaSubmissionInput } from "@/lib/idea-submission";
 import { submitJobApplication } from "@/app/(public)/careers/actions";
+import { deleteJobApplication } from "@/app/admin/careers/actions";
 import type { JobApplicationInput } from "@/lib/job-application";
 
 /** Render a console argument the way a log aggregator would see it. */
@@ -3238,6 +3239,47 @@ describe("log audit · job application (/careers, #376)", () => {
       "submitJobApplication: failed",
       { level: "error", tags: { code: "42P01", name: "DrizzleQueryError" } },
     ]);
+  });
+});
+
+describe("log audit · admin delete of a job application (/admin/careers, #376)", () => {
+  // The admin's delete binds only the row id, but its failure is reported to
+  // the log and to Sentry — so the driver text it gets back is seeded with a
+  // candidate's address, name and words, the way a quoting error would carry
+  // them. What may come out: the id (it is on the page anyway), the error's
+  // class and its SQLSTATE.
+  const APPLICATION_ID = "3f0c2a4e-8b1d-4c6a-9e2f-5a7b8c9d0e1f";
+  const MARKERS = [MARKER_EMAIL, MARKER_NAME, MARKER_STORY];
+
+  it("a failed DELETE answers a typed failure and reports id + class + SQLSTATE only", async () => {
+    del.mockImplementation(() => ({
+      where: async () => {
+        const statement = `delete from "job_applications" where "email" = '${MARKER_EMAIL}' -- ${MARKER_NAME}: ${MARKER_STORY}`;
+        throw Object.assign(new Error(`Failed query: ${statement}`), {
+          name: "DrizzleQueryError",
+          cause: Object.assign(new Error(`${statement} — deadlock`), {
+            name: "PostgresError",
+            code: "40P01",
+          }),
+        });
+      },
+    }));
+    const logged = captureConsole();
+
+    const result = await deleteJobApplication(APPLICATION_ID, "list");
+
+    expect(result).toEqual({ ok: false, error: "failed" });
+    expect(logged()).toBe(
+      `deleteJobApplication: failed {"id":"${APPLICATION_ID}","name":"DrizzleQueryError","code":"40P01"}`,
+    );
+    expect(sentryMessage.mock.calls).toEqual([
+      [
+        "deleteJobApplication: failed",
+        { level: "error", tags: { code: "40P01", name: "DrizzleQueryError" } },
+      ],
+    ]);
+    const outputs = [logged(), render(sentryMessage.mock.calls), render(result)];
+    expect(MARKERS.filter((m) => outputs.some((o) => o.includes(m)))).toEqual([]);
   });
 });
 

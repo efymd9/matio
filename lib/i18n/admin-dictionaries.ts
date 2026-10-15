@@ -10,6 +10,8 @@
 // original hard-coded copy verbatim (including smart quotes), so the EN
 // rendering is byte-identical to what shipped before this dictionary.
 
+import { JOB_APPLICATION_RETENTION_MONTHS } from "../job-application";
+
 export type AdminLocale = "ru" | "en";
 
 export const ADMIN_SUPPORTED_LOCALES: readonly AdminLocale[] = ["ru", "en"];
@@ -44,7 +46,7 @@ export const ru = {
     analytics: "Аналитика",
     trackedLinks: "Ссылки",
     ideas: "Идеи",
-    careers: "Вакансии",
+    careers: "Заявки",
     backToApp: "← Вернуться на сайт",
   },
   actorsList: {
@@ -1116,7 +1118,7 @@ export const ru = {
     colEmail: "Email",
     open: "Открыть",
     retentionNote:
-      "Каждая заявка удаляется автоматически через 6 месяцев после отправки.",
+      `Каждая заявка удаляется автоматически через ${JOB_APPLICATION_RETENTION_MONTHS} ${ruPlural(JOB_APPLICATION_RETENTION_MONTHS, ["месяц", "месяца", "месяцев"])} после отправки.`,
   },
   careerDetail: {
     back: "Заявки",
@@ -1166,7 +1168,7 @@ export const en: AdminDict = {
     analytics: "Analytics",
     trackedLinks: "Links",
     ideas: "Ideas",
-    careers: "Careers",
+    careers: "Applications",
     backToApp: "← Back to app",
   },
   actorsList: {
@@ -2182,7 +2184,7 @@ export const en: AdminDict = {
     colEmail: "Email",
     open: "Open",
     retentionNote:
-      "Every application is deleted automatically 6 months after it was sent.",
+      `Every application is deleted automatically ${JOB_APPLICATION_RETENTION_MONTHS} months after it was sent.`,
   },
   careerDetail: {
     back: "Applications",

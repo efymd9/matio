@@ -32,7 +32,11 @@
 // Job applications (/careers, #376) added 2026-10-15 in §2/§3/§6/§8 — a new
 // edition ("Last updated" moves): an agent's draft from the code, DRAFT with
 // the rest of this page; the lawful-basis choice is the counsel's question
-// (#168).
+// (#168). §3 says what the analytics sees of an application (the PostHog
+// `job_application_submitted {position}` count, marketing cookies only), and
+// §4's mailbox row names Google Workspace, which has carried maksym@matio.tv
+// since 08.10.2026 (#414), instead of Namecheap PrivateEmail — both in the
+// same #376 draft, merged on the owner's «да» in the PR thread.
 // matio.tv/ideas is
 // plain text on purpose: every internal link here must survive ?embed=app
 // (app/(public)/legal-embed.test.tsx).
@@ -241,8 +245,11 @@ function PrivacyEn() {
             <strong>To consider your job application</strong> and contact
             you about it. Lawful basis: <em>steps taken at your request
             before entering into a contract</em> and our{" "}
-            <em>legitimate interests</em> in recruiting for Matio. We use an
-            application for nothing else.
+            <em>legitimate interests</em> in recruiting for Matio. We use your
+            application for nothing else. While marketing cookies are on, our
+            product analytics (PostHog) also counts that an application for a
+            role was sent — which role, never your name, your contact details,
+            your links or what you wrote.
           </li>
           <li>
             <strong>Marketing and advertising measurement</strong> via the{" "}
@@ -358,8 +365,11 @@ function PrivacyEn() {
             with you, and only what the production needs.
           </li>
           <li>
-            <strong>Namecheap, Inc.</strong> (PrivateEmail) — our mailbox at
-            maksym@matio.tv, for correspondence with you.
+            <strong>Google Ireland Ltd</strong> (Google Workspace, with
+            transfers to Google LLC in the US) — our mailbox at
+            maksym@matio.tv, for correspondence with you, including replies
+            about story ideas and job applications and requests about your
+            data. SCCs.
           </li>
         </ul>
         <p>

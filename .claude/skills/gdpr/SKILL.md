@@ -342,7 +342,7 @@ Clerk id вместо самого id для лимита авторизован
   почему», статус `erased` в реестре — по нему §7 `db-restore.md`.
 - **Скрипт — `pnpm export-user-data <userId> [--out <file>]`**
   (`scripts/export-user-data.ts`, логика и тесты в `lib/user-export.ts` +
-  `lib/user-export-db.ts`): девять таблиц по ключам карты (`users` по `id`;
+  `lib/user-export-db.ts`): десять таблиц по ключам карты (`users` по `id`;
   `subscriptions`, `watch_progress`, `watch_days`, `trial_sessions`,
   `visitors` по `user_id`; `visitor_days` по найденным `aid`;
   `show_reminders` по `user_id` **или** `email`; `idea_submissions` и

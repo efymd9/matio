@@ -13,10 +13,16 @@
 // Studio facts are copied from /about and nothing else (#376 spec): no
 // salary, perks, city, office, team size or response time is promised here.
 //
+// Every line that NAMES or COUNTS the roles (the meta description, the
+// hero's role line, the section title, the phone bar, the FAQ answer) is
+// built from lib/careers.ts:VACANCY_LIST below — a role changes in one place.
+// careers-dictionaries.test.ts pins it.
+//
 // LEGAL STATUS: the privacy line and the FAQ answer about personal data are a
 // DRAFT pending counsel review, with the /privacy "Job applications" section
 // (docs/registry.md, #168).
 
+import { VACANCY_LIST } from "../careers";
 import { JOB_APPLICATION_RETENTION_MONTHS, JOB_LIMITS } from "../job-application";
 
 /** A sentence with one inline link: `before` + <link>{link}</link> + `after`. */
@@ -24,16 +30,38 @@ export type CareersLinked = { before: string; link: string; after: string };
 
 const KEEP = `${JOB_APPLICATION_RETENTION_MONTHS} months`;
 
+// "a", "a and b", "a, b and c" — a hand-rolled list join: this module ships
+// to the browser, and Intl.ListFormat is missing from older iOS Safari.
+export function joinWithAnd(items: readonly string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+// The number of open roles as a word ("Two"), digits past ten.
+export function countWord(n: number): string {
+  const words = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
+  return words[n] ?? String(n);
+}
+
+const ROLE_TITLES = VACANCY_LIST.map((v) => v.title);
+const ROLE_COUNT = countWord(VACANCY_LIST.length);
+const ROLES_NOUN = VACANCY_LIST.length === 1 ? "role" : "roles";
+
+// The analytics count a sent application leaves behind (#376): with
+// marketing cookies on, PostHog gets `job_application_submitted {position}`
+// — the role, nothing the candidate wrote. Said wherever the copy promises
+// what the details are used for.
+
 export const en = {
   meta: {
     title: "Careers",
     description:
-      "Matio is hiring an AI Creator and a Sales & Distribution Manager. An independent studio making dark romantic stories and short series, from script to final frame.",
+      `Matio is hiring: ${joinWithAnd(ROLE_TITLES)}. An independent studio making dark romantic stories and short series, from script to final frame.`,
   },
   hero: {
     badge: "Work with Matio",
     title: ["We are", "hiring."] as [string, string],
-    roles: "AI Creator · Sales & Distribution",
+    roles: VACANCY_LIST.map((v) => v.shortTitle).join(" · "),
     pitch:
       "An independent studio making dark romantic stories and short series — written, produced and premiered under one roof. We're looking for the people who'll make the next ones with us.",
     cta: "See open roles",
@@ -41,7 +69,7 @@ export const en = {
   },
   roles: {
     label: "Open roles",
-    title: ["Two roles.", "Open now."] as [string, string],
+    title: [`${ROLE_COUNT} ${ROLES_NOUN}.`, "Open now."] as [string, string],
     intro:
       "Tell us who you are and what you've made. If there's a fit, we'll write to you.",
     count: (n: number, total: number) =>
@@ -136,7 +164,7 @@ export const en = {
     },
     age: "I'm 18 or older.",
     privacy: {
-      before: `We use these details only to consider you for work at Matio and keep them for ${KEEP}. `,
+      before: `We use these details only to consider you for work at Matio and keep them for ${KEEP}. With marketing cookies on, our analytics also counts that an application for a role was sent — never what's in it. `,
       link: "Privacy Policy",
       after: "",
     } satisfies CareersLinked,
@@ -149,6 +177,7 @@ export const en = {
     position: "Pick the role you're applying for.",
     nameRequired: "Tell us your name.",
     nameTooLong: `Keep your name under ${JOB_LIMITS.fullName} characters.`,
+    emailRequired: "We need an email to reply to.",
     email: "That email doesn't look right.",
     locationRequired: "Tell us where you're based.",
     locationTooLong: `Keep it under ${JOB_LIMITS.location} characters.`,
@@ -174,7 +203,7 @@ export const en = {
   },
   bar: {
     title: "We are hiring",
-    sub: "Two open roles · about 5 minutes",
+    sub: `${ROLE_COUNT} open ${ROLES_NOUN} · about 5 minutes`,
     apply: "Apply",
   },
   faq: {
@@ -182,7 +211,7 @@ export const en = {
     title: "Before you ask.",
     roles: {
       q: "Which roles are open?",
-      a: "Two: AI Creator and Sales & Distribution Manager. Pick one at the top of the form.",
+      a: `${ROLE_COUNT}: ${joinWithAnd(ROLE_TITLES)}. Pick one at the top of the form.`,
     },
     files: {
       q: "Can I attach a CV?",
@@ -203,7 +232,7 @@ export const en = {
     data: {
       q: "What happens to my details?",
       a: {
-        before: `We use them only to consider you for work at Matio and keep them for ${KEEP}. Ask us to delete them any time: `,
+        before: `We use them only to consider you for work at Matio and keep them for ${KEEP}. With marketing cookies on, our analytics also counts that an application for a role was sent — never what's in it. Ask us to delete them any time: `,
         link: "maksym@matio.tv",
         after: ".",
       } satisfies CareersLinked,

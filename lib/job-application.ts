@@ -82,6 +82,7 @@ export type JobFieldCode =
   | "position_required"
   | "name_required"
   | "name_too_long"
+  | "email_required"
   | "email_invalid"
   | "location_required"
   | "location_too_long"
@@ -134,9 +135,13 @@ export function jobTextLength(s: unknown): number {
   return Array.from(normalizeJobText(s)).length;
 }
 
-/** Trimmed and lowercased — the address as stored, compared and erased. */
+/**
+ * Trimmed and lowercased — the address as stored, compared and erased. NUL
+ * is removed like in every other field: Postgres text refuses it, and a
+ * forged address carrying one would otherwise end as a 22021 server_error.
+ */
 export function normalizeJobEmail(s: unknown): string {
-  return typeof s === "string" ? s.trim().toLowerCase() : "";
+  return typeof s === "string" ? s.split("\u0000").join("").trim().toLowerCase() : "";
 }
 
 /**
@@ -220,7 +225,8 @@ export function validateJobApplication(input: unknown): JobFieldError[] {
     errors.push({ field: "fullName", code: "name_too_long" });
   }
 
-  if (!v.email || v.email.length > JOB_LIMITS.email || !EMAIL_RE.test(v.email)) {
+  if (!v.email) errors.push({ field: "email", code: "email_required" });
+  else if (v.email.length > JOB_LIMITS.email || !EMAIL_RE.test(v.email)) {
     errors.push({ field: "email", code: "email_invalid" });
   }
 

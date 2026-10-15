@@ -131,7 +131,7 @@ export const FormWithErrors: Story = {
     await expect(canvas.getByRole("alert")).toHaveTextContent(en.errors.summary);
     for (const copy of [
       en.errors.nameRequired,
-      en.errors.email,
+      en.errors.emailRequired,
       en.errors.locationRequired,
       en.errors.link,
       en.errors.portfolioRequired,

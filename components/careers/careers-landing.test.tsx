@@ -163,6 +163,32 @@ describe("CareersLanding — the page", () => {
     expect(document.activeElement).toBe(s.field.sales);
   });
 
+  it("the role picker is ONE radio group — a shared name, so arrow keys move within it and it is one Tab stop", () => {
+    const s = setup();
+    expect(s.field.aiCreator.name).toBe("position");
+    expect(s.field.sales.name).toBe("position");
+    expect(s.field.aiCreator.value).toBe("ai-creator");
+    expect(s.field.sales.value).toBe("sales-distribution");
+    // Checking one unchecks the other, natively, within the group.
+    fireEvent.click(s.field.sales);
+    expect(s.field.sales.checked).toBe(true);
+    expect(s.field.aiCreator.checked).toBe(false);
+    // No other field carries a name: nothing personal could ride a native submit.
+    const named = [...s.form.querySelectorAll("[name]")].map((el) => el.getAttribute("name"));
+    expect([...new Set(named)].sort()).toEqual(["position", "website"]);
+  });
+
+  it("an address with something in it but no @ gets the malformed copy, not the empty one", () => {
+    const s = setup();
+    fillValid(s);
+    fireEvent.change(s.field.email, { target: { value: "marker-at-example.com" } });
+
+    s.send();
+
+    expect(screen.getByText(en.errors.email)).toBeTruthy();
+    expect(screen.queryByText(en.errors.emailRequired)).toBeNull();
+  });
+
   it("the hero CTA goes to the roles", () => {
     setup();
     fireEvent.click(screen.getByRole("link", { name: new RegExp(en.hero.cta) }));
@@ -204,13 +230,14 @@ describe("CareersLanding — validation after the first send", () => {
     for (const copy of [
       en.errors.position,
       en.errors.nameRequired,
-      en.errors.email,
+      en.errors.emailRequired,
       en.errors.locationRequired,
       en.errors.messageRequired,
       en.errors.age,
     ]) {
       expect(screen.getByText(copy)).toBeTruthy();
     }
+    expect(screen.queryByText(en.errors.email)).toBeNull();
     expect(s.submit).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(s.field.aiCreator);
     expect(s.field.fullName.getAttribute("aria-invalid")).toBe("true");
