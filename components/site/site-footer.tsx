@@ -73,6 +73,7 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
           <FooterLink href="/">{t.footer.browse}</FooterLink>
           <FooterLink href="/about">{t.footer.about}</FooterLink>
           <FooterLink href="/press">{t.footer.press}</FooterLink>
+          <FooterLink href="/careers">{t.footer.careers}</FooterLink>
           {/* No prefetch: for a signed-out visitor proxy.ts answers
               /subscribe with a 307 to Clerk's origin, and the prefetch
               fetch dies on CORS as an unhandled "Failed to fetch" (#259). */}
@@ -112,6 +113,7 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
             <FooterLink href="/">{t.footer.browse}</FooterLink>
             <FooterLink href="/about">{t.footer.about}</FooterLink>
             <FooterLink href="/press">{t.footer.press}</FooterLink>
+            <FooterLink href="/careers">{t.footer.careers}</FooterLink>
             {/* Same two rules as the mobile row above (#259). */}
             {paymentsEnabled && (
               <FooterLink href="/subscribe" prefetch={false}>

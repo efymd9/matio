@@ -99,6 +99,24 @@ describe("SiteHeader — the trimmed header on the /ideas landing (#297)", () =>
     expectNoLanguageSwitcher(container);
   });
 
+  it("/careers (#376): the same trimmed header — a half-written application loses its draft too", () => {
+    nav.pathname = "/careers";
+    render(
+      <SiteHeader
+        authSlot={<button type="button">account-slot</button>}
+        paymentsEnabled
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: en.header.home })).toBeTruthy();
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByRole("button", { name: "account-slot" })).toBeNull();
+    const header = screen.getByRole("banner");
+    expect(header.classList.contains("absolute")).toBe(true);
+    expect(header.classList.contains("fixed")).toBe(false);
+  });
+
   describe("scrolling (#362): the /ideas header scrolls away, the rest stay pinned", () => {
     // jsdom has no layout, so the positioning scheme IS the observable: an
     // absolute header travels up with the page, a fixed one stays put — and

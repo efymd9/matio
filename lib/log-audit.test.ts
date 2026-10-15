@@ -360,6 +360,8 @@ import { CheckoutRateLimitedError } from "@/lib/checkout-session";
 import { CONSENT_VERSION, serializeConsent } from "@/lib/cookie-consent";
 import { submitIdea } from "@/app/(public)/ideas/actions";
 import type { IdeaSubmissionInput } from "@/lib/idea-submission";
+import { submitJobApplication } from "@/app/(public)/careers/actions";
+import type { JobApplicationInput } from "@/lib/job-application";
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -1042,9 +1044,10 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     expect(logged()).not.toContain(MARKER_EMAIL);
   });
 
-  // Story ideas (#297) go by the account's address in the same erasure. The
-  // deleted rows are seeded with the fan's own words: only a COUNT may come
-  // out — of the info line, the apply summary and the dry run alike.
+  // Story ideas (#297) and job applications (#376) go by the account's
+  // address in the same erasure. The deleted rows are seeded with the
+  // person's own words: only a COUNT may come out — of the info line, the
+  // apply summary and the dry run alike.
   function ideasDeleteSeeded() {
     del.mockImplementation((table: PgTable) =>
       getTableName(table) === "idea_submissions"
@@ -1056,11 +1059,20 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
               story: MARKER_STORY,
             },
           ])
-        : deleteChain([{ id: "rem_1" }]),
+        : getTableName(table) === "job_applications"
+          ? deleteChain([
+              {
+                id: "job_marker",
+                fullName: MARKER_NAME,
+                email: MARKER_EMAIL,
+                message: MARKER_STORY,
+              },
+            ])
+          : deleteChain([{ id: "rem_1" }]),
     );
   }
 
-  it("erases the story ideas sent from the address (#297) and logs how many — never who wrote them or what", async () => {
+  it("erases the story ideas (#297) and job applications (#376) sent from the address and logs how many — never who wrote them or what", async () => {
     const req = deletedWithLiveSubscription();
     ideasDeleteSeeded();
     const logged = captureConsole();
@@ -1071,20 +1083,22 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
     expect(del.mock.calls.map(([table]) => getTableName(table as PgTable))).toEqual([
       "show_reminders",
       "idea_submissions",
+      "job_applications",
       "users",
     ]);
     for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STORY]) {
       expect(logged()).not.toContain(marker);
     }
-    // What it DOES say: the count, on the erasure's info line.
+    // What it DOES say: the counts, on the erasure's info line.
     expect(logged()).toContain("erase user: local data erased");
     expect(logged()).toContain('"ideaSubmissionRows":1');
+    expect(logged()).toContain('"jobApplicationRows":1');
     const sentry = sentryMessage.mock.calls.map(render).join("\n");
     expect(sentry).not.toContain(MARKER_STORY);
     expect(sentry).not.toContain(MARKER_NAME);
   });
 
-  it("the script's apply summary and dry run count the story ideas (#297) — idea_submissions=N, nothing else", async () => {
+  it("the script's apply summary and dry run count the story ideas (#297) and job applications (#376) — table=N, nothing else", async () => {
     deletedWithLiveSubscription();
     ideasDeleteSeeded();
     const { db } = await import("@/db");
@@ -1113,7 +1127,9 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
           Promise.resolve(
             table === "idea_submissions"
               ? [{ n: 1, authorName: MARKER_NAME, email: MARKER_EMAIL, story: MARKER_STORY }]
-              : [{ n: 0 }],
+              : table === "job_applications"
+                ? [{ n: 1, fullName: MARKER_NAME, email: MARKER_EMAIL, message: MARKER_STORY }]
+                : [{ n: 0 }],
           ).then(resolve, reject),
       };
       return chain;
@@ -1123,6 +1139,8 @@ describe("log audit · Clerk user.deleted (account erasure)", () => {
 
     expect(applied).toContain("idea_submissions=1");
     expect(dryRun).toContain("idea_submissions=1");
+    expect(applied).toContain("job_applications=1");
+    expect(dryRun).toContain("job_applications=1");
     for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STORY]) {
       expect(applied).not.toContain(marker);
       expect(dryRun).not.toContain(marker);
@@ -2413,6 +2431,19 @@ describe("log audit · subject-access export summary (scripts/export-user-data.t
           story: MARKER_STORY,
         },
       ],
+      // A job application (#376): the candidate's name, address, links and
+      // their own words.
+      job_applications: [
+        {
+          id: "job_marker",
+          position: "ai-creator",
+          fullName: MARKER_NAME,
+          email: MARKER_EMAIL,
+          location: MARKER_STREET,
+          linkedinUrl: `https://www.linkedin.com/in/${MARKER_NAME.replace(" ", "-")}`,
+          message: MARKER_STORY,
+        },
+      ],
     } as unknown as Parameters<typeof assembleUserExport>[0]["rows"];
   }
 
@@ -2492,6 +2523,25 @@ describe("log audit · subject-access export summary (scripts/export-user-data.t
       expect(summary).not.toContain(marker);
     }
     expect(summary).toContain("idea_submissions=1");
+  });
+
+  it("counts the job applications (#376) in the summary — job_applications=1, never the candidate, the address, the city or the message", async () => {
+    const result = await assembleUserExport({
+      userId: USER_ID,
+      rows: seededRows(),
+      clients: {},
+    });
+    const document = JSON.stringify(result.database.job_applications);
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STORY, MARKER_STREET]) {
+      expect(document).toContain(marker);
+    }
+
+    const summary = summarizeExport(result);
+
+    for (const marker of [MARKER_EMAIL, MARKER_NAME, MARKER_STORY, MARKER_STREET, "linkedin"]) {
+      expect(summary).not.toContain(marker);
+    }
+    expect(summary).toContain("job_applications=1");
   });
 
   it("keeps a vendor's error text out of the notes and the summary", async () => {
@@ -3048,6 +3098,149 @@ describe("log audit · idea submission (/ideas, #297)", () => {
   });
 });
 
+describe("log audit · job application (/careers, #376)", () => {
+  // A candidate's application is free text from an anonymous form: a name,
+  // an address, a city, links and up to 2,000 characters about themselves.
+  // The action may log a reason line or `{ name, code }` and nothing else —
+  // and it must RESOLVE, because an unhandled throw would carry the driver's
+  // text to Sentry through onRequestError. The worst case seeds the markers
+  // INTO the thrown text, the way the driver quotes a statement's params.
+  const MARKER_CITY = "Leak Marker City";
+  const MARKER_LINK = "https://leak-marker.example.invalid/reel";
+  const MARKER_HANDLE = "@leak.marker";
+  const MARKERS = [
+    MARKER_NAME,
+    MARKER_EMAIL,
+    MARKER_STORY,
+    MARKER_CITY,
+    MARKER_LINK,
+    MARKER_HANDLE,
+  ];
+
+  function application(over: Partial<JobApplicationInput> = {}): JobApplicationInput {
+    return {
+      position: "ai-creator",
+      fullName: MARKER_NAME,
+      email: MARKER_EMAIL,
+      location: MARKER_CITY,
+      linkedinUrl: "",
+      portfolioUrl: MARKER_LINK,
+      socials: [{ platform: "tiktok", value: MARKER_HANDLE }],
+      message: MARKER_STORY,
+      ageConfirmed: true,
+      website: "",
+      ...over,
+    };
+  }
+
+  /** Markers found in what would leave the process: the console, every Sentry call (tags included), the answer. */
+  function leaked(logged: () => string, result: unknown): string[] {
+    const outputs = [
+      logged(),
+      sentryMessage.mock.calls.map(render).join("\n"),
+      render(result),
+    ];
+    return MARKERS.filter((marker) => outputs.some((out) => out.includes(marker)));
+  }
+
+  /** The hourly brake's key per call — typed loosely: the spy is shared with the checkout cases. */
+  const brakeKeys = () =>
+    (walletAudit.rateLimited.mock.calls as unknown as [string, number][]).map(
+      ([key]) => key,
+    );
+
+  beforeEach(() => {
+    walletAudit.rateLimited.mockClear();
+  });
+
+  it("honeypot: a filled trap is swallowed with a success and one bare line — nothing written, the brake untouched", async () => {
+    const logged = captureConsole();
+
+    const result = await submitJobApplication(
+      application({ website: "https://bot.example.invalid" }),
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(logged()).toBe("submitJobApplication: honeypot");
+    expect(leaked(logged, result)).toEqual([]);
+    expect(insert).not.toHaveBeenCalled();
+    expect(walletAudit.rateLimited).not.toHaveBeenCalled();
+  });
+
+  it("a validation refusal answers field + code pairs only and logs nothing", async () => {
+    const logged = captureConsole();
+
+    const result = await submitJobApplication(
+      application({
+        portfolioUrl: `javascript:alert('${MARKER_EMAIL}')`,
+        socials: [{ platform: "tiktok", value: `${MARKER_HANDLE} ${MARKER_CITY}` }],
+        message: MARKER_STORY.repeat(60),
+      }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid",
+      errors: [
+        { field: "portfolio", code: "portfolio_invalid" },
+        { field: "socials", code: "social_invalid", index: 0 },
+        { field: "message", code: "message_too_long" },
+      ],
+    });
+    expect(logged()).toBe("");
+    expect(leaked(logged, result)).toEqual([]);
+    expect(walletAudit.rateLimited).not.toHaveBeenCalled();
+  });
+
+  it("a rate-limited submit answers a bare reason; the brake's key is `job:` + a hash, never the address or an IP", async () => {
+    walletAudit.rateLimited.mockResolvedValueOnce(true);
+    const logged = captureConsole();
+
+    const result = await submitJobApplication(application());
+
+    expect(result).toEqual({ ok: false, reason: "rate_limited" });
+    expect(insert).not.toHaveBeenCalled();
+    const [key] = brakeKeys();
+    expect(key).toMatch(/^job:[0-9a-f]{64}$/);
+    expect(leaked(logged, [result, key])).toEqual([]);
+  });
+
+  it("an insert failure whose driver error quotes the row resolves to server_error and reports class + SQLSTATE only", async () => {
+    const statement = `insert into job_applications (full_name, email, location, portfolio_url, social_links, message) values ('${MARKER_NAME}', '${MARKER_EMAIL}', '${MARKER_CITY}', '${MARKER_LINK}', '[{"value":"${MARKER_HANDLE}"}]', '${MARKER_STORY}')`;
+    insert.mockImplementation(() => ({
+      values: () => ({
+        onConflictDoNothing: async () => {
+          throw Object.assign(new Error(`Failed query: ${statement}`), {
+            name: "DrizzleQueryError",
+            cause: Object.assign(new Error(`${statement} — relation does not exist`), {
+              name: "PostgresError",
+              code: "42P01",
+            }),
+          });
+        },
+      }),
+    }));
+    const logged = captureConsole();
+
+    const pending = submitJobApplication(application());
+
+    await expect(pending).resolves.toEqual({ ok: false, reason: "server_error" });
+    const result = await pending;
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(leaked(logged, result)).toEqual([]);
+    // What it DOES say: the class of the thrown error and the SQLSTATE from
+    // its `.cause` — the same pair in the log and in the Sentry tags.
+    expect(logged()).toBe(
+      'submitJobApplication: failed {"name":"DrizzleQueryError","code":"42P01"}',
+    );
+    expect(sentryMessage).toHaveBeenCalledTimes(1);
+    expect(sentryMessage.mock.calls[0]).toEqual([
+      "submitJobApplication: failed",
+      { level: "error", tags: { code: "42P01", name: "DrizzleQueryError" } },
+    ]);
+  });
+});
+
 describe("log audit · subject requests by address (pnpm -s export-email / erase-email, #339)", () => {
   // The address is the whole key of these two commands, so it is the one
   // thing they must never print: stdout and stderr of a terminal end up in
@@ -3079,6 +3272,14 @@ describe("log audit · subject requests by address (pnpm -s export-email / erase
     logline: "What if a banished postman had one last letter to deliver?",
     story: MARKER_STORY,
   };
+  // A job application (#376): the candidate's name, address and own words.
+  const applicationRow = {
+    id: "job_marker",
+    email: MARKER_EMAIL,
+    fullName: MARKER_NAME,
+    location: "Leak Marker City",
+    message: MARKER_STORY,
+  };
 
   /** What Drizzle 0.44+ throws: its wrapper quoting the query, the PostgresError on `.cause`. */
   function driverError(code: string) {
@@ -3104,6 +3305,7 @@ describe("log audit · subject requests by address (pnpm -s export-email / erase
     const rowsOf = (table: PgTable) => {
       const name = getTableName(table);
       if (name === "users") return over.accounts ?? [];
+      if (name === "job_applications") return [applicationRow];
       return name === "show_reminders" ? [reminderRow] : [ideaRow];
     };
     const db = {
@@ -3171,7 +3373,9 @@ describe("log audit · subject requests by address (pnpm -s export-email / erase
     // …but not another person's account id, and not in the file name either.
     expect(r.written[0].content).not.toContain(MARKER_OTHER_ACCOUNT);
     expect(r.written[0].path).not.toContain(MARKER_EMAIL.split("@")[0]);
-    expect(r.out.join("\n")).toContain("show_reminders=1 idea_submissions=1");
+    expect(r.out.join("\n")).toContain("show_reminders=1 idea_submissions=1 job_applications=1");
+    expect(r.written[0].content).toContain("Leak Marker City");
+    expect(r.out.join("\n")).not.toContain("Leak Marker City");
     expect(leaked(logged, r)).toEqual([]);
   });
 
@@ -3221,9 +3425,10 @@ describe("log audit · subject requests by address (pnpm -s export-email / erase
     expect(await runEraseEmail([MARKER_EMAIL], ENV, dry.deps)).toBe(0);
     expect(await runEraseEmail([MARKER_EMAIL, "--apply"], ENV, applied.deps)).toBe(0);
 
-    expect(dry.out.join("\n")).toContain("would delete: show_reminders=1 idea_submissions=1");
+    expect(dry.out.join("\n")).toContain("would delete: show_reminders=1 idea_submissions=1 job_applications=1");
     expect(dry.out.join("\n")).toContain("ids idea_submissions: idea_marker");
-    expect(applied.out.join("\n")).toContain("deleted: show_reminders=1 idea_submissions=1");
+    expect(dry.out.join("\n")).toContain("ids job_applications: job_marker");
+    expect(applied.out.join("\n")).toContain("deleted: show_reminders=1 idea_submissions=1 job_applications=1");
     expect(applied.out.join("\n")).toContain("ids show_reminders: rem_marker");
     expect(leaked(logged, dry)).toEqual([]);
     expect(leaked(logged, applied)).toEqual([]);
