@@ -71,6 +71,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly",
       priority: 0.5,
     }),
+    // The careers page (#376) — the two open roles; indexed on purpose.
+    entry("/careers", {
+      changeFrequency: "monthly",
+      priority: 0.5,
+    }),
     ...published.map((s) =>
       entry(`/shows/${s.slug}`, {
         lastModified: s.updatedAt ?? catalogLastMod,

@@ -111,8 +111,8 @@ describe("«Last updated»", () => {
     expect(await render(TermsPage)).toContain(`Last updated: ${edition}`);
   });
 
-  it("/privacy keeps its edition, /cookies has the #445 one", async () => {
-    expect(await render(PrivacyPage)).toContain("Last updated: October 12, 2026");
+  it("/privacy has the #376 edition (job applications), /cookies the #445 one", async () => {
+    expect(await render(PrivacyPage)).toContain("Last updated: October 15, 2026");
     expect(await render(CookiesPage)).toContain("Last updated: October 12, 2026");
   });
 });

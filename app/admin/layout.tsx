@@ -61,6 +61,12 @@ export default async function AdminLayout({
             >
               {t.nav.ideas}
             </Link>
+            <Link
+              href="/admin/careers"
+              className="text-sm font-medium text-cream/65 transition-colors hover:text-cream"
+            >
+              {t.nav.careers}
+            </Link>
             <div className="ml-auto flex items-center gap-4">
               <Link
                 href="/"

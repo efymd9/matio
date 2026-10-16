@@ -29,6 +29,14 @@
 // English only since #445 (2026-10-12): the Spanish version was withdrawn
 // with the site's Spanish — it is in git history. Not a new edition: the
 // English text did not change, so "Last updated" stays at 2026-10-11.
+// Job applications (/careers, #376) added 2026-10-15 in §2/§3/§6/§8 — a new
+// edition ("Last updated" moves): an agent's draft from the code, DRAFT with
+// the rest of this page; the lawful-basis choice is the counsel's question
+// (#168). §3 says what the analytics sees of an application (the PostHog
+// `job_application_submitted {position}` count, marketing cookies only), and
+// §4's mailbox row names Google Workspace, which has carried maksym@matio.tv
+// since 08.10.2026 (#414), instead of Namecheap PrivateEmail — both in the
+// same #376 draft, merged on the owner's «да» in the PR thread.
 // matio.tv/ideas is
 // plain text on purpose: every internal link here must survive ?embed=app
 // (app/(public)/legal-embed.test.tsx).
@@ -49,7 +57,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "October 12, 2026";
+const LAST_UPDATED = "October 15, 2026";
 
 export default async function PrivacyPage() {
   const { t } = await getDict();
@@ -186,6 +194,16 @@ function PrivacyEn() {
             preferences&rdquo; in the footer. You don&rsquo;t need an account
             to send an idea, and we don&rsquo;t store your IP address with it.
           </li>
+          <li id="careers" className="scroll-mt-24">
+            <strong>Job applications</strong> — if you apply for a role
+            through matio.tv/careers, we keep the role you applied for, your
+            full name, your email address, where you are based, the links you
+            give us (LinkedIn, a portfolio or other work, and up to four
+            social profiles — a link or an @handle) and what you write about
+            yourself. You don&rsquo;t need an account to apply, we don&rsquo;t
+            accept files, and we don&rsquo;t store your IP address with your
+            application.
+          </li>
           <li>
             <strong>Technical data</strong> — IP address, browser user-agent,
             request logs needed to operate, secure and debug the service.
@@ -222,6 +240,16 @@ function PrivacyEn() {
             accept when you send it. <strong>Emails about new episodes and
             story calls</strong>: lawful basis <em>consent</em>, only if you
             tick the box; we don&rsquo;t send them yet.
+          </li>
+          <li>
+            <strong>To consider your job application</strong> and contact
+            you about it. Lawful basis: <em>steps taken at your request
+            before entering into a contract</em> and our{" "}
+            <em>legitimate interests</em> in recruiting for Matio. We use your
+            application for nothing else. While marketing cookies are on, our
+            product analytics (PostHog) also counts that an application for a
+            role was sent — which role, never your name, your contact details,
+            your links or what you wrote.
           </li>
           <li>
             <strong>Marketing and advertising measurement</strong> via the{" "}
@@ -337,8 +365,11 @@ function PrivacyEn() {
             with you, and only what the production needs.
           </li>
           <li>
-            <strong>Namecheap, Inc.</strong> (PrivateEmail) — our mailbox at
-            maksym@matio.tv, for correspondence with you.
+            <strong>Google Ireland Ltd</strong> (Google Workspace, with
+            transfers to Google LLC in the US) — our mailbox at
+            maksym@matio.tv, for correspondence with you, including replies
+            about story ideas and job applications and requests about your
+            data. SCCs.
           </li>
         </ul>
         <p>
@@ -386,6 +417,9 @@ function PrivacyEn() {
             longer only if we develop your idea with you.
           </li>
           <li>
+            <strong>Job applications</strong>: 6 months from submission.
+          </li>
+          <li>
             <strong>Request and security logs</strong>: 30 days.
           </li>
         </ul>
@@ -424,8 +458,8 @@ function PrivacyEn() {
         <p>
           The service is intended for users aged 16 and over. We do not
           knowingly collect personal data from children below that age. If we
-          learn we have, we will delete it. Story ideas may only be sent by
-          people aged 18 or over.
+          learn we have, we will delete it. Story ideas and job applications
+          may only be sent by people aged 18 or over.
         </p>
       </Section>
 

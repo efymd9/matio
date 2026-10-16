@@ -380,6 +380,53 @@ describe("proxy — the app's embed of the legal documents", () => {
   });
 });
 
+// #376, the owner's option (а): /careers renders without the Meta Pixel and
+// GA4 until #341 (lib/ad-pixels.ts). proxy.ts stamps the request for that
+// path only; the cookie work — the consent default outside the EU, the
+// attribution cookies, matio_aid — is exactly what any other page gets.
+describe("proxy — /careers is stamped for a layout without the ad pixels", () => {
+  const forwarded = (res: Awaited<ReturnType<typeof proxy>>, name: string) =>
+    (res && res.headers.get(`x-middleware-request-${name}`)) ?? null;
+
+  it("a first visit from outside the EU: stamped, and consent + matio_aid written as on any page", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(
+      request("/careers?role=ai-creator&utm_source=ig", { "x-vercel-ip-country": "US" }),
+      event,
+    );
+
+    expect(forwarded(res, "x-matio-ad-pixels")).toBe("off");
+    // The same render still sees the auto-granted consent (banner hidden).
+    expect(forwarded(res, "cookie")).toContain("cookie_consent=");
+    const setCookie = res?.headers.get("Set-Cookie") ?? "";
+    expect(setCookie).toContain("cookie_consent");
+    expect(setCookie).toContain("attribution_first");
+    expect(setCookie).toContain("matio_aid");
+  });
+
+  it("an EU visitor with nothing to write is still stamped", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(
+      request("/careers", { "x-vercel-ip-country": "ES", cookie: "matio_aid=already" }),
+      event,
+    );
+
+    expect(forwarded(res, "x-matio-ad-pixels")).toBe("off");
+    expect(res?.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("a neighbour page (/ideas) and the rest are not stamped", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    for (const path of ["/ideas", "/", "/about", "/careers/ai-creator", "/careersx"]) {
+      const res = await proxy(request(path, { "x-vercel-ip-country": "US" }), event);
+      expect(forwarded(res, "x-matio-ad-pixels"), path).toBeNull();
+    }
+  });
+});
+
 // #419 — /api/healthz never enters proxy.ts. clerkMiddleware throws on every
 // request it sees when the Clerk keys are absent (Vercel previews, the #46
 // incident), so a health check inside the matcher answered 500 for a reason

@@ -61,6 +61,10 @@ function seed() {
       { id: "idea_mine", email: ADDRESS, authorName: "Ana", story: "A postman." },
       { id: "idea_else", email: "someone.else@example.invalid", authorName: "Else", story: "Another." },
     ] as Row[],
+    job_applications: [
+      { id: "job_mine", email: ADDRESS, fullName: "Ana Perez", message: "I cut trailers." },
+      { id: "job_else", email: "someone.else@example.invalid", fullName: "Else", message: "Other." },
+    ] as Row[],
     users: [] as Row[],
   };
 }
@@ -250,15 +254,19 @@ describe("defaultAddressExportPath", () => {
 // ── the document ────────────────────────────────────────────────────────
 
 describe("assembleAddressExport", () => {
-  const rows = (reminders: Row[], ideas: Row[] = []) =>
-    ({ show_reminders: reminders, idea_submissions: ideas }) as unknown as AddressRows;
+  const rows = (reminders: Row[], ideas: Row[] = [], applications: Row[] = []) =>
+    ({
+      show_reminders: reminders,
+      idea_submissions: ideas,
+      job_applications: applications,
+    }) as unknown as AddressRows;
 
-  it("lists both tables as keys even with zero rows, keys the subject by the reference and nothing else", () => {
+  it("lists every table as a key even with zero rows, keys the subject by the reference and nothing else", () => {
     const doc = assembleAddressExport({ address: ADDRESS, rows: rows([]), now: NOW });
     expect(doc).toEqual({
       exportedAt: "2026-10-03T12:00:00.000Z",
       subject: { addressRef: REF },
-      database: { show_reminders: [], idea_submissions: [] },
+      database: { show_reminders: [], idea_submissions: [], job_applications: [] },
       notes: [],
     });
   });
@@ -290,34 +298,51 @@ describe("assembleAddressExport", () => {
     expect(doc.database.idea_submissions).toEqual([idea]);
   });
 
+  it("gives the job applications as stored (#376) — the candidate's own record", () => {
+    const application = { id: "job_mine", email: ADDRESS, fullName: "Ana Perez", message: "I cut trailers." };
+    const doc = assembleAddressExport({ address: ADDRESS, rows: rows([], [], [application]), now: NOW });
+    expect(doc.database.job_applications).toEqual([application]);
+  });
+
   it("summarises by counts and the reference — never a row", () => {
     const doc = assembleAddressExport({
       address: ADDRESS,
-      rows: rows([{ id: "r", email: ADDRESS, userId: "user_2other" }], [{ id: "i", email: ADDRESS, story: "A postman." }]),
+      rows: rows(
+        [{ id: "r", email: ADDRESS, userId: "user_2other" }],
+        [{ id: "i", email: ADDRESS, story: "A postman." }],
+        [{ id: "j", email: ADDRESS, message: "I cut trailers." }],
+      ),
       now: NOW,
     });
     const text = summarizeAddressExport(doc);
     expect(text).toBe(
       [
         `subject: address#${REF} (the address itself is never printed)`,
-        "database rows: show_reminders=1 idea_submissions=1",
+        "database rows: show_reminders=1 idea_submissions=1 job_applications=1",
         "notes (1):",
         "  - show_reminders: user_id left out of 1 row(s) — it names an account under another address, not this subject's data (art. 15(4))",
       ].join("\n"),
     );
     expect(text).not.toContain(ADDRESS);
     expect(text).not.toContain("postman");
+    expect(text).not.toContain("trailers");
   });
 });
 
 describe("summarizeAddressRowIds", () => {
   it("prints counts, and an ids line only for a table that has any", () => {
-    expect(summarizeAddressRowIds("would delete", { show_reminders: ["a", "b"], idea_submissions: [] })).toBe(
-      "would delete: show_reminders=2 idea_submissions=0\nids show_reminders: a, b",
+    expect(
+      summarizeAddressRowIds("would delete", {
+        show_reminders: ["a", "b"],
+        idea_submissions: [],
+        job_applications: ["j"],
+      }),
+    ).toBe(
+      "would delete: show_reminders=2 idea_submissions=0 job_applications=1\nids show_reminders: a, b\nids job_applications: j",
     );
-    expect(summarizeAddressRowIds("deleted", { show_reminders: [], idea_submissions: [] })).toBe(
-      "deleted: show_reminders=0 idea_submissions=0",
-    );
+    expect(
+      summarizeAddressRowIds("deleted", { show_reminders: [], idea_submissions: [], job_applications: [] }),
+    ).toBe("deleted: show_reminders=0 idea_submissions=0 job_applications=0");
   });
 });
 
@@ -335,7 +360,7 @@ describe("runExportEmail", () => {
 
   beforeEach(() => writeFile.mockReset());
 
-  it("an address in mixed case finds the rows of BOTH tables — and only those", async () => {
+  it("an address in mixed case finds the rows of EVERY table — and only those", async () => {
     const { db } = fakeDb(seed());
     const sink = io();
 
@@ -348,13 +373,14 @@ describe("runExportEmail", () => {
     const doc = JSON.parse(content);
     expect(doc.database.show_reminders.map((r: Row) => r.id)).toEqual(["rem_anon", "rem_linked"]);
     expect(doc.database.idea_submissions.map((r: Row) => r.id)).toEqual(["idea_mine"]);
+    expect(doc.database.job_applications.map((r: Row) => r.id)).toEqual(["job_mine"]);
     // The other address's rows are not in the person's file.
     expect(content).not.toContain("someone.else");
     // Stdout: counts, the reference and the path — not a value.
     expect(sink.out.join("\n")).toBe(
       [
         `subject: address#${REF} (the address itself is never printed)`,
-        "database rows: show_reminders=2 idea_submissions=1",
+        "database rows: show_reminders=2 idea_submissions=1 job_applications=1",
         "notes (1):",
         "  - show_reminders: user_id left out of 1 row(s) — it names an account under another address, not this subject's data (art. 15(4))",
         `written /tmp/dir/export-address-${REF}-2026-10-03.json (mode 0600) — delete it once the reply has gone out`,
@@ -488,7 +514,7 @@ describe("runEraseEmail", () => {
     io: sink.io,
   });
 
-  it("is a dry run by default: counts and ids of the rows of both tables, and nothing deleted — no transaction, no DELETE", async () => {
+  it("is a dry run by default: counts and ids of the rows of every table, and nothing deleted — no transaction, no DELETE", async () => {
     const tables = seed();
     const before = structuredClone(tables);
     const { db, log } = fakeDb(tables);
@@ -502,7 +528,7 @@ describe("runEraseEmail", () => {
     expect(sink.out).toEqual([
       `DRY RUN — erase address#${REF}`,
       "account: none for this address",
-      "would delete: show_reminders=2 idea_submissions=1\nids show_reminders: rem_anon, rem_linked\nids idea_submissions: idea_mine",
+      "would delete: show_reminders=2 idea_submissions=1 job_applications=1\nids show_reminders: rem_anon, rem_linked\nids idea_submissions: idea_mine\nids job_applications: job_mine",
       "nothing changed (dry run — re-run with --apply)",
     ]);
     expect(sink.err).toEqual([]);
@@ -519,20 +545,29 @@ describe("runEraseEmail", () => {
     const code = await runEraseEmail([MIXED, "--apply"], ENV, deps(db, sink));
 
     expect(code).toBe(EXIT_OK);
-    // The account check, then both DELETEs between one begin and one commit.
-    expect(log).toEqual(["select users", "begin", "delete show_reminders", "delete idea_submissions", "commit"]);
+    // The account check, then every DELETE between one begin and one commit.
+    expect(log).toEqual([
+      "select users",
+      "begin",
+      "delete show_reminders",
+      "delete idea_submissions",
+      "delete job_applications",
+      "commit",
+    ]);
     expect(tables.show_reminders.map((r) => r.id)).toEqual(["rem_else"]);
     expect(tables.idea_submissions.map((r) => r.id)).toEqual(["idea_else"]);
+    expect(tables.job_applications.map((r) => r.id)).toEqual(["job_else"]);
     // The ids it reports are the ids the dry run promised.
     expect(dry.out[2]).toBe(
-      "would delete: show_reminders=2 idea_submissions=1\nids show_reminders: rem_anon, rem_linked\nids idea_submissions: idea_mine",
+      "would delete: show_reminders=2 idea_submissions=1 job_applications=1\nids show_reminders: rem_anon, rem_linked\nids idea_submissions: idea_mine\nids job_applications: job_mine",
     );
     expect(sink.out[0]).toBe(`APPLY — erase address#${REF}`);
     expect(sink.out[2]).toBe(
-      "deleted: show_reminders=2 idea_submissions=1\nids show_reminders: rem_anon, rem_linked\nids idea_submissions: idea_mine",
+      "deleted: show_reminders=2 idea_submissions=1 job_applications=1\nids show_reminders: rem_anon, rem_linked\nids idea_submissions: idea_mine\nids job_applications: job_mine",
     );
-    // Idea ids are what the request register keeps for a restore (runbook §6).
-    expect(sink.out[3]).toContain("record the idea ids in the request register");
+    // Idea and application ids are what the request register keeps for a
+    // restore (runbook §6).
+    expect(sink.out[3]).toContain("record the idea and application ids in the request register");
   });
 
   it("--apply twice is safe: the second run finds nothing and changes nothing", async () => {
@@ -546,10 +581,10 @@ describe("runEraseEmail", () => {
 
     expect(code).toBe(EXIT_OK);
     expect(tables).toEqual(afterFirst);
-    expect(sink.out.slice(2)).toEqual(["deleted: show_reminders=0 idea_submissions=0"]);
+    expect(sink.out.slice(2)).toEqual(["deleted: show_reminders=0 idea_submissions=0 job_applications=0"]);
   });
 
-  it("a failure between the two DELETEs rolls the first back — the address is never half erased", async () => {
+  it("a failure between the DELETEs rolls the earlier ones back — the address is never half erased", async () => {
     const tables = seed();
     const before = structuredClone(tables);
     const { db, log, failDeleteOn } = fakeDb(tables);
@@ -560,6 +595,28 @@ describe("runEraseEmail", () => {
 
     expect(code).toBe(EXIT_FAILED);
     expect(log).toEqual(["select users", "begin", "delete show_reminders", "delete idea_submissions", "rollback"]);
+    expect(tables).toEqual(before);
+    expect(sink.err).toEqual(["erase-email failed (DrizzleQueryError/40P01)"]);
+  });
+
+  it("the job applications DELETE (#376) is inside the same transaction: its failure rolls the reminders and ideas back", async () => {
+    const tables = seed();
+    const before = structuredClone(tables);
+    const { db, log, failDeleteOn } = fakeDb(tables);
+    failDeleteOn("job_applications");
+    const sink = io();
+
+    const code = await runEraseEmail([MIXED, "--apply"], ENV, deps(db, sink));
+
+    expect(code).toBe(EXIT_FAILED);
+    expect(log).toEqual([
+      "select users",
+      "begin",
+      "delete show_reminders",
+      "delete idea_submissions",
+      "delete job_applications",
+      "rollback",
+    ]);
     expect(tables).toEqual(before);
     expect(sink.err).toEqual(["erase-email failed (DrizzleQueryError/40P01)"]);
   });
@@ -617,7 +674,7 @@ describe("the by-address predicates match the account erasure's own (lib/erase-u
     return pairs.sort();
   }
 
-  it("for show_reminders the address half, for idea_submissions the whole predicate — same column, same lowercased value", async () => {
+  it("for show_reminders the address half, for idea_submissions and job_applications the whole predicate — same column, same lowercased value", async () => {
     const dialect = new PgDialect();
     const wheres: { table: string; q: { sql: string; params: unknown[] } }[] = [];
     const erasure = {
@@ -662,5 +719,7 @@ describe("the by-address predicates match the account erasure's own (lib/erase-u
     expect(found("show_reminders")).toEqual([`email=${ADDRESS}`]);
     expect(erased("show_reminders")).toContain(`email=${ADDRESS}`);
     expect(found("idea_submissions")).toEqual([`email=${ADDRESS}`]);
+    expect(found("job_applications")).toEqual(erased("job_applications"));
+    expect(found("job_applications")).toEqual([`email=${ADDRESS}`]);
   });
 });

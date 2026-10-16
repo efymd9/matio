@@ -29,6 +29,7 @@ describe("sitemap.xml — English only", () => {
       "https://matio.tv/about",
       "https://matio.tv/press",
       "https://matio.tv/ideas",
+      "https://matio.tv/careers",
       "https://matio.tv/shows/the-scarlet-oath",
       "https://matio.tv/shows/fallen",
       "https://matio.tv/actors/lena",

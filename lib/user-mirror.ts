@@ -33,7 +33,8 @@ import { getStripe } from "@/lib/stripe";
 //     LATE erasure (`addressReassignedAt` = the new account's creation): the
 //     address now belongs to the new account, so nothing is looked up or
 //     deleted by it that the new account may own (no Stripe customer search;
-//     address-matched reminders and ideas only from before its creation).
+//     address-matched reminders, ideas and job applications only from
+//     before its creation).
 //     Then the insert is repeated.
 //   · alive, and the address is no longer among its addresses — the mirror is
 //     stale (path 2): the row gets the account's CURRENT primary address,
