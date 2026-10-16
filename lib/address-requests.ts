@@ -8,9 +8,11 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "@/db/schema";
 import {
   ideaSubmissions,
+  jobApplications,
   showReminders,
   users,
   type IdeaSubmission,
+  type JobApplication,
   type ShowReminder,
 } from "@/db/schema";
 import { describeDbError } from "@/lib/db-errors";
@@ -21,10 +23,11 @@ import { describeDbError } from "@/lib/db-errors";
 // аккаунта». Always `-s`: without it pnpm itself echoes the script line,
 // arguments and so the address included, to stdout before a line of ours.
 //
-// Two tables hold a person who never signed in, both written without a login
-// and keyed by the address ALONE: `show_reminders` (the «remind me» form) and
-// `idea_submissions` (a story pitch from /ideas, #297 — the author needs no
-// account). Everything else the project knows about a person hangs off a
+// Three tables hold a person who never signed in, all written without a
+// login and keyed by the address ALONE: `show_reminders` (the «remind me»
+// form), `idea_submissions` (a story pitch from /ideas, #297 — the author
+// needs no account) and `job_applications` (an application from /careers,
+// #376 — neither does a candidate). Everything else the project knows about a person hangs off a
 // Clerk id and is served by `pnpm export-user-data` / `erase-user`.
 //
 // The module is the whole of the two scripts: argument parsing, the
@@ -38,8 +41,9 @@ import { describeDbError } from "@/lib/db-errors";
 // which always carries the address, are outside what it can see.
 //
 // Four rules the shape encodes:
-//   * the address is compared LOWERCASED — both tables store it that way
-//     (subscribeToShowReminder / submitIdea lowercase before the insert) and
+//   * the address is compared LOWERCASED — every table stores it that way
+//     (subscribeToShowReminder / submitIdea / submitJobApplication lowercase
+//     before the insert) and
 //     `=` on text is exact, so the operator's «Ana.Perez@Example.com» must
 //     become «ana.perez@example.com» before it meets a column;
 //   * the address NEVER leaves the process in a message: stdout, stderr and
@@ -51,11 +55,15 @@ import { describeDbError } from "@/lib/db-errors";
 //     id: that person is served by the account's own path (a complete
 //     answer for art. 15, the Stripe / PostHog steps for art. 17), and a
 //     by-address run would give an incomplete one;
-//   * erasure is dry-run unless told otherwise, and `--apply` deletes both
-//     tables in ONE transaction — a half-erased address is the state the
-//     operator cannot reason about.
+//   * erasure is dry-run unless told otherwise, and `--apply` deletes from
+//     every table in ONE transaction — a half-erased address is the state
+//     the operator cannot reason about.
 
-export const ADDRESS_TABLES = ["show_reminders", "idea_submissions"] as const;
+export const ADDRESS_TABLES = [
+  "show_reminders",
+  "idea_submissions",
+  "job_applications",
+] as const;
 export type AddressTable = (typeof ADDRESS_TABLES)[number];
 
 export const EXIT_OK = 0;
@@ -68,7 +76,7 @@ export const EXIT_REFUSED = 4;
 
 // ── The address ─────────────────────────────────────────────────────────
 
-/** Trimmed and lowercased — the address as both tables store and compare it. */
+/** Trimmed and lowercased — the address as the tables store and compare it. */
 export function normalizeAddress(raw: string): string {
   return raw.trim().toLowerCase();
 }
@@ -132,6 +140,7 @@ export type AddressDb = Pick<
 // both and compares them, so the two paths cannot drift apart.
 const remindersAt = (address: string) => eq(showReminders.email, address);
 const ideasAt = (address: string) => eq(ideaSubmissions.email, address);
+const applicationsAt = (address: string) => eq(jobApplications.email, address);
 // users.email is Clerk's address as typed — compared case-insensitively.
 const accountsAt = (address: string) =>
   eq(sql<string>`lower(${users.email})`, address);
@@ -139,6 +148,7 @@ const accountsAt = (address: string) =>
 export type AddressRows = {
   show_reminders: ShowReminder[];
   idea_submissions: IdeaSubmission[];
+  job_applications: JobApplication[];
 };
 
 export type AddressRowIds = Record<AddressTable, string[]>;
@@ -168,6 +178,10 @@ export async function loadAddressRows(
       .select()
       .from(ideaSubmissions)
       .where(ideasAt(address)),
+    job_applications: await db
+      .select()
+      .from(jobApplications)
+      .where(applicationsAt(address)),
   };
 }
 
@@ -184,14 +198,19 @@ export async function findAddressRowIds(
     .select({ id: ideaSubmissions.id })
     .from(ideaSubmissions)
     .where(ideasAt(address));
+  const applications = await db
+    .select({ id: jobApplications.id })
+    .from(jobApplications)
+    .where(applicationsAt(address));
   return {
     show_reminders: reminders.map((row) => row.id),
     idea_submissions: ideas.map((row) => row.id),
+    job_applications: applications.map((row) => row.id),
   };
 }
 
 /**
- * Both DELETEs in one transaction, by the same predicates the dry run reads
+ * Every DELETE in one transaction, by the same predicates the dry run reads
  * by. Idempotent: a second run finds nothing and says so.
  */
 export async function eraseAddressRows(
@@ -207,9 +226,14 @@ export async function eraseAddressRows(
       .delete(ideaSubmissions)
       .where(ideasAt(address))
       .returning({ id: ideaSubmissions.id });
+    const applications = await tx
+      .delete(jobApplications)
+      .where(applicationsAt(address))
+      .returning({ id: jobApplications.id });
     return {
       show_reminders: reminders.map((row) => row.id),
       idea_submissions: ideas.map((row) => row.id),
+      job_applications: applications.map((row) => row.id),
     };
   });
 }
@@ -224,6 +248,7 @@ export type AddressExport = {
     /** `userId` is left out — see the note it produces. */
     show_reminders: Omit<ShowReminder, "userId">[];
     idea_submissions: IdeaSubmission[];
+    job_applications: JobApplication[];
   };
   notes: string[];
 };
@@ -256,7 +281,11 @@ export function assembleAddressExport(input: {
   return {
     exportedAt: (input.now ?? new Date()).toISOString(),
     subject: { addressRef: addressRef(address) },
-    database: { show_reminders, idea_submissions: rows.idea_submissions },
+    database: {
+      show_reminders,
+      idea_submissions: rows.idea_submissions,
+      job_applications: rows.job_applications,
+    },
     notes,
   };
 }
@@ -303,10 +332,10 @@ export function refusalMessage(
 ): string {
   const next =
     command === "export"
-      ? "pnpm export-user-data <id> — its answer is complete: the account's own tables plus these two, and the vendors (runbook §3)"
-      : "pnpm erase-user <id> — the account is erased through its own path, these two tables included (runbook §4)";
+      ? "pnpm export-user-data <id> — its answer is complete: the account's own tables plus these, and the vendors (runbook §3)"
+      : "pnpm erase-user <id> — the account is erased through its own path, these tables included (runbook §4)";
   return [
-    `refused: this address belongs to an account (${accountIds.join(", ")}) — no row of the two tables was read or changed.`,
+    `refused: this address belongs to an account (${accountIds.join(", ")}) — no row of the by-address tables was read or changed.`,
     `  use ${next}`,
   ].join("\n");
 }
@@ -319,12 +348,12 @@ export const EXPORT_EMAIL_USAGE =
   "usage: DATABASE_URL=<host> pnpm -s export-email <address> [--out <file>]\n" +
   "  address — the requester's email, any letter case; for an address WITHOUT an account (an account is refused — use export-user-data)\n" +
   "  --out   — where to write the JSON (default: the OS temp dir, export-address-<hash>-<YYYY-MM-DD>.json — outside the repo, the path is printed; mode 0600)\n" +
-  "  Covers show_reminders and idea_submissions. Nothing is read from .env.local on purpose — DATABASE_URL is passed explicitly.";
+  "  Covers show_reminders, idea_submissions and job_applications. Nothing is read from .env.local on purpose — DATABASE_URL is passed explicitly.";
 
 export const ERASE_EMAIL_USAGE =
   "usage: DATABASE_URL=<host> pnpm -s erase-email <address> [--apply]\n" +
   "  address — the requester's email, any letter case; for an address WITHOUT an account (an account is refused — use erase-user)\n" +
-  "  --apply — delete show_reminders and idea_submissions rows of the address in one transaction (default: a dry run — ids and counts, nothing written)\n" +
+  "  --apply — delete the show_reminders, idea_submissions and job_applications rows of the address in one transaction (default: a dry run — ids and counts, nothing written)\n" +
   "  Nothing is read from .env.local on purpose — DATABASE_URL is passed explicitly.";
 
 export type ArgFailure = {
@@ -569,9 +598,9 @@ export async function runEraseEmail(
 
     const erased = await eraseAddressRows(db, address);
     io.out(summarizeAddressRowIds("deleted", erased));
-    if (erased.idea_submissions.length > 0) {
+    if (erased.idea_submissions.length > 0 || erased.job_applications.length > 0) {
       io.out(
-        "record the idea ids in the request register (runbook §6) — db-restore.md §7 repeats the deletion from them after a restore",
+        "record the idea and application ids in the request register (runbook §6) — db-restore.md §7 repeats the deletion from them after a restore",
       );
     }
     return EXIT_OK;

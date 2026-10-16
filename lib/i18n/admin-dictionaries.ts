@@ -10,6 +10,8 @@
 // original hard-coded copy verbatim (including smart quotes), so the EN
 // rendering is byte-identical to what shipped before this dictionary.
 
+import { JOB_APPLICATION_RETENTION_MONTHS } from "../job-application";
+
 export type AdminLocale = "ru" | "en";
 
 export const ADMIN_SUPPORTED_LOCALES: readonly AdminLocale[] = ["ru", "en"];
@@ -44,6 +46,7 @@ export const ru = {
     analytics: "Аналитика",
     trackedLinks: "Ссылки",
     ideas: "Идеи",
+    careers: "Заявки",
     backToApp: "← Вернуться на сайт",
   },
   actorsList: {
@@ -1094,6 +1097,58 @@ export const ru = {
     deleteConfirm: "Удалить эту идею? Это действие необратимо.",
     deleteThisIdea: "Удалить идею",
   },
+  // Job applications sent through the public /careers page (#376). Read and
+  // delete only — no edit, no candidate statuses (registry).
+  careersList: {
+    eyebrow: "Найм",
+    title: "Заявки на вакансии",
+    sub: "Заявки, присланные через публичную страницу /careers. Правки нет: удаление — для спама и по просьбе кандидата.",
+    countLine: (shown: number, total: number) => {
+      const all = `всего ${total} ${ruPlural(total, ["заявка", "заявки", "заявок"])}`;
+      return shown < total ? `показаны последние ${shown} · ${all}` : all;
+    },
+    filterAria: "Фильтр по вакансии",
+    filterAll: "Все",
+    empty: "Заявок пока нет. Форма живёт на странице /careers.",
+    emptyFiltered: "На эту вакансию заявок пока нет.",
+    colReceived: "Получена",
+    colName: "Имя",
+    colPosition: "Вакансия",
+    colLocation: "Город",
+    colEmail: "Email",
+    open: "Открыть",
+    retentionNote:
+      `Каждая заявка удаляется автоматически через ${JOB_APPLICATION_RETENTION_MONTHS} ${ruPlural(JOB_APPLICATION_RETENTION_MONTHS, ["месяц", "месяца", "месяцев"])} после отправки.`,
+  },
+  careerDetail: {
+    back: "Заявки",
+    received: (date: string) => `получена ${date}`,
+    candidateKicker: "Кандидат",
+    candidateTitle: "Контакт",
+    nameLabel: "Имя",
+    emailLabel: "Email",
+    locationLabel: "Где живёт",
+    positionLabel: "Вакансия",
+    workKicker: "Работы",
+    workTitle: "Ссылки и профили",
+    workHint:
+      "Кликабельны только ссылки http(s); @handle показан текстом. Ссылки открываются в новой вкладке без реферера.",
+    linkedinLabel: "LinkedIn",
+    portfolioLabel: "Портфолио / работы",
+    socialsLabel: "Соцсети",
+    none: "—",
+    messageKicker: "О себе",
+    messageTitle: "Текст кандидата",
+    messageHint:
+      "Показан как простой текст: ссылки не кликабельны, разметка не исполняется.",
+    idLabel: "Id",
+    deleteDescription:
+      "Удаление стирает заявку целиком. Для спама и по просьбе кандидата (письмо на maksym@matio.tv) — тогда запишите id в реестр заявок. Это действие необратимо.",
+    deleteConfirm: "Удалить эту заявку? Это действие необратимо.",
+    deleteThis: "Удалить заявку",
+    delete: "Удалить",
+    deleteFailed: "Не удалось удалить заявку. Попробуйте ещё раз.",
+  },
 };
 
 export type AdminDict = typeof ru;
@@ -1113,6 +1168,7 @@ export const en: AdminDict = {
     analytics: "Analytics",
     trackedLinks: "Links",
     ideas: "Ideas",
+    careers: "Applications",
     backToApp: "← Back to app",
   },
   actorsList: {
@@ -2108,6 +2164,56 @@ export const en: AdminDict = {
       "Deleting erases the idea completely. For spam, and for a fan's request (an email to maksym@matio.tv) — then record the id in the requests log. This cannot be undone.",
     deleteConfirm: "Delete this idea? This cannot be undone.",
     deleteThisIdea: "Delete idea",
+  },
+  careersList: {
+    eyebrow: "Hiring",
+    title: "Job applications",
+    sub: "Applications sent through the public /careers page. No editing: delete is for spam and for a candidate's request.",
+    countLine: (shown: number, total: number) =>
+      shown < total
+        ? `showing the latest ${shown} of ${total}`
+        : `${total} total`,
+    filterAria: "Filter by role",
+    filterAll: "All",
+    empty: "No applications yet. The form lives on /careers.",
+    emptyFiltered: "No applications for this role yet.",
+    colReceived: "Received",
+    colName: "Name",
+    colPosition: "Role",
+    colLocation: "Based in",
+    colEmail: "Email",
+    open: "Open",
+    retentionNote:
+      `Every application is deleted automatically ${JOB_APPLICATION_RETENTION_MONTHS} months after it was sent.`,
+  },
+  careerDetail: {
+    back: "Applications",
+    received: (date: string) => `received ${date}`,
+    candidateKicker: "Candidate",
+    candidateTitle: "Contact",
+    nameLabel: "Name",
+    emailLabel: "Email",
+    locationLabel: "Based in",
+    positionLabel: "Role",
+    workKicker: "Work",
+    workTitle: "Links and profiles",
+    workHint:
+      "Only http(s) links are clickable; an @handle is shown as text. Links open in a new tab with no referrer.",
+    linkedinLabel: "LinkedIn",
+    portfolioLabel: "Portfolio / work",
+    socialsLabel: "Social profiles",
+    none: "—",
+    messageKicker: "About",
+    messageTitle: "In the candidate's words",
+    messageHint:
+      "Shown as plain text: links are not clickable and no markup runs.",
+    idLabel: "Id",
+    deleteDescription:
+      "Deleting erases the application completely. For spam, and for a candidate's request (an email to maksym@matio.tv) — then record the id in the requests log. This cannot be undone.",
+    deleteConfirm: "Delete this application? This cannot be undone.",
+    deleteThis: "Delete application",
+    delete: "Delete",
+    deleteFailed: "Couldn't delete the application. Try again.",
   },
 };
 

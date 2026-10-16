@@ -3,7 +3,7 @@ import { Anton, Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { enUS } from "@clerk/localizations";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { SiteHeader } from "@/components/site/site-header";
 import { SiteFooter } from "@/components/site/site-footer";
 import { CookieBanner } from "@/components/site/cookie-banner";
@@ -14,6 +14,7 @@ import { OpenAIPixel } from "@/components/site/openai-pixel";
 import { VisitBeacon } from "@/components/site/visit-beacon";
 import { UserMenu } from "@/components/site/user-menu";
 import { isAppEmbed } from "@/lib/app-embed-server";
+import { AD_PIXELS_HEADER, AD_PIXELS_OFF } from "@/lib/ad-pixels";
 import { CONSENT_COOKIE, parseConsent } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { getDict } from "@/lib/i18n/server";
@@ -132,6 +133,12 @@ export default async function RootLayout({
   // page and nothing else — no header (its Subscribe link is a purchase
   // outside the App Store), footer, banner, tracker loaders or visit beacon.
   const embed = await isAppEmbed();
+  // /careers (#376, the owner's option (а)): no Meta Pixel and no GA4 until
+  // #341 confirms their automatic form-field collection is off — proxy.ts
+  // stamps the request (lib/ad-pixels.ts). Consent, PostHog and the ChatGPT
+  // Ads pixel are untouched.
+  const adPixelsOff =
+    (await headers()).get(AD_PIXELS_HEADER) === AD_PIXELS_OFF;
   return (
     <ClerkProvider
       // Clerk's hosted UI (sign-in / sign-up modals, UserButton dropdown,
@@ -197,7 +204,7 @@ export default async function RootLayout({
                   visitor accepts marketing cookies. Shares the same
                   initialConsent the banner uses so it can fire on first paint
                   for already-consented visitors. */}
-              <MetaPixel initialConsent={initialConsent} />
+              {adPixelsOff ? null : <MetaPixel initialConsent={initialConsent} />}
               {/* Consent-gated PostHog — dynamically loads posthog-js only after
                   the visitor accepts marketing cookies. Same initialConsent as
                   the banner + Meta Pixel for first-paint tracking of returning
@@ -206,7 +213,7 @@ export default async function RootLayout({
               {/* Consent-gated Google Analytics 4 — only injects gtag.js after
                   the visitor accepts marketing cookies. Same initialConsent as
                   the other trackers; blank NEXT_PUBLIC_GA_MEASUREMENT_ID → off. */}
-              <GoogleAnalytics initialConsent={initialConsent} />
+              {adPixelsOff ? null : <GoogleAnalytics initialConsent={initialConsent} />}
               {/* Consent-gated ChatGPT Ads pixel (OpenAI oaiq) — only injects
                   the SDK after the visitor accepts marketing cookies. Same
                   initialConsent as the other trackers; blank

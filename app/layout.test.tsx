@@ -109,6 +109,44 @@ describe("RootLayout — the app's embed variant (#310)", () => {
   });
 });
 
+// #376, the owner's option (а): /careers loads no Meta Pixel and no GA4 until
+// #341 confirms their automatic form-field collection is off. proxy.ts stamps
+// the request (x-matio-ad-pixels: off, lib/ad-pixels.ts); the layout drops
+// exactly those two loaders and nothing else — the banner (consent), PostHog,
+// the ChatGPT Ads pixel and the visit beacon stay. A page without the stamp
+// (/ideas, say) keeps all of them.
+describe("RootLayout — /careers without the ad pixels (#376)", () => {
+  it("/careers: no Meta Pixel and no GA4 loader; every other loader and the chrome stay", async () => {
+    h.headers.set("x-matio-ad-pixels", "off");
+
+    const html = await render();
+
+    expect(html).not.toContain('data-mounted="meta-pixel"');
+    expect(html).not.toContain('data-mounted="google-analytics"');
+    for (const loader of ["cookie-banner", "posthog", "openai-pixel", "visit-beacon"]) {
+      expect(html).toContain(`data-mounted="${loader}"`);
+    }
+    expect(html).toContain("<header");
+    expect(html).toContain("<footer");
+  });
+
+  it("a neighbour page (/ideas — no stamp) mounts both of them, like every other page", async () => {
+    const html = await render();
+
+    expect(html).toContain('data-mounted="meta-pixel"');
+    expect(html).toContain('data-mounted="google-analytics"');
+  });
+
+  it("only the exact value switches them off", async () => {
+    h.headers.set("x-matio-ad-pixels", "1");
+
+    const html = await render();
+
+    expect(html).toContain('data-mounted="meta-pixel"');
+    expect(html).toContain('data-mounted="google-analytics"');
+  });
+});
+
 // #445 — the site speaks English only: the page says so, the chrome carries no
 // language switcher, and the home metadata names no Spanish twin.
 describe("RootLayout — English only (#445)", () => {

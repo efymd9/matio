@@ -6,12 +6,14 @@ import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
   ideaSubmissions,
+  jobApplications,
   showReminders,
   trialSessions,
   visitors,
   watchDays,
 } from "@/db/schema";
 import { describeDbError } from "@/lib/db-errors";
+import { JOB_APPLICATION_RETENTION_MONTHS } from "@/lib/job-application";
 
 // Data retention — the code behind /privacy §6 "How long we keep it".
 //
@@ -67,7 +69,8 @@ export type RetentionTable =
   | "visitors"
   | "watch_days"
   | "show_reminders"
-  | "idea_submissions";
+  | "idea_submissions"
+  | "job_applications";
 
 export interface RetentionPolicy {
   /** Real table name — what the log line and the response name. */
@@ -182,6 +185,21 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     // (lib/erase-user.ts) — this window holds for every row either way.
     promise:
       "§6 Story ideas: up to 24 months from submission, or longer only if we develop your idea with you",
+  },
+  {
+    name: "job_applications",
+    table: jobApplications,
+    keyColumns: [jobApplications.id],
+    column: jobApplications.createdAt,
+    grain: "instant",
+    // The same constant the form's privacy line and the FAQ print.
+    window: { months: JOB_APPLICATION_RETENTION_MONTHS },
+    // Every row, no `extra`: v1 has no candidate status, so a shortlisted
+    // candidate's application goes like any other — "longer" would need a
+    // status column first (registry row, #376). An account's erasure takes
+    // its address's rows whenever it happens (lib/erase-user.ts).
+    promise:
+      "§6 Job applications: 6 months from submission",
   },
 ];
 
@@ -308,6 +326,7 @@ export async function runRetention(
     watch_days: 0,
     show_reminders: 0,
     idea_submissions: 0,
+    job_applications: 0,
   } satisfies Record<RetentionTable, number>;
   const failed: RetentionTable[] = [];
   const truncated: Partial<Record<RetentionTable, true>> = {};

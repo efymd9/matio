@@ -3,6 +3,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "@/db/schema";
 import {
   ideaSubmissions,
+  jobApplications,
   showReminders,
   subscriptions,
   trialSessions,
@@ -32,6 +33,8 @@ import type { UserExportRows } from "@/lib/user-export";
 //                    user_id; ideas are stored lowercased while users.email
 //                    is Clerk's address as typed, so the account's side is
 //                    lowercased (the erasure uses the same predicate)
+//   job_applications email ALONE, lowercased (#376) — the same shape and the
+//                    same predicate as the ideas
 //
 // Not here on purpose: watch_segments (an aggregate without a user key),
 // stripe_events (raw webhook ids), guest_checkout_sessions (an HMAC of a
@@ -105,6 +108,15 @@ export async function loadUserExportRows(
         .where(eq(ideaSubmissions.email, email.toLowerCase()))
     : [];
 
+  // Job applications sent from the account's address (#376) — the same
+  // lowercasing again.
+  const applicationRows = email
+    ? await db
+        .select()
+        .from(jobApplications)
+        .where(eq(jobApplications.email, email.toLowerCase()))
+    : [];
+
   return {
     users: userRows,
     subscriptions: subscriptionRows,
@@ -115,5 +127,6 @@ export async function loadUserExportRows(
     visitor_days: visitorDayRows,
     show_reminders: reminderRows,
     idea_submissions: ideaRows,
+    job_applications: applicationRows,
   };
 }

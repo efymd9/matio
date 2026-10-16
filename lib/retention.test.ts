@@ -2,6 +2,8 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { JOB_APPLICATION_RETENTION_MONTHS } from "./job-application";
+
 vi.mock("server-only", () => ({}));
 
 // The module deletes user data. What is under test is therefore exactly WHAT
@@ -74,7 +76,7 @@ afterEach(() => {
 });
 
 describe("retention policies — the promises of /privacy §6, pinned", () => {
-  it("covers exactly the five ledgers, with the windows the policy states", () => {
+  it("covers exactly the six ledgers, with the windows the policy states", () => {
     // A change here is a change to what viewers were told. Deliberate ones
     // come with a /privacy edit and a data-map row; accidental ones fail here.
     expect(
@@ -85,6 +87,7 @@ describe("retention policies — the promises of /privacy §6, pinned", () => {
       ["watch_days", "day", "day", { months: 25 }],
       ["show_reminders", "notified_at", "instant", { days: 30 }],
       ["idea_submissions", "created_at", "instant", { months: 24 }],
+      ["job_applications", "created_at", "instant", { months: 6 }],
     ]);
   });
 
@@ -193,6 +196,22 @@ describe("expiredWhere — which rows a policy selects", () => {
     expect(policy("idea_submissions").promise).toContain("24 months");
     expect(policy("idea_submissions").promise).toMatch(/^§6 Story ideas: /);
   });
+
+  it("job_applications: rows created before now − 6 months, strictly — no extra filter (#376)", () => {
+    const q = render(expiredWhere(policy("job_applications"), NOW));
+    // No `extra`: v1 has no candidate status, so a shortlisted application
+    // goes at the window like any other (registry, #376).
+    expect(q.sql).toBe('"job_applications"."created_at" < $1');
+    expect(q.params).toEqual(["2026-03-07T12:34:56.789Z"]);
+    expect(policy("job_applications").extra).toBeUndefined();
+  });
+
+  it("job_applications: the window is the one /privacy §6 states — and the number the form and the FAQ say", () => {
+    expect(policy("job_applications").promise).toMatch(/^§6 Job applications: 6 months/);
+    expect(policy("job_applications").window).toEqual({
+      months: JOB_APPLICATION_RETENTION_MONTHS,
+    });
+  });
 });
 
 describe("deleteBatchSql — the shape of one batch", () => {
@@ -251,21 +270,23 @@ describe("policyOrder — daily rotation of the starting table", () => {
       "watch_days",
       "show_reminders",
       "idea_submissions",
+      "job_applications",
     ]);
     expect(names(new Date(RUN_AT.getTime() + DAY_MS))).toEqual([
       "visitors",
       "watch_days",
       "show_reminders",
       "idea_submissions",
+      "job_applications",
       "trial_sessions",
     ]);
     // Every table is first once per cycle — a backlog cannot starve the
     // tables behind it night after night.
-    expect(names(new Date(RUN_AT.getTime() + 5 * DAY_MS))).toEqual(names(RUN_AT));
+    expect(names(new Date(RUN_AT.getTime() + 6 * DAY_MS))).toEqual(names(RUN_AT));
   });
 
   it("is a permutation, never a subset", () => {
-    for (let d = 0; d < 5; d++) {
+    for (let d = 0; d < 6; d++) {
       const at = new Date(RUN_AT.getTime() + d * DAY_MS);
       expect([...names(at)].sort()).toEqual(
         RETENTION_POLICIES.map((p) => p.name).sort(),
@@ -292,7 +313,7 @@ describe("runRetention — batching, isolation, reporting", () => {
     const result = await runRetention({ now: RUN_AT });
 
     // Three batches for the first table (two full, one short), one empty
-    // batch for each of the other four.
+    // batch for each of the other five.
     expect(targets()).toEqual([
       "trial_sessions",
       "trial_sessions",
@@ -301,6 +322,7 @@ describe("runRetention — batching, isolation, reporting", () => {
       "watch_days",
       "show_reminders",
       "idea_submissions",
+      "job_applications",
     ]);
     expect(result.deleted).toEqual({
       trial_sessions: 2004,
@@ -308,6 +330,7 @@ describe("runRetention — batching, isolation, reporting", () => {
       watch_days: 0,
       show_reminders: 0,
       idea_submissions: 0,
+      job_applications: 0,
     });
     expect(result.failed).toEqual([]);
     expect(result.truncated).toEqual({});
@@ -324,6 +347,7 @@ describe("runRetention — batching, isolation, reporting", () => {
       "watch_days",
       "show_reminders",
       "idea_submissions",
+      "job_applications",
       "trial_sessions",
     ]);
   });
@@ -352,6 +376,7 @@ describe("runRetention — batching, isolation, reporting", () => {
       "watch_days",
       "show_reminders",
       "idea_submissions",
+      "job_applications",
     ]) {
       expect(targets().filter((t) => t === table)).toHaveLength(3);
     }
@@ -364,6 +389,7 @@ describe("runRetention — batching, isolation, reporting", () => {
       watch_days: true,
       show_reminders: true,
       idea_submissions: true,
+      job_applications: true,
     });
     expect(RETENTION_MAX_BATCHES_PER_TABLE).toBe(50);
   });
@@ -390,6 +416,7 @@ describe("runRetention — batching, isolation, reporting", () => {
       watch_days: true,
       show_reminders: true,
       idea_submissions: true,
+      job_applications: true,
     });
     expect(result.durationMs).toBe(60_000);
   });
@@ -411,6 +438,7 @@ describe("runRetention — batching, isolation, reporting", () => {
       "watch_days",
       "show_reminders",
       "idea_submissions",
+      "job_applications",
     ]);
     // What is logged: the table, the SQLSTATE, the error class and a counter
     // — enough to tell a deadlock from a missing table from a timeout, and
@@ -436,7 +464,7 @@ describe("runRetention — batching, isolation, reporting", () => {
 
     const result = await runRetention({ now: RUN_AT });
 
-    expect(result.failed).toHaveLength(5);
+    expect(result.failed).toHaveLength(6);
     expect(captureMessage.mock.calls[0][1]).toMatchObject({
       tags: { table: "trial_sessions", code: "none", name: "TypeError" },
     });
@@ -465,6 +493,7 @@ describe("runRetention — batching, isolation, reporting", () => {
         watch_days: 0,
         show_reminders: 0,
         idea_submissions: 0,
+        job_applications: 0,
       },
       failed: [],
       truncated: {},

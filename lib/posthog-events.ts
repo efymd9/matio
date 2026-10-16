@@ -80,7 +80,12 @@ export type FunnelEvent =
   // `{ ok: true }` only. Properties are enums and ids — idea_kind
   // ("continuation" | "new_series") and, for a continuation, show_slug.
   // Never the name, the address, the text or its length.
-  | "idea_submitted";
+  | "idea_submitted"
+  // A candidate applied from /careers (#376), fired on the server's
+  // `{ ok: true }` only. One property: `position`, the vacancy id
+  // ("ai-creator" | "sales-distribution"). Never the name, the address, the
+  // links, the location or the message.
+  | "job_application_submitted";
 
 // Minimal surface we use. The provider assigns the real posthog-js instance
 // (which is structurally compatible) to window.posthog after init.

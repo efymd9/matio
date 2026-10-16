@@ -217,6 +217,7 @@ describe("POST /api/v1/account/delete — the deletion", () => {
     expect(h.writes).toEqual([
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
       `clerk deleteUser ${USER_ID}`,
     ]);
@@ -244,6 +245,7 @@ describe("POST /api/v1/account/delete — the deletion", () => {
       "insert erased_customers",
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
       `clerk deleteUser ${USER_ID}`,
     ]);
@@ -267,7 +269,12 @@ describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", ()
   // Apple's protocol). Apple is a fake fetch that writes into the same
   // ordered log as the database and Clerk. Whatever Apple does, the deletion
   // completes.
-  const ERASURE = ["delete show_reminders", "delete idea_submissions", "delete users"];
+  const ERASURE = [
+    "delete show_reminders",
+    "delete idea_submissions",
+    "delete job_applications",
+    "delete users",
+  ];
   const CODE = "c0de-dummy-apple-authorization";
   let apple: { token: () => Promise<Response>; revoke: () => Promise<Response> };
 
@@ -321,8 +328,8 @@ describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", ()
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(h.writes.slice(0, 3)).toEqual(ERASURE);
-    expect(h.writes.slice(3).sort()).toEqual(
+    expect(h.writes.slice(0, ERASURE.length)).toEqual(ERASURE);
+    expect(h.writes.slice(ERASURE.length).sort()).toEqual(
       ["apple revoke", "apple token", `clerk deleteUser ${USER_ID}`],
     );
     expect(h.writes.indexOf("apple token")).toBeLessThan(h.writes.indexOf("apple revoke"));
@@ -370,8 +377,8 @@ describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", ()
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(h.writes.slice(0, 3)).toEqual(ERASURE);
-    expect(h.writes.slice(3).sort()).toEqual(["apple token", `clerk deleteUser ${USER_ID}`]);
+    expect(h.writes.slice(0, ERASURE.length)).toEqual(ERASURE);
+    expect(h.writes.slice(ERASURE.length).sort()).toEqual(["apple token", `clerk deleteUser ${USER_ID}`]);
     expect(done()).toMatchObject({
       apple: { status: "failed", step: "token", httpStatus: 400, appleError: "invalid_grant" },
       clerk: "deleted",
@@ -471,7 +478,7 @@ describe("POST /api/v1/account/delete — Sign in with Apple's grant (#407)", ()
     expect(res.status).toBe(500);
     expect(h.userRow).toBeUndefined();
     // The sweep's second erasure comes after Apple's revoke and Clerk's answer.
-    expect(h.writes.slice(-3)).toEqual(ERASURE);
+    expect(h.writes.slice(-ERASURE.length)).toEqual(ERASURE);
     expect(h.writes.indexOf("apple revoke")).toBeLessThan(h.writes.length - 3);
     expect(console.error).toHaveBeenCalledWith(
       expect.stringContaining("Clerk account could NOT be deleted"),
@@ -504,6 +511,7 @@ describe("POST /api/v1/account/delete — failures a retry finishes", () => {
     expect(h.writes).toEqual([
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
       `clerk deleteUser ${USER_ID}`,
     ]);
@@ -548,10 +556,12 @@ describe("POST /api/v1/account/delete — failures a retry finishes", () => {
     expect(h.writes).toEqual([
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
       `clerk deleteUser ${USER_ID}`,
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
     ]);
     expect(console.error).toHaveBeenCalledWith(
@@ -587,10 +597,12 @@ describe("POST /api/v1/account/delete — the sweep after Clerk (step 3)", () =>
     expect(h.writes).toEqual([
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
       `clerk deleteUser ${USER_ID}`,
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
     ]);
     expect(console.info).toHaveBeenCalledWith(
