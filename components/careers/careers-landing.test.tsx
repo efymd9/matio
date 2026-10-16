@@ -443,7 +443,9 @@ describe("CareersLanding — the server's answers", () => {
     s.send();
 
     await waitFor(() => expect(s.social(1).getAttribute("aria-invalid")).toBe("true"));
-    expect(document.activeElement).toBe(s.social(1));
+    // The server's answer lands in a transition, so the focus effect runs on a
+    // commit of its own — wait for it, the target is still exactly this row.
+    await waitFor(() => expect(document.activeElement).toBe(s.social(1)));
   });
 });
 
