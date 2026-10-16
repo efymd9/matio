@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.21.0](https://github.com/efymd9/matio/compare/matio-v0.20.0...matio-v0.21.0) (2026-10-16)
+
+
+### Features
+
+* кнопка AirPlay в горизонтальном плеере приложения — свой Expo-модуль над AVRoutePickerView ([#451](https://github.com/efymd9/matio/issues/451)) ([#452](https://github.com/efymd9/matio/issues/452)) ([6c79870](https://github.com/efymd9/matio/commit/6c7987011bce074f94aa18ffb1079c9d9847fc13))
+* страница /careers — две вакансии, заявка на сайте и раздел заявок в админке ([#376](https://github.com/efymd9/matio/issues/376)) ([#454](https://github.com/efymd9/matio/issues/454)) ([1e48069](https://github.com/efymd9/matio/commit/1e48069b4a99d46692614554248a84b2e0ff6416))
+
+
+### Bug fixes
+
+* **deps:** next 16.4.2 (уязвимости Next.js от 14.10) и 26 минорных обновлений сайта ([#457](https://github.com/efymd9/matio/issues/457)) ([#456](https://github.com/efymd9/matio/issues/456)) ([9fbc9db](https://github.com/efymd9/matio/commit/9fbc9db72aa8295c43ebbb28f6d3db9b1b764086))
+
 ## [0.20.0](https://github.com/efymd9/matio/compare/matio-v0.19.1...matio-v0.20.0) (2026-10-13)
 
 
