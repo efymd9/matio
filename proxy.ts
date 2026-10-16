@@ -18,6 +18,7 @@ import {
   APP_EMBED_VALUE,
   isAppEmbedRequest,
 } from "@/lib/app-embed";
+import { AD_PIXELS_HEADER, AD_PIXELS_OFF, adPixelsOffFor } from "@/lib/ad-pixels";
 import {
   authorizedPartiesForRequest,
   NATIVE_API_PREFIX,
@@ -135,19 +136,25 @@ function evaluateMarketing(req: NextRequest): MarketingDecision {
 
 // Build the pass-through response. Injects a REQUEST header when the same
 // render must see the auto-granted consent cookie (banner hidden + pixel on
-// the very first page).
+// the very first page), plus any request header the caller asks the render
+// to see (`extra` — the ad-pixel switch on /careers, lib/ad-pixels.ts).
 function buildBaseResponse(
   req: NextRequest,
   d: MarketingDecision,
+  extra: Record<string, string> = {},
 ): NextResponse {
-  if (!d.autoGrant || !d.consentRecord) return NextResponse.next();
+  const inject = d.autoGrant && d.consentRecord;
+  if (!inject && Object.keys(extra).length === 0) return NextResponse.next();
   const headers = new Headers(req.headers);
-  const cookieHeader = headers.get("cookie");
-  headers.set(
-    "cookie",
-    (cookieHeader ? `${cookieHeader}; ` : "") +
-      `${CONSENT_COOKIE}=${encodeURIComponent(d.consentRecord)}`,
-  );
+  for (const [name, value] of Object.entries(extra)) headers.set(name, value);
+  if (inject) {
+    const cookieHeader = headers.get("cookie");
+    headers.set(
+      "cookie",
+      (cookieHeader ? `${cookieHeader}; ` : "") +
+        `${CONSENT_COOKIE}=${encodeURIComponent(d.consentRecord!)}`,
+    );
+  }
   return NextResponse.next({ request: { headers } });
 }
 
@@ -197,13 +204,17 @@ function writeMarketingCookies(
   }
 }
 
-function applyMarketingCookies(req: NextRequest): NextResponse | null {
+function applyMarketingCookies(
+  req: NextRequest,
+  extra: Record<string, string> = {},
+): NextResponse | null {
   const d = evaluateMarketing(req);
   // Nothing to persist: not auto-granting, and either no consent or no params.
+  // A request header to forward still needs a response that carries it.
   if (!d.autoGrant && (!d.marketingOk || (!d.hasAttribution && !d.needFbc))) {
-    return null;
+    return Object.keys(extra).length > 0 ? buildBaseResponse(req, d, extra) : null;
   }
-  const res = buildBaseResponse(req, d);
+  const res = buildBaseResponse(req, d, extra);
   writeMarketingCookies(res, req, d);
   return res;
 }
@@ -346,8 +357,13 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
 
   // Catch-all: every other passthrough route captures attribution + _fbc. Ad
   // landings are nearly always /, /shows/*, or /watch/* — anything not
-  // gated above.
-  return applyVisitorCookie(req, applyMarketingCookies(req)) ?? undefined;
+  // gated above. /careers (#376) is stamped for a layout without the Meta
+  // Pixel and GA4 until #341 (lib/ad-pixels.ts); the cookie work — consent
+  // default, attribution, _fbc, matio_aid — is exactly the same.
+  const extra: Record<string, string> = adPixelsOffFor(path)
+    ? { [AD_PIXELS_HEADER]: AD_PIXELS_OFF }
+    : {};
+  return applyVisitorCookie(req, applyMarketingCookies(req, extra)) ?? undefined;
 }, clerkOptions);
 
 // STAGING LOCK — the outermost layer, ahead of everything above.

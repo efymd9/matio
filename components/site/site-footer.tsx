@@ -73,7 +73,12 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
           <FooterLink href="/">{t.footer.browse}</FooterLink>
           <FooterLink href="/about">{t.footer.about}</FooterLink>
           <FooterLink href="/press">{t.footer.press}</FooterLink>
-          <FooterLink href="/careers">{t.footer.careers}</FooterLink>
+          {/* A document load, not a client navigation: /careers renders
+              without the Meta Pixel and GA4 (lib/ad-pixels.ts), and only a
+              fresh layout can leave them out. */}
+          <FooterLink href="/careers" documentLoad>
+            {t.footer.careers}
+          </FooterLink>
           {/* No prefetch: for a signed-out visitor proxy.ts answers
               /subscribe with a 307 to Clerk's origin, and the prefetch
               fetch dies on CORS as an unhandled "Failed to fetch" (#259). */}
@@ -113,7 +118,9 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
             <FooterLink href="/">{t.footer.browse}</FooterLink>
             <FooterLink href="/about">{t.footer.about}</FooterLink>
             <FooterLink href="/press">{t.footer.press}</FooterLink>
-            <FooterLink href="/careers">{t.footer.careers}</FooterLink>
+            <FooterLink href="/careers" documentLoad>
+              {t.footer.careers}
+            </FooterLink>
             {/* Same two rules as the mobile row above (#259). */}
             {paymentsEnabled && (
               <FooterLink href="/subscribe" prefetch={false}>
@@ -175,6 +182,7 @@ function FooterLink({
   children,
   prefetch,
   routeHandler = false,
+  documentLoad = false,
 }: {
   href: string;
   children: React.ReactNode;
@@ -185,11 +193,15 @@ function FooterLink({
   // no client navigation to gain, and next/link would PREFETCH it the moment
   // the footer scrolls into view — a GET that runs the handler (#259).
   routeHandler?: boolean;
+  // The target must be reached by a full document load — a page whose layout
+  // differs from the one already mounted (/careers without the ad pixels,
+  // lib/ad-pixels.ts). A plain <a>, no prefetch either.
+  documentLoad?: boolean;
 }) {
   const className = "transition-colors hover:text-cream";
   return (
     <li>
-      {routeHandler ? (
+      {routeHandler || documentLoad ? (
         <a href={href} className={className}>
           {children}
         </a>

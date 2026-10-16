@@ -87,15 +87,14 @@ describe("SiteFooter — links that must not be prefetched (#259)", () => {
     }
   });
 
-  it("links to /careers (#376) in both layouts, with the default prefetch", () => {
+  it("links to /careers (#376) in both layouts as a plain <a> — a document load, so the page's own layout (no Meta Pixel, no GA4) is the one that renders", () => {
     render(<SiteFooter paymentsEnabled={false} />);
 
     const careers = links(en.footer.careers);
     expect(careers).toHaveLength(2);
     for (const a of careers) {
       expect(a.getAttribute("href")).toBe("/careers");
-      expect(isNextLink(a)).toBe(true);
-      expect(prefetchOf(a)).toBe("default");
+      expect(isNextLink(a)).toBe(false);
     }
   });
 
