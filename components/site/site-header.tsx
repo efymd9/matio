@@ -38,7 +38,9 @@ export function SiteHeader({
   // The /ideas landing (#297) gets a trimmed header — the logo and nothing
   // else: every other exit from a half-written story loses the draft. (Until
   // #445 it also carried the EN · ES toggle; the site is English-only now.)
-  const minimal = pathname === "/ideas";
+  // /careers (#376) takes the same header for the same reason: a half-written
+  // application.
+  const minimal = pathname === "/ideas" || pathname === "/careers";
   return (
     <SiteHeaderContent
       authSlot={authSlot}
@@ -83,8 +85,9 @@ function SiteHeaderContent({
   return (
     <header
       className={cn(
-        // The /ideas header is not sticky (#362): it sits over the hero at
-        // the top of the page and scrolls away with it — no frosted bar.
+        // The /ideas and /careers header is not sticky (#362): it sits over
+        // the hero at the top of the page and scrolls away with it — no
+        // frosted bar.
         minimal
           ? "absolute"
           : "fixed transition-[background-color,backdrop-filter,border-color] duration-500 ease-out",

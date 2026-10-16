@@ -22,6 +22,7 @@ const cleanRun = {
     watch_days: 0,
     show_reminders: 1,
     idea_submissions: 0,
+    job_applications: 0,
   },
   failed: [],
   truncated: {},

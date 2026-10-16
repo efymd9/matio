@@ -463,6 +463,7 @@ export const en = {
     browse: "Browse",
     about: "About",
     press: "Press",
+    careers: "Careers",
     subscribe: "Subscribe",
     manage: "Manage subscription",
     followUs: "Follow us",

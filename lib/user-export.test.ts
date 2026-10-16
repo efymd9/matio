@@ -64,6 +64,7 @@ function emptyRows(over: Partial<UserExportRows> = {}): UserExportRows {
     visitor_days: [],
     show_reminders: [],
     idea_submissions: [],
+    job_applications: [],
     ...over,
   };
 }
@@ -71,7 +72,7 @@ function emptyRows(over: Partial<UserExportRows> = {}): UserExportRows {
 // ── (а) the document ────────────────────────────────────────────────────
 
 describe("assembleUserExport · shape", () => {
-  it("lists all nine tables as keys even with zero rows, and nothing else", async () => {
+  it("lists all ten tables as keys even with zero rows, and nothing else", async () => {
     const result = await assembleUserExport({
       userId: USER_ID,
       rows: emptyRows(),
@@ -79,9 +80,11 @@ describe("assembleUserExport · shape", () => {
       now: NOW,
     });
 
-    expect(EXPORT_TABLES).toHaveLength(9);
+    expect(EXPORT_TABLES).toHaveLength(10);
     // The ninth (#297): story ideas sent through /ideas from the address.
     expect(EXPORT_TABLES).toContain("idea_submissions");
+    // The tenth (#376): job applications sent through /careers from it.
+    expect(EXPORT_TABLES).toContain("job_applications");
     expect(Object.keys(result.database)).toEqual([...EXPORT_TABLES]);
     for (const table of EXPORT_TABLES) expect(result.database[table]).toEqual([]);
     expect("stripe_events" in result.database).toBe(false);
@@ -169,12 +172,13 @@ function recorderDb(
 }
 
 describe("loadUserExportRows · every table by its own key", () => {
-  it("reads the six user-keyed tables by user_id, visitor_days by the visitors found, show_reminders by user_id OR email, idea_submissions by the email alone", async () => {
+  it("reads the six user-keyed tables by user_id, visitor_days by the visitors found, show_reminders by user_id OR email, idea_submissions and job_applications by the email alone", async () => {
     const { db, calls } = recorderDb({
       users: [account],
       visitors: [{ aid: "aid-1" }, { aid: "aid-2" }],
       show_reminders: [{ id: "rem_1" }],
       idea_submissions: [{ id: "idea_1" }],
+      job_applications: [{ id: "job_1" }],
     });
 
     const rows = await loadUserExportRows(db, USER_ID);
@@ -201,11 +205,17 @@ describe("loadUserExportRows · every table by its own key", () => {
       sql: '"idea_submissions"."email" = $1',
       params: [account.email],
     });
-    // Exactly the nine tables, each once.
+    // Job applications (#376): the same — the address alone.
+    expect(byTable.job_applications).toMatchObject({
+      sql: '"job_applications"."email" = $1',
+      params: [account.email],
+    });
+    // Exactly the ten tables, each once.
     expect(calls.map((c) => c.table).sort()).toEqual([...EXPORT_TABLES].sort());
     expect(rows.users).toEqual([account]);
     expect(rows.show_reminders).toEqual([{ id: "rem_1" }]);
     expect(rows.idea_submissions).toEqual([{ id: "idea_1" }]);
+    expect(rows.job_applications).toEqual([{ id: "job_1" }]);
   });
 
   it("finds the story idea of an account whose Clerk address is mixed-case — idea rows are stored lowercased (#297)", async () => {
@@ -227,6 +237,23 @@ describe("loadUserExportRows · every table by its own key", () => {
       params: ["subject@example.invalid"],
     });
     expect(rows.idea_submissions).toEqual([{ id: "idea_1" }]);
+  });
+
+  it("finds the job application of an account whose Clerk address is mixed-case — application rows are stored lowercased (#376)", async () => {
+    const mixed = { ...account, email: "Subject@Example.INVALID" };
+    const { db, calls } = recorderDb({
+      users: [mixed],
+      job_applications: (params) =>
+        params[0] === "subject@example.invalid" ? [{ id: "job_1" }] : [],
+    });
+
+    const rows = await loadUserExportRows(db, USER_ID);
+
+    expect(calls.find((c) => c.table === "job_applications")).toMatchObject({
+      sql: '"job_applications"."email" = $1',
+      params: ["subject@example.invalid"],
+    });
+    expect(rows.job_applications).toEqual([{ id: "job_1" }]);
   });
 
   it("finds the anonymous reminder row of an account whose Clerk address is mixed-case — reminder rows are stored lowercased (#340)", async () => {
@@ -261,6 +288,8 @@ describe("loadUserExportRows · every table by its own key", () => {
     // No address, no key: idea rows are tied to nothing else (#297).
     expect(tables).not.toContain("idea_submissions");
     expect(rows.idea_submissions).toEqual([]);
+    expect(tables).not.toContain("job_applications");
+    expect(rows.job_applications).toEqual([]);
     const reminders = calls.find((c) => c.table === "show_reminders");
     expect(reminders).toMatchObject({
       sql: '"show_reminders"."user_id" = $1',
@@ -305,6 +334,10 @@ describe("export and erasure find the same rows (#340)", () => {
     { id: "idea_mine", email: "ana.perez@example.com" },
     { id: "idea_other", email: "other@example.invalid" },
   ];
+  const applications = [
+    { id: "job_mine", email: "ana.perez@example.com" },
+    { id: "job_other", email: "other@example.invalid" },
+  ];
 
   /** The select recorder previewErasure needs: counts, and the one users row. */
   function eraseRecorder() {
@@ -340,6 +373,7 @@ describe("export and erasure find the same rows (#340)", () => {
     for (const [table, stored, expected] of [
       ["show_reminders", reminders, ["rem_anon", "rem_linked", "rem_linked_elsewhere"]],
       ["idea_submissions", ideas, ["idea_mine"]],
+      ["job_applications", applications, ["job_mine"]],
     ] as const) {
       const exported = equalitiesOf(
         table,
@@ -769,7 +803,7 @@ describe("summarizeExport", () => {
 
     expect(summary).toContain(`subject: ${USER_ID}`);
     expect(summary).toContain(
-      "database rows: users=1 subscriptions=0 watch_progress=0 watch_days=0 trial_sessions=0 visitors=0 visitor_days=0 show_reminders=2 idea_submissions=0",
+      "database rows: users=1 subscriptions=0 watch_progress=0 watch_days=0 trial_sessions=0 visitors=0 visitor_days=0 show_reminders=2 idea_submissions=0 job_applications=0",
     );
     expect(summary).toContain("processors: clerk=received stripe=received (invoices=2) posthog=received (events=1)");
     expect(summary).toContain("notes (1):");

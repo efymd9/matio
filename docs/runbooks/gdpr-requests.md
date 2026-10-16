@@ -66,11 +66,12 @@
    п. 2. Адрес в реестр не пишется, как и в остальных случаях.
 
 **Адрес без аккаунта.** Если адреса нет в Clerk, у нас о нём могут быть только
-строки двух таблиц, обе пишутся без входа: `show_reminders` (форма «напомнить
-о новой серии») и `idea_submissions` (идеи с `/ideas`, #297 — автору идеи
-аккаунт не нужен вовсе). Скрипты §3 и §4 ключуются по Clerk id и такой случай
-не покрывают; для него есть свои два (#339), по адресу в любом регистре
-(обе таблицы хранят его в нижнем регистре, скрипт приводит сам):
+строки трёх таблиц, все пишутся без входа: `show_reminders` (форма «напомнить
+о новой серии»), `idea_submissions` (идеи с `/ideas`, #297 — автору идеи
+аккаунт не нужен вовсе) и `job_applications` (заявки на вакансии с
+`/careers`, #376 — кандидату тоже). Скрипты §3 и §4 ключуются по Clerk id и
+такой случай не покрывают; для него есть свои два (#339), по адресу в любом
+регистре (все три таблицы хранят его в нижнем регистре, скрипт приводит сам):
 
 ```bash
 DATABASE_URL='postgres://…' pnpm -s export-email  <адрес> [--out <файл>]   # ст. 15/20
@@ -91,13 +92,14 @@ DATABASE_URL='postgres://…' pnpm -s erase-email   <адрес> [--apply]      
   зеркало `users` в нашей базе, а не Clerk: аккаунт, чья строка `user.created`
   ещё не дошла, они не заметят. Нашёлся аккаунт — это не этот случай, §3 / §4.
 - **Найти и проверить стирание.** `pnpm -s erase-email <адрес>` без `--apply`
-  печатает счётчики и **id строк** обеих таблиц и ничего не пишет. В issue и в
-  обсуждение реестра — только эти строки вывода, не командная строка (в ней
-  адрес): в `idea_submissions` лежат имя, адрес и свободный текст истории.
+  печатает счётчики и **id строк** всех трёх таблиц и ничего не пишет. В issue
+  и в обсуждение реестра — только эти строки вывода, не командная строка (в
+  ней адрес): в `idea_submissions` лежат имя, адрес и свободный текст истории,
+  в `job_applications` — имя, адрес, город, ссылки и текст о себе.
 - **Доступ и портируемость (ст. 15/20).** `pnpm -s export-email` пишет один
   JSON-файл с правами `0600` (без `--out` — во временный каталог ОС, в имени
   `address#<хеш>`, не адрес; `.gitignore` закрывает `export-*.json`), по
-  обеим таблицам, ключи видны даже при нуле строк. В stdout — только счётчики и
+  всем трём таблицам, ключи видны даже при нуле строк. В stdout — только счётчики и
   путь. **`user_id` в строках `show_reminders` в файл не попадает**: у адреса
   без аккаунта он указывает на чужой аккаунт (coalesce-backfill), а чужой
   идентификатор — не ответ этому человеку (ст. 15(4); для аккаунта это
@@ -179,18 +181,18 @@ PostHog 30 с на выражение): зависший вендор даёт `
 
 ```
 subject: user_…
-database rows: users=1 subscriptions=0 watch_progress=12 watch_days=5 trial_sessions=2 visitors=1 visitor_days=4 show_reminders=1 idea_submissions=1
+database rows: users=1 subscriptions=0 watch_progress=12 watch_days=5 trial_sessions=2 visitors=1 visitor_days=4 show_reminders=1 idea_submissions=1 job_applications=0
 processors: clerk=received stripe=received (invoices=3) posthog=received (events=143)
 notes (1):
   - clerk: the profile above is what the Backend API exposes; sign-in sessions and devices are not part of it — …
 written ~/dsr/DSR-2026-001.json (mode 0600) — delete it once the reply has gone out
 ```
 
-Что внутри файла: `database` — девять таблиц, привязанных к человеку
+Что внутри файла: `database` — десять таблиц, привязанных к человеку
 (`users`, `subscriptions`, `watch_progress`, `watch_days`, `trial_sessions`,
 `visitors` + `visitor_days`, `show_reminders` — по `user_id` **и** по адресу,
-`idea_submissions` — только по адресу аккаунта в нижнем регистре, #297),
-всегда все девять ключей, даже с нулём строк; `processors.{clerk,stripe,
+`idea_submissions` и `job_applications` — только по адресу аккаунта в нижнем
+регистре, #297, #376), всегда все десять ключей, даже с нулём строк; `processors.{clerk,stripe,
 posthog}` — профиль Clerk, Customer + инвойсы Stripe, персона + события
 PostHog; `notes` — что пропущено и почему. `stripe_events` (сырые вебхуки) и
 `watch_segments` (агрегат без ключа пользователя) в выгрузку не входят.
@@ -326,6 +328,8 @@ Clerk его уже не покажет, а скрипт и реестр клю�
    #297) — у таблицы нет `user_id` и FK на `users`, каскад её не достанет,
    поэтому шаг явный и идёт до `DELETE FROM users`, пока адрес читается.
    Удаляются и идеи с выданной лицензией (исключения в v1 нет — реестр);
+   следом так же — `DELETE FROM job_applications` по адресу (#376, заявки с
+   `/careers`);
 5. `DELETE FROM users` → каскады FK: `subscriptions`, `watch_progress`,
    `watch_days` удаляются; `trial_sessions`, `visitors`,
    `marketing_links.created_by` остаются с `user_id = NULL` (псевдонимно);
@@ -364,7 +368,7 @@ customer / тумбстоун / живая подписка, **сколько к
 ```
 DRY RUN — erase user_…
 subject: user_…
-would delete: users=1 show_reminders=1 idea_submissions=0 subscriptions=1 watch_progress=12 watch_days=5
+would delete: users=1 show_reminders=1 idea_submissions=0 job_applications=0 subscriptions=1 watch_progress=12 watch_days=5
 would de-identify (user_id → NULL): trial_sessions=2 visitors=1 marketing_links=0
 stripe: customer=yes live_subscription=no search=ok customers=2 (ids cus_…, cus_…) skipped=1 (other or no address)
 posthog: found persons=1
@@ -450,8 +454,9 @@ events of this person» → подтвердить; затем Session replay �
 
 Одна строка на запрос, без имён и адресов. Статусы: `received` → `verified`
 → `answered` / `refused` (с причиной в issue владельца) / `erased` (для ст. 17).
-Для удаления идей адреса без аккаунта (§2) в колонку «Id строк» — id
-удалённых `idea_submissions` (id не персональные данные): по ним
+Для удаления идей и заявок адреса без аккаунта (§2) в колонку «Id строк» —
+id удалённых `idea_submissions` и `job_applications` (id не персональные
+данные): по ним
 `db-restore.md` §7 повторит удаление после восстановления из дампа —
 `pnpm erase-user` такие строки не находит; ids печатает
 `pnpm -s erase-email <адрес> --apply`.

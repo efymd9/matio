@@ -74,7 +74,9 @@ vi.mock("@/db", async () => {
                 ? [{ id: "rem_1" }, { id: "rem_2" }]
                 : name === "idea_submissions"
                   ? [{ id: "idea_1" }]
-                  : [],
+                  : name === "job_applications"
+                    ? [{ id: "job_1" }]
+                    : [],
           });
         },
       }),
@@ -248,13 +250,14 @@ describe("Clerk webhook · signature", () => {
 });
 
 describe("Clerk webhook · user.deleted", () => {
-  it("erases the reminder rows, the story ideas and the mirror row, in that order", async () => {
+  it("erases the reminder rows, the story ideas, the job applications and the mirror row, in that order", async () => {
     const res = await POST(signed(userDeleted(USER_ID)));
 
     expect(res.status).toBe(200);
     expect(h.deletes.map((d) => d.table)).toEqual([
       "show_reminders",
       "idea_submissions",
+      "job_applications",
       "users",
     ]);
 
@@ -273,8 +276,14 @@ describe("Clerk webhook · user.deleted", () => {
     expect(ideas.sql).toBe('"idea_submissions"."email" = $1');
     expect(ideas.params).toEqual([EMAIL]);
 
+    // Job applications (#376): the same shape and the same reason — by the
+    // address alone, before the users row.
+    const applications = render(h.deletes[2].where);
+    expect(applications.sql).toBe('"job_applications"."email" = $1');
+    expect(applications.params).toEqual([EMAIL]);
+
     // The users row: one DELETE by Clerk id; the cascades take the rest.
-    const user = render(h.deletes[2].where);
+    const user = render(h.deletes[3].where);
     expect(user.sql).toBe('"users"."id" = $1');
     expect(user.params).toEqual([USER_ID]);
   });
@@ -287,13 +296,15 @@ describe("Clerk webhook · user.deleted", () => {
     expect(render(h.deletes[0].where).params[0]).toBe("someone@example.invalid");
   });
 
-  it("matches story idea rows by the lowercased address too (#297) — they are stored lowercased", async () => {
+  it("matches story idea and job application rows by the lowercased address too (#297, #376) — they are stored lowercased", async () => {
     h.userRow = { email: "Someone@Example.INVALID", stripeCustomerId: null };
 
     await POST(signed(userDeleted(USER_ID)));
 
     const ideas = h.deletes.find((d) => d.table === "idea_submissions");
     expect(render(ideas?.where).params).toEqual(["someone@example.invalid"]);
+    const applications = h.deletes.find((d) => d.table === "job_applications");
+    expect(render(applications?.where).params).toEqual(["someone@example.invalid"]);
   });
 
   it("is idempotent: a redelivery for an already-erased user is a 200 no-op", async () => {
@@ -320,6 +331,7 @@ describe("Clerk webhook · user.deleted", () => {
     expect(h.deletes.map((d) => d.table)).toEqual([
       "show_reminders",
       "idea_submissions",
+      "job_applications",
       "users",
     ]);
   });
@@ -355,6 +367,7 @@ describe("Clerk webhook · user.deleted × a live Stripe subscription (#164)", (
     expect(h.deletes.map((d) => d.table)).toEqual([
       "show_reminders",
       "idea_submissions",
+      "job_applications",
       "users",
     ]);
 
@@ -390,6 +403,7 @@ describe("Clerk webhook · user.deleted × a live Stripe subscription (#164)", (
     expect(h.deletes.map((d) => d.table)).toEqual([
       "show_reminders",
       "idea_submissions",
+      "job_applications",
       "users",
     ]);
     expect(error).toHaveBeenCalledTimes(1);
@@ -425,6 +439,7 @@ describe("Clerk webhook · user.deleted × a live Stripe subscription (#164)", (
     expect(h.deletes.map((d) => d.table)).toEqual([
       "show_reminders",
       "idea_submissions",
+      "job_applications",
       "users",
     ]);
   });
@@ -452,6 +467,7 @@ describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)"
       "insert erased_customers",
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
     ]);
     expect(h.inserts).toEqual([
@@ -488,6 +504,7 @@ describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)"
       "insert erased_customers",
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
     ]);
     expect(h.inserts).toEqual([
@@ -516,6 +533,7 @@ describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)"
     expect(h.writes).toEqual([
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
     ]);
     // The footprint probe: any subscriptions row by user_id, after the
@@ -547,6 +565,7 @@ describe("Clerk webhook · user.deleted × the erased-customer tombstone (#164)"
     expect(h.writes).toEqual([
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
     ]);
   });
@@ -622,6 +641,7 @@ describe("Clerk webhook · user.deleted × PostHog (#180)", () => {
     expect(h.deletes.map((d) => d.table)).toEqual([
       "show_reminders",
       "idea_submissions",
+      "job_applications",
       "users",
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -662,6 +682,7 @@ describe("Clerk webhook · user.deleted × PostHog (#180)", () => {
     expect(h.writes).toEqual([
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
     ]);
     expect(info.mock.calls.at(-1)?.[1]).toMatchObject({
@@ -681,6 +702,7 @@ describe("Clerk webhook · user.deleted × PostHog (#180)", () => {
     expect(h.deletes.map((d) => d.table)).toEqual([
       "show_reminders",
       "idea_submissions",
+      "job_applications",
       "users",
     ]);
   });
@@ -747,6 +769,7 @@ describe("Clerk webhook · user.created × the address held by another row (#380
       "insert erased_customers",
       "delete show_reminders",
       "delete idea_submissions",
+      "delete job_applications",
       "delete users",
       "insert users",
     ]);
@@ -769,7 +792,11 @@ describe("Clerk webhook · user.created × the address held by another row (#380
     expect(ideas.sql).toBe(
       '("idea_submissions"."email" = $1 and "idea_submissions"."created_at" < $2)',
     );
-    const erased = render(h.deletes[2].where);
+    const applications = render(h.deletes[2].where);
+    expect(applications.sql).toBe(
+      '("job_applications"."email" = $1 and "job_applications"."created_at" < $2)',
+    );
+    const erased = render(h.deletes[3].where);
     expect(erased.sql).toBe('"users"."id" = $1');
     expect(erased.params).toEqual([STALE_ID]);
     expect(h.inserts[1]).toEqual({
@@ -842,7 +869,7 @@ describe("Clerk webhook · user.created × the address held by another row (#380
     expect(res.status).toBe(200);
     // Only the new account's own existence check (#336).
     expect(h.clerkGetUser.mock.calls).toEqual([[USER_ID]]);
-    expect(h.writes.slice(4)).toEqual(["insert users"]);
+    expect(h.writes.slice(5)).toEqual(["insert users"]);
   });
 });
 
@@ -990,6 +1017,15 @@ describe("Clerk webhook · what DELETE FROM users takes with it", () => {
     expect(
       foreignKeys.map((fk) => getTableConfig(fk.reference().foreignTable).name),
     ).toEqual(["shows"]);
+    expect(columns.map((c) => c.name)).not.toContain("user_id");
+  });
+
+  it("job_applications has no foreign key at all — only the explicit by-address step takes it (#376)", () => {
+    // Anonymous like the ideas: no user_id, no FK on users (nor on anything
+    // else), so the map above cannot notice a missed erasure step — the
+    // user.deleted suite pins the DELETE itself.
+    const { foreignKeys, columns } = getTableConfig(schema.jobApplications);
+    expect(foreignKeys).toEqual([]);
     expect(columns.map((c) => c.name)).not.toContain("user_id");
   });
 
