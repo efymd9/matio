@@ -254,7 +254,21 @@ The admin form has two artwork fields — **drag-and-drop upload** (client-direc
 - Target weight: posters under ~150 KB, heroes under ~400 KB. All artwork goes through `next/image` (responsive `srcset` + WebP conversion at the edge) — see `next.config.ts` `images.remotePatterns`. To allow a new source host, add it there; without an entry `next/image` refuses the URL.
 - Hosting: **drop the file on the field** — it uploads client-direct to Vercel Blob (our store's `/shows/` folder, already in `remotePatterns` — `lib/blob-artwork.ts`) and fills the URL itself. Same-origin files committed under `public/shows/` also work (legacy shows use these). An arbitrary external URL (e.g. an Unsplash hotlink) — **including a Mux thumbnail URL, since #306** — previews fine in the admin form (raw `<img>`) but **throws in `next/image` on the public hero/detail pages** — only allowlisted hosts render. Add the host to `remotePatterns` first if you genuinely need an external source.
 
-### Trial flow (incognito, anon visitor)
+### Sign-up wall → sign-up → paywall → `/checkout` (incognito, paid mode, #462)
+
+On staging (test-mode Stripe) first; on production the purchase is a **real $25** — refund yourself afterwards.
+
+1. **Incognito window** → `/watch/<slug>` of a show whose first episode is `subscriber`. The `SignupWall` shows at once, before any video: headline "Create your account", body "Sign up to continue — then become a member to watch every episode.", no kicker, no "No card needed". DevTools → Network: **no** `/api/playback-token` request. With consent, PostHog gets `signup_wall_shown {gate: false, trigger: "land"}`. A direct `curl -s "…/api/playback-token?episode_id=<that id>"` answers 403 `{"reason":"signup_required"}`.
+   - A `free` first episode plays anonymously instead (the `trial_session` cookie + a `kind='episodes'` row); at its end the wall for the next episode reports `trigger: "end_of_tier"`.
+   - The **Episodes** overlay labels a locked `subscriber` row «Subscribe», a `member` row «Create account».
+2. **Create account** → Clerk sign-up modal → back on `/watch/<slug>?ep=<locked id>`. The signed-in branch syncs the users mirror, links the cookie's trial rows, links the visitor and stamps `users.attribution_*` (from the UTM cookies, if any).
+3. The **Paywall**: when nothing before this episode was free — kicker "Become a member", no "Free episodes complete" badge (after a free episode: the badge + "Continue watching"). `/api/playback-token` for this user → 403 `subscribe_required`.
+4. **Continue · Subscribe** → `/checkout?show=<slug>&ep=<id>` directly (no `/subscribe` card) → embedded Stripe form. Staging: test card `4242 4242 4242 4242`.
+5. Stripe returns to `/watch/<slug>?ep=<id>&cs=<session>` → the page verifies the session and mirrors the subscription inline → subscriber mode, the episode plays.
+
+### Trial flow (HISTORICAL — the 60s preview was removed in #462)
+
+Kept for the record; no page renders the trial mode any more (see the recipe above).
 
 1. **Incognito window** → `/`. Click the show poster → `/shows/<slug>` → Play → `/watch/<slug>`. The page renders the Player in trial mode but **no cookie is set and no `trial_sessions` row exists yet** — the 60s clock hasn't started.
 2. Player mounts → fetches `/api/playback-token?episode_id=<id>`. The route handler verifies show is published+ready, runs `mintTrialSession({ sessionToken, showId, ipHash })` which creates the row with `expires_at = now + 60s` and `ip_hash = HMAC(MUX_SIGNING_KEY_PRIVATE_KEY, x-forwarded-for)`, then sets the `trial_session` cookie (HTTP-only, secure-in-prod, sameSite=lax, 1y) on the response and returns the 60s JWT.
@@ -270,6 +284,8 @@ The admin form has two artwork fields — **drag-and-drop upload** (client-direc
 ### Pay-first guest purchase (`PAY_FIRST_CHECKOUT=1`)
 
 In production this is a **real $1 charge** (the 3-day trial fee; $38/mo begins on day 3 — cancel before then to avoid it) — use an email alias you control and refund yourself in the Stripe dashboard afterwards. Locally, test-mode card `4242…` works as usual (flag in `.env.local`).
+
+> **Unreachable from the player since #462**: an anonymous viewer meets the sign-up wall, never the paywall whose signed-out CTA started this flow (registry). The steps below describe the path as it was.
 
 1. **Incognito window** → `/watch/<gated-slug>` → watch through the free episodes (or deep-link a subscriber episode via `?ep=`). The paywall's signed-out CTA reads "Try it · $1 for 3 days" and posts `startGuestCheckout` — no Clerk modal.
 2. Stripe Checkout opens with an **email field** (no pre-filled customer) and shows "$1.00 due today", then "$38.00/month after 3 days". Pay with a fresh email alias (e.g. `you+paytest@…`).

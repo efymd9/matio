@@ -357,8 +357,9 @@ describe("the show page reads its rows and its «‹» properly (#288 item 8)", 
     render(<ShowScreen />);
     await settle();
 
-    // A subscriber-only row names no purchase (#311): «Subscribers only».
-    const locked = byLabel("Ep. 2, Episode 2, 10 min, Subscribers only");
+    // A signed-out viewer's subscriber-only row asks for the account first
+    // (#462); the signed-in «Subscribers only» wording is show-page.test's.
+    const locked = byLabel("Ep. 2, Episode 2, 10 min, Create account");
     expect(locked?.getAttribute("role")).toBe("button");
     expect(byLabel("Ep. 1, Episode 1, 10 min")?.getAttribute("role")).toBe("button");
 

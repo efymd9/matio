@@ -10,16 +10,31 @@ import { body, colors, display, SCREEN_PAD, space } from "@/theme";
 // signup_required, and as the feed's page for an episode the positional
 // gate locks (so an auto-advance or a swipe lands on the wall, never on a
 // stalled player).
-export function SignupWall({ onSignIn, onBack }: { onSignIn: () => void; onBack: () => void }) {
+//
+// `paywallNext` (#462): the episode stays locked once the viewer has an
+// account (paid mode, a subscribers-only episode — subscriptionFollowsSignIn).
+// Then the wall promises nothing "free" and names no purchase (3.1.1): no
+// kicker, no "No card needed", a body that only asks for the account.
+export function SignupWall({
+  onSignIn,
+  onBack,
+  paywallNext = false,
+}: {
+  onSignIn: () => void;
+  onBack: () => void;
+  paywallNext?: boolean;
+}) {
   const t = useT();
   const { flags } = useConfig();
   return (
     <View style={styles.wall}>
-      <Pill label={t.signupWall.kicker} />
+      {paywallNext ? null : <Pill label={t.signupWall.kicker} />}
       <Text style={styles.wallTitle}>{t.signupWall.headline}</Text>
-      <Text style={styles.wallCopy}>{t.signupWall.bodyNoCount}</Text>
+      <Text style={styles.wallCopy}>
+        {paywallNext ? t.app.signIn.paywallNextBody : t.signupWall.bodyNoCount}
+      </Text>
       <GoldButton
-        label={t.signupWall.signUpCta}
+        label={paywallNext ? t.app.signIn.createAccount : t.signupWall.signUpCta}
         onPress={onSignIn}
         style={{ alignSelf: "stretch", marginTop: space(5) }}
       />
@@ -27,8 +42,9 @@ export function SignupWall({ onSignIn, onBack }: { onSignIn: () => void; onBack:
         <Text style={styles.wallSecondary}>{t.app.common.notNow}</Text>
       </Pressable>
       {/* Paid mode only, like the sign-in form's: with payments off there is
-          no card to not need (#447, from the #446 audit). */}
-      {flags.paymentsEnabled ? (
+          no card to not need (#447, from the #446 audit) — and never in
+          front of a subscribers-only episode (#462). */}
+      {flags.paymentsEnabled && !paywallNext ? (
         <Text style={styles.wallFine}>{t.signupWall.noCardNeeded}</Text>
       ) : null}
     </View>

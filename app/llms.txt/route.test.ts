@@ -10,8 +10,9 @@ vi.mock("@/lib/catalog", () => ({ getPublishedShows: async () => [] }));
 
 import { GET } from "./route";
 
+// #462: no free preview exists any more — the paid sentence must not promise one.
 const PAID =
-  "Episodes stream with a paid membership; selected episodes and previews are free to watch.";
+  "Episodes stream with a paid membership: create an account, then subscribe.";
 const FREE_WITH_ACCOUNT =
   "Every episode is free to watch; some episodes ask for a free account.";
 const OPEN_FREE =
@@ -38,6 +39,7 @@ describe("/llms.txt — what the summary says about price and accounts (#446)", 
     expect(line).toContain(PAID);
     expect(line).not.toContain(FREE_WITH_ACCOUNT);
     expect(line).not.toContain(OPEN_FREE);
+    expect(line).not.toMatch(/preview|free/i);
   });
 
   it("paid mode ignores REQUIRE_SIGNUP — the tier system owns gating there", async () => {

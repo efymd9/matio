@@ -1,19 +1,19 @@
 import { auth } from "@clerk/nextjs/server";
-import * as Sentry from "@sentry/nextjs";
 import { and, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import type { PlaybackMode, PlaybackTokenResponse } from "@/lib/api/types";
 import { apiError, apiOk, readDeviceId, resolveSignupGate } from "@/lib/api/v1";
-import { getOrderedReadyEpisodeIds, showHasTierGating } from "@/lib/episode-access";
+import {
+  getOrderedReadyEpisodeIds,
+  resolveEffectiveTier,
+} from "@/lib/episode-access";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { signMuxPlaybackToken, signMuxStoryboardToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import { EMPTY_ATTRIBUTION } from "@/lib/attribution";
-import { describeDbError } from "@/lib/db-errors";
 import {
-  TRIAL_DURATION_SECONDS,
   TrialRateLimitError,
   findTrialSession,
   getClientIp,
@@ -44,7 +44,6 @@ import {
 export const runtime = "nodejs";
 
 const SUBSCRIBER_TTL = 60 * 60; // 1h, matching the web
-const TRIAL_TTL_CAP = TRIAL_DURATION_SECONDS;
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -58,26 +57,6 @@ function logToken(fields: {
   episodeId?: string | null;
 }) {
   console.info(`[v1/playback-token] ${JSON.stringify(fields)}`);
-}
-
-// The legacy 60-second preview's own trial_sessions read/write failed — the one
-// path of this route whose failure used to be thrown to the framework (#326).
-// Drizzle's wrapper repeats the statement WITH its params (`Failed query: …
-// \nparams: <device id>,<show>,<ip hash>`) and Next prints an unhandled error's
-// message to the runtime log, so the failure is caught HERE and only its class
-// and SQLSTATE leave (`describeDbError`, the `submitIdea` / retention
-// precedent). The app gets the same 503 `unavailable` its other transient
-// failures use (the feed retries it with backoff). Sentry still hears of it, by
-// class and code, so a broken table does not go quiet.
-function trialStoreFailed(err: unknown, showId: string, episodeId: string) {
-  const { name, code } = describeDbError(err);
-  console.error("[v1/playback-token] trial store failed", { name, code });
-  Sentry.captureMessage("v1/playback-token: trial store failed", {
-    level: "error",
-    tags: { code: code ?? "none", name },
-  });
-  logToken({ result: 503, mode: "trial", showId, episodeId });
-  return apiError("unavailable", "Playback is unavailable right now. Try again.");
 }
 
 export async function POST(req: NextRequest) {
@@ -144,13 +123,21 @@ export async function POST(req: NextRequest) {
   }
 
   // --- effective tier ---------------------------------------------------
-  // Paid mode: the episode's own tier decides. Free mode: signed-in viewers
-  // take the member path; anonymous viewers are free UNLESS the positional
-  // signup gate puts this episode out of reach.
+  // Paid mode: the episode's own tier through the web's rule — an anonymous
+  // device meets a subscriber episode as `member`, i.e. the sign-up ask
+  // (#462), exactly what the app locks up front (isEpisodeLockedForApp).
+  // Free mode: signed-in viewers take the member path; anonymous viewers are
+  // free UNLESS the positional signup gate puts this episode out of reach.
   const gate = resolveSignupGate();
   let access = row.access;
 
-  if (!paymentsEnabled()) {
+  if (paymentsEnabled()) {
+    access = resolveEffectiveTier(row.access, {
+      paymentsOn: true,
+      signupGate: false,
+      signedIn: Boolean(userId),
+    });
+  } else {
     if (userId) {
       access = "member";
     } else if (gate.mode === "after_episodes") {
@@ -229,61 +216,14 @@ export async function POST(req: NextRequest) {
   }
 
   // --- subscriber-tier episode, requester isn't one ----------------------
-  // On a tier-gated show this is the subscription paywall; on a legacy
-  // all-subscriber show it falls through to the 60-second preview.
-  if (await showHasTierGating(row.showId)) {
-    logToken({ result: 403, mode: userId ? "member" : "free", showId: row.showId, episodeId });
-    return apiError("forbidden", "Subscribe to watch.", {
-      reason: "subscribe_required",
-    });
-  }
-
-  // --- legacy 60s trial (paid mode only) --------------------------------
-  // Deliberately NOT special-casing trial.converted: granting a full-length
-  // token to any identity that once converted is a real bypass for users who
-  // paid then cancelled.
-  if (!deviceId) {
-    // The preview is a per-identity 60s budget; with nothing to key it on it
-    // can't be granted without becoming unlimited.
-    logToken({ result: 400, mode: "trial", showId: row.showId, episodeId });
-    return apiError("bad_request", "A device id is required for preview playback.");
-  }
-
-  let trial: Awaited<ReturnType<typeof findTrialSession>>;
-  try {
-    trial = await findTrialSession(deviceId, row.showId);
-  } catch (err) {
-    return trialStoreFailed(err, row.showId, episodeId);
-  }
-  if (trial) {
-    const remaining = Math.floor((trial.expiresAt.getTime() - Date.now()) / 1000);
-    if (remaining > 0) return ok("trial", Math.min(remaining, TRIAL_TTL_CAP));
-
-    logToken({ result: 403, mode: "trial", showId: row.showId, episodeId });
-    return apiError("forbidden", "Your preview has ended.", {
-      reason: "subscribe_required",
-    });
-  }
-
-  try {
-    const fresh = await mintTrialSession({
-      sessionToken: deviceId,
-      showId: row.showId,
-      ipHash: hashClientIp(getClientIp(req)),
-      client: "app",
-      attribution: { first: EMPTY_ATTRIBUTION, last: EMPTY_ATTRIBUTION },
-    });
-    const remaining = Math.floor((fresh.expiresAt.getTime() - Date.now()) / 1000);
-    return ok("trial", Math.min(Math.max(remaining, 0), TRIAL_TTL_CAP));
-  } catch (err) {
-    if (err instanceof TrialRateLimitError) {
-      // Generic body — don't confirm to an adversary that they hit a
-      // per-network bucket; the client identifies the case by status code.
-      logToken({ result: 429, mode: "trial", showId: row.showId, episodeId });
-      return apiError("rate_limited", "Too many previews. Try again later.", {
-        headers: { "Retry-After": String(60 * 60) },
-      });
-    }
-    return trialStoreFailed(err, row.showId, episodeId);
-  }
+  // Paid mode, signed in only (an anonymous device took the member branch
+  // above; free mode never leaves `access` at "subscriber"). Every show
+  // answers the same, all-subscriber ones included: the legacy 60-second
+  // preview that used to follow here is gone (#462), so no request through
+  // here mints a kind='preview' row. The app renders this 403 as its
+  // «Subscribers only» page (#316) — it sells nothing (App Store 3.1.1).
+  logToken({ result: 403, mode: "member", showId: row.showId, episodeId });
+  return apiError("forbidden", "Subscribe to watch.", {
+    reason: "subscribe_required",
+  });
 }

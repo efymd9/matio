@@ -137,8 +137,11 @@ export const en = {
     episodesBtn: "Episodes",
     upNextBtn: "Up Next",
     qualityAria: "Video quality",
+    // The legacy 60s preview's poster label — the player's trial mode only,
+    // which no page renders since #462.
     playPreview: "Watch 60s free",
     playFreeEpisode: "Watch free",
+    play: "Play",
     fullscreenAria: "Toggle fullscreen",
     tapForSound: "Tap for sound",
   },
@@ -215,6 +218,9 @@ export const en = {
     continueSubscribe: "Continue · Subscribe",
     cancelAnytimeFromAccount: "Cancel anytime from your account.",
     allFreeWatched: "Free episodes complete",
+    // The tier paywall's kicker when nothing before the locked episode was
+    // free — "Free episodes complete" / "Continue watching" would be untrue.
+    becomeMemberKicker: "Become a member",
     subscribeBody:
       "Subscribe to watch the full catalog and every upcoming episode.",
     benefits: "Every episode · Full catalog · Cancel anytime",
@@ -241,6 +247,15 @@ export const en = {
     gateKicker: "Watch for free",
     gateBody:
       "Create a free account to start watching and save your progress across every series.",
+    // Paid mode, the wall in front of a subscriber episode (#462): the
+    // account comes first and the paywall right after it, so nothing on the
+    // wall may promise "free". It shows no kicker — `headline` already says
+    // "Create your account".
+    thenPaywallBody:
+      "Sign up to continue — then become a member to watch every episode.",
+    // That wall's CTA (and the app's wall in front of a subscribers-only
+    // episode): the account is free, but what it leads to is not.
+    thenPaywallCta: "Create account",
     signUpCta: "Create free account",
     alreadyMember: "Already have an account?",
     signInLink: "Sign in",
@@ -351,21 +366,21 @@ export const en = {
     siteTitle: "matio — original stories, streamed",
     siteTitleTemplate: "%s · matio",
     siteDescription:
-      "A subscription streaming home for original short-form stories. Watch the first 60 seconds free.",
+      "Original short-form drama series from the Matio studio. Create an account, then become a member to watch every episode.",
     // Payments-off variants (lib/free-mode.ts): the indexed copy must not
     // promise a subscription gate or a 60s preview that no longer exists.
     siteDescriptionFree:
       "A streaming home for original short-form stories. The full catalogue, free.",
     twitterTitle: "matio",
     twitterDescription:
-      "Original stories, streamed. Watch the first 60 seconds free.",
+      "Original stories, streamed. Create an account, then become a member.",
     twitterDescriptionFree:
       "Original stories, streamed. The full catalogue, free.",
   },
   og: {
     kicker: "Streaming originals",
     title: ["Original stories,", "streamed."],
-    tagline: "Watch the first 60 seconds free.",
+    tagline: "Become a member. Watch everything.",
     taglineFree: "Watch everything free.",
   },
   about: {

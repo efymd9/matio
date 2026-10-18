@@ -94,11 +94,12 @@ describe.each(PAGES)("$path", ({ path, Page, metadata, others }) => {
   });
 });
 
-// Withdrawing the Spanish translation (#445) is not a new edition of a
-// document whose English text did not change by a word: /terms and /privacy
-// keep the dates they had, /cookies moves because its table lost the `locale`
-// row. /terms is tied to the wallet checkbox's TOS_VERSION (#214) — a stored
-// acceptance has to name the edition the page shows.
+// Withdrawing the Spanish translation (#445) was not a new edition of a
+// document whose English text did not change by a word. Removing the
+// 60-second preview (#462) is one for all three: /terms §4, the /cookies
+// `trial_session` row and /privacy §2 + §11 describe the free-episode record
+// instead. /terms is tied to the wallet checkbox's TOS_VERSION (#214) — a
+// stored acceptance has to name the edition the page shows.
 describe("«Last updated»", () => {
   it("/terms shows the TOS_VERSION edition", async () => {
     const edition = new Date(`${TOS_VERSION}T00:00:00Z`).toLocaleDateString("en-US", {
@@ -107,12 +108,32 @@ describe("«Last updated»", () => {
       day: "numeric",
       timeZone: "UTC",
     });
-    expect(edition).toBe("September 9, 2026");
+    expect(edition).toBe("October 18, 2026");
     expect(await render(TermsPage)).toContain(`Last updated: ${edition}`);
   });
 
-  it("/privacy has the #376 edition (job applications), /cookies the #445 one", async () => {
-    expect(await render(PrivacyPage)).toContain("Last updated: October 15, 2026");
-    expect(await render(CookiesPage)).toContain("Last updated: October 12, 2026");
+  it("/privacy and /cookies have the #462 edition", async () => {
+    expect(await render(PrivacyPage)).toContain("Last updated: October 18, 2026");
+    expect(await render(CookiesPage)).toContain("Last updated: October 18, 2026");
+  });
+});
+
+// #462 — the preview is gone from the legal pages: none of them may still
+// promise one, and /terms §4 says what replaced it.
+describe("no 60-second preview", () => {
+  it("is promised by /terms, /privacy or /cookies", async () => {
+    for (const Page of [TermsPage, PrivacyPage, CookiesPage]) {
+      const html = (await render(Page)).replace(/\s+/g, " ");
+      expect(html).not.toMatch(/60-second|free preview|preview expires/i);
+    }
+  });
+
+  it("/terms §4 is about episode access, without numbers for the anonymous limit", async () => {
+    const html = (await render(TermsPage)).replace(/\s+/g, " ");
+    expect(html).toContain("4. Episode access");
+    expect(html).toContain("does not offer a time-limited preview");
+    expect(html).toContain("short, muted teaser that plays on our home page");
+    expect(html).toContain("never stops a free episode from playing");
+    expect(html).not.toContain("three per network per hour");
   });
 });

@@ -2222,84 +2222,60 @@ describe("log audit · the playback-token routes' funnel writes (#305)", () => {
     );
   });
 
-  // #326 — the legacy 60-second preview (an all-subscriber show, paid mode).
-  // Unlike the best-effort writes above, its trial_sessions read and write
-  // are the access decision, so a failure there used to be thrown to the
-  // framework — which prints an unhandled error's message, i.e. the statement
-  // WITH its params, to the runtime log. Both routes now catch it at the
-  // boundary, answer 503 and report the class and SQLSTATE only.
-  function legacyPreviewRows() {
-    // The episode lookup, then showHasTierGating's probe: no free / member
-    // episode on the show, so the request falls through to the 60s preview.
-    const answers: unknown[][] = [[{ playbackId: "pb_dummy", showId: SHOW, access: "subscriber" }], []];
+  // #326 → #462. The legacy 60-second preview (an all-subscriber show, paid
+  // mode) used to read and write trial_sessions as the access decision, and a
+  // failure there quoted the statement WITH its params. The preview is gone:
+  // neither route reads or mints a trial row for a subscriber episode any
+  // more — an anonymous request on either is the sign-up ask, whose only
+  // write is the wall stamp (its failure is logged by ids). Pinned with a
+  // store that fails the way the driver does — nothing it would quote may
+  // reach the log, the body or Sentry.
+  function subscriberEpisodeRow() {
     const chain = {
       from: () => chain,
       innerJoin: () => chain,
       where: () => chain,
-      limit: async () => answers.shift() ?? [],
+      limit: async () => [{ playbackId: "pb_dummy", showId: SHOW, access: "subscriber" }],
     };
     select.mockImplementation(() => chain);
   }
 
-  const PREVIEW_ROUTES = [
+  it.each([
     {
       name: "app",
-      tag: "[v1/playback-token]",
+      reason: "signup_required",
       call: () => appPlaybackToken(appRequest()),
     },
     {
       name: "web",
-      tag: "[playback-token]",
+      reason: "signup_required",
       call: () => webPlaybackToken(webRequest(EPISODE)),
     },
-  ] as const;
-
-  it.each(PREVIEW_ROUTES)(
-    "$name, legacy preview: a failed trial lookup answers 503 and logs the class and SQLSTATE — never the identity, the IP hash or the database URL",
-    async ({ tag, call }) => {
-      legacyPreviewRows();
+  ] as const)(
+    "$name, subscriber episode: no preview — 403 $reason, the trial lookup and mint never run, nothing quoted reaches the log",
+    async ({ reason, call }) => {
+      subscriberEpisodeRow();
       tokenAudit.find.mockRejectedValue(driverError(FIND));
-      const logged = captureConsole();
-
-      const res = await call();
-      const body = JSON.stringify(await res.json());
-
-      expect(res.status).toBe(503);
-      // The fixture is honest: the identity really was in the failed read.
-      expect(tokenAudit.find).toHaveBeenCalledWith(MARKER_IDENTITY, SHOW);
-      expect(logged()).toContain(`${tag} trial store failed {"name":"DrizzleQueryError","code":"57P01"}`);
-      for (const marker of MARKERS) {
-        expect(logged()).not.toContain(marker);
-        expect(body).not.toContain(marker);
-        expect(JSON.stringify(sentryMessage.mock.calls)).not.toContain(marker);
-      }
-      expect(sentryMessage).toHaveBeenCalledTimes(1);
-    },
-  );
-
-  it.each(PREVIEW_ROUTES)(
-    "$name, legacy preview: a failed trial mint answers 503 and logs the class and SQLSTATE only",
-    async ({ tag, call }) => {
-      legacyPreviewRows();
       tokenAudit.mint.mockRejectedValue(driverError(MINT));
+      tokenAudit.stamp.mockRejectedValue(driverError(STAMP));
       const logged = captureConsole();
 
       const res = await call();
       const body = JSON.stringify(await res.json());
 
-      expect(res.status).toBe(503);
-      expect(tokenAudit.mint).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionToken: MARKER_IDENTITY }),
-      );
-      expect(logged()).toContain(`${tag} trial store failed {"name":"DrizzleQueryError","code":"57P01"}`);
+      expect(res.status).toBe(403);
+      expect(body).toContain(reason);
+      expect(tokenAudit.find).not.toHaveBeenCalled();
+      expect(tokenAudit.mint).not.toHaveBeenCalled();
+      expect(logged()).not.toContain("trial store failed");
       for (const marker of MARKERS) {
         expect(logged()).not.toContain(marker);
         expect(body).not.toContain(marker);
-        expect(JSON.stringify(sentryMessage.mock.calls)).not.toContain(marker);
       }
-      expect(sentryMessage).toHaveBeenCalledTimes(1);
+      expect(sentryMessage).not.toHaveBeenCalled();
     },
   );
+
 
   it("web: an episode_id that is not an id is refused before the query — Postgres would quote it back, and the framework logs that", async () => {
     // What the driver does with text bound for a uuid column: refuse it,

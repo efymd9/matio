@@ -66,7 +66,6 @@ vi.mock("@/lib/i18n/server", () => ({ getLocale: async () => "en" }));
 vi.mock("@/lib/episode-access", () => ({
   resolveEffectiveTier: vi.fn(),
   getOrderedReadyEpisodeIds: vi.fn(),
-  showHasTierGating: vi.fn(),
 }));
 vi.mock("@/lib/watch-progress", () => ({
   clampPositionSeconds: vi.fn(),

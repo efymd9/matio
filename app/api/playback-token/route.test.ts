@@ -10,6 +10,8 @@ vi.mock("server-only", () => ({}));
 //
 // The gate cases are #198: with REQUIRE_SIGNUP=1 the episode's own tier
 // decides for anonymous viewers, instead of a blanket wall over everything.
+// The paid-mode cases are #462: registration first, then the paywall, and no
+// 60-second preview for anyone.
 const h = vi.hoisted(() => ({
   userId: null as string | null,
   row: undefined as
@@ -17,13 +19,11 @@ const h = vi.hoisted(() => ({
     | undefined,
   cookie: undefined as string | undefined,
   hasActiveSubscription: vi.fn(),
-  showHasTierGating: vi.fn(),
   findTrialSession: vi.fn(),
   mintTrialSession: vi.fn(),
   stampSignupWall: vi.fn(),
   stampVisitorWallSeen: vi.fn(),
   sign: vi.fn(),
-  captureMessage: vi.fn(),
   FakeRateLimit: class FakeRateLimit extends Error {},
   // true = the REAL getClientIp/hashClientIp (the #351 bucket cases); every
   // other case keeps the constant IP and the constant hash.
@@ -33,7 +33,6 @@ const h = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: h.userId }),
 }));
-vi.mock("@sentry/nextjs", () => ({ captureMessage: h.captureMessage }));
 vi.mock("next/headers", () => ({
   cookies: async () => ({
     get: () => (h.cookie ? { value: h.cookie } : undefined),
@@ -61,10 +60,7 @@ vi.mock("drizzle-orm", () => ({
 vi.mock("@/lib/episode-access", async (importOriginal) => {
   // resolveRequestTier is the rule under test — the real one, not a stub.
   const actual = await importOriginal<typeof import("@/lib/episode-access")>();
-  return {
-    resolveRequestTier: actual.resolveRequestTier,
-    showHasTierGating: h.showHasTierGating,
-  };
+  return { resolveRequestTier: actual.resolveRequestTier };
 });
 vi.mock("@/lib/subscription-access", () => ({
   hasActiveSubscription: h.hasActiveSubscription,
@@ -80,7 +76,6 @@ vi.mock("@/lib/trial", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/trial")>();
   return {
     TRIAL_COOKIE: "trial_session",
-    TRIAL_DURATION_SECONDS: 60,
     TrialRateLimitError: h.FakeRateLimit,
     findTrialSession: h.findTrialSession,
     mintTrialSession: h.mintTrialSession,
@@ -123,7 +118,6 @@ beforeEach(() => {
   h.cookie = undefined;
   h.row = { playbackId: "pb-1", showId: SHOW, access: "free" };
   h.hasActiveSubscription.mockReset().mockResolvedValue(false);
-  h.showHasTierGating.mockReset().mockResolvedValue(true);
   h.findTrialSession.mockReset().mockResolvedValue(null);
   h.mintTrialSession.mockReset().mockResolvedValue({
     expiresAt: new Date(Date.now() + 60_000),
@@ -131,7 +125,6 @@ beforeEach(() => {
   h.stampSignupWall.mockReset().mockResolvedValue(undefined);
   h.stampVisitorWallSeen.mockReset().mockResolvedValue(undefined);
   h.sign.mockReset().mockReturnValue("signed-jwt");
-  h.captureMessage.mockReset();
   vi.stubEnv("PAYMENTS_ENABLED", "");
   vi.stubEnv("REQUIRE_SIGNUP", "");
   vi.spyOn(console, "info").mockImplementation(() => {});
@@ -254,7 +247,24 @@ describe("open free mode — everything plays", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ mode: "free" });
+    // The funnel row is a free-tier one — never a 60s preview (#462).
+    expect(h.mintTrialSession.mock.calls[0][0]).toMatchObject({
+      kind: "episodes",
+    });
   });
+
+  it.each([["free"], ["member"], ["subscriber"]])(
+    "plays a %s episode for a signed-in viewer on the member path",
+    async (access) => {
+      h.userId = "user_1";
+      h.row = { playbackId: "pb-1", showId: SHOW, access };
+
+      const res = await GET(get());
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ mode: "member" });
+    },
+  );
 });
 
 describe("paid mode — the tier means money again", () => {
@@ -268,6 +278,10 @@ describe("paid mode — the tier means money again", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ mode: "subscriber" });
+    // The whole episode: the teaser clip is the home hero's alone
+    // (lib/hero-preview.ts) — a third argument here would cut a subscriber's
+    // episode to its first minute.
+    expect(h.sign).toHaveBeenCalledWith("pb-1", 3600);
   });
 
   it("refuses a signed-in non-subscriber on a subscriber episode with subscribe_required", async () => {
@@ -303,81 +317,73 @@ describe("paid mode — the tier means money again", () => {
   });
 });
 
-describe("paid mode — the legacy 60s preview (all-subscriber show)", () => {
-  // A show whose ready episodes are ALL subscriber-tier keeps the historical
-  // preview; the viewer's identity is the trial_session cookie.
+// #462: every episode subscriber-tier, and pressing play asks for an account
+// first, then for money. The legacy 60-second preview is gone for everyone —
+// an anonymous request must never mint a kind='preview' row (or any row: the
+// sign-up wall is not a free play).
+describe("paid mode — registration first, then the paywall (#462)", () => {
   const COOKIE = "1eaf0000-dead-4bee-8f00-00000000beef";
 
   beforeEach(() => {
     vi.stubEnv("PAYMENTS_ENABLED", "1");
-    h.showHasTierGating.mockResolvedValue(false);
     h.row = { playbackId: "pb-1", showId: SHOW, access: "subscriber" };
   });
 
-  it("mints a fresh preview, capped at the trial duration, and sets the cookie", async () => {
-    h.mintTrialSession.mockResolvedValue({
-      expiresAt: new Date(Date.now() + 10 * 60_000),
+  it("asks an anonymous viewer for an account on a subscriber episode — no preview, no trial row", async () => {
+    const res = await GET(get());
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ reason: "signup_required" });
+    expect(h.sign).not.toHaveBeenCalled();
+    expect(h.findTrialSession).not.toHaveBeenCalled();
+    expect(h.mintTrialSession).not.toHaveBeenCalled();
+    expect(res.cookies.get("trial_session")).toBeUndefined();
+    // The wall impression is still measured, on the visit ledger.
+    expect(h.stampVisitorWallSeen).toHaveBeenCalledTimes(1);
+  });
+
+  it("with a trial cookie from an earlier visit, only stamps the wall on it — still no preview", async () => {
+    h.cookie = COOKIE;
+    // Even a row whose 60s window is still open buys nothing any more.
+    h.findTrialSession.mockResolvedValue({
+      expiresAt: new Date(Date.now() + 30_000),
     });
+
+    const res = await GET(get());
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ reason: "signup_required" });
+    expect(h.stampSignupWall).toHaveBeenCalledWith(COOKIE, SHOW);
+    expect(h.mintTrialSession).not.toHaveBeenCalled();
+    expect(h.sign).not.toHaveBeenCalled();
+  });
+
+  it("shows a signed-in non-subscriber the paywall — subscribe_required, the trial store untouched", async () => {
+    h.userId = "user_1";
+    h.cookie = COOKIE;
+
+    const res = await GET(get());
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ reason: "subscribe_required" });
+    expect(h.sign).not.toHaveBeenCalled();
+    expect(h.findTrialSession).not.toHaveBeenCalled();
+    expect(h.mintTrialSession).not.toHaveBeenCalled();
+    expect(h.stampVisitorWallSeen).not.toHaveBeenCalled();
+  });
+
+  it("plays for a subscriber", async () => {
+    h.userId = "user_1";
+    h.hasActiveSubscription.mockResolvedValue(true);
 
     const res = await GET(get());
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ mode: "trial", expiresIn: 60 });
-    expect(res.cookies.get("trial_session")?.value).toBeTruthy();
-    expect(h.mintTrialSession.mock.calls[0][0]).toMatchObject({ client: "web" });
-  });
-
-  it("answers 429 with Retry-After when the IP bucket is full", async () => {
-    h.mintTrialSession.mockRejectedValue(new h.FakeRateLimit("limit"));
-
-    const res = await GET(get());
-
-    expect(res.status).toBe(429);
-    expect(res.headers.get("Retry-After")).toBe("3600");
-  });
-
-  // #326: a trial_sessions failure here used to be thrown to the framework,
-  // which prints the Drizzle error — the statement AND its params, the trial
-  // cookie and the IP hash among them — to the runtime log. It is caught at
-  // the route now: a plain 503 (never a 403 that would read as «your preview
-  // ended»), and only the class and SQLSTATE are reported.
-  function driverError(): Error {
-    const cause = Object.assign(new Error("terminating connection"), {
-      name: "PostgresError",
-      code: "57P01",
+    expect(await res.json()).toMatchObject({
+      token: "signed-jwt",
+      mode: "subscriber",
+      expiresIn: 3600,
     });
-    return Object.assign(
-      new Error(`Failed query: select … from "trial_sessions"\nparams: ${COOKIE},${SHOW},hashed-ip`),
-      { name: "DrizzleQueryError", cause },
-    );
-  }
-
-  it.each([
-    ["the lookup", "findTrialSession"],
-    ["the mint", "mintTrialSession"],
-  ] as const)("answers 503 when %s fails — not a throw, not a 403", async (_what, failing) => {
-    h.cookie = failing === "findTrialSession" ? COOKIE : undefined;
-    h[failing].mockRejectedValue(driverError());
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-
-    const res = await GET(get());
-    const body = await res.json();
-
-    expect(res.status).toBe(503);
-    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
-    expect(res.cookies.get("trial_session")).toBeUndefined();
-    expect(h.sign).not.toHaveBeenCalled();
-    // Class and SQLSTATE — nothing the driver quoted.
-    expect(error).toHaveBeenCalledWith("[playback-token] trial store failed", {
-      name: "DrizzleQueryError",
-      code: "57P01",
-    });
-    expect(h.captureMessage).toHaveBeenCalledWith("playback-token: trial store failed", {
-      level: "error",
-      tags: { code: "57P01", name: "DrizzleQueryError" },
-    });
-    expect(JSON.stringify([body, error.mock.calls, h.captureMessage.mock.calls])).not.toContain(
-      COOKIE,
-    );
+    expect(h.mintTrialSession).not.toHaveBeenCalled();
   });
 });

@@ -9,6 +9,7 @@ import { ErrorState, Loading } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import { goBackOrHome } from "@/navigation";
 import { useLeaveUpright, useOrientationLock, useOrientationSettled } from "@/orientation";
+import type { EpisodeAccessTier } from "@/shared/api-types";
 import { EpisodeFeed } from "@/watch/episode-feed";
 
 // The watch screen. Loads the show (its ordered ready episodes are what the
@@ -106,7 +107,12 @@ export default function WatchScreen() {
   // screen turns upright while it is still focused, and only then the pop.
   const leaveNow = useCallback(() => goBackOrHome(router), [router]);
   const { leaving, requestLeave: onBack } = useLeaveUpright(leaveNow);
-  const onSignIn = useCallback(() => router.push("/sign-in"), [router]);
+  // The wall's episode tier rides along, so the form in front of a
+  // subscribers-only episode drops "free" (#462).
+  const onSignIn = useCallback(
+    (access: EpisodeAccessTier) => router.push({ pathname: "/sign-in", params: { access } }),
+    [router],
+  );
 
   // Before the early returns: hooks — and the lock must also be RELEASED
   // when this screen unmounts from an error state after having rotated.

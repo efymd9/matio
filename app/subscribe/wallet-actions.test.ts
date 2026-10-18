@@ -330,7 +330,8 @@ describe("createAuthWalletCheckoutSession — the session it builds", () => {
     await createAuthWalletCheckoutSession(INPUT, true);
 
     const meta = metadataOf(0);
-    expect(meta.tos_version).toBe("2026-09-09");
+    // The /terms edition on screen — §4 rewritten 2026-10-18 (#462).
+    expect(meta.tos_version).toBe("2026-10-18");
     // The exact moment is Stripe's own session `created`; a second clock in
     // the record would be a second, contestable answer (#214).
     expect(meta).not.toHaveProperty("tos_accepted_at");

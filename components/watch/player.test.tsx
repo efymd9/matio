@@ -185,6 +185,10 @@ vi.mock("@/lib/meta-pixel-events", () => ({
   onPixelReady: vi.fn(() => () => undefined),
   trackPixel: vi.fn(),
 }));
+// The #462 suite computes its tiers with the real server-side rule
+// (lib/episode-access.ts) — pure, but its module also holds a db helper.
+vi.mock("server-only", () => ({}));
+vi.mock("@/db", () => ({ db: {} }));
 
 // Module-level const in the player (read at import, which is hoisted above
 // ordinary statements) — same reason the hero suite sets it in vi.hoisted.
@@ -192,6 +196,7 @@ vi.hoisted(() => {
   process.env.NEXT_PUBLIC_MUX_DATA_ENV_KEY = "env-key-test";
 });
 
+import { resolveEffectiveTier } from "@/lib/episode-access";
 import { Player, type PlayerEpisode } from "./player";
 
 // jsdom's HTMLMediaElement has no play()/pause()/load() (they log "not
@@ -555,7 +560,7 @@ describe("Player — Mux Data consent on the live element", () => {
 // transition is asserted on the probe's initialize log: the SAME element,
 // a new playbackId, no remount (the invariant that carries WebKit's
 // autoplay blessing across the seam).
-import { capturePostHog } from "@/lib/posthog-events";
+import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 import { onPixelReady } from "@/lib/meta-pixel-events";
 
 // The overlays load through next/dynamic — under a full parallel run the
@@ -959,5 +964,293 @@ describe("Player → SignupWall — the payment fine print follows the kill-swit
     await screen.findByText(en.signupWall.kicker, undefined, LONG);
 
     expect(screen.getByText(en.signupWall.noCardNeeded)).toBeTruthy();
+  });
+});
+
+describe("Player → paid mode: an anonymous viewer on a subscriber episode (#462)", () => {
+  // The tiers exactly as the watch page hands them to an anonymous viewer in
+  // paid mode — the real rule, not a hand-written "member" — together with
+  // what each episode asks once the viewer has an account (`accountTier`).
+  const ANON_PAID = { paymentsOn: true, signupGate: false, signedIn: false };
+  const asAnonymous = (access: "free" | "member" | "subscriber") => ({
+    tier: resolveEffectiveTier(access, ANON_PAID),
+    accountTier: resolveEffectiveTier(access, { ...ANON_PAID, signedIn: true }),
+  });
+  const ALL_SUBSCRIBER: PlayerEpisode[] = [
+    episode("ep-1", 1, asAnonymous("subscriber")),
+    episode("ep-2", 2, asAnonymous("subscriber")),
+  ];
+  const MEMBER_THEN_SUBSCRIBER: PlayerEpisode[] = [
+    episode("ep-1", 1, asAnonymous("member")),
+    episode("ep-2", 2, asAnonymous("subscriber")),
+  ];
+
+  function renderAnonymous(
+    accountUnlocks: number,
+    opts: { episodes?: PlayerEpisode[]; initialEpisodeId?: string; autoplay?: boolean } = {},
+  ) {
+    return render(
+      <Player
+        episodes={opts.episodes ?? ALL_SUBSCRIBER}
+        initialEpisodeId={opts.initialEpisodeId ?? "ep-1"}
+        mode="free"
+        showId="show-1"
+        showSlug="the-scarlet-oath"
+        showTitle="The Scarlet Oath"
+        autoplay={opts.autoplay ?? false}
+        payFirst
+        freeMode={false}
+        signupGate={false}
+        accountUnlocks={accountUnlocks}
+      />,
+    );
+  }
+
+  beforeEach(() => {
+    vi.mocked(capturePostHog).mockClear();
+    // Run the wall's PostHog callback at once — the impression is the subject.
+    vi.mocked(onPostHogReady).mockImplementation((cb: () => void) => {
+      cb();
+      return () => undefined;
+    });
+  });
+
+  afterEach(() => {
+    vi.mocked(onPostHogReady).mockImplementation(() => () => undefined);
+  });
+
+  it("sees the SignupWall — not the Paywall, not the 60s preview — with no token fetched", async () => {
+    renderAnonymous(0);
+    await screen.findByText(en.signupWall.headline, undefined, LONG);
+
+    // Not the paywall: neither its pay-first CTA (the flag is on) nor the
+    // trial-end variant that used to follow a spent preview.
+    expect(screen.queryByText(en.paywall.payFirstCta)).toBeNull();
+    expect(screen.queryByText(en.paywall.previewComplete)).toBeNull();
+    // Not the preview: no player element, no token asked for.
+    expect(screen.queryByTestId("mux-video")).toBeNull();
+    expect(tokenFetches()).toEqual([]);
+    // The wall's CTA (both Clerk arms render under the test's <Show> stub).
+    expect(screen.getAllByText(en.signupWall.thenPaywallCta).length).toBeGreaterThan(0);
+  });
+
+  it("says the membership comes next — no 'free' kicker, no episode count, no 'No card needed'", async () => {
+    renderAnonymous(0);
+    await screen.findByText(en.signupWall.headline, undefined, LONG);
+
+    expect(screen.getByText(en.signupWall.thenPaywallBody)).toBeTruthy();
+    // No "free" kicker; the headline alone says "Create your account".
+    expect(screen.getAllByText(en.signupWall.headline)).toHaveLength(1);
+    expect(screen.queryByText(en.signupWall.kicker)).toBeNull();
+    expect(screen.queryByText(en.signupWall.bodyNoCount)).toBeNull();
+    expect(screen.queryByText(en.signupWall.body(2))).toBeNull();
+    expect(screen.queryByText(en.signupWall.noCardNeeded)).toBeNull();
+    // The CTA drops "free" too: «Create account», never «Create free account».
+    expect(screen.getAllByText("Create account").length).toBeGreaterThan(0);
+    expect(screen.queryByText(en.signupWall.signUpCta)).toBeNull();
+  });
+
+  it("a member episode's wall — which the account really opens — keeps its wording and its count", async () => {
+    renderAnonymous(1, { episodes: MEMBER_THEN_SUBSCRIBER });
+    await screen.findByText(en.signupWall.headline, undefined, LONG);
+
+    expect(screen.getByText(en.signupWall.kicker)).toBeTruthy();
+    expect(screen.getByText(en.signupWall.body(1))).toBeTruthy();
+    expect(screen.getByText(en.signupWall.noCardNeeded)).toBeTruthy();
+    expect(screen.queryByText(en.signupWall.thenPaywallBody)).toBeNull();
+    expect(screen.getAllByText(en.signupWall.signUpCta).length).toBeGreaterThan(0);
+    expect(screen.queryByText(en.signupWall.thenPaywallCta)).toBeNull();
+  });
+
+  it("deep-linked to the subscriber episode behind a member one, the wall says the paywall follows", async () => {
+    renderAnonymous(1, { episodes: MEMBER_THEN_SUBSCRIBER, initialEpisodeId: "ep-2" });
+    await screen.findByText(en.signupWall.headline, undefined, LONG);
+
+    expect(screen.getByText(en.signupWall.thenPaywallBody)).toBeTruthy();
+    expect(screen.queryByText(en.signupWall.body(1))).toBeNull();
+  });
+
+  it("a wall before any playback reports trigger 'land', whatever its copy", async () => {
+    renderAnonymous(0);
+    await screen.findByText(en.signupWall.headline, undefined, LONG);
+
+    expect(capturePostHog).toHaveBeenCalledWith("signup_wall_shown", {
+      show_slug: "the-scarlet-oath",
+      episode_number: 1,
+      gate: false,
+      trigger: "land",
+    });
+  });
+
+  it("a wall reached after watching a free episode reports trigger 'end_of_tier'", async () => {
+    renderAnonymous(0, {
+      episodes: [episode("ep-1", 1, asAnonymous("free")), episode("ep-2", 2, asAnonymous("subscriber"))],
+      autoplay: true,
+    });
+    const video = (await screen.findByTestId("mux-video", undefined, LONG)) as HTMLVideoElement;
+    const c = clock(video, 600);
+    act(() => {
+      video.dispatchEvent(new Event("playing"));
+    });
+    await c.end();
+    await screen.findByText(en.signupWall.headline, undefined, LONG);
+
+    expect(capturePostHog).toHaveBeenCalledWith("signup_wall_shown", {
+      show_slug: "the-scarlet-oath",
+      episode_number: 2,
+      gate: false,
+      trigger: "end_of_tier",
+    });
+    expect(screen.getByText(en.signupWall.thenPaywallBody)).toBeTruthy();
+  });
+
+  it("the episodes list names what a locked row really asks for: «Subscribe» for a subscriber episode", async () => {
+    renderAnonymous(1, {
+      episodes: [
+        episode("ep-1", 1, asAnonymous("free")),
+        episode("ep-2", 2, asAnonymous("member")),
+        episode("ep-3", 3, asAnonymous("subscriber")),
+      ],
+      autoplay: true,
+    });
+    await screen.findByTestId("mux-video", undefined, LONG);
+    await act(async () => {
+      screen.getByRole("button", { name: en.player.episodesBtn }).click();
+    });
+    const dialog = await screen.findByRole("dialog", { name: en.episodesOverlay.title }, LONG);
+    const rows = [...dialog.querySelectorAll("li")];
+    const row = (n: number) => rows.find((li) => li.textContent?.includes(`${n}. Episode ${n}`));
+
+    expect(row(2)?.textContent).toContain(en.episodesOverlay.lockedSignup);
+    expect(row(3)?.textContent).toContain(en.episodesOverlay.lockedSubscribe);
+    expect(row(3)?.textContent).not.toContain(en.episodesOverlay.lockedSignup);
+  });
+});
+
+describe("Player → paid mode: a signed-in non-subscriber at the Paywall (#462)", () => {
+  const SIGNED_IN_PAID = { paymentsOn: true, signupGate: false, signedIn: true };
+  const asMember = (access: "free" | "member" | "subscriber") => {
+    const tier = resolveEffectiveTier(access, SIGNED_IN_PAID);
+    return { tier, accountTier: tier };
+  };
+
+  function renderMember(episodes: PlayerEpisode[], initialEpisodeId: string) {
+    return render(
+      <Player
+        episodes={episodes}
+        initialEpisodeId={initialEpisodeId}
+        mode="member"
+        showId="show-1"
+        showSlug="the-scarlet-oath"
+        showTitle="The Scarlet Oath"
+        freeMode={false}
+      />,
+    );
+  }
+
+  it("goes straight to /checkout — no /subscribe card in between", async () => {
+    renderMember([episode("ep-1", 1, asMember("subscriber"))], "ep-1");
+    const cta = await screen.findByText(en.paywall.continueSubscribe, undefined, LONG);
+
+    const href = cta.closest("a")?.getAttribute("href") ?? "";
+    expect(href.startsWith("/checkout?")).toBe(true);
+    const qs = new URLSearchParams(href.split("?")[1]);
+    expect(qs.get("show")).toBe("the-scarlet-oath");
+    expect(qs.get("ep")).toBe("ep-1");
+    expect(tokenFetches()).toEqual([]);
+  });
+
+  it("nothing was free: no 'Free episodes complete' badge, the kicker asks for the membership", async () => {
+    renderMember(
+      [episode("ep-1", 1, asMember("subscriber")), episode("ep-2", 2, asMember("subscriber"))],
+      "ep-2",
+    );
+    await screen.findByText(en.paywall.continueSubscribe, undefined, LONG);
+
+    expect(screen.queryByText(en.paywall.allFreeWatched)).toBeNull();
+    expect(screen.queryByText(en.paywall.continueWatching)).toBeNull();
+    expect(screen.getByText(en.paywall.becomeMemberKicker)).toBeTruthy();
+  });
+
+  it("after a free episode the badge and the kicker stay as they were", async () => {
+    renderMember(
+      [episode("ep-1", 1, asMember("free")), episode("ep-2", 2, asMember("subscriber"))],
+      "ep-2",
+    );
+    await screen.findByText(en.paywall.continueSubscribe, undefined, LONG);
+
+    expect(screen.getByText(en.paywall.allFreeWatched)).toBeTruthy();
+    expect(screen.getByText(en.paywall.continueWatching)).toBeTruthy();
+    expect(screen.queryByText(en.paywall.becomeMemberKicker)).toBeNull();
+  });
+
+  it("the series-end paywall over an episode the member just watched keeps «Free episodes complete»", async () => {
+    // One member episode, played to its end: the member's series-end
+    // paywall. Nothing PRECEDES the episode, but the episode itself was open
+    // to the account — "nothing was free" would be untrue here.
+    render(
+      <Player
+        episodes={[episode("ep-1", 1, asMember("member"))]}
+        initialEpisodeId="ep-1"
+        mode="member"
+        showId="show-1"
+        showSlug="the-scarlet-oath"
+        showTitle="The Scarlet Oath"
+        autoplay
+        freeMode={false}
+      />,
+    );
+    const video = (await screen.findByTestId("mux-video", undefined, LONG)) as HTMLVideoElement;
+    const c = clock(video, 600);
+    act(() => {
+      video.dispatchEvent(new Event("playing"));
+    });
+    await c.end();
+    await screen.findByText(en.paywall.continueSubscribe, undefined, LONG);
+
+    expect(screen.getByText(en.paywall.allFreeWatched)).toBeTruthy();
+    expect(screen.getByText(en.paywall.continueWatching)).toBeTruthy();
+    expect(screen.queryByText(en.paywall.becomeMemberKicker)).toBeNull();
+  });
+});
+
+describe("Player → a subscriber's 403 subscribe_required (#462)", () => {
+  it("shows the tier paywall — no «Preview complete», no «Create a free account»", async () => {
+    // The subscription lapsed mid-visit: the page rendered mode="subscriber",
+    // the token route now answers the paywall's 403.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.startsWith("/api/playback-token")) {
+          return {
+            ok: false,
+            status: 403,
+            json: async () => ({ error: "Not authorized", reason: "subscribe_required" }),
+          } as unknown as Response;
+        }
+        throw new Error(`offline: ${url}`);
+      }),
+    );
+    render(
+      <Player
+        episodes={[episode("ep-1", 1, { tier: "subscriber", accountTier: "subscriber" })]}
+        initialEpisodeId="ep-1"
+        mode="subscriber"
+        showId="show-1"
+        showSlug="the-scarlet-oath"
+        showTitle="The Scarlet Oath"
+        freeMode={false}
+      />,
+    );
+    await screen.findByText(en.paywall.subscribeBody, undefined, LONG);
+
+    expect(screen.queryByText(en.paywall.previewComplete)).toBeNull();
+    expect(screen.queryByText(en.paywall.signUpToContinue)).toBeNull();
+    expect(screen.queryByText(/Create a free account/)).toBeNull();
+    // Nothing on this show was open without a subscription: no badge, the
+    // kicker asks for the membership — the episode in view does not count.
+    expect(screen.queryByText(en.paywall.allFreeWatched)).toBeNull();
+    expect(screen.getByText(en.paywall.becomeMemberKicker)).toBeTruthy();
   });
 });

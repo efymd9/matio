@@ -21,9 +21,11 @@ export async function GET() {
   const shows = await getPublishedShows();
   // Free mode has two shapes (lib/free-mode.ts): behind REQUIRE_SIGNUP the
   // admin's member/subscriber episodes ask for a free account, so "no account
-  // required" would be false there (#446). Paid mode ignores the gate.
+  // required" would be false there (#446). Paid mode ignores the gate, and
+  // since #462 it has no free preview to promise: an anonymous viewer is
+  // asked for an account first, the membership comes right after.
   const access = paymentsEnabled()
-    ? " Episodes stream with a paid membership; selected episodes and previews are free to watch."
+    ? " Episodes stream with a paid membership: create an account, then subscribe."
     : signupRequired()
       ? " Every episode is free to watch; some episodes ask for a free account."
       : " The full catalogue is currently free to watch — no account or payment required.";

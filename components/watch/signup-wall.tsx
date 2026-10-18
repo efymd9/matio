@@ -10,6 +10,11 @@ import { useT } from "@/lib/i18n/client";
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
 import { markSignupWallShown } from "@/app/watch/actions";
 
+// What brought the wall up, for analytics (#462): "land" = before anything
+// played in this visit (a walled first episode, a deep link), "end_of_tier" =
+// after the viewer watched something. Independent of the copy variant.
+export type SignupWallTrigger = "land" | "end_of_tier";
+
 // End-of-free-tier prompt on episode-gated shows. The conversion path is:
 //   free episodes end → "Create a free account" → Clerk sign-up modal
 //   → BACK TO /watch/<slug>?ep=<first member episode> (playback resumes)
@@ -29,6 +34,8 @@ export function SignupWall({
   backdropThumbnailUrl,
   gate = false,
   freeMode = false,
+  paywallNext = false,
+  trigger = "end_of_tier",
 }: {
   showSlug: string;
   showId: string;
@@ -54,6 +61,13 @@ export function SignupWall({
   // with nothing for sale, "No card needed" would bring up a payment that
   // does not exist, so the fine print renders in paid mode only (#446).
   freeMode?: boolean;
+  // Paid mode, a subscriber episode behind the wall (#462): the account comes
+  // first and the paywall right after it. The wall says so — no "free"
+  // kicker, no "unlock N episodes", no "No card needed" — instead of letting
+  // the viewer find out one step later. The headline ("Create your account")
+  // stays.
+  paywallNext?: boolean;
+  trigger?: SignupWallTrigger;
 }) {
   const t = useT();
 
@@ -67,14 +81,18 @@ export function SignupWall({
       capturePostHog("signup_wall_shown", {
         show_slug: showSlug,
         episode_number: episodeNumber,
-        // Segments the signup-gate pivot's wall impressions (shown on
-        // land, pre-playback) from the end-of-free-tier wall.
+        // The free-mode signup-gate copy variant (REQUIRE_SIGNUP).
         gate,
+        // Before or after playback — whatever the copy (#462).
+        trigger,
       });
     });
-  }, [showId, showSlug, episodeNumber, gate]);
+  }, [showId, showSlug, episodeNumber, gate, trigger]);
 
   const watchHref = `/watch/${showSlug}?ep=${encodeURIComponent(targetEpisodeId)}`;
+  // In front of a paywall the CTA drops "free" too (#462): the account is
+  // free, the episode behind it is not.
+  const cta = paywallNext ? t.signupWall.thenPaywallCta : t.signupWall.signUpCta;
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-espresso sm:aspect-video sm:h-auto">
@@ -136,18 +154,25 @@ export function SignupWall({
 
       {/* Bottom block */}
       <div className="relative z-10 mt-auto flex flex-col gap-3.5 pb-[max(env(safe-area-inset-bottom),1.875rem)] pl-[max(env(safe-area-inset-left),1.5rem)] pr-[max(env(safe-area-inset-right),1.5rem)]">
-        <span className="self-start rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
-          {gate ? t.signupWall.gateKicker : t.signupWall.kicker}
-        </span>
+        {/* No kicker in front of a paywall (#462): the decided one, «Create
+            your account», is the headline word for word, and the "free"
+            kickers would be untrue there. */}
+        {paywallNext ? null : (
+          <span className="self-start rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
+            {gate ? t.signupWall.gateKicker : t.signupWall.kicker}
+          </span>
+        )}
         <h2 className="font-display text-4xl uppercase leading-[1.02] tracking-[0.01em] text-cream">
           {t.signupWall.headline}
         </h2>
         <p className="text-[13px] leading-[1.6] text-cream/72">
-          {gate
-            ? t.signupWall.gateBody
-            : memberCount > 0
-              ? t.signupWall.body(memberCount)
-              : t.signupWall.bodyNoCount}
+          {paywallNext
+            ? t.signupWall.thenPaywallBody
+            : gate
+              ? t.signupWall.gateBody
+              : memberCount > 0
+                ? t.signupWall.body(memberCount)
+                : t.signupWall.bodyNoCount}
         </p>
 
         <Show when="signed-out">
@@ -166,7 +191,7 @@ export function SignupWall({
               }
               className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out active:scale-[0.98]"
             >
-              {t.signupWall.signUpCta}
+              {cta}
             </button>
           </SignUpButton>
         </Show>
@@ -177,7 +202,7 @@ export function SignupWall({
             href={watchHref}
             className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out active:scale-[0.98]"
           >
-            {t.signupWall.signUpCta}
+            {cta}
           </a>
         </Show>
 
@@ -196,7 +221,7 @@ export function SignupWall({
           </p>
         </Show>
 
-        {freeMode ? null : (
+        {freeMode || paywallNext ? null : (
           <p className="text-center text-[10px] font-semibold tracking-[0.04em] text-cream/40">
             {t.signupWall.noCardNeeded}
           </p>

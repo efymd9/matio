@@ -131,21 +131,33 @@ describe("firstEpisodeLocked / episodeRoute", () => {
     expect(firstEpisodeLocked(show("a", "free"), tiers, false)).toBe(false);
     expect(firstEpisodeLocked(show("a", "member"), tiers, false)).toBe("signup_required");
     expect(firstEpisodeLocked(show("a", "member"), tiers, true)).toBe(false);
-    // /v1 carries no subscription state: signed in or not, a subscriber
-    // episode is subscribe_required — never a sign-up ask.
+    // /v1 carries no subscription state: signed in, a subscriber episode is
+    // subscribe_required. Signed out it asks for the account first (#462) —
+    // sign-in, then the token route's «Subscribers only».
     expect(firstEpisodeLocked(show("a", "subscriber"), tiers, true)).toBe("subscribe_required");
-    expect(firstEpisodeLocked(show("a", "subscriber"), tiers, false)).toBe("subscribe_required");
+    expect(firstEpisodeLocked(show("a", "subscriber"), tiers, false)).toBe("signup_required");
     expect(firstEpisodeLocked({ ...show("a", "member"), episodes: [] }, tiers, false)).toBe(false);
   });
 
-  it("sends only an account ask to sign-in, carrying the episode; everything else to the player", () => {
+  it("sends only an account ask to sign-in, carrying the episode and its tier; everything else to the player", () => {
     const params = { episodeId: "ep-1", showSlug: "fallen" };
-    expect(episodeRoute("signup_required", "ep-1", "fallen")).toEqual({ pathname: "/sign-in", params });
-    expect(episodeRoute("subscribe_required", "ep-1", "fallen")).toEqual({
+    // The tier tells the form whether an account will open the episode (#462).
+    expect(episodeRoute("signup_required", "ep-1", "fallen", "subscriber")).toEqual({
+      pathname: "/sign-in",
+      params: { ...params, access: "subscriber" },
+    });
+    expect(episodeRoute("signup_required", "ep-1", "fallen", "member")).toEqual({
+      pathname: "/sign-in",
+      params: { ...params, access: "member" },
+    });
+    expect(episodeRoute("subscribe_required", "ep-1", "fallen", "subscriber")).toEqual({
       pathname: "/watch/[episodeId]",
       params,
     });
-    expect(episodeRoute(false, "ep-1", "fallen")).toEqual({ pathname: "/watch/[episodeId]", params });
+    expect(episodeRoute(false, "ep-1", "fallen", "free")).toEqual({
+      pathname: "/watch/[episodeId]",
+      params,
+    });
   });
 });
 
@@ -188,7 +200,17 @@ describe("usePlayFirstEpisode — Home's Play (#288)", () => {
 
     expect(router.push).toHaveBeenCalledWith({
       pathname: "/sign-in",
-      params: { episodeId: "morelli-ep1", showSlug: "morelli" },
+      params: { episodeId: "morelli-ep1", showSlug: "morelli", access: "member" },
+    });
+  });
+
+  it("an anonymous viewer on a subscribers-only show goes to sign-in with the tier that drops «free» (#462)", async () => {
+    act(() => hook.play("fallen"));
+    await settle(() => pending[0].resolve(show("fallen", "subscriber")));
+
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/sign-in",
+      params: { episodeId: "fallen-ep1", showSlug: "fallen", access: "subscriber" },
     });
   });
 

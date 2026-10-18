@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import { useConfig } from "@/api/config-context";
 import { useOptionalAuth } from "@/auth/clerk";
 import {
+  type EpisodeAccessTier,
   isEpisodeLockedForApp,
   type PlaybackDenialReason,
   type ShowDetail,
@@ -12,10 +13,11 @@ import {
 
 // Paid mode is live (since 2026-09-09), but /v1 carries no subscription
 // state (registry): every signed-in viewer reads as a non-subscriber, so a
-// `subscriber` episode is locked with `subscribe_required` for everyone.
-// The show page takes the same stance; neither sends anyone anywhere on it
-// but the player, whose feed leaves a signed-in viewer's answer to the
-// token route (#316).
+// `subscriber` episode is locked with `subscribe_required` for them — and
+// with `signup_required` for a signed-out viewer, who is asked for the
+// account first (#462). The show page takes the same stance; a subscribers-
+// only lock sends nobody anywhere but the player, whose feed leaves a
+// signed-in viewer's answer to the token route (#316).
 const HAS_SUBSCRIPTION = false;
 
 // Whether — and why — a show's first episode is locked for this viewer: the
@@ -39,16 +41,18 @@ export function firstEpisodeLocked(
 
 // Where a tap on an episode goes. Only an episode that asks for an ACCOUNT
 // leads to sign-in — carrying the episode, so signing in lands on it rather
-// than back on the list. Everything else opens the player: a subscribers-only
-// episode's page in the feed says so itself (sign-in could never unlock it).
+// than back on the list, and its tier, so the form in front of a
+// subscribers-only episode drops "free" (#462). Everything else opens the
+// player: a subscribers-only episode's page in the feed says so itself.
 export function episodeRoute(
   lock: false | PlaybackDenialReason,
   episodeId: string,
   showSlug: string,
+  access: EpisodeAccessTier,
 ) {
   const params = { episodeId, showSlug };
   return lock === "signup_required"
-    ? { pathname: "/sign-in" as const, params }
+    ? { pathname: "/sign-in" as const, params: { ...params, access } }
     : { pathname: "/watch/[episodeId]" as const, params };
 }
 
@@ -95,7 +99,7 @@ export function usePlayFirstEpisode(): { play: (slug: string) => void; busy: boo
             return;
           }
           const lock = firstEpisodeLocked(show, config.signupGate, isSignedIn);
-          router.push(episodeRoute(lock, first.id, slug));
+          router.push(episodeRoute(lock, first.id, slug, first.access));
         })
         .catch(() => {
           if (!stillWanted()) return;

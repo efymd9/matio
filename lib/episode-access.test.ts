@@ -44,7 +44,6 @@ vi.mock("drizzle-orm", () => ({
   asc: () => undefined,
   eq: (column: unknown, value: unknown) => ({ eq: [column, value] }),
   isNull: (column: unknown) => ({ isNull: column }),
-  ne: (column: unknown, value: unknown) => ({ ne: [column, value] }),
 }));
 
 import { episodes, seasons } from "@/db/schema";
@@ -54,7 +53,6 @@ import {
   resolveEffectiveTier,
   seriesIsFreeToWatch,
   resolveRequestTier,
-  showHasTierGating,
 } from "./episode-access";
 import type { EpisodeTier } from "./episode-access";
 
@@ -81,123 +79,112 @@ describe("getOrderedReadyEpisodeIds", () => {
   });
 });
 
-describe("showHasTierGating", () => {
-  it("is true iff a ready LISTED episode sits below the subscriber tier", async () => {
-    h.rows = [{ id: "ep-1" }];
-    expect(await showHasTierGating("show-1")).toBe(true);
-    const [clause] = h.where as unknown[][];
-    expect(clause).toContainEqual({ ne: [episodes.access, "subscriber"] });
-    expect(clause).toContainEqual({ eq: [episodes.status, "ready"] });
-    // A hidden branch with a free/member tier must not flip an
-    // all-subscriber show into the per-episode walls (#143).
-    expect(clause).toContainEqual({ isNull: episodes.branchOfEpisodeId });
+// The rule the whole access surface reads from (#198, #462). Every
+// combination of payments × signup gate × session × tier is written out —
+// the three consumers (watch page, token route, watch actions) must never
+// disagree, and the free pivot's lesson was exactly one of them drifting.
+// Each row: [paymentsOn, signupGate, signedIn, free, member, subscriber].
+type Row = [boolean, boolean, boolean, EpisodeTier, EpisodeTier, EpisodeTier];
+const TIERS: EpisodeTier[] = ["free", "member", "subscriber"];
 
-    h.rows = [];
-    expect(await showHasTierGating("show-1")).toBe(false);
-  });
-});
+function cases(table: Row[]) {
+  return table.flatMap(([paymentsOn, signupGate, signedIn, ...out]) =>
+    TIERS.map((access, i) => ({
+      paymentsOn,
+      signupGate,
+      signedIn,
+      access,
+      expected: out[i],
+    })),
+  );
+}
 
-// The rule the whole access surface reads from (#198): the admin's tier
-// decides in paid mode and under the signup gate; the open free pivot
-// flattens everything. Table-driven because the three consumers (watch
-// page, token route, watch actions) must never disagree — the free pivot's
-// lesson was exactly one of them drifting.
-describe("resolveEffectiveTier", () => {
-  const TIERS: EpisodeTier[] = ["free", "member", "subscriber"];
+describe("resolveEffectiveTier — what an episode presents to one viewer", () => {
+  const TABLE: Row[] = [
+    // Paid mode: registration first, then the paywall (#462). The gate is a
+    // deliberate no-op once payments own the gating.
+    [true, false, false, "free", "member", "member"],
+    [true, true, false, "free", "member", "member"],
+    [true, false, true, "free", "member", "subscriber"],
+    [true, true, true, "free", "member", "subscriber"],
+    // Free mode under the signup gate: subscriber asks for an account, not
+    // for money — the session does not matter here (mode="member" unlocks
+    // `member` for the signed-in).
+    [false, true, false, "free", "member", "member"],
+    [false, true, true, "free", "member", "member"],
+    // The open free pivot: everything is free.
+    [false, false, false, "free", "free", "free"],
+    [false, false, true, "free", "free", "free"],
+  ];
 
-  it("hands back the admin's tier verbatim in paid mode", () => {
-    for (const tier of TIERS) {
+  it.each(cases(TABLE))(
+    "payments=$paymentsOn gate=$signupGate signedIn=$signedIn: $access → $expected",
+    ({ paymentsOn, signupGate, signedIn, access, expected }) => {
       expect(
-        resolveEffectiveTier(tier, { paymentsOn: true, signupGate: false }),
-        tier,
-      ).toBe(tier);
-      // The gate is a deliberate no-op once payments own the gating.
-      expect(
-        resolveEffectiveTier(tier, { paymentsOn: true, signupGate: true }),
-        tier,
-      ).toBe(tier);
-    }
-  });
+        resolveEffectiveTier(access, { paymentsOn, signupGate, signedIn }),
+      ).toBe(expected);
+    },
+  );
 
-  it("flattens every tier to free in the open free pivot", () => {
-    for (const tier of TIERS) {
-      expect(
-        resolveEffectiveTier(tier, { paymentsOn: false, signupGate: false }),
-        tier,
-      ).toBe("free");
-    }
-  });
-
-  it("keeps a free episode free under the signup gate — no account needed", () => {
+  it("paid mode asks an anonymous viewer for an account on a subscriber episode, and only then for money", () => {
+    const paid = { paymentsOn: true, signupGate: false };
+    // The member tier is what the player answers with the SignupWall in
+    // mode="free" and what the token route turns into signup_required.
     expect(
-      resolveEffectiveTier("free", { paymentsOn: false, signupGate: true }),
-    ).toBe("free");
-  });
-
-  it("walls member behind the account under the signup gate", () => {
-    expect(
-      resolveEffectiveTier("member", { paymentsOn: false, signupGate: true }),
+      resolveEffectiveTier("subscriber", { ...paid, signedIn: false }),
     ).toBe("member");
-  });
-
-  it("asks a subscriber episode for an account, not for money, while payments are off", () => {
-    // A paywall would send the viewer to /subscribe, which redirects home
-    // in free mode. Flipping PAYMENTS_ENABLED=1 turns this into the real
-    // paywall through the paid branch above, with no code change.
+    // Signed in, the same episode is the paywall again.
     expect(
-      resolveEffectiveTier("subscriber", { paymentsOn: false, signupGate: true }),
-    ).toBe("member");
+      resolveEffectiveTier("subscriber", { ...paid, signedIn: true }),
+    ).toBe("subscriber");
   });
 });
 
 // What the token route mints for one request. The dangerous mistakes are
 // asymmetric: minting for an anonymous member request hands out walled
 // content, refusing a signed-in one locks a viewer out of what they were
-// promised. Both directions are pinned here.
-describe("resolveRequestTier", () => {
-  const GATE = { paymentsOn: false, signupGate: true };
-  const OPEN = { paymentsOn: false, signupGate: false };
-  const PAID = { paymentsOn: true, signupGate: false };
+// promised. Both directions are pinned, for every combination.
+describe("resolveRequestTier — what one request may mint", () => {
+  const TABLE: Row[] = [
+    // Paid mode: anonymous → the sign-up wall on member AND subscriber
+    // (#462); signed in → a session buys nothing by itself, the route
+    // checks the subscription separately.
+    [true, false, false, "free", "member", "member"],
+    [true, true, false, "free", "member", "member"],
+    [true, false, true, "free", "member", "subscriber"],
+    [true, true, true, "free", "member", "subscriber"],
+    // Free mode: a signed-in viewer plays everything on the member path.
+    [false, true, true, "member", "member", "member"],
+    [false, false, true, "member", "member", "member"],
+    // Free mode, anonymous: the gate walls everything above free; the open
+    // pivot hands out the free path.
+    [false, true, false, "free", "member", "member"],
+    [false, false, false, "free", "free", "free"],
+  ];
 
-  it("mints a free episode for an anonymous viewer under the gate (#198)", () => {
-    expect(resolveRequestTier("free", { ...GATE, signedIn: false })).toBe("free");
-  });
-
-  it.each([["member"], ["subscriber"]] as const)(
-    "refuses %s for an anonymous viewer under the gate",
-    (access) => {
-      // "member" is what the route turns into 403 signup_required.
-      expect(resolveRequestTier(access, { ...GATE, signedIn: false })).toBe(
-        "member",
-      );
+  it.each(cases(TABLE))(
+    "payments=$paymentsOn gate=$signupGate signedIn=$signedIn: $access → $expected",
+    ({ paymentsOn, signupGate, signedIn, access, expected }) => {
+      expect(
+        resolveRequestTier(access, { paymentsOn, signupGate, signedIn }),
+      ).toBe(expected);
     },
   );
 
-  it.each([["free"], ["member"], ["subscriber"]] as const)(
-    "lets a signed-in viewer play %s while payments are off",
-    (access) => {
-      expect(resolveRequestTier(access, { ...GATE, signedIn: true })).toBe(
-        "member",
-      );
-      expect(resolveRequestTier(access, { ...OPEN, signedIn: true })).toBe(
-        "member",
-      );
-    },
-  );
-
-  it("hands anonymous viewers the free path in the open pivot", () => {
-    expect(resolveRequestTier("subscriber", { ...OPEN, signedIn: false })).toBe(
-      "free",
-    );
-  });
-
-  it("gives payments back their say — a session buys nothing by itself", () => {
-    // With payments on, a signed-in non-subscriber must still meet the
-    // subscriber tier; the route checks the subscription separately.
-    expect(resolveRequestTier("subscriber", { ...PAID, signedIn: true })).toBe(
-      "subscriber",
-    );
-    expect(resolveRequestTier("free", { ...PAID, signedIn: false })).toBe("free");
+  it("never yields the subscriber tier with payments off — the paywall cannot open in free mode", () => {
+    for (const signupGate of [false, true]) {
+      for (const signedIn of [false, true]) {
+        for (const access of TIERS) {
+          expect(
+            resolveRequestTier(access, {
+              paymentsOn: false,
+              signupGate,
+              signedIn,
+            }),
+          ).not.toBe("subscriber");
+        }
+      }
+    }
   });
 });
 
@@ -212,6 +199,9 @@ describe("isFreeToWatch — what schema.org may claim", () => {
     expect(
       isFreeToWatch("subscriber", { paymentsOn: true, signupGate: false }),
     ).toBe(false);
+    expect(isFreeToWatch("free", { paymentsOn: true, signupGate: false })).toBe(
+      true,
+    );
     // The open pivot really is free for everyone.
     expect(
       isFreeToWatch("subscriber", { paymentsOn: false, signupGate: false }),
@@ -222,10 +212,19 @@ describe("isFreeToWatch — what schema.org may claim", () => {
 describe("seriesIsFreeToWatch — the claim about the whole series", () => {
   const GATE = { paymentsOn: false, signupGate: true };
 
-  it("is false when only the first episode is free — the shape every show in production has", () => {
+  it("is false when only the first episode is free", () => {
     expect(seriesIsFreeToWatch(["free", "member", "subscriber"], GATE)).toBe(
       false,
     );
+  });
+
+  it("is false for an all-subscriber series in paid mode — the shape #462 sets up", () => {
+    expect(
+      seriesIsFreeToWatch(["subscriber", "subscriber"], {
+        paymentsOn: true,
+        signupGate: false,
+      }),
+    ).toBe(false);
   });
 
   it("is true when every ready episode really plays with no account", () => {

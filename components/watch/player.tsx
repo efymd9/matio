@@ -19,6 +19,8 @@ import {
   type PlayerChoice,
 } from "@/lib/branching";
 import { VerticalChrome } from "./vertical-chrome";
+// Type only — the wall itself stays a dynamic import below.
+import type { SignupWallTrigger } from "./signup-wall";
 
 // Public Mux Data env key (distinct from the API token / signing key). Empty
 // when unset → Mux Data stays fully off.
@@ -97,8 +99,16 @@ export type PlayerEpisode = {
   // provisioned yet or when minting fails — overlays fall back to a
   // tone-gradient placeholder.
   thumbnailUrl: string | null;
-  // Access tier on episode-gated shows; "free" everywhere on legacy shows.
+  // The tier this episode presents to THIS viewer (resolveEffectiveTier on
+  // the watch page — e.g. a subscriber episode reads "member" for an
+  // anonymous viewer in paid mode, #462).
   tier: EpisodeTier;
+  // What the episode asks of this viewer once they HAVE an account — the same
+  // rule for a signed-in viewer (#462). It tells the two walls apart where
+  // `tier` cannot: an anonymous viewer meets a subscriber episode as `member`
+  // (the sign-up wall), and only this field says the paywall comes next.
+  // Omitted = the same as `tier`.
+  accountTier?: EpisodeTier;
   // Branching video (#144). A branch (branchOfEpisodeId set) is PLAYABLE
   // but unlisted: it stays in the Player's `episodes` array so a choice or
   // a ?ep= deep link can land on it, while every list the player renders
@@ -113,12 +123,14 @@ export type PlayerEpisode = {
   choices: PlayerChoice[] | null;
 };
 
-// Tier of an episode on an episode-gated show, as computed server-side by
-// lib/episode-access.ts (which is server-only and can't be imported here —
-// this is the structural client-side mirror). Legacy shows pass "free" for
-// every episode so nothing ever renders locked.
+// Tier of an episode as computed server-side by lib/episode-access.ts (which
+// is server-only and can't be imported here — this is the structural
+// client-side mirror).
 export type EpisodeTier = "free" | "member" | "subscriber";
 
+// "trial" is the legacy 60s preview: the watch page no longer renders it
+// since #462 (every show is walled per episode) — its code below is dead,
+// tracked in docs/registry.md.
 export type Mode = "subscriber" | "trial" | "free" | "member";
 
 // Video shape of the show (db `shows.orientation`). "vertical" switches to the
@@ -227,6 +239,7 @@ export function Player({
   walletPublishableKey = null,
   freeMode = false,
   signupGate = false,
+  accountUnlocks,
   orientation = "horizontal",
 }: {
   episodes: PlayerEpisode[];
@@ -260,6 +273,13 @@ export function Player({
   // "watch for free" variant — the locking itself rides the member-tier
   // presentation the watch page applies.
   signupGate?: boolean;
+  // How many listed episodes an account opens — what the SignupWall's
+  // "unlock N more episodes" may promise. Server-computed by the watch page
+  // with the tier rule for a SIGNED-IN viewer: since #462 an anonymous viewer
+  // in paid mode sees subscriber episodes as `member` too (registration
+  // first, then the paywall), so counting this viewer's member tiers would
+  // promise episodes the account does not open. Omitted → that count.
+  accountUnlocks?: number;
   // Show's video shape — vertical shows get the portrait chrome on mobile.
   orientation?: ShowOrientation;
 }) {
@@ -301,9 +321,14 @@ export function Player({
   // mount, any mode. Deferred onto the consent-gated pixel; without consent
   // the listener never fires.
   const viewContentFiredRef = useRef(false);
+  // Whether anything played in this visit — the sign-up wall's analytics
+  // `trigger` (#462): "land" before any playback (a walled first episode, a
+  // deep link), "end_of_tier" after some. Independent of the wall's copy.
+  const [hasPlayed, setHasPlayed] = useState(false);
   const onFirstPlay = useCallback(() => {
     if (viewContentFiredRef.current) return;
     viewContentFiredRef.current = true;
+    setHasPlayed(true);
     onPixelReady(() => {
       trackPixel("ViewContent", {
         content_type: "product",
@@ -395,6 +420,8 @@ export function Player({
       walletPublishableKey={walletPublishableKey}
       freeMode={freeMode}
       signupGate={signupGate}
+      accountUnlocks={accountUnlocks}
+      wallTrigger={hasPlayed ? "end_of_tier" : "land"}
       orientation={orientation}
     />
   );
@@ -421,6 +448,8 @@ function EpisodePlayback({
   walletPublishableKey,
   freeMode,
   signupGate,
+  accountUnlocks,
+  wallTrigger,
   orientation,
 }: {
   current: PlayerEpisode;
@@ -443,6 +472,8 @@ function EpisodePlayback({
   walletPublishableKey?: string | null;
   freeMode?: boolean;
   signupGate?: boolean;
+  accountUnlocks?: number;
+  wallTrigger: SignupWallTrigger;
   orientation: ShowOrientation;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -675,7 +706,22 @@ function EpisodePlayback({
       ? listed[currentPosition - 2]
       : (episodes.find((e) => e.id === current.branchOfEpisodeId) ?? null);
   const firstMemberEpisode = listed.find((e) => e.tier === "member") ?? null;
-  const memberCount = listed.filter((e) => e.tier === "member").length;
+  const memberCount =
+    accountUnlocks ?? listed.filter((e) => e.tier === "member").length;
+  // Was anything up to this episode open to an account (free or member)?
+  // Only then may the tier paywall say "Free episodes complete" (#462). The
+  // listed run before it counts — a branch counts its parent as before it —
+  // and so does the current episode when it is not locked: the member's
+  // series-end paywall comes up over an episode they just watched for free.
+  // A lapsed subscriber's 403 on a subscriber episode does not count it.
+  const precedingCount = current.branchOfEpisodeId
+    ? listedPosition(episodes, anchor.id)
+    : currentPosition - 1;
+  const openToAccount = (e: PlayerEpisode) =>
+    (e.accountTier ?? e.tier) !== "subscriber";
+  const somethingWasFree =
+    (!currentLocked && openToAccount(current)) ||
+    listed.slice(0, Math.max(precedingCount, 0)).some(openToAccount);
   // free/member episode-start funnel events fire once per episode mount.
   const tierStartFiredRef = useRef(false);
 
@@ -1378,6 +1424,11 @@ function EpisodePlayback({
         backdropThumbnailUrl={current.thumbnailUrl}
         gate={signupGate}
         freeMode={freeMode}
+        paywallNext={
+          (signupWallTarget.accountTier ?? signupWallTarget.tier) ===
+          "subscriber"
+        }
+        trigger={wallTrigger}
       />
     );
   }
@@ -1390,7 +1441,12 @@ function EpisodePlayback({
         resumeSeconds={lastSaved || undefined}
         showTitle={showTitle}
         episodeLabel={episodeLabel}
-        variant={mode === "free" || mode === "member" ? "tier" : "trial"}
+        // "trial" only for the legacy preview's own end (no page renders
+        // that mode since #462); a subscriber whose 403 says
+        // subscribe_required — the subscription lapsed mid-visit — gets the
+        // tier copy, never "Preview complete".
+        variant={mode === "trial" ? "trial" : "tier"}
+        nothingFree={!somethingWasFree}
         payFirst={payFirst}
         walletPublishableKey={walletPublishableKey}
       />
@@ -1501,7 +1557,11 @@ function EpisodePlayback({
             </span>
           </span>
           <span className="text-xs font-semibold uppercase tracking-[0.3em] text-cream/80">
-            {mode === "free" ? t.player.playFreeEpisode : t.player.playPreview}
+            {mode === "free"
+              ? t.player.playFreeEpisode
+              : mode === "trial"
+                ? t.player.playPreview
+                : t.player.play}
           </span>
         </button>
         <Link

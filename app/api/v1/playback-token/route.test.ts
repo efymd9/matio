@@ -12,13 +12,11 @@ const h = vi.hoisted(() => ({
     | undefined,
   hasActiveSubscription: vi.fn(),
   orderedEpisodeIds: vi.fn(),
-  showHasTierGating: vi.fn(),
   findTrialSession: vi.fn(),
   mintTrialSession: vi.fn(),
   stampSignupWall: vi.fn(),
   sign: vi.fn(),
   signStoryboard: vi.fn(),
-  captureMessage: vi.fn(),
   // Declared inside vi.hoisted: `vi.mock` factories are lifted above every
   // top-level statement, so a class declared normally is still in its temporal
   // dead zone when the trial mock is built.
@@ -31,7 +29,6 @@ const h = vi.hoisted(() => ({
 vi.mock("@clerk/nextjs/server", () => ({
   auth: async () => ({ userId: h.userId }),
 }));
-vi.mock("@sentry/nextjs", () => ({ captureMessage: h.captureMessage }));
 vi.mock("@/db", () => ({
   db: {
     select: () => ({
@@ -51,9 +48,11 @@ vi.mock("drizzle-orm", () => ({
   eq: () => undefined,
   isNull: () => undefined,
 }));
-vi.mock("@/lib/episode-access", () => ({
+// The tier rule itself is the real one (#462: the app and the web answer an
+// anonymous viewer the same way); only the ordering read is faked.
+vi.mock("@/lib/episode-access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/episode-access")>()),
   getOrderedReadyEpisodeIds: h.orderedEpisodeIds,
-  showHasTierGating: h.showHasTierGating,
 }));
 vi.mock("@/lib/subscription-access", () => ({
   hasActiveSubscription: h.hasActiveSubscription,
@@ -67,7 +66,6 @@ vi.mock("@/lib/attribution", () => ({ EMPTY_ATTRIBUTION: {} }));
 vi.mock("@/lib/trial", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/trial")>();
   return {
-    TRIAL_DURATION_SECONDS: 60,
     TrialRateLimitError: h.FakeRateLimit,
     findTrialSession: h.findTrialSession,
     mintTrialSession: h.mintTrialSession,
@@ -106,7 +104,6 @@ beforeEach(() => {
   h.row = { playbackId: "pb-1", showId: SHOW, access: "free" };
   h.hasActiveSubscription.mockReset().mockResolvedValue(false);
   h.orderedEpisodeIds.mockReset().mockResolvedValue([EPISODE, OTHER_EPISODE]);
-  h.showHasTierGating.mockReset().mockResolvedValue(false);
   h.findTrialSession.mockReset().mockResolvedValue(null);
   h.mintTrialSession.mockReset().mockResolvedValue({
     expiresAt: new Date(Date.now() + 60_000),
@@ -114,7 +111,6 @@ beforeEach(() => {
   h.stampSignupWall.mockReset().mockResolvedValue(undefined);
   h.sign.mockReset().mockReturnValue("signed-jwt");
   h.signStoryboard.mockReset().mockReturnValue("signed-storyboard-jwt");
-  h.captureMessage.mockReset();
   vi.stubEnv("PAYMENTS_ENABLED", "");
   vi.stubEnv("REQUIRE_SIGNUP", "");
   vi.spyOn(console, "info").mockImplementation(() => {});
@@ -200,10 +196,9 @@ describe("POST /api/v1/playback-token — who gets a token", () => {
     expect(h.stampSignupWall).toHaveBeenCalledWith(DEVICE, SHOW);
   });
 
-  it("answers `subscribe_required` on a tier-gated show in paid mode", async () => {
+  it("answers `subscribe_required` to a signed-in non-subscriber in paid mode", async () => {
     vi.stubEnv("PAYMENTS_ENABLED", "1");
     h.userId = "user_1";
-    h.showHasTierGating.mockResolvedValue(true);
     h.row = { playbackId: "pb-1", showId: SHOW, access: "subscriber" };
 
     const res = await POST(post({ episodeId: EPISODE }));
@@ -225,18 +220,6 @@ describe("POST /api/v1/playback-token — the scrub preview's storyboard token (
     expect(h.signStoryboard).toHaveBeenCalledWith("pb-1", 3600);
   });
 
-  it("a 60s preview's storyboard token runs out with the preview, not an hour later", async () => {
-    vi.stubEnv("PAYMENTS_ENABLED", "1");
-    h.row = { playbackId: "pb-1", showId: SHOW, access: "subscriber" };
-    h.mintTrialSession.mockResolvedValue({ expiresAt: new Date(Date.now() + 10 * 60_000) });
-
-    const body = await (await POST(post({ episodeId: EPISODE }))).json();
-
-    expect(body.mode).toBe("trial");
-    expect(h.signStoryboard).toHaveBeenCalledWith("pb-1", body.expiresIn);
-    expect(h.sign).toHaveBeenCalledWith("pb-1", body.expiresIn);
-  });
-
   it("a refusal carries none — no frames of an episode the viewer may not watch", async () => {
     vi.stubEnv("REQUIRE_SIGNUP", "1");
     h.row = { playbackId: "pb-1", showId: SHOW, access: "subscriber" };
@@ -250,128 +233,60 @@ describe("POST /api/v1/playback-token — the scrub preview's storyboard token (
   });
 });
 
-describe("POST /api/v1/playback-token — legacy 60s preview (paid mode)", () => {
-  // A show whose ready episodes are ALL subscriber-tier keeps the historical
-  // preview trial. The app reaches it through the same device identity the
-  // web reaches through its cookie.
+
+// #462: the legacy 60-second preview for all-subscriber shows is gone — for
+// the app too. With every episode subscriber-tier, a non-subscriber gets the
+// «Subscribers only» answer and nothing is minted: no token, no trial row.
+describe("POST /api/v1/playback-token — paid mode, no preview (#462)", () => {
   beforeEach(() => {
     vi.stubEnv("PAYMENTS_ENABLED", "1");
-    h.showHasTierGating.mockResolvedValue(false);
     h.row = { playbackId: "pb-1", showId: SHOW, access: "subscriber" };
   });
 
-  it("refuses to start a preview with no device to key it on", async () => {
-    // Without an identity the 60-second budget would be unlimited.
-    const res = await POST(post({ episodeId: EPISODE }, { device: null }));
-    expect(res.status).toBe(400);
-    expect(h.sign).not.toHaveBeenCalled();
-  });
+  it("a signed-in non-subscriber gets `subscribe_required` at once — the trial store untouched", async () => {
+    h.userId = "user_1";
 
-  it("mints a fresh preview capped at the trial duration", async () => {
-    h.mintTrialSession.mockResolvedValue({
-      expiresAt: new Date(Date.now() + 10 * 60_000),
-    });
-    const body = await (await POST(post({ episodeId: EPISODE }))).json();
-    expect(body.mode).toBe("trial");
-    // Ten minutes of clock remaining must not become a ten-minute token.
-    expect(body.expiresIn).toBe(60);
-    // A device row, whichever mint made it (#349).
-    expect(h.mintTrialSession.mock.calls[0][0]).toMatchObject({
-      sessionToken: DEVICE,
-      client: "app",
-    });
-  });
-
-  it("serves the remainder of an existing preview", async () => {
-    h.findTrialSession.mockResolvedValue({
-      expiresAt: new Date(Date.now() + 25_000),
-    });
-    const body = await (await POST(post({ episodeId: EPISODE }))).json();
-    expect(body.mode).toBe("trial");
-    expect(body.expiresIn).toBeGreaterThan(0);
-    expect(body.expiresIn).toBeLessThanOrEqual(25);
-    expect(h.mintTrialSession).not.toHaveBeenCalled();
-  });
-
-  it("walls a spent preview with `subscribe_required`", async () => {
-    h.findTrialSession.mockResolvedValue({
-      expiresAt: new Date(Date.now() - 1000),
-    });
     const res = await POST(post({ episodeId: EPISODE }));
+
     expect(res.status).toBe(403);
     expect((await res.json()).error.reason).toBe("subscribe_required");
     expect(h.sign).not.toHaveBeenCalled();
+    expect(h.signStoryboard).not.toHaveBeenCalled();
+    expect(h.findTrialSession).not.toHaveBeenCalled();
+    expect(h.mintTrialSession).not.toHaveBeenCalled();
   });
 
-  it("answers 429 with Retry-After, and without naming the bucket", async () => {
-    h.mintTrialSession.mockRejectedValue(new h.FakeRateLimit("limit"));
+  it("an anonymous device is asked for an account first — the answer it is locked with up front, no preview row", async () => {
+    // Registration first, then the paywall (#462) — the web's rule, and what
+    // isEpisodeLockedForApp shows a signed-out viewer before any request.
     const res = await POST(post({ episodeId: EPISODE }));
-    const body = await res.json();
-    expect(res.status).toBe(429);
-    expect(res.headers.get("Retry-After")).toBe("3600");
-    // Don't confirm to an adversary which bucket they hit.
-    expect(JSON.stringify(body)).not.toMatch(/ip|network|bucket/i);
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.reason).toBe("signup_required");
+    // The wall stamp on this device's row, like any sign-up ask; nothing else.
+    expect(h.stampSignupWall).toHaveBeenCalledWith(DEVICE, SHOW);
+    expect(h.findTrialSession).not.toHaveBeenCalled();
+    expect(h.mintTrialSession).not.toHaveBeenCalled();
+    expect(h.sign).not.toHaveBeenCalled();
   });
 
-  // #326: a trial_sessions failure on this path used to be thrown to the
-  // framework, which prints the Drizzle error — statement AND params, the
-  // device id and the IP hash among them — to the runtime log. It is caught at
-  // the route now: a plain 503 (never a 403 that would read as «your preview
-  // ended»), and only the class and SQLSTATE are reported.
-  const DRIVER_PARAMS = `${DEVICE},${SHOW},hashed-ip`;
-  function driverError(statement: string): Error {
-    const cause = Object.assign(new Error("terminating connection"), {
-      name: "PostgresError",
-      code: "57P01",
+  it("even a device whose old preview row is still open gets nothing", async () => {
+    h.findTrialSession.mockResolvedValue({
+      expiresAt: new Date(Date.now() + 30_000),
     });
-    return Object.assign(new Error(`Failed query: ${statement}\nparams: ${DRIVER_PARAMS}`), {
-      name: "DrizzleQueryError",
-      cause,
-    });
-  }
-
-  it.each([
-    ["the lookup", "findTrialSession"],
-    ["the mint", "mintTrialSession"],
-  ] as const)(
-    "answers 503 `unavailable` when %s fails — not a throw, not a 403",
-    async (_what, failing) => {
-      h[failing].mockRejectedValue(driverError('select … from "trial_sessions"'));
-      const error = vi.spyOn(console, "error").mockImplementation(() => {});
-
-      const res = await POST(post({ episodeId: EPISODE }));
-      const body = await res.json();
-
-      expect(res.status).toBe(503);
-      expect(body.error.code).toBe("unavailable");
-      expect(h.sign).not.toHaveBeenCalled();
-      expect(res.headers.get("Cache-Control")).toBe("private, no-store");
-      // Class and SQLSTATE — nothing the driver quoted.
-      expect(error).toHaveBeenCalledWith("[v1/playback-token] trial store failed", {
-        name: "DrizzleQueryError",
-        code: "57P01",
-      });
-      expect(JSON.stringify([body, error.mock.calls, h.captureMessage.mock.calls])).not.toContain(
-        DEVICE,
-      );
-      expect(h.captureMessage).toHaveBeenCalledWith("v1/playback-token: trial store failed", {
-        level: "error",
-        tags: { code: "57P01", name: "DrizzleQueryError" },
-      });
-    },
-  );
-
-  it("reports a failure with no SQLSTATE as code `none`", async () => {
-    h.findTrialSession.mockRejectedValue(new Error("db down"));
-    vi.spyOn(console, "error").mockImplementation(() => {});
 
     const res = await POST(post({ episodeId: EPISODE }));
 
-    expect(res.status).toBe(503);
-    expect(h.captureMessage).toHaveBeenCalledWith("v1/playback-token: trial store failed", {
-      level: "error",
-      tags: { code: "none", name: "Error" },
-    });
+    expect(res.status).toBe(403);
+    expect(h.sign).not.toHaveBeenCalled();
+  });
+
+  it("a request with no device id is refused the same way, not as a bad request", async () => {
+    const res = await POST(post({ episodeId: EPISODE }, { device: null }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.reason).toBe("signup_required");
+    expect(h.stampSignupWall).not.toHaveBeenCalled();
   });
 });
 

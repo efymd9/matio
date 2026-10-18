@@ -27,15 +27,17 @@ const WalletExpressCheckout = dynamic(
 // moment was decision overload; plan selection belongs to /subscribe,
 // which is exactly where Clerk drops the user after signup.
 //
-// Signed-in non-subscribers (rare on this path — only if they signed in
-// then canceled and came back) skip the signup step and go straight to
-// /subscribe via the secondary branch.
+// Signed-in non-subscribers skip the signup step and go straight to
+// /checkout (#462 — the paywall's most common viewer since an anonymous one
+// is asked for an account first). The watch page already did what /subscribe
+// would have (Clerk mirror, trial linking, attribution stamp).
 export function Paywall({
   showSlug,
   resumeSeconds,
   episodeLabel,
   showTitle,
   variant = "trial",
+  nothingFree = false,
   episodeId,
   payFirst = false,
   walletPublishableKey = null,
@@ -48,6 +50,11 @@ export function Paywall({
   // unchanged). "tier" — episode-gated show, member tier exhausted or a
   // subscriber-only episode was requested.
   variant?: "trial" | "tier";
+  // "tier" only: nothing on the show before this episode was open to an
+  // account (#462 — e.g. every episode `subscriber`). "Free episodes
+  // complete" would then be untrue, so the badge goes and the kicker asks
+  // for the membership instead of "Continue watching".
+  nothingFree?: boolean;
   // Episode to return to after checkout — carried through /subscribe into
   // the Stripe success_url so the new subscriber resumes where the wall
   // interrupted them. Without it, ?resume= seeks episode 1 of the show to
@@ -87,10 +94,12 @@ export function Paywall({
     params.set("resume", String(resumeSeconds));
   }
   const subscribeHref = `/subscribe?${params.toString()}`;
-  // Pay-first guests go to the in-site /checkout page (embedded Stripe form),
-  // which creates the guest session on mount (createCheckoutSession →
-  // createGuestCheckoutSession). Same watch-flow params so they resume here.
+  // The in-site /checkout page (embedded Stripe form) creates the session on
+  // mount — createCheckoutSession dispatches to the signed-in or the guest
+  // builder. Signed-in viewers and pay-first guests go there directly; same
+  // watch-flow params so they resume here.
   const checkoutHref = `/checkout?${params.toString()}`;
+  const tierNothingFree = variant === "tier" && nothingFree;
 
   const primaryCta =
     "inline-flex h-[52px] items-center justify-center rounded-full bg-gold-cta px-7 text-sm font-extrabold text-gold-deep shadow-cta transition-[transform,filter,box-shadow] duration-150 ease-out hover:brightness-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold/70 focus-visible:ring-offset-2 focus-visible:ring-offset-espresso-2 active:scale-[0.98]";
@@ -113,12 +122,15 @@ export function Paywall({
       />
       <div className="glow-floor pointer-events-none absolute inset-0" aria-hidden />
 
-      {/* "Preview ended" badge */}
-      <div className="absolute left-1/2 top-[24%] -translate-x-1/2 rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
-        {variant === "tier"
-          ? t.paywall.allFreeWatched
-          : t.paywall.previewComplete}
-      </div>
+      {/* "Preview ended" / "Free episodes complete" badge — absent when
+          nothing was free (#462). */}
+      {tierNothingFree ? null : (
+        <div className="absolute left-1/2 top-[24%] -translate-x-1/2 rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
+          {variant === "tier"
+            ? t.paywall.allFreeWatched
+            : t.paywall.previewComplete}
+        </div>
+      )}
 
       {/* Bottom sheet. Padding honors iOS home-indicator + notch safe-area
           so the CTA never sits beneath the system gesture bar. Floors keep
@@ -131,7 +143,9 @@ export function Paywall({
           />
 
           <span className="inline-flex rounded-full bg-burgundy px-3.5 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.2em] text-cream">
-            {t.paywall.continueWatching}
+            {tierNothingFree
+              ? t.paywall.becomeMemberKicker
+              : t.paywall.continueWatching}
           </span>
           <h2 className="mt-3 font-display text-xl uppercase leading-tight tracking-[0.01em] text-cream sm:text-2xl">
             {showTitle ?? t.paywall.yourStory}
@@ -201,12 +215,13 @@ export function Paywall({
               )}
             </Show>
             <Show when="signed-in">
-              {/* prefetch off (#264): rendering /subscribe WRITES — it links
-                  trial sessions and stamps attribution — so a prefetch would
-                  run those for a viewer who only saw the wall. Still a Link:
-                  the click keeps client navigation. */}
+              {/* Straight to /checkout (#462), no /subscribe card in between:
+                  the watch page this wall lives on has already synced the
+                  account, linked its trial rows and stamped attribution.
+                  prefetch off (#264): a prefetch is a render nobody asked
+                  for. Still a Link: the click keeps client navigation. */}
               <Link
-                href={subscribeHref}
+                href={checkoutHref}
                 prefetch={false}
                 onClick={() =>
                   capturePostHog("signup_cta_clicked", { auth: "signed_in" })
