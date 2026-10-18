@@ -37,6 +37,16 @@
 // §4's mailbox row names Google Workspace, which has carried maksym@matio.tv
 // since 08.10.2026 (#414), instead of Namecheap PrivateEmail — both in the
 // same #376 draft, merged on the owner's «да» in the PR thread.
+// 2026-10-18 edition (#462): the 60-second preview is gone. §2 "Usage data"
+// describes the anonymous free-episode record instead — every field
+// `trial_sessions` holds for a web row (db/schema/trial_sessions.ts; the
+// `expires_at` column is the creation time for these rows, lib/trial.ts) and
+// the cookie + 6-hour same-network links of linkTrialSessionsToCurrentUser —
+// and §11 drops "when a free preview expires" and the preview as a viewing
+// rule (no access decision reads the record any more; what it still backs
+// is the anonymous counters' proof of playback, lib/watch-segments-write.ts).
+// Written by the main session on the owner's order (PR #463 thread, 18.10),
+// counsel review pending with the rest of the page (#168).
 // matio.tv/ideas is
 // plain text on purpose: every internal link here must survive ?embed=app
 // (app/(public)/legal-embed.test.tsx).
@@ -57,7 +67,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "October 15, 2026";
+const LAST_UPDATED = "October 18, 2026";
 
 export default async function PrivacyPage() {
   const { t } = await getDict();
@@ -139,9 +149,25 @@ function PrivacyEn() {
           <li>
             <strong>Usage data</strong> — which episodes you watched and the
             playback position, recorded per (user, episode) so you can resume.
-            For anonymous previews we record a session token, the show id, an
-            expiry timestamp, and a HMAC hash of your IP (the raw IP is never
-            stored).
+            When a free episode plays on your browser, we may also keep one
+            record per show for that browser, identified by the random token
+            in the{" "}
+            <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">trial_session</code>{" "}
+            cookie: the show, when the record was created, the last free
+            episode you watched and how far into it you got, the furthest
+            episode you reached in that show, when you first reached the
+            sign-up screen, a keyed hash (HMAC) of your IP address — for an
+            IPv6 address, of its network prefix — (the raw IP is never
+            stored), whether the record came from the website or the app, and
+            the campaign source / medium / campaign that brought you, only
+            while marketing cookies are on. If you then sign in on that
+            browser, the record is linked to your account — and so may be
+            website records created from the same internet connection in the
+            six hours before — and if that account later subscribes, the
+            record is marked as converted. Unlinked records are kept as
+            described under &ldquo;Trial sessions&rdquo; in section 6. The app
+            keeps the same kind of record against its device identifier
+            (section 11).
           </li>
           <li>
             <strong>Marketing-attribution data</strong> — if you arrive from a
@@ -509,14 +535,14 @@ function PrivacyEn() {
             long we keep it&rdquo; below).
           </li>
           <li>
-            <strong>What the identifier is used for</strong> — when an episode
-            plays, we may keep one record per show against the identifier: the
-            show, when playback started, when a free preview expires, when the
-            sign-up screen was first reached, and a HMAC hash of your IP
-            address (the raw IP is never stored). These records let us apply
-            the viewing rules to episodes you do not have full access to,
-            whether or not you are signed in (such as the 60-second preview),
-            limit abuse, and measure how our own service is used. Lawful basis: <em>legitimate interests</em> — offering
+            <strong>What the identifier is used for</strong> — when a free
+            episode plays, we may keep one record per show against the
+            identifier: the show, when playback started, when the sign-up
+            screen was first reached, and a keyed hash (HMAC) of your IP
+            address — for an IPv6 address, of its network prefix — (the raw
+            IP is never stored). These records let us check that the viewing
+            counters below reflect real playback, limit abuse, and measure
+            how our own service is used. Lawful basis: <em>legitimate interests</em> — offering
             free viewing fairly and understanding how our own service is used,
             without third-party tracking. Like the{" "}
             <code className="rounded bg-white/[0.06] px-1 py-0.5 text-[0.85em]">matio_aid</code>{" "}

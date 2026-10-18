@@ -253,6 +253,9 @@ export const en = {
     // "Create your account".
     thenPaywallBody:
       "Sign up to continue — then become a member to watch every episode.",
+    // That wall's CTA (and the app's wall in front of a subscribers-only
+    // episode): the account is free, but what it leads to is not.
+    thenPaywallCta: "Create account",
     signUpCta: "Create free account",
     alreadyMember: "Already have an account?",
     signInLink: "Sign in",

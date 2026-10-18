@@ -124,6 +124,12 @@ export const appEn = {
     signInBody: "We'll email you a code. No password needed.",
     noAccount: "No account yet?",
     createAccount: "Create account",
+    // The wall and the sign-in form in front of a subscribers-only episode
+    // (#462, `paywallNext`): an account will not open it, so nothing says
+    // "free" — and, the app selling nothing (App Store 3.1.1), nothing names
+    // a purchase, a price or a membership either. No kicker, no "No card
+    // needed"; the wall's CTA is `createAccount`.
+    paywallNextBody: "Sign in or create an account to continue.",
     // The line under the email step's CTA (#312, App Store 5.1.1(i)): split
     // around its two links, which open /terms and /privacy as Settings does.
     // Legal copy: merged only on the owner's approval in #312's PR thread;

@@ -75,7 +75,7 @@ export default function ShowScreen() {
   // rides along; a subscribers-only episode's page says so there.
   const openEpisode = useCallback(
     (show: ShowDetail, episode: EpisodeSummary, lock: false | PlaybackDenialReason) => {
-      router.push(episodeRoute(lock, episode.id, show.slug));
+      router.push(episodeRoute(lock, episode.id, show.slug, episode.access));
     },
     [router],
   );

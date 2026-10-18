@@ -10,6 +10,15 @@
 // cookie any more. That row changes the English text, hence the new "Last
 // updated" (2026-10-12); /terms and /privacy, whose English did not change,
 // keep their dates.
+// 2026-10-18 edition (#462): the `trial_session` row no longer describes the
+// 60-second preview (gone) but what the cookie does now — set by
+// /api/playback-token on a free episode's first play, it keys the per-show
+// `trial_sessions` record behind anonymous resume (the watch page, the
+// Continue watching rail), funnel depth and the sign-up-wall stamp, and the
+// link to the account on sign-in (lib/trial.ts). Category kept "Strictly
+// necessary", the same footing as `matio_aid` — whether its measurement half
+// stands on it is a counsel question (#168). Written by the main session on
+// the owner's order (PR #463 thread, 18.10), counsel review pending.
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalLink } from "@/components/site/legal-link";
@@ -27,7 +36,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "October 12, 2026";
+const LAST_UPDATED = "October 18, 2026";
 
 export default async function CookiesPage() {
   const { t } = await getDict();
@@ -101,7 +110,7 @@ function CookiesEn() {
             {
               name: "trial_session",
               purpose:
-                "Tracks your 60-second free preview per show so it can&rsquo;t be reset by reloading. Random opaque token, no personal data.",
+                "Your viewing of free episodes on this browser. Set when a free episode first plays here, it ties together our first-party record of that viewing for each show: where you stopped, so you can pick up there and find it under Continue watching; how far into the show you got; and whether you reached the sign-up screen. If you then sign up or sign in, it lets us link those records to your account. First-party only — never shared with third parties or used for advertising. A random opaque token: the cookie itself holds nothing about you (what we keep against it is described in section 2 of the Privacy Policy).",
               expiry: "1 year",
               category: "Strictly necessary",
             },

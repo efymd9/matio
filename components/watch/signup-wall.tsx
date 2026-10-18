@@ -90,6 +90,9 @@ export function SignupWall({
   }, [showId, showSlug, episodeNumber, gate, trigger]);
 
   const watchHref = `/watch/${showSlug}?ep=${encodeURIComponent(targetEpisodeId)}`;
+  // In front of a paywall the CTA drops "free" too (#462): the account is
+  // free, the episode behind it is not.
+  const cta = paywallNext ? t.signupWall.thenPaywallCta : t.signupWall.signUpCta;
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-espresso sm:aspect-video sm:h-auto">
@@ -188,7 +191,7 @@ export function SignupWall({
               }
               className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out active:scale-[0.98]"
             >
-              {t.signupWall.signUpCta}
+              {cta}
             </button>
           </SignUpButton>
         </Show>
@@ -199,7 +202,7 @@ export function SignupWall({
             href={watchHref}
             className="inline-flex h-[54px] w-full items-center justify-center rounded-full bg-gold-cta text-[15px] font-extrabold text-gold-deep shadow-cta transition-transform duration-150 ease-out active:scale-[0.98]"
           >
-            {t.signupWall.signUpCta}
+            {cta}
           </a>
         </Show>
 

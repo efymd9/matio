@@ -132,6 +132,9 @@ vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 // browser its links open — inert here, tested in sign-in-form.test.tsx.
 vi.mock("@/api/config-context", () => ({
   useConfig: () => ({
+    // Paid mode (live): a subscribers-only episode stays locked once signed
+    // in — the screen's `paywallNext` wording (#462).
+    signupGate: { mode: "tiers" },
     flags: { paymentsEnabled: true, downloadsEnabled: false, castEnabled: false },
     urls: {
       terms: "https://matio.tv/terms?embed=app",
@@ -230,6 +233,36 @@ describe("SignInScreen — where success and «Not now» lead (#288)", { timeout
     Reflect.deleteProperty(document.documentElement, "clientHeight");
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  // #462 — sent here by a subscribers-only episode, which an account alone
+  // will not open: nothing "free" on either step, no "No card needed", and
+  // nothing that names a purchase (3.1.1). A member episode keeps the form's
+  // usual wording.
+  it("in front of a subscribers-only episode the form says nothing «free» — on either step", async () => {
+    params = { ...EPISODE, access: "subscriber" };
+    render();
+
+    expect(text()).toContain("Sign in or create an account to continue.");
+    expect(text()).not.toContain("Keep watching free");
+    expect(text()).not.toContain("No card needed");
+    expect(text()).not.toMatch(/\$|\bSubscribe\b|member/i);
+
+    typeInto("member@example.com");
+    await press("Send code");
+    expect(text()).toContain("Check your email");
+    expect(text()).not.toContain("Keep watching free");
+    expect(text()).not.toContain("No card needed");
+  });
+
+  it("in front of a member episode the form keeps its wording", async () => {
+    params = { ...EPISODE, access: "member" };
+    render();
+
+    expect(text()).toContain("Keep watching free");
+    expect(text()).toContain("Create a free account to keep watching");
+    expect(text()).toContain("No card needed. Just an email.");
+    expect(text()).not.toContain("Sign in or create an account to continue.");
   });
 
   it("signing in from a locked episode on the show page lands IN that episode", async () => {

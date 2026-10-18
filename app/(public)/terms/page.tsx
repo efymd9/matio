@@ -7,6 +7,12 @@
 // new edition: the English text did not change by a word, so "Last updated"
 // stays at the 2026-09-09 edition and keeps matching lib/wallet-checkout.ts
 // TOS_VERSION (#214).
+// 2026-10-18 edition (#462): §4 "Free preview" → "Episode access" — the
+// 60-second preview is gone; per-episode access (free / account /
+// membership) and the anti-abuse limit on anonymous viewing records, no
+// numbers — and the free-mode notice no longer names a preview. Written by
+// the main session on the owner's order (PR #463 thread, 18.10), counsel
+// review pending (#168). TOS_VERSION moved with "Last updated".
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalLink } from "@/components/site/legal-link";
@@ -25,14 +31,13 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "September 9, 2026";
+const LAST_UPDATED = "October 18, 2026";
 
 export default async function TermsPage() {
   const { t } = await getDict();
   const embed = await isAppEmbed();
-  // Free pivot: with payments off, §4 (60s preview) and §5-6 (pricing /
-  // billing / withdrawal) describe a purchase flow that doesn't currently
-  // exist. The legal wording below stays untouched (counsel-pending, and it
+  // Free pivot: with payments off, §5-6 (pricing / billing / withdrawal)
+  // describe a purchase flow that doesn't currently exist. The legal wording below stays untouched (counsel-pending, and it
   // still governs memberships bought before the pivot) — this notice frames
   // it so the indexed page doesn't sell "$1 today" as a current fact.
   const paymentsOn = paymentsEnabled();
@@ -60,8 +65,8 @@ export default async function TermsPage() {
           <div className="mb-10 rounded-lg border border-white/[0.12] bg-white/[0.04] p-4 text-sm leading-relaxed text-white/75">
             <strong>Notice:</strong> payments are currently disabled on
             matio — all content is free to watch and no new subscriptions
-            or trials can be purchased. The preview, pricing and billing
-            sections below apply only while payments are enabled and to
+            or trials can be purchased. The pricing and billing sections
+            below apply only while payments are enabled and to
             memberships purchased before this change; existing memberships
             can still be managed and cancelled via the Stripe Customer
             Portal.
@@ -122,13 +127,28 @@ function TermsEn() {
         </p>
       </Section>
 
-      <Section id="trial" title="4. Free preview">
+      <Section id="episode-access" title="4. Episode access">
         <p>
-          Each show offers a free 60-second preview per browser session, with no
-          account required. We use a HTTP-only cookie and an HMAC-hashed IP
-          address to limit previews to three per network per hour, to prevent
-          the preview becoming a substitute for the paid service. The preview is
-          a marketing courtesy and may be removed or changed without notice.
+          Each episode shows what you need to watch it. Some episodes may be
+          marked free: they play without an account. Others need a free matio
+          account, or a paid membership (section 5), as shown on that episode.
+          matio does not offer a time-limited preview of episodes that need an
+          account or a membership.
+        </p>
+        <p>
+          We may change which episodes are free, which need an account and
+          which need a membership at any time, without notice; the access
+          shown on an episode when you play it is the one that applies.
+          Watching a free episode, or one that comes with a free account, is
+          subject to the licence terms and acceptable-use rules in section 7
+          for as long as that episode is offered that way.
+        </p>
+        <p>
+          To keep our records of anonymous viewing reliable, we automatically
+          limit how many of them can be created from one network. That limit
+          never stops a free episode from playing. Our{" "}
+          <LegalLink href="/privacy" className="underline underline-offset-2 hover:text-white">Privacy Policy</LegalLink>{" "}
+          explains what those records hold.
         </p>
       </Section>
 

@@ -144,7 +144,7 @@ Google Pay прямо на paywall создают Checkout Session с `ui_mode: 
 |---|---|---|---|---|
 | `cookie_consent` | `proxy.ts` (гео-дефолт вне EU/EEA/UK/CH) / баннер | `{necessary, marketing, ts, v}` | 1 год | нет |
 | `matio_aid` | `proxy.ts` | случайный UUID — ключ `visitors` | 395 дней, без продления | да |
-| `trial_session` | `/api/playback-token` | UUID — ключ `trial_sessions` | 1 год (`ONE_YEAR_SECONDS`) | да |
+| `trial_session` | `/api/playback-token` (первое воспроизведение `free`-эпизода в браузере, #462) | UUID — ключ `trial_sessions`; `/cookies` с 18.10 описывает его как запись просмотра бесплатных серий (резюм, Continue watching, глубина, стена, привязка к аккаунту), категория «Strictly necessary» наравне с `matio_aid` — вопрос юристу (#168); поля строки — `/privacy` §2 «Usage data» | 1 год (`ONE_YEAR_SECONDS`) | да |
 | `attribution_first` / `attribution_last` | `proxy.ts` | `{s,m,c}` UTM | 90 / 30 дней | нет |
 | `_fbc` | `proxy.ts` из `?fbclid` (при согласии) | click id Meta | 90 дней | нет |
 | `_fbp` | Meta Pixel | browser id | по Meta | нет |

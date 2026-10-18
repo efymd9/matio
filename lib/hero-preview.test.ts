@@ -7,7 +7,9 @@ vi.mock("server-only", () => ({}));
 // case queues the rows those reads should see.
 const h = vi.hoisted(() => ({
   reads: [] as unknown[][],
-  sign: vi.fn<(playbackId: string, ttl: number) => string>(),
+  sign: vi.fn<
+    (playbackId: string, ttl: number, clip?: { startSeconds: number; endSeconds: number }) => string
+  >(),
 }));
 
 vi.mock("@/db", () => ({
@@ -34,6 +36,7 @@ vi.mock("@/lib/trial", () => ({ TRIAL_DURATION_SECONDS: 60 }));
 
 import {
   HERO_PREVIEW_TTL_SECONDS,
+  HERO_TEASER_CLIP_SECONDS,
   pickFeaturedShow,
   resolveHeroPreview,
 } from "./hero-preview";
@@ -101,13 +104,19 @@ describe("resolveHeroPreview", () => {
     expect(h.sign).not.toHaveBeenCalled();
   });
 
-  it("signs a token with the capped TTL for a signed asset", async () => {
+  it("signs a token with the capped TTL, clipped to the first minute, for a signed asset", async () => {
     h.reads = [SEASON, [{ muxPlaybackId: "pb-1", muxPlaybackPolicy: "signed" }]];
     expect(await resolveHeroPreview("show-1")).toEqual({
       previewPlaybackId: "pb-1",
       previewToken: "signed-dummy-token",
     });
-    expect(h.sign).toHaveBeenCalledWith("pb-1", HERO_PREVIEW_TTL_SECONDS);
+    // Every re-mint by /api/hero-preview-token opens the same window —
+    // 0:00 to 1:00 — never the next minute of the (paid) episode.
+    expect(HERO_TEASER_CLIP_SECONDS).toBe(60);
+    expect(h.sign).toHaveBeenCalledWith("pb-1", HERO_PREVIEW_TTL_SECONDS, {
+      startSeconds: 0,
+      endSeconds: 60,
+    });
   });
 
   it("degrades to a token-less preview when signing fails (key unset)", async () => {

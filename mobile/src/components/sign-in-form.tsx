@@ -82,6 +82,11 @@ type SignInFormProps = {
   // account» switches them back. Shown on the tab, where the framing is
   // "create".
   signInHint?: boolean;
+  // The episode that sent the viewer here stays locked once they have an
+  // account (#462 — subscriptionFollowsSignIn): no kicker on either step
+  // (the code step's own is «Keep watching free») and no "No card needed".
+  // The caller passes the matching body; the episode note stays.
+  paywallNext?: boolean;
 };
 
 // The gate — and it has to be a SEPARATE component from the form. Without a
@@ -115,6 +120,7 @@ function ClerkSignInForm({
   onDone,
   onCancel,
   signInHint = false,
+  paywallNext = false,
 }: SignInFormProps) {
   const t = useT();
   const config = useConfig();
@@ -329,7 +335,7 @@ function ClerkSignInForm({
   return (
     <View style={styles.form}>
       <View style={styles.kickerRow}>
-        <Pill label={step === "email" ? kicker : t.signupWall.kicker} />
+        {paywallNext ? null : <Pill label={step === "email" ? kicker : t.signupWall.kicker} />}
         {step === "email" && kickerNote ? (
           <Text style={styles.kickerNote} numberOfLines={1}>
             {kickerNote}
@@ -487,8 +493,9 @@ function ClerkSignInForm({
 
       {/* «No card needed» only says something where there is something to
           pay for: with payments off (free mode) the line is not drawn (#447,
-          from the #446 audit). The key stays, for paid mode. */}
-      {config.flags.paymentsEnabled ? (
+          from the #446 audit). The key stays, for paid mode — but not in
+          front of a subscribers-only episode (#462). */}
+      {config.flags.paymentsEnabled && !paywallNext ? (
         <Text style={styles.fine}>{t.signupWall.noCardNeeded}</Text>
       ) : null}
 

@@ -314,3 +314,21 @@ export function isEpisodeLockedForApp(args: {
   if (signedIn) return false;
   return position <= gate.episodes ? false : "signup_required";
 }
+
+// Whether the episode stays locked once the viewer HAS an account — paid
+// mode, a `subscriber` episode (#462). The app's sign-up ask in front of such
+// an episode must neither promise "free" nor name a purchase (App Store
+// 3.1.1): the wall and the sign-in form draw their `paywallNext` wording. The
+// app's twin of the web's `PlayerEpisode.accountTier === "subscriber"`, read
+// off the same rule, so the two cannot drift.
+export function subscriptionFollowsSignIn(gate: SignupGate, access: EpisodeAccessTier): boolean {
+  return (
+    isEpisodeLockedForApp({
+      gate,
+      signedIn: true,
+      hasSubscription: false,
+      position: 1,
+      access,
+    }) === "subscribe_required"
+  );
+}

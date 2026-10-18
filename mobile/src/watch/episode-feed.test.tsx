@@ -395,6 +395,10 @@ afterEach(() => {
 });
 
 const WALL_CTA = "Create free account";
+const WALL_KICKER = "Keep watching free";
+// The wall in front of a subscribers-only episode (#462, `paywallNext`).
+const PAYWALL_NEXT_BODY = "Sign in or create an account to continue.";
+const PAYWALL_NEXT_CTA = "Create account";
 const SUBSCRIBERS_ONLY = "Subscribers only";
 const TRY_AGAIN = "Try again";
 // What a purchase call to action would read like — none may appear (3.1.1).
@@ -469,20 +473,30 @@ describe("EpisodeFeed — which answer a locked page gives (#288 item 1)", () =>
     // 403 is the «Subscribers only» page (the SIGNED-IN test above).
     await renderFeed(makeShow("horizontal", ["subscriber"]));
 
-    expect(text()).toContain(WALL_CTA);
+    // An account will not open it: nothing "free", nothing to buy (3.1.1).
+    expect(text()).toContain(PAYWALL_NEXT_BODY);
+    expect(text()).not.toContain(WALL_KICKER);
+    expect(text()).not.toContain(WALL_CTA);
+    expect(text()).not.toContain("No card needed");
+    expect(text()).not.toMatch(/free/i);
+    expect(text()).not.toMatch(PURCHASE_CTA);
     expect(text()).not.toContain(SUBSCRIBERS_ONLY);
-    press(WALL_CTA);
-    expect(onSignIn).toHaveBeenCalledTimes(1);
+    press(PAYWALL_NEXT_CTA);
+    // The tier rides to the sign-in screen, whose form drops "free" too.
+    expect(onSignIn).toHaveBeenCalledWith("subscriber");
     expect(tokens.calls).toEqual([]);
   });
 
   it("an episode that asks for an account is still the sign-up wall for an anonymous viewer", async () => {
     await renderFeed(makeShow("horizontal", ["member"]));
 
+    // The account really opens this one: the wall keeps its wording.
+    expect(text()).toContain(WALL_KICKER);
     expect(text()).toContain(WALL_CTA);
+    expect(text()).not.toContain(PAYWALL_NEXT_BODY);
     expect(text()).not.toContain(SUBSCRIBERS_ONLY);
     press(WALL_CTA);
-    expect(onSignIn).toHaveBeenCalledTimes(1);
+    expect(onSignIn).toHaveBeenCalledWith("member");
     expect(tokens.calls).toEqual([]);
   });
 
@@ -1539,7 +1553,8 @@ describe("EpisodeFeed — a signed-in viewer's subscribers-only episode is the t
     await renderFeed(makeShow("horizontal", ["free", "member", "subscriber"]), { initialIndex: 2 });
 
     expect(tokens.calls).toEqual([]);
-    expect(text()).toContain(WALL_CTA);
+    expect(text()).toContain(PAYWALL_NEXT_CTA);
+    expect(text()).toContain(PAYWALL_NEXT_BODY);
     expect(text()).not.toContain(SUBSCRIBERS_ONLY);
     expect(text()).not.toContain(TRY_AGAIN);
   });

@@ -24,6 +24,8 @@ import { useT } from "@/i18n/locale";
 import { autoplayNextEnabled, loadAutoplayNext } from "@/prefs/autoplay";
 import {
   isEpisodeLockedForApp,
+  subscriptionFollowsSignIn,
+  type EpisodeAccessTier,
   type EpisodeSummary,
   type PlaybackDenialReason,
   type PlaybackMode,
@@ -64,12 +66,13 @@ import { useSegmentTracker } from "./use-segment-tracker";
 //
 // The gate is the same one the show page draws its locks from
 // (isEpisodeLockedForApp): an episode that asks for an account has the
-// sign-up wall as its page, a subscribers-only one the «Subscribers only»
-// state — so an auto-advance or a swipe into it lands on the answer, never on
-// a stalled player — and the token route still enforces the gate underneath.
-// One exception (#316): a signed-in viewer is never locked up front on a
-// subscribers-only episode, because the app cannot tell a subscriber from a
-// member — the token route answers for them (see lockedAt).
+// sign-up wall as its page — so an auto-advance or a swipe into it lands on
+// the answer, never on a stalled player — and the token route still enforces
+// the gate underneath. A subscribers-only episode is never locked up front:
+// a signed-out viewer meets it as the sign-up wall (#462), and a signed-in
+// one is left to the token route, because the app cannot tell a subscriber
+// from a member (#316) — its 403 is the «Subscribers only» page (see
+// lockedAt).
 
 // How long before the current episode ends the next one's token is fetched
 // and its player mounted (horizontal). Same lead as the web player.
@@ -169,7 +172,9 @@ export function EpisodeFeed({
   resumeSeconds: number;
   signedIn: boolean;
   onBack: () => void;
-  onSignIn: () => void;
+  // The wall's episode tier rides to the sign-in screen, so its form in
+  // front of a subscribers-only episode drops "free" (#462).
+  onSignIn: (access: EpisodeAccessTier) => void;
   // The current page and where it stands — its last playhead, or where it
   // would start if it has not played yet — every time either changes and
   // once on mount. The watch screen remembers both across a remount of the
@@ -187,7 +192,6 @@ export function EpisodeFeed({
   }));
   const { height } = useWindowDimensions();
   const config = useConfig();
-  const t = useT();
   const vertical = show.orientation === "vertical";
   const episodes = show.episodes;
   const listRef = useRef<FlatList<EpisodeSummary>>(null);
@@ -251,10 +255,12 @@ export function EpisodeFeed({
   // Subscription state is not exposed to the app (registry), so a signed-in
   // viewer might be a subscriber: for them a subscribers-only episode is not
   // locked here, the token route decides (#316). A subscriber gets a token
-  // and plays; anyone else gets the 403 subscribe_required — or, on a show
-  // whose episodes are ALL subscribers-only, the 60s preview the web gives
-  // too — and both end on the same «Subscribers only» page. A signed-out
-  // viewer is still locked up front: no account, no subscription.
+  // and plays; anyone else gets the 403 subscribe_required — at once, on
+  // every show: the 60s preview is gone since #462 — and the page shows
+  // «Subscribers only». A signed-out viewer is locked up front, but with the
+  // sign-up wall: since #462 isEpisodeLockedForApp asks a signed-out viewer
+  // for the account first (`signup_required`), so `subscribe_required` never
+  // comes out of here.
   const lockedAt = useCallback(
     (index: number) => {
       const lock = isEpisodeLockedForApp({
@@ -382,18 +388,15 @@ export function EpisodeFeed({
         ? Math.abs(index - current) <= 1
         : index >= current && index <= current + 1;
 
+      // `signup_required` is the only lock a page is drawn from (see
+      // lockedAt); «Subscribers only» comes from the token route's 403
+      // inside the page (FeedPage).
       let content;
       if (locked === "signup_required") {
-        content = <SignupWall onSignIn={onSignIn} onBack={onBack} />;
-      } else if (locked === "subscribe_required") {
-        // Signed out only (see lockedAt). An account alone does not open
-        // it, so no sign-up wall and no retry: the same answer the token
-        // route's 403 gets inside the page — with a way back, since in
-        // landscape nothing else on screen leads out.
         content = (
-          <ErrorState
-            message={t.app.watch.subscribersOnly}
-            hint={t.app.watch.subscribersOnlyHint}
+          <SignupWall
+            paywallNext={subscriptionFollowsSignIn(config.signupGate, item.access)}
+            onSignIn={() => onSignIn(item.access)}
             onBack={onBack}
           />
         );
@@ -439,6 +442,7 @@ export function EpisodeFeed({
     },
     [
       armedIndex,
+      config.signupGate,
       current,
       height,
       lockedAt,
@@ -453,7 +457,6 @@ export function EpisodeFeed({
       seedFor,
       show,
       signedIn,
-      t,
       vertical,
       watchedFraction,
     ],
@@ -545,7 +548,7 @@ function FeedPage({
   onNearEnd: (index: number) => void;
   onSelectEpisode: (index: number) => void;
   onBack: () => void;
-  onSignIn: () => void;
+  onSignIn: (access: EpisodeAccessTier) => void;
 }) {
   const t = useT();
   const config = useConfig();
@@ -980,7 +983,15 @@ function FeedPage({
     // quiet retry runs, then an honest failure, never a wall asking an
     // account holder to sign in.
     if (code === "forbidden" && reason === "signup_required") {
-      if (!signedIn) return <SignupWall onSignIn={onSignIn} onBack={onBack} />;
+      if (!signedIn) {
+        return (
+          <SignupWall
+            paywallNext={subscriptionFollowsSignIn(config.signupGate, episode.access)}
+            onSignIn={() => onSignIn(episode.access)}
+            onBack={onBack}
+          />
+        );
+      }
       if (!authRetried) return <Loading />;
       return (
         <ErrorState

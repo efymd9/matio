@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/api/client";
+import { useConfig } from "@/api/config-context";
 import { useAsync } from "@/api/use-async";
 import { useOptionalAuth } from "@/auth/clerk";
 import { AuthStalled } from "@/components/auth-stalled";
@@ -17,12 +18,15 @@ import { SignInForm } from "@/components/sign-in-form";
 import { Artwork, Scrim } from "@/components/ui";
 import { useT } from "@/i18n/locale";
 import { goBackOrHome } from "@/navigation";
+import { subscriptionFollowsSignIn } from "@/shared/api-types";
 import { colors, SCREEN_PAD, space } from "@/theme";
 
 // Set by the show page and Home's Play (watch/first-episode.ts: episodeRoute)
-// — the locked episode the viewer tapped. The player's own wall passes none:
-// the player is still under this screen.
-type Params = { episodeId?: string; showSlug?: string };
+// — the locked episode the viewer tapped. The player's own wall passes no
+// episode: the player is still under this screen. `access` is the locked
+// episode's tier, from either path (the player's wall passes it too): a
+// subscribers-only one in paid mode gets the `paywallNext` wording (#462).
+type Params = { episodeId?: string; showSlug?: string; access?: string };
 
 // The show's frame over the form (#277, board variant B) when a locked
 // episode sent the viewer here: its hero across the top, the form starting
@@ -43,7 +47,13 @@ function signInFrame(windowHeight: number): { height: number; overlap: number } 
 // success, goes on to the episode rather than home.
 export default function SignInScreen() {
   const router = useRouter();
-  const { episodeId, showSlug } = useLocalSearchParams<Params>();
+  const { episodeId, showSlug, access } = useLocalSearchParams<Params>();
+  const config = useConfig();
+  // An account will not open the episode that sent the viewer here: say
+  // nothing "free", name no purchase (3.1.1). Decided by the route param,
+  // not by the show load below, so the copy never changes under the viewer.
+  const paywallNext =
+    access === "subscriber" && subscriptionFollowsSignIn(config.signupGate, access);
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const t = useT();
@@ -128,8 +138,9 @@ export default function SignInScreen() {
               kicker={t.signupWall.kicker}
               kickerNote={kickerNote}
               headline={t.signupWall.headline}
-              bodyText={t.signupWall.bodyNoCount}
+              bodyText={paywallNext ? t.app.signIn.paywallNextBody : t.signupWall.bodyNoCount}
               cta={t.app.signIn.sendCode}
+              paywallNext={paywallNext}
               onDone={done}
               onCancel={back}
             />

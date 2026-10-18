@@ -278,6 +278,10 @@ describe("paid mode — the tier means money again", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ mode: "subscriber" });
+    // The whole episode: the teaser clip is the home hero's alone
+    // (lib/hero-preview.ts) — a third argument here would cut a subscriber's
+    // episode to its first minute.
+    expect(h.sign).toHaveBeenCalledWith("pb-1", 3600);
   });
 
   it("refuses a signed-in non-subscriber on a subscriber episode with subscribe_required", async () => {

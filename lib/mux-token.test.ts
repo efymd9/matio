@@ -57,3 +57,22 @@ describe("signMuxStoryboardToken (#375)", () => {
     expect(() => signMuxStoryboardToken("pb-1", 60)).toThrow(/MUX_SIGNING_KEY/);
   });
 });
+
+// Mux instant clipping on a signed id (#462, the home hero's teaser): the
+// window has to ride INSIDE the JWT as `asset_start_time` / `asset_end_time`
+// — https://www.mux.com/docs/guides/create-instant-clips#via-signed-urls.
+describe("signMuxPlaybackToken — the clip", () => {
+  it("carries the window as asset_start_time / asset_end_time claims, in seconds", () => {
+    const { claims } = read(
+      signMuxPlaybackToken("pb-1", 60, { startSeconds: 0, endSeconds: 60 }),
+    );
+    expect(claims.aud).toBe("v");
+    expect(claims.asset_start_time).toBe(0);
+    expect(claims.asset_end_time).toBe(60);
+  });
+
+  it("leaves a token minted without a clip whole — what the watch and app routes mint", () => {
+    const { claims } = read(signMuxPlaybackToken("pb-1", 3600));
+    expect(Object.keys(claims).sort()).toEqual(["aud", "exp", "iat", "sub"]);
+  });
+});

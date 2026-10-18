@@ -708,15 +708,20 @@ function EpisodePlayback({
   const firstMemberEpisode = listed.find((e) => e.tier === "member") ?? null;
   const memberCount =
     accountUnlocks ?? listed.filter((e) => e.tier === "member").length;
-  // Was anything on the listed run before this episode open to an account
-  // (free or member)? Only then may the tier paywall say "Free episodes
-  // complete" (#462). A branch counts its parent as before it.
+  // Was anything up to this episode open to an account (free or member)?
+  // Only then may the tier paywall say "Free episodes complete" (#462). The
+  // listed run before it counts — a branch counts its parent as before it —
+  // and so does the current episode when it is not locked: the member's
+  // series-end paywall comes up over an episode they just watched for free.
+  // A lapsed subscriber's 403 on a subscriber episode does not count it.
   const precedingCount = current.branchOfEpisodeId
     ? listedPosition(episodes, anchor.id)
     : currentPosition - 1;
-  const somethingWasFree = listed
-    .slice(0, Math.max(precedingCount, 0))
-    .some((e) => (e.accountTier ?? e.tier) !== "subscriber");
+  const openToAccount = (e: PlayerEpisode) =>
+    (e.accountTier ?? e.tier) !== "subscriber";
+  const somethingWasFree =
+    (!currentLocked && openToAccount(current)) ||
+    listed.slice(0, Math.max(precedingCount, 0)).some(openToAccount);
   // free/member episode-start funnel events fire once per episode mount.
   const tierStartFiredRef = useRef(false);
 
@@ -1436,7 +1441,11 @@ function EpisodePlayback({
         resumeSeconds={lastSaved || undefined}
         showTitle={showTitle}
         episodeLabel={episodeLabel}
-        variant={mode === "free" || mode === "member" ? "tier" : "trial"}
+        // "trial" only for the legacy preview's own end (no page renders
+        // that mode since #462); a subscriber whose 403 says
+        // subscribe_required — the subscription lapsed mid-visit — gets the
+        // tier copy, never "Preview complete".
+        variant={mode === "trial" ? "trial" : "tier"}
         nothingFree={!somethingWasFree}
         payFirst={payFirst}
         walletPublishableKey={walletPublishableKey}

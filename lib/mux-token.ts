@@ -8,10 +8,19 @@ import jwt from "jsonwebtoken";
 // Same RS256 signing key works for all of them; only `aud` and TTL vary.
 type Audience = "v" | "t" | "s";
 
+// Mux instant clipping on a SIGNED playback id: the window rides inside the
+// JWT as `asset_start_time` / `asset_end_time` claims (seconds from the start
+// of the asset) — a query parameter next to `?token=` would be ignored, and on
+// a public id it could simply be edited away. Mux trims the HLS manifest at
+// segment boundaries, so the stream can run a few seconds past the end.
+// https://www.mux.com/docs/guides/create-instant-clips#via-signed-urls
+export type MuxClip = { startSeconds: number; endSeconds: number };
+
 function signMuxToken(
   playbackId: string,
   ttlSeconds: number,
   aud: Audience,
+  clip?: MuxClip,
 ): string {
   const keyId = process.env.MUX_SIGNING_KEY_ID;
   const privateKeyBase64 = process.env.MUX_SIGNING_KEY_PRIVATE_KEY;
@@ -28,6 +37,10 @@ function signMuxToken(
       sub: playbackId,
       aud,
       exp: Math.floor(Date.now() / 1000) + ttlSeconds,
+      ...(clip && {
+        asset_start_time: clip.startSeconds,
+        asset_end_time: clip.endSeconds,
+      }),
     },
     privateKey,
     {
@@ -40,11 +53,14 @@ function signMuxToken(
 // Signs a Mux playback JWT (RS256). Mux signing keys are created in
 // dashboard.mux.com → Settings → Signing Keys. Store the key id directly
 // and the private key as a base64-encoded PEM (avoids env-var newline pain).
+// `clip` is for the home hero's teaser ONLY (lib/hero-preview.ts): the watch
+// and app token routes mint the whole episode and never pass it.
 export function signMuxPlaybackToken(
   playbackId: string,
   ttlSeconds: number,
+  clip?: MuxClip,
 ): string {
-  return signMuxToken(playbackId, ttlSeconds, "v");
+  return signMuxToken(playbackId, ttlSeconds, "v", clip);
 }
 
 // Signs a Mux storyboard JWT — audience 's'. The app's landscape player

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isEpisodeLockedForApp } from "./types";
+import { isEpisodeLockedForApp, subscriptionFollowsSignIn } from "./types";
 
 // The CLIENT half of the playback gate — the app locks episodes from this,
 // prop-driven, with no token fetch. It must agree with what
@@ -104,6 +104,25 @@ describe("isEpisodeLockedForApp — free mode", () => {
         access: "subscriber",
         signedIn: true,
       }),
+    ).toBe(false);
+  });
+});
+
+// The app's sign-up ask in front of a subscribers-only episode (#462): an
+// account will not open it, so the wall and the sign-in form must not say
+// "free" — and only there.
+describe("subscriptionFollowsSignIn", () => {
+  it("paid mode: true for a subscriber episode only", () => {
+    const gate = { mode: "tiers" } as const;
+    expect(subscriptionFollowsSignIn(gate, "subscriber")).toBe(true);
+    expect(subscriptionFollowsSignIn(gate, "member")).toBe(false);
+    expect(subscriptionFollowsSignIn(gate, "free")).toBe(false);
+  });
+
+  it("free mode: never — an account opens every episode", () => {
+    expect(subscriptionFollowsSignIn({ mode: "none" }, "subscriber")).toBe(false);
+    expect(
+      subscriptionFollowsSignIn({ mode: "after_episodes", episodes: 1 }, "subscriber"),
     ).toBe(false);
   });
 });
