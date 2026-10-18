@@ -97,7 +97,9 @@ export type PlayerEpisode = {
   // provisioned yet or when minting fails — overlays fall back to a
   // tone-gradient placeholder.
   thumbnailUrl: string | null;
-  // Access tier on episode-gated shows; "free" everywhere on legacy shows.
+  // The tier this episode presents to THIS viewer (resolveEffectiveTier on
+  // the watch page — e.g. a subscriber episode reads "member" for an
+  // anonymous viewer in paid mode, #462).
   tier: EpisodeTier;
   // Branching video (#144). A branch (branchOfEpisodeId set) is PLAYABLE
   // but unlisted: it stays in the Player's `episodes` array so a choice or
@@ -113,12 +115,14 @@ export type PlayerEpisode = {
   choices: PlayerChoice[] | null;
 };
 
-// Tier of an episode on an episode-gated show, as computed server-side by
-// lib/episode-access.ts (which is server-only and can't be imported here —
-// this is the structural client-side mirror). Legacy shows pass "free" for
-// every episode so nothing ever renders locked.
+// Tier of an episode as computed server-side by lib/episode-access.ts (which
+// is server-only and can't be imported here — this is the structural
+// client-side mirror).
 export type EpisodeTier = "free" | "member" | "subscriber";
 
+// "trial" is the legacy 60s preview: the watch page no longer renders it
+// since #462 (every show is walled per episode) — its code below is dead,
+// tracked in docs/registry.md.
 export type Mode = "subscriber" | "trial" | "free" | "member";
 
 // Video shape of the show (db `shows.orientation`). "vertical" switches to the
@@ -227,6 +231,7 @@ export function Player({
   walletPublishableKey = null,
   freeMode = false,
   signupGate = false,
+  accountUnlocks,
   orientation = "horizontal",
 }: {
   episodes: PlayerEpisode[];
@@ -260,6 +265,13 @@ export function Player({
   // "watch for free" variant — the locking itself rides the member-tier
   // presentation the watch page applies.
   signupGate?: boolean;
+  // How many listed episodes an account opens — what the SignupWall's
+  // "unlock N more episodes" may promise. Server-computed by the watch page
+  // with the tier rule for a SIGNED-IN viewer: since #462 an anonymous viewer
+  // in paid mode sees subscriber episodes as `member` too (registration
+  // first, then the paywall), so counting this viewer's member tiers would
+  // promise episodes the account does not open. Omitted → that count.
+  accountUnlocks?: number;
   // Show's video shape — vertical shows get the portrait chrome on mobile.
   orientation?: ShowOrientation;
 }) {
@@ -395,6 +407,7 @@ export function Player({
       walletPublishableKey={walletPublishableKey}
       freeMode={freeMode}
       signupGate={signupGate}
+      accountUnlocks={accountUnlocks}
       orientation={orientation}
     />
   );
@@ -421,6 +434,7 @@ function EpisodePlayback({
   walletPublishableKey,
   freeMode,
   signupGate,
+  accountUnlocks,
   orientation,
 }: {
   current: PlayerEpisode;
@@ -443,6 +457,7 @@ function EpisodePlayback({
   walletPublishableKey?: string | null;
   freeMode?: boolean;
   signupGate?: boolean;
+  accountUnlocks?: number;
   orientation: ShowOrientation;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -675,7 +690,8 @@ function EpisodePlayback({
       ? listed[currentPosition - 2]
       : (episodes.find((e) => e.id === current.branchOfEpisodeId) ?? null);
   const firstMemberEpisode = listed.find((e) => e.tier === "member") ?? null;
-  const memberCount = listed.filter((e) => e.tier === "member").length;
+  const memberCount =
+    accountUnlocks ?? listed.filter((e) => e.tier === "member").length;
   // free/member episode-start funnel events fire once per episode mount.
   const tierStartFiredRef = useRef(false);
 

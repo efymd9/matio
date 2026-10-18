@@ -1,5 +1,4 @@
 import { auth } from "@clerk/nextjs/server";
-import * as Sentry from "@sentry/nextjs";
 import { and, eq, isNull } from "drizzle-orm";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
@@ -8,18 +7,13 @@ import crypto from "node:crypto";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import { readAttributionCookiesFromRequest } from "@/lib/attribution";
-import { describeDbError } from "@/lib/db-errors";
-import {
-  resolveRequestTier,
-  showHasTierGating,
-} from "@/lib/episode-access";
+import { resolveRequestTier } from "@/lib/episode-access";
 import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { signMuxPlaybackToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import { stampVisitorWallSeen } from "@/lib/visitor";
 import {
   TRIAL_COOKIE,
-  TRIAL_DURATION_SECONDS,
   TrialRateLimitError,
   findTrialSession,
   getClientIp,
@@ -33,45 +27,20 @@ const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 export const runtime = "nodejs";
 
 const SUBSCRIBER_TTL = 60 * 60; // 1h
-// Cap trial JWT TTL at the trial duration so a token never outlives the row.
-const TRIAL_TTL_CAP = TRIAL_DURATION_SECONDS;
 const NO_CACHE = { "Cache-Control": "private, no-store" } as const;
 const UUID_RE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
-// Structured, greppable log so token volume + outcome (esp. a trial 403/429
-// spike that would flag a client refresh-loop regression) is queryable in
-// Vercel runtime logs — the route was previously silent on success, which is
-// why the original refresh-loop bug was invisible to monitoring.
+// Structured, greppable log so token volume + outcome (esp. a 403 spike that
+// would flag a client refresh-loop regression) is queryable in Vercel runtime
+// logs — the route was previously silent on success, which is why the
+// original refresh-loop bug was invisible to monitoring.
 function logToken(fields: {
   result: number;
-  mode: "subscriber" | "trial" | "free" | "member" | "none";
+  mode: "subscriber" | "free" | "member" | "none";
   showId?: string;
   episodeId?: string | null;
 }) {
   console.info(`[playback-token] ${JSON.stringify(fields)}`);
-}
-
-// The legacy 60-second preview's own trial_sessions read/write failed — the one
-// path of this route whose failure used to be thrown to the framework (#326).
-// Drizzle's wrapper repeats the statement WITH its params (`Failed query: …
-// \nparams: <trial cookie>,<show>,<ip hash>`) and Next prints an unhandled
-// error's message to the runtime log, so the failure is caught HERE and only
-// its class and SQLSTATE leave (`describeDbError`, the `submitIdea` /
-// retention precedent). The viewer gets a plain 503 — the player reads any 5xx
-// as «Playback unavailable» with a retry, not as a paywall. Sentry still hears
-// of it, by class and code, so a broken table does not go quiet.
-function trialStoreFailed(err: unknown, showId: string, episodeId: string) {
-  const { name, code } = describeDbError(err);
-  console.error("[playback-token] trial store failed", { name, code });
-  Sentry.captureMessage("playback-token: trial store failed", {
-    level: "error",
-    tags: { code: code ?? "none", name },
-  });
-  logToken({ result: 503, mode: "trial", showId, episodeId });
-  return NextResponse.json(
-    { error: "Playback temporarily unavailable" },
-    { status: 503, headers: NO_CACHE },
-  );
 }
 
 export async function GET(req: NextRequest) {
@@ -89,10 +58,10 @@ export async function GET(req: NextRequest) {
   }
 
   // Belt-and-braces gate: episode must be ready, show must be published and
-  // not soft-deleted. Without this, anyone with a leaked draft episode id +
-  // an auto-issued trial cookie could mint a 60s preview for unreleased
-  // content. The watch page applies the same filters at render time, but
-  // this endpoint is the actual token-issuance gate.
+  // not soft-deleted. Without this, anyone with a leaked draft episode id
+  // could mint a token for unreleased content (a free-tier one needs no
+  // account at all). The watch page applies the same filters at render time,
+  // but this endpoint is the actual token-issuance gate.
   const [row] = await db
     .select({
       playbackId: episodes.muxPlaybackId,
@@ -140,17 +109,19 @@ export async function GET(req: NextRequest) {
   // Per-episode access control: the episode's own `access` value decides
   // who may play it — free → anyone, member → any signed-in user,
   // subscriber → active subscription (subscribers already returned above).
-  // A free or member episode implies a tier-gated show, so those paths need
-  // no show-level lookup; only subscriber-tier episodes probe the show to
-  // pick between the paywall (gated show) and the legacy 60s trial below.
-  // Gated 403s carry a machine-readable `reason`; legacy 403s stay
-  // reason-less.
+  // Every 403 carries a machine-readable `reason` the player routes on.
+  //
+  // Registration first, then the paywall (#462): an ANONYMOUS request for a
+  // subscriber episode resolves to the member tier, i.e. 403
+  // `signup_required` — the sign-up wall; once signed in, the same episode
+  // answers `subscribe_required` — the paywall. There is no 60-second preview
+  // any more, for anyone: no request through here mints a kind='preview' row.
   //
   // Free pivot: with payments off, tiers aren't enforced — signed-in
   // viewers take the member path, anonymous viewers the free path (which
   // keeps the anonymous funnel tracking + its best-effort rate-limit
   // semantics). Both existing branches already never 403 for their
-  // audience, so the paywall/signup/trial paths below become unreachable.
+  // audience, so the paywall/signup paths below become unreachable.
   //
   // Signup gate (REQUIRE_SIGNUP=1, free mode only): the episode's own tier
   // decides for anonymous requests (resolveEffectiveTier) — a free episode
@@ -170,7 +141,7 @@ export async function GET(req: NextRequest) {
   if (access === "free") {
     // Funnel tracking row (kind='episodes') — minted on the first free
     // play for this (cookie, show), carrying the attribution snapshot and
-    // IP hash exactly like the legacy trial. STRICTLY best-effort: a rate
+    // the IP hash. STRICTLY best-effort: a rate
     // limit (or any DB hiccup) degrades tracking, never playback — free
     // content must not 429.
     const cookieStore = await cookies();
@@ -271,115 +242,13 @@ export async function GET(req: NextRequest) {
   }
 
   // access === "subscriber" and the requester isn't one (subscribers
-  // returned earlier). On a tier-gated show this is the subscription
-  // paywall; on an all-subscriber (legacy) show, fall through to the
-  // 60-second trial path below.
-  if (await showHasTierGating(row.showId)) {
-    logToken({
-      result: 403,
-      mode: userId ? "member" : "free",
-      showId: row.showId,
-      episodeId,
-    });
-    return NextResponse.json(
-      { error: "Not authorized", reason: "subscribe_required" },
-      { status: 403, headers: NO_CACHE },
-    );
-  }
-
-  // Trial path. Note we intentionally do NOT special-case trial.converted —
-  // granting a subscriber-length token to any cookie that once converted is
-  // a real bypass for users who paid then canceled. They re-enter through
-  // the signed-in active-subscription branch above; if that fails they have
-  // no playback access. Converted is now an analytics-only marker.
-  //
-  // Cookie minting and row creation both happen here (not in proxy.ts) so
-  // (a) the 60s clock starts when the user actually plays, not on page
-  // load, and (b) we never issue a cookie or row for a non-existent /
-  // unpublished / not-ready show — the gate above already rejected those.
-  const cookieStore = await cookies();
-  const existingToken = cookieStore.get(TRIAL_COOKIE)?.value;
-  let trial: Awaited<ReturnType<typeof findTrialSession>> = null;
-  if (existingToken) {
-    try {
-      trial = await findTrialSession(existingToken, row.showId);
-    } catch (err) {
-      return trialStoreFailed(err, row.showId, episodeId);
-    }
-  }
-
-  // Active row → mint trial token with TTL capped at the row's remaining.
-  if (trial) {
-    const remaining = Math.floor(
-      (trial.expiresAt.getTime() - Date.now()) / 1000,
-    );
-    if (remaining > 0) {
-      const ttl = Math.min(remaining, TRIAL_TTL_CAP);
-      const token = signMuxPlaybackToken(row.playbackId, ttl);
-      logToken({ result: 200, mode: "trial", showId: row.showId, episodeId });
-      return NextResponse.json({
-        token,
-        expiresIn: ttl,
-        mode: "trial",
-      }, { headers: NO_CACHE });
-    }
-    // Expired row exists — don't issue a new trial for this show on the
-    // same cookie. User must subscribe.
-    logToken({ result: 403, mode: "trial", showId: row.showId, episodeId });
-    return NextResponse.json({ error: "Not authorized" }, { status: 403, headers: NO_CACHE });
-  }
-
-  // No row yet for (cookie, show) — first preview for this show. Mint a
-  // new row (with IP-bucket rate-limit) and set the cookie if missing.
-  const sessionToken = existingToken ?? crypto.randomUUID();
-  const ipHash = hashClientIp(getClientIp(req));
-  // Snapshot the UTM cookies (set by proxy.ts on landing) at the moment
-  // of first play. Stamping at trial-creation means every campaign's
-  // trial-start count is queryable from the analytics dashboard without
-  // requiring user signup.
-  const attribution = readAttributionCookiesFromRequest(req);
-  let mintedExpiresAt: Date;
-  try {
-    const fresh = await mintTrialSession({
-      sessionToken,
-      showId: row.showId,
-      ipHash,
-      client: "web",
-      attribution,
-    });
-    mintedExpiresAt = fresh.expiresAt;
-  } catch (err) {
-    if (err instanceof TrialRateLimitError) {
-      // Generic body — don't confirm to an adversary that they hit a
-      // per-network bucket (signal to rotate IPs / proxies); the client
-      // identifies the case by status code, not text.
-      logToken({ result: 429, mode: "trial", showId: row.showId, episodeId });
-      return NextResponse.json(
-        { error: "Too many requests" },
-        {
-          status: 429,
-          headers: { ...NO_CACHE, "Retry-After": String(60 * 60) },
-        },
-      );
-    }
-    return trialStoreFailed(err, row.showId, episodeId);
-  }
-
-  const remaining = Math.floor(
-    (mintedExpiresAt.getTime() - Date.now()) / 1000,
+  // returned earlier, and an anonymous request resolved to "member" above):
+  // a signed-in viewer without a subscription — the paywall. Every show,
+  // all-subscriber ones included: the legacy 60-second preview that used to
+  // follow here is gone (#462).
+  logToken({ result: 403, mode: "member", showId: row.showId, episodeId });
+  return NextResponse.json(
+    { error: "Not authorized", reason: "subscribe_required" },
+    { status: 403, headers: NO_CACHE },
   );
-  const ttl = Math.min(Math.max(remaining, 0), TRIAL_TTL_CAP);
-  const token = signMuxPlaybackToken(row.playbackId, ttl);
-  logToken({ result: 200, mode: "trial", showId: row.showId, episodeId });
-  const res = NextResponse.json({ token, expiresIn: ttl, mode: "trial" }, { headers: NO_CACHE });
-  if (!existingToken) {
-    res.cookies.set(TRIAL_COOKIE, sessionToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: ONE_YEAR_SECONDS,
-    });
-  }
-  return res;
 }

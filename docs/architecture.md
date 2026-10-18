@@ -67,7 +67,20 @@ Hot-path indexes (migration 0010): `subscriptions(user_id, updated_at DESC)` for
 
 ## Trial system (the most subtle piece)
 
-End-to-end:
+> **The 60-second preview is gone since #462 (2026-10-18).** Every show is
+> walled per episode by one rule (`lib/episode-access.ts`:
+> `resolveEffectiveTier` / `resolveRequestTier`): in paid mode an anonymous
+> viewer meets a `subscriber` episode as the sign-up wall (the watch page
+> presents it as tier `member` in mode `free`; `/api/playback-token` answers
+> 403 `signup_required`), a signed-in non-subscriber meets it as the paywall
+> (mode `member`, tier `subscriber`; 403 `subscribe_required`). No page renders
+> the player's `trial` mode and no token route mints a `kind='preview'` row.
+> The steps below describe the removed preview and are kept for the record;
+> the token-refresh, end-state, visibility-gated save and IP-bucket details
+> still apply to the per-episode flow. Live rules: CLAUDE.md → «Per-episode
+> access control».
+
+End-to-end (historical — the legacy preview):
 
 1. **Visiting `/watch/<slug>`** (`app/watch/[showSlug]/page.tsx`):
    - The show must be `status='published' AND deleted_at IS NULL`, else `notFound()`.

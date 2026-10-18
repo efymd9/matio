@@ -23,12 +23,10 @@ import {
 import { saveWatchSegmentsFor } from "@/lib/watch-segments-write";
 import {
   getOrderedReadyEpisodeIds,
-  showHasTierGating,
   resolveEffectiveTier,
 } from "@/lib/episode-access";
 import {
   TRIAL_COOKIE,
-  TRIAL_DURATION_SECONDS,
   getClientIp,
   hashClientIp,
   stampSignupWall,
@@ -68,10 +66,11 @@ export async function saveWatchSegments(episodeId: string, buckets: number[]) {
   }
   // Anonymous flushes are only legitimate where anonymous playback exists:
   // open free mode, and — since #198 — a free-tier episode under the signup
-  // gate. Paid-mode anonymous previews stay deliberately excluded (a
-  // 60s-capped preview cohort would paint a fake everyone-leaves-at-60s
-  // cliff onto the episode's retention curve). Neither free-mode shape has
-  // a positional gate on the web, hence maxPosition: null.
+  // gate. Paid mode keeps every anonymous flush out: it was there for the
+  // 60s-capped preview cohort (a fake everyone-leaves-at-60s cliff on the
+  // retention curve), which is gone since #462; counting anonymous free-tier
+  // playback in paid mode is a separate decision (docs/registry.md). Neither
+  // free-mode shape has a positional gate on the web, hence maxPosition: null.
   if (paymentsEnabled()) return;
   const sessionToken = (await cookies()).get(TRIAL_COOKIE)?.value;
   if (!sessionToken) return;
@@ -89,10 +88,12 @@ export async function saveWatchSegments(episodeId: string, buckets: number[]) {
   );
 }
 
-// Trial-mode position save: keyed on (session_token, show_id), looked up via
-// the episode's season → show relationship. Anonymous-only — subscribers
-// route to saveWatchProgress instead. Trial sessions don't track completion
-// (single-show trial; no Up Next), so the caller's third arg is dropped.
+// Anonymous position save (the player's mode="free"): keyed on
+// (session_token, show_id), looked up via the episode's season → show
+// relationship. Anonymous-only — signed-in viewers route to
+// saveWatchProgress instead. The session row tracks no completion, so the
+// caller's third arg is dropped. (The name is historical: the legacy 60s
+// preview it was written for is gone since #462.)
 export async function saveTrialPosition(
   episodeId: string,
   positionSeconds: number,
@@ -131,69 +132,46 @@ export async function saveTrialPosition(
   // dirty their own trial position, but the clamp above bounds the
   // damage, and the row is rate-limit / ip-hash gated at creation.
 
-  // Per-episode access decides the write shape:
+  // The episode's effective tier for an anonymous viewer — the same
+  // resolveEffectiveTier the watch page locks with and the token route mints
+  // from — decides whether this save may write at all:
   //  - free: full tracking (resume target + monotonic positional depth) —
-  //    the only tier an anonymous viewer can legitimately play on a gated
-  //    show; the position-0 guard keeps a vanished-episode race out.
-  //  - member: never legitimately playable anonymously — a forged action
-  //    call must not pollute the funnel row.
-  //  - subscriber: on legacy 60s-preview shows (no tier-gated episode) keep
-  //    the plain position write; on gated shows it's not anonymously
-  //    playable, so no write.
+  //    the only tier an anonymous viewer can legitimately play; the
+  //    position-0 guard keeps a vanished-episode race out.
+  //  - anything above it (member, and subscriber, which an anonymous viewer
+  //    meets as the sign-up wall in paid mode since #462): never playable
+  //    anonymously — a forged or stale call must not pollute the funnel row.
   // Free pivot: with payments off every episode is anonymously playable as
-  // the free tier, so every save takes the full-tracking branch (no 60s
-  // cap, no member/tier-gating rejects) — mirrors the token route.
-  // Signup gate: only a free episode is anonymously playable, so only it
-  // may write; a save for anything above it is forged or stale and is
-  // rejected — the same resolveEffectiveTier the token route mints from.
+  // the free tier, so every save takes the full-tracking branch — mirrors
+  // the token route. Signup gate: only a free episode is.
   const access = resolveEffectiveTier(row.access, {
     paymentsOn: paymentsEnabled(),
     signupGate: signupRequired(),
+    // Anonymous by contract: the trial cookie is the only identity here.
+    signedIn: false,
   });
-  if (access === "free") {
-    const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
-    const position = orderedIds.indexOf(episodeId) + 1;
-    if (position === 0) return;
-    await db
-      .update(trialSessions)
-      .set({
-        lastPositionSeconds: clamped,
-        lastEpisodeId: episodeId,
-        furthestEpisodeNumber: sql`GREATEST(${trialSessions.furthestEpisodeNumber}, ${position})`,
-      })
-      .where(
-        and(
-          eq(trialSessions.sessionToken, sessionToken),
-          eq(trialSessions.showId, row.showId),
-          // Full-tracking writes belong to kind='episodes' rows ONLY. A
-          // legacy kind='preview' row can hold this (cookie, show) slot —
-          // free mode makes every show playable and a retiered show hits
-          // this in paid mode too — and writing an uncapped position +
-          // lastEpisodeId there breaks the preview invariants ("clamped at
-          // the save source", no episode pointer) and misplaces the resume
-          // offset if the row is ever read as a trial again.
-          eq(trialSessions.kind, "episodes"),
-        ),
-      );
-    return;
-  }
-  if (access === "member") return;
-  if (await showHasTierGating(row.showId)) return;
-
-  // Legacy 60s-preview row (kind='preview'). Cap the stored position at the
-  // trial duration: buffered segments keep playing past token expiry and
-  // seeks can land anywhere in the episode, so the raw playhead routinely
-  // exceeds 60s — which inflated every depth metric on /admin/analytics.
-  // A capped value reads as "watched the full preview".
+  if (access !== "free") return;
+  const orderedIds = await getOrderedReadyEpisodeIds(row.showId);
+  const position = orderedIds.indexOf(episodeId) + 1;
+  if (position === 0) return;
   await db
     .update(trialSessions)
     .set({
-      lastPositionSeconds: Math.min(clamped, TRIAL_DURATION_SECONDS),
+      lastPositionSeconds: clamped,
+      lastEpisodeId: episodeId,
+      furthestEpisodeNumber: sql`GREATEST(${trialSessions.furthestEpisodeNumber}, ${position})`,
     })
     .where(
       and(
         eq(trialSessions.sessionToken, sessionToken),
         eq(trialSessions.showId, row.showId),
+        // Full-tracking writes belong to kind='episodes' rows ONLY. A
+        // legacy kind='preview' row (minted before #462 removed the
+        // preview) can hold this (cookie, show) slot, and writing an
+        // uncapped position + lastEpisodeId there breaks the preview
+        // invariants ("clamped at the save source", no episode pointer)
+        // the legacy dashboard still reads.
+        eq(trialSessions.kind, "episodes"),
       ),
     );
 }

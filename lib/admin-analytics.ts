@@ -1240,7 +1240,8 @@ export async function loadEpisodeFunnels(
   f: AnalyticsFilters,
 ): Promise<EpisodeFunnel[]> {
   // Tier-gated shows = at least one READY episode below the subscriber
-  // tier (set-query mirror of showHasTierGating).
+  // tier (the old split between per-episode walls and the legacy 60s
+  // preview, which #462 removed — this legacy dashboard keeps its cut).
   const gatedShowIds = db
     .selectDistinct({ showId: seasons.showId })
     .from(episodes)

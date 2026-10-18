@@ -185,6 +185,10 @@ vi.mock("@/lib/meta-pixel-events", () => ({
   onPixelReady: vi.fn(() => () => undefined),
   trackPixel: vi.fn(),
 }));
+// The #462 suite computes its tiers with the real server-side rule
+// (lib/episode-access.ts) — pure, but its module also holds a db helper.
+vi.mock("server-only", () => ({}));
+vi.mock("@/db", () => ({ db: {} }));
 
 // Module-level const in the player (read at import, which is hoisted above
 // ordinary statements) — same reason the hero suite sets it in vi.hoisted.
@@ -192,6 +196,7 @@ vi.hoisted(() => {
   process.env.NEXT_PUBLIC_MUX_DATA_ENV_KEY = "env-key-test";
 });
 
+import { resolveEffectiveTier } from "@/lib/episode-access";
 import { Player, type PlayerEpisode } from "./player";
 
 // jsdom's HTMLMediaElement has no play()/pause()/load() (they log "not
@@ -959,5 +964,65 @@ describe("Player → SignupWall — the payment fine print follows the kill-swit
     await screen.findByText(en.signupWall.kicker, undefined, LONG);
 
     expect(screen.getByText(en.signupWall.noCardNeeded)).toBeTruthy();
+  });
+});
+
+describe("Player → paid mode: an anonymous viewer on a subscriber episode (#462)", () => {
+  // The tiers exactly as the watch page hands them to an anonymous viewer in
+  // paid mode — the real rule, not a hand-written "member".
+  const ANON_PAID = { paymentsOn: true, signupGate: false, signedIn: false };
+  const ALL_SUBSCRIBER: PlayerEpisode[] = [
+    episode("ep-1", 1, { tier: resolveEffectiveTier("subscriber", ANON_PAID) }),
+    episode("ep-2", 2, { tier: resolveEffectiveTier("subscriber", ANON_PAID) }),
+  ];
+
+  function renderAnonymous(accountUnlocks: number) {
+    return render(
+      <Player
+        episodes={ALL_SUBSCRIBER}
+        initialEpisodeId="ep-1"
+        mode="free"
+        showId="show-1"
+        showSlug="the-scarlet-oath"
+        showTitle="The Scarlet Oath"
+        autoplay={false}
+        payFirst
+        freeMode={false}
+        signupGate={false}
+        accountUnlocks={accountUnlocks}
+      />,
+    );
+  }
+
+  it("sees the SignupWall — not the Paywall, not the 60s preview — with no token fetched", async () => {
+    renderAnonymous(0);
+    await screen.findByText(en.signupWall.headline, undefined, LONG);
+
+    // Not the paywall: neither its pay-first CTA (the flag is on) nor the
+    // trial-end variant that used to follow a spent preview.
+    expect(screen.queryByText(en.paywall.payFirstCta)).toBeNull();
+    expect(screen.queryByText(en.paywall.previewComplete)).toBeNull();
+    // Not the preview: no player element, no token asked for.
+    expect(screen.queryByTestId("mux-video")).toBeNull();
+    expect(tokenFetches()).toEqual([]);
+    // The wall's CTA (both Clerk arms render under the test's <Show> stub).
+    expect(screen.getAllByText(en.signupWall.signUpCta).length).toBeGreaterThan(0);
+  });
+
+  it("promises no episodes the account does not open", async () => {
+    renderAnonymous(0);
+    await screen.findByText(en.signupWall.headline, undefined, LONG);
+
+    // Both episodes read "member" for this viewer, but an account opens
+    // neither — the paywall comes next. The server's count, not the tiers.
+    expect(screen.getByText(en.signupWall.bodyNoCount)).toBeTruthy();
+    expect(screen.queryByText(en.signupWall.body(2))).toBeNull();
+  });
+
+  it("counts what an account really opens when there is something", async () => {
+    renderAnonymous(1);
+    await screen.findByText(en.signupWall.headline, undefined, LONG);
+
+    expect(screen.getByText(en.signupWall.body(1))).toBeTruthy();
   });
 });

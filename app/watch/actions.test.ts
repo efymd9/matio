@@ -55,12 +55,10 @@ vi.mock("@/lib/episode-access", async (importOriginal) => {
   return {
     resolveEffectiveTier: actual.resolveEffectiveTier,
     getOrderedReadyEpisodeIds: vi.fn(),
-    showHasTierGating: vi.fn(),
   };
 });
 vi.mock("@/lib/trial", () => ({
   TRIAL_COOKIE: "trial_session",
-  TRIAL_DURATION_SECONDS: 60,
   getClientIp: () => "unknown",
   hashClientIp: () => "hashed",
   stampSignupWall: vi.fn(),
@@ -243,4 +241,60 @@ describe("saveTrialPosition — the episode's tier decides for an anonymous save
       expect(update).not.toHaveBeenCalled();
     },
   );
+});
+
+// #462: in paid mode a subscriber episode is the sign-up wall for an
+// anonymous viewer — there is no 60s preview whose capped position used to be
+// written here. Only a free episode was playable, so only it may write.
+describe("saveTrialPosition — paid mode, no preview (#462)", () => {
+  beforeEach(() => {
+    h.cookie = "trial-token";
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+  });
+
+  it.each([["member"], ["subscriber"]])(
+    "writes nothing for a %s episode — not even a capped preview position",
+    async (access) => {
+      h.select.mockReturnValueOnce(episodeRow([{ showId: "show-1", access }]));
+      const update = vi.fn();
+      h.update = update;
+
+      await expect(saveTrialPosition(EPISODE, 30)).resolves.toBeUndefined();
+
+      expect(update).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still writes for a free episode", async () => {
+    h.select.mockReturnValueOnce(
+      episodeRow([{ showId: "show-1", access: "free" }]),
+    );
+    vi.mocked(
+      (await import("@/lib/episode-access")).getOrderedReadyEpisodeIds,
+    ).mockResolvedValueOnce([EPISODE]);
+    const update = vi.fn(() => ({ set: () => ({ where: async () => undefined }) }));
+    h.update = update;
+
+    await saveTrialPosition(EPISODE, 30);
+
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("saveTrialPosition — open free mode, unchanged by #462", () => {
+  it("writes for a subscriber episode — every episode plays anonymously", async () => {
+    h.cookie = "trial-token";
+    h.select.mockReturnValueOnce(
+      episodeRow([{ showId: "show-1", access: "subscriber" }]),
+    );
+    vi.mocked(
+      (await import("@/lib/episode-access")).getOrderedReadyEpisodeIds,
+    ).mockResolvedValueOnce([EPISODE]);
+    const update = vi.fn(() => ({ set: () => ({ where: async () => undefined }) }));
+    h.update = update;
+
+    await saveTrialPosition(EPISODE, 30);
+
+    expect(update).toHaveBeenCalledTimes(1);
+  });
 });
