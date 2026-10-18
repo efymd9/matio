@@ -132,6 +132,7 @@ describe("no 60-second preview", () => {
     const html = (await render(TermsPage)).replace(/\s+/g, " ");
     expect(html).toContain("4. Episode access");
     expect(html).toContain("does not offer a time-limited preview");
+    expect(html).toContain("short, muted teaser that plays on our home page");
     expect(html).toContain("never stops a free episode from playing");
     expect(html).not.toContain("three per network per hour");
   });

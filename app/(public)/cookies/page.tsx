@@ -110,7 +110,7 @@ function CookiesEn() {
             {
               name: "trial_session",
               purpose:
-                "Your viewing of free episodes on this browser. Set when a free episode first plays here, it ties together our first-party record of that viewing for each show: where you stopped, so you can pick up there and find it under Continue watching; how far into the show you got; and whether you reached the sign-up screen. If you then sign up or sign in, it lets us link those records to your account. First-party only — never shared with third parties or used for advertising. A random opaque token: the cookie itself holds nothing about you (what we keep against it is described in section 2 of the Privacy Policy).",
+                "Your viewing of free episodes on this browser. Set when a free episode first plays here, it ties together our first-party record of that viewing for each show: where you stopped, so you can pick up there and find it under Continue watching; how far into the show you got; and whether you reached the sign-up screen. If you then sign up or sign in, it lets us link those records to your account. First-party only — never used for advertising. If you buy a membership without signing in, we pass it to our payment processor, Stripe, so the purchase can be linked to this browser’s viewing. A random opaque token: the cookie itself holds nothing about you (what we keep against it is described in section 2 of the Privacy Policy).",
               expiry: "1 year",
               category: "Strictly necessary",
             },

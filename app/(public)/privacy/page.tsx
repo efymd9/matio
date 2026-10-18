@@ -161,7 +161,7 @@ function PrivacyEn() {
             stored), whether the record came from the website or the app, and
             the campaign source / medium / campaign that brought you, only
             while marketing cookies are on. If you then sign in on that
-            browser, the record is linked to your account — and so may be
+            browser, the record may be linked to your account — as may
             website records created from the same internet connection in the
             six hours before — and if that account later subscribes, the
             record is marked as converted. Unlinked records are kept as
@@ -530,9 +530,8 @@ function PrivacyEn() {
             the keychain can keep the identifier after the app is deleted, so
             reinstalling the app may bring back the same identifier; on
             Android it is normally removed together with the app. Signing in
-            in the app does not link the identifier to your account (for the
-            one way a record kept against it can become linked, see &ldquo;How
-            long we keep it&rdquo; below).
+            in the app does not link the identifier, or the records kept
+            against it, to your account.
           </li>
           <li>
             <strong>What the identifier is used for</strong> — when a free
@@ -559,13 +558,12 @@ function PrivacyEn() {
           </li>
           <li>
             <strong>How long we keep it</strong> — records kept against the
-            device identifier are deleted 30 days after they are created (the
-            &ldquo;Trial sessions&rdquo; period in section 6). One exception:
-            if, within six hours of such a record being created, matio.tv is
-            used from the same internet connection (the same IP address) by
-            someone signed in to an account — usually you, for example on the
-            same Wi-Fi — the record may be linked to that account, and a
-            linked record is kept like the rest of that account&rsquo;s data
+            device identifier are not linked to an account and are deleted 30
+            days after they are created (the &ldquo;Trial sessions&rdquo;
+            period in section 6). Before 3 October 2026, a record could be
+            linked to an account signed in to matio.tv from the same internet
+            connection within six hours of the record being created; a record
+            linked that way is kept like the rest of that account&rsquo;s data
             (section 6) until the account is deleted. The viewing counters
             hold no personal data.
           </li>

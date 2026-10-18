@@ -129,11 +129,12 @@ function TermsEn() {
 
       <Section id="episode-access" title="4. Episode access">
         <p>
-          Each episode shows what you need to watch it. Some episodes may be
-          marked free: they play without an account. Others need a free matio
-          account, or a paid membership (section 5), as shown on that episode.
-          matio does not offer a time-limited preview of episodes that need an
-          account or a membership.
+          When you open an episode, matio shows what you need to watch it.
+          Some episodes may be free: they play without an account. Others need
+          a free matio account, or a paid membership (section 5). Apart from
+          the short, muted teaser that plays on our home page, matio does not
+          offer a time-limited preview of episodes that need an account or a
+          membership.
         </p>
         <p>
           We may change which episodes are free, which need an account and
