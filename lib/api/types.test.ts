@@ -32,9 +32,11 @@ describe("isEpisodeLockedForApp — paid mode (tiers)", () => {
     ).toBe(false);
   });
 
-  it("asks a subscriber-tier episode for a subscription", () => {
+  it("asks a subscriber-tier episode for an account first, then a subscription (#462)", () => {
+    // Signed out: registration first — the web's rule (resolveEffectiveTier),
+    // and what /api/v1/playback-token answers an anonymous device.
     expect(isEpisodeLockedForApp({ ...base, gate, access: "subscriber" })).toBe(
-      "subscribe_required",
+      "signup_required",
     );
     // Signed in is not enough — the paywall is the subscription, not the account.
     expect(

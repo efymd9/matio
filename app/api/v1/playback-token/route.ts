@@ -5,7 +5,10 @@ import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import type { PlaybackMode, PlaybackTokenResponse } from "@/lib/api/types";
 import { apiError, apiOk, readDeviceId, resolveSignupGate } from "@/lib/api/v1";
-import { getOrderedReadyEpisodeIds } from "@/lib/episode-access";
+import {
+  getOrderedReadyEpisodeIds,
+  resolveEffectiveTier,
+} from "@/lib/episode-access";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { signMuxPlaybackToken, signMuxStoryboardToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
@@ -120,13 +123,21 @@ export async function POST(req: NextRequest) {
   }
 
   // --- effective tier ---------------------------------------------------
-  // Paid mode: the episode's own tier decides. Free mode: signed-in viewers
-  // take the member path; anonymous viewers are free UNLESS the positional
-  // signup gate puts this episode out of reach.
+  // Paid mode: the episode's own tier through the web's rule — an anonymous
+  // device meets a subscriber episode as `member`, i.e. the sign-up ask
+  // (#462), exactly what the app locks up front (isEpisodeLockedForApp).
+  // Free mode: signed-in viewers take the member path; anonymous viewers are
+  // free UNLESS the positional signup gate puts this episode out of reach.
   const gate = resolveSignupGate();
   let access = row.access;
 
-  if (!paymentsEnabled()) {
+  if (paymentsEnabled()) {
+    access = resolveEffectiveTier(row.access, {
+      paymentsOn: true,
+      signupGate: false,
+      signedIn: Boolean(userId),
+    });
+  } else {
     if (userId) {
       access = "member";
     } else if (gate.mode === "after_episodes") {
@@ -205,16 +216,13 @@ export async function POST(req: NextRequest) {
   }
 
   // --- subscriber-tier episode, requester isn't one ----------------------
-  // Paid mode only (free mode never leaves `access` at "subscriber"). Every
-  // show answers the same, all-subscriber ones included: the legacy 60-second
+  // Paid mode, signed in only (an anonymous device took the member branch
+  // above; free mode never leaves `access` at "subscriber"). Every show
+  // answers the same, all-subscriber ones included: the legacy 60-second
   // preview that used to follow here is gone (#462), so no request through
-  // here mints a kind='preview' row. A signed-in non-subscriber gets the
-  // «Subscribers only» page from this 403 (#316). An anonymous device gets the
-  // same answer — unlike the web, which asks it for an account first: the app
-  // locks a subscriber episode up front for a signed-out viewer with
-  // `subscribe_required` (lib/api/types.ts:isEpisodeLockedForApp), because it
-  // sells nothing (App Store 3.1.1), so this only answers a direct call.
-  logToken({ result: 403, mode: userId ? "member" : "free", showId: row.showId, episodeId });
+  // here mints a kind='preview' row. The app renders this 403 as its
+  // «Subscribers only» page (#316) — it sells nothing (App Store 3.1.1).
+  logToken({ result: 403, mode: "member", showId: row.showId, episodeId });
   return apiError("forbidden", "Subscribe to watch.", {
     reason: "subscribe_required",
   });

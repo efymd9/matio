@@ -131,10 +131,11 @@ describe("firstEpisodeLocked / episodeRoute", () => {
     expect(firstEpisodeLocked(show("a", "free"), tiers, false)).toBe(false);
     expect(firstEpisodeLocked(show("a", "member"), tiers, false)).toBe("signup_required");
     expect(firstEpisodeLocked(show("a", "member"), tiers, true)).toBe(false);
-    // /v1 carries no subscription state: signed in or not, a subscriber
-    // episode is subscribe_required — never a sign-up ask.
+    // /v1 carries no subscription state: signed in, a subscriber episode is
+    // subscribe_required. Signed out it asks for the account first (#462) —
+    // sign-in, then the token route's «Subscribers only».
     expect(firstEpisodeLocked(show("a", "subscriber"), tiers, true)).toBe("subscribe_required");
-    expect(firstEpisodeLocked(show("a", "subscriber"), tiers, false)).toBe("subscribe_required");
+    expect(firstEpisodeLocked(show("a", "subscriber"), tiers, false)).toBe("signup_required");
     expect(firstEpisodeLocked({ ...show("a", "member"), episodes: [] }, tiers, false)).toBe(false);
   });
 

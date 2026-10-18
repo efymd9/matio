@@ -46,8 +46,14 @@ vi.mock("@/api/client", async (importOriginal) => {
 vi.mock("@/api/config-context", () => ({
   useConfig: (): Partial<AppConfig> => ({ signupGate: { mode: "tiers" } }),
 }));
+const auth = vi.hoisted(() => ({ signedIn: false }));
 vi.mock("@/auth/clerk", () => ({
-  useOptionalAuth: () => ({ isLoaded: true, isSignedIn: false, stalled: false, retry: () => undefined }),
+  useOptionalAuth: () => ({
+    isLoaded: true,
+    isSignedIn: auth.signedIn,
+    stalled: false,
+    retry: () => undefined,
+  }),
 }));
 
 vi.mock("react-native-safe-area-context", () => ({
@@ -169,19 +175,34 @@ describe("a subscriber-only episode row names no purchase (#311 item 1)", () => 
   // is the WORD, hence the word boundary.
   const cta = /\bsubscribe\b/i;
 
+  afterEach(() => {
+    auth.signedIn = false;
+  });
+
   it("reads «Subscribers only» on screen and to VoiceOver, and «subscribe» nowhere", async () => {
+    // Signed in: the account is there, the subscription is what is missing.
+    auth.signedIn = true;
     await renderShow(makeShow());
 
     expect(rowLabel("Episode 3")).toBe("Ep. 3, Episode 3, 10 min, Subscribers only");
     expect(leaves("Subscribers only")).toHaveLength(1);
-    // The sign-up wall's row is untouched.
-    expect(rowLabel("Episode 2")).toBe("Ep. 2, Episode 2, 10 min, Create account");
+    // The member row is open to an account.
+    expect(rowLabel("Episode 2")).toBe("Ep. 2, Episode 2, 10 min");
 
     const spoken = Array.from(container.querySelectorAll("[aria-label]")).map((el) =>
       el.getAttribute("aria-label"),
     );
     expect(text()).not.toMatch(cta);
     for (const label of spoken) expect(label).not.toMatch(cta);
+  });
+
+  it("signed out, a subscriber row asks for the account first, like a member row (#462)", async () => {
+    await renderShow(makeShow());
+
+    expect(rowLabel("Episode 2")).toBe("Ep. 2, Episode 2, 10 min, Create account");
+    expect(rowLabel("Episode 3")).toBe("Ep. 3, Episode 3, 10 min, Create account");
+    expect(leaves("Subscribers only")).toHaveLength(0);
+    expect(text()).not.toMatch(cta);
   });
 });
 

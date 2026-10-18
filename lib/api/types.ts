@@ -286,6 +286,11 @@ export type PlaybackDenialReason = "signup_required" | "subscribe_required";
 // position and tier. The app must lock prop-driven rather than relying on a
 // token 403: the free-pivot bug was exactly a client that played on regardless
 // because only the token route had been coerced.
+//
+// Paid mode asks for the account first (#462, the web's rule —
+// lib/episode-access.ts:resolveEffectiveTier): a signed-out viewer meets a
+// `subscriber` episode as `signup_required` (the app's sign-in), and only once
+// signed in does it read `subscribe_required` («Subscribers only»).
 export function isEpisodeLockedForApp(args: {
   gate: SignupGate;
   signedIn: boolean;
@@ -298,7 +303,8 @@ export function isEpisodeLockedForApp(args: {
 
   if (gate.mode === "tiers") {
     if (access === "free") return false;
-    if (access === "member") return signedIn ? false : "signup_required";
+    if (!signedIn) return "signup_required";
+    if (access === "member") return false;
     return hasSubscription ? false : "subscribe_required";
   }
 

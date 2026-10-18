@@ -237,6 +237,15 @@ export default async function WatchPage({
           signupGate,
           signedIn,
         }),
+        // What it asks once the viewer has an account — the same rule for a
+        // signed-in viewer. Tells the sign-up wall in front of a paywall
+        // (and the «Subscribe» row in the episodes list) apart from one that
+        // really opens the episode (#462).
+        accountTier: resolveEffectiveTier(e.access, {
+          paymentsOn,
+          signupGate,
+          signedIn: true,
+        }),
         branchOfEpisodeId: e.branchOfEpisodeId,
         forkPrompt: englishFirst(e.forkPromptEn, e.forkPromptEs),
         forkWindowSeconds: e.forkWindowSeconds,
@@ -355,16 +364,12 @@ export default async function WatchPage({
     // This surface is where fresh signups land from the wall redirect,
     // so the visitor funnel's "registered" stage depends on it.
     await linkVisitorToUser(userId);
-    // Free mode only: /subscribe — the historical applyUserAttribution
-    // call site — redirects home while payments are off, so without this
-    // no account would ever get first/last-touch stamped and every signup
-    // would read "(direct)" in the per-campaign tables. The watch page is
-    // where signed-in users actually land from tracked links. Paid mode
-    // keeps the /subscribe-only stamping unchanged (free-pivot rule: the
-    // flag branches at surfaces, and this surface IS the free funnel).
-    if (!paymentsOn) {
-      await applyUserAttribution(userId);
-    }
+    // Both modes (#462): the watch page is where signed-in users land from
+    // tracked links and from the sign-up wall, and in paid mode the paywall
+    // here sends them straight to /checkout — past /subscribe, the historical
+    // call site. Idempotent by contract (first touch write-if-NULL, last
+    // touch overwrite), so a later /subscribe render changes nothing.
+    await applyUserAttribution(userId);
 
     // Signup-completion events (Meta Lead/CompleteRegistration + PostHog
     // signup_completed) historically fired on /subscribe; this flow
@@ -439,15 +444,8 @@ export default async function WatchPage({
   // Counted from this viewer's presentation instead, it would count every
   // subscriber episode too in paid mode ("unlock 6 more episodes" — and then
   // a paywall); in free mode both counts are the same number.
-  const accountUnlocks = ordered.filter(
-    (e) =>
-      !!e.muxPlaybackId &&
-      e.branchOfEpisodeId === null &&
-      resolveEffectiveTier(e.access, {
-        paymentsOn,
-        signupGate,
-        signedIn: true,
-      }) === "member",
+  const accountUnlocks = playable.filter(
+    (e) => e.branchOfEpisodeId === null && e.accountTier === "member",
   ).length;
 
   return (

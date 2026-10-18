@@ -221,7 +221,13 @@ export function EpisodesOverlay({
                                     className="inline-flex items-center gap-1 rounded-full bg-burgundy px-2 py-0.5 text-[10px] font-semibold text-cream"
                                   >
                                     <Icon name="lock" size={10} />
-                                    {ep.tier === "member"
+                                    {/* What the episode really asks for:
+                                        an anonymous viewer meets a
+                                        subscriber episode as `member` (the
+                                        sign-up wall comes first, #462), but
+                                        the row names the membership. */}
+                                    {ep.tier === "member" &&
+                                    (ep.accountTier ?? ep.tier) !== "subscriber"
                                       ? t.episodesOverlay.lockedSignup
                                       : t.episodesOverlay.lockedSubscribe}
                                   </span>

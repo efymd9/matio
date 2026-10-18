@@ -19,6 +19,8 @@ import {
   type PlayerChoice,
 } from "@/lib/branching";
 import { VerticalChrome } from "./vertical-chrome";
+// Type only — the wall itself stays a dynamic import below.
+import type { SignupWallTrigger } from "./signup-wall";
 
 // Public Mux Data env key (distinct from the API token / signing key). Empty
 // when unset → Mux Data stays fully off.
@@ -101,6 +103,12 @@ export type PlayerEpisode = {
   // the watch page — e.g. a subscriber episode reads "member" for an
   // anonymous viewer in paid mode, #462).
   tier: EpisodeTier;
+  // What the episode asks of this viewer once they HAVE an account — the same
+  // rule for a signed-in viewer (#462). It tells the two walls apart where
+  // `tier` cannot: an anonymous viewer meets a subscriber episode as `member`
+  // (the sign-up wall), and only this field says the paywall comes next.
+  // Omitted = the same as `tier`.
+  accountTier?: EpisodeTier;
   // Branching video (#144). A branch (branchOfEpisodeId set) is PLAYABLE
   // but unlisted: it stays in the Player's `episodes` array so a choice or
   // a ?ep= deep link can land on it, while every list the player renders
@@ -313,9 +321,14 @@ export function Player({
   // mount, any mode. Deferred onto the consent-gated pixel; without consent
   // the listener never fires.
   const viewContentFiredRef = useRef(false);
+  // Whether anything played in this visit — the sign-up wall's analytics
+  // `trigger` (#462): "land" before any playback (a walled first episode, a
+  // deep link), "end_of_tier" after some. Independent of the wall's copy.
+  const [hasPlayed, setHasPlayed] = useState(false);
   const onFirstPlay = useCallback(() => {
     if (viewContentFiredRef.current) return;
     viewContentFiredRef.current = true;
+    setHasPlayed(true);
     onPixelReady(() => {
       trackPixel("ViewContent", {
         content_type: "product",
@@ -408,6 +421,7 @@ export function Player({
       freeMode={freeMode}
       signupGate={signupGate}
       accountUnlocks={accountUnlocks}
+      wallTrigger={hasPlayed ? "end_of_tier" : "land"}
       orientation={orientation}
     />
   );
@@ -435,6 +449,7 @@ function EpisodePlayback({
   freeMode,
   signupGate,
   accountUnlocks,
+  wallTrigger,
   orientation,
 }: {
   current: PlayerEpisode;
@@ -458,6 +473,7 @@ function EpisodePlayback({
   freeMode?: boolean;
   signupGate?: boolean;
   accountUnlocks?: number;
+  wallTrigger: SignupWallTrigger;
   orientation: ShowOrientation;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -692,6 +708,15 @@ function EpisodePlayback({
   const firstMemberEpisode = listed.find((e) => e.tier === "member") ?? null;
   const memberCount =
     accountUnlocks ?? listed.filter((e) => e.tier === "member").length;
+  // Was anything on the listed run before this episode open to an account
+  // (free or member)? Only then may the tier paywall say "Free episodes
+  // complete" (#462). A branch counts its parent as before it.
+  const precedingCount = current.branchOfEpisodeId
+    ? listedPosition(episodes, anchor.id)
+    : currentPosition - 1;
+  const somethingWasFree = listed
+    .slice(0, Math.max(precedingCount, 0))
+    .some((e) => (e.accountTier ?? e.tier) !== "subscriber");
   // free/member episode-start funnel events fire once per episode mount.
   const tierStartFiredRef = useRef(false);
 
@@ -1394,6 +1419,11 @@ function EpisodePlayback({
         backdropThumbnailUrl={current.thumbnailUrl}
         gate={signupGate}
         freeMode={freeMode}
+        paywallNext={
+          (signupWallTarget.accountTier ?? signupWallTarget.tier) ===
+          "subscriber"
+        }
+        trigger={wallTrigger}
       />
     );
   }
@@ -1407,6 +1437,7 @@ function EpisodePlayback({
         showTitle={showTitle}
         episodeLabel={episodeLabel}
         variant={mode === "free" || mode === "member" ? "tier" : "trial"}
+        nothingFree={!somethingWasFree}
         payFirst={payFirst}
         walletPublishableKey={walletPublishableKey}
       />
@@ -1517,7 +1548,11 @@ function EpisodePlayback({
             </span>
           </span>
           <span className="text-xs font-semibold uppercase tracking-[0.3em] text-cream/80">
-            {mode === "free" ? t.player.playFreeEpisode : t.player.playPreview}
+            {mode === "free"
+              ? t.player.playFreeEpisode
+              : mode === "trial"
+                ? t.player.playPreview
+                : t.player.play}
           </span>
         </button>
         <Link

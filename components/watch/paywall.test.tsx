@@ -83,7 +83,8 @@ describe("Paywall — the in-place wallet slot (#210)", () => {
     );
 
     const cta = screen.getByRole("link", { name: /subscribe/i });
-    expect(cta.getAttribute("href")).toContain("/subscribe?show=the-scarlet-oath");
+    // Straight to /checkout since #462 — the card form, no /subscribe card.
+    expect(cta.getAttribute("href")).toContain("/checkout?show=the-scarlet-oath");
   });
 
   it("carries the episode and playhead into the wallet's checkout target", () => {
@@ -104,22 +105,22 @@ describe("Paywall — the in-place wallet slot (#210)", () => {
   });
 });
 
-describe("Paywall — the signed-in /subscribe link is never prefetched (#264)", () => {
-  // Why: rendering /subscribe is not side-effect free. app/subscribe/page.tsx
-  // awaits linkTrialSessionsToCurrentUser() and applyUserAttribution(userId) —
-  // database writes. next/link prefetches whatever scrolls into view, so a
-  // signed-in non-subscriber who was merely SHOWN the paywall got those writes
-  // without a click. Idempotent, but intent must be a click, not an impression
-  // (the same class as #259 / #260).
+describe("Paywall — the signed-in link goes straight to /checkout, never prefetched (#264, #462)", () => {
+  // #264: the link pointed at /subscribe, whose render writes (trial linking,
+  // attribution) — next/link prefetches whatever scrolls into view, so a
+  // viewer merely SHOWN the paywall got those writes without a click. Since
+  // #462 it points at /checkout (the watch page has already done those
+  // writes); the prefetch stays off — intent must be a click, not an
+  // impression (the same class as #259 / #260).
 
-  it("Continue · Subscribe stays a next/link, with prefetch switched off", () => {
+  it("Continue · Subscribe is a next/link to /checkout, with prefetch switched off", () => {
     render(<Paywall showSlug="the-scarlet-oath" episodeId="ep-3" />);
 
     const cta = screen.getByRole("link", {
       name: en.paywall.continueSubscribe,
     });
     expect(cta.getAttribute("href")).toBe(
-      "/subscribe?show=the-scarlet-oath&ep=ep-3",
+      "/checkout?show=the-scarlet-oath&ep=ep-3",
     );
     // Still next/link: the click itself keeps client navigation.
     expect(isNextLink(cta)).toBe(true);

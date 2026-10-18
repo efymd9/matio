@@ -39,3 +39,33 @@ describe("one language", () => {
     expect(en).not.toHaveProperty("language");
   });
 });
+
+// #462: paid mode has no free 60-second preview any more — an anonymous
+// viewer is asked for an account, then for the membership. The indexed copy
+// (meta/OG description, Twitter card, the OG image's tagline, the web
+// manifest — which reads siteDescription) must not promise one; the
+// payments-off variants keep their own meaning.
+describe("paid-mode indexed copy promises no free preview", () => {
+  const paid = {
+    siteDescription: en.metadata.siteDescription,
+    twitterDescription: en.metadata.twitterDescription,
+    ogTagline: en.og.tagline,
+    synopsisFallback: en.showDetail.synopsisFallback("Fallen", ["Drama"]),
+  };
+
+  it.each(Object.entries(paid))("%s says nothing of a free preview", (_key, text) => {
+    expect(text).not.toMatch(/60|preview|free/i);
+  });
+
+  it("says what it takes: an account, then the membership", () => {
+    expect(en.metadata.siteDescription).toBe(
+      "Original short-form drama series from the Matio studio. Create an account, then become a member to watch every episode.",
+    );
+    expect(en.metadata.twitterDescription).toMatch(/account.*member/i);
+  });
+
+  it("the payments-off variants are untouched", () => {
+    expect(en.metadata.siteDescriptionFree).toMatch(/free/);
+    expect(en.og.taglineFree).toBe("Watch everything free.");
+  });
+});

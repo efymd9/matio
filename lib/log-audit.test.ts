@@ -2225,9 +2225,11 @@ describe("log audit · the playback-token routes' funnel writes (#305)", () => {
   // #326 → #462. The legacy 60-second preview (an all-subscriber show, paid
   // mode) used to read and write trial_sessions as the access decision, and a
   // failure there quoted the statement WITH its params. The preview is gone:
-  // neither route touches the trial store for a subscriber episode any more.
-  // Pinned with a store that fails the way the driver does if it is touched
-  // anyway — nothing it would quote may reach the log, the body or Sentry.
+  // neither route reads or mints a trial row for a subscriber episode any
+  // more — an anonymous request on either is the sign-up ask, whose only
+  // write is the wall stamp (its failure is logged by ids). Pinned with a
+  // store that fails the way the driver does — nothing it would quote may
+  // reach the log, the body or Sentry.
   function subscriberEpisodeRow() {
     const chain = {
       from: () => chain,
@@ -2241,7 +2243,7 @@ describe("log audit · the playback-token routes' funnel writes (#305)", () => {
   it.each([
     {
       name: "app",
-      reason: "subscribe_required",
+      reason: "signup_required",
       call: () => appPlaybackToken(appRequest()),
     },
     {

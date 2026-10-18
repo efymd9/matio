@@ -8,10 +8,13 @@ import { TRIAL_DURATION_SECONDS } from "@/lib/trial";
 // The hero on `/` auto-plays a muted preview of the featured show's first
 // episode. The signed JWT we mint ends up in the HTML (and in the answer of
 // /api/hero-preview-token), so anyone can extract it and stream the asset
-// directly. Cap the TTL to the trial duration so the preview window never
-// exposes more than what /watch already gives an anonymous visitor for free.
-// (Defense-in-depth: also configure referrer restrictions on the Mux signing
-// key — see docs/services.md.)
+// directly. The TTL is capped at 60 seconds (the number the legacy preview
+// used). Since #462 /watch gives an anonymous visitor NOTHING of a subscriber
+// episode, so this teaser is the one anonymous path to a paid asset — and
+// /api/hero-preview-token re-mints it with no auth and no rate limit, so a
+// script can keep renewing it (docs/registry.md: a dedicated teaser asset or
+// a limit is the owner's call). (Defense-in-depth: also configure referrer
+// restrictions on the Mux signing key — see docs/services.md.)
 export const HERO_PREVIEW_TTL_SECONDS = TRIAL_DURATION_SECONDS;
 
 export type HeroPreview = {

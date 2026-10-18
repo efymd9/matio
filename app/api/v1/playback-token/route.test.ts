@@ -48,7 +48,10 @@ vi.mock("drizzle-orm", () => ({
   eq: () => undefined,
   isNull: () => undefined,
 }));
-vi.mock("@/lib/episode-access", () => ({
+// The tier rule itself is the real one (#462: the app and the web answer an
+// anonymous viewer the same way); only the ordering read is faked.
+vi.mock("@/lib/episode-access", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/episode-access")>()),
   getOrderedReadyEpisodeIds: h.orderedEpisodeIds,
 }));
 vi.mock("@/lib/subscription-access", () => ({
@@ -253,13 +256,15 @@ describe("POST /api/v1/playback-token — paid mode, no preview (#462)", () => {
     expect(h.mintTrialSession).not.toHaveBeenCalled();
   });
 
-  it("an anonymous device gets the same answer it is locked with up front — no preview row", async () => {
-    // The app never asks (isEpisodeLockedForApp locks a subscriber episode
-    // for a signed-out viewer); a direct call must not open a preview either.
+  it("an anonymous device is asked for an account first — the answer it is locked with up front, no preview row", async () => {
+    // Registration first, then the paywall (#462) — the web's rule, and what
+    // isEpisodeLockedForApp shows a signed-out viewer before any request.
     const res = await POST(post({ episodeId: EPISODE }));
 
     expect(res.status).toBe(403);
-    expect((await res.json()).error.reason).toBe("subscribe_required");
+    expect((await res.json()).error.reason).toBe("signup_required");
+    // The wall stamp on this device's row, like any sign-up ask; nothing else.
+    expect(h.stampSignupWall).toHaveBeenCalledWith(DEVICE, SHOW);
     expect(h.findTrialSession).not.toHaveBeenCalled();
     expect(h.mintTrialSession).not.toHaveBeenCalled();
     expect(h.sign).not.toHaveBeenCalled();
@@ -280,7 +285,8 @@ describe("POST /api/v1/playback-token — paid mode, no preview (#462)", () => {
     const res = await POST(post({ episodeId: EPISODE }, { device: null }));
 
     expect(res.status).toBe(403);
-    expect((await res.json()).error.reason).toBe("subscribe_required");
+    expect((await res.json()).error.reason).toBe("signup_required");
+    expect(h.stampSignupWall).not.toHaveBeenCalled();
   });
 });
 

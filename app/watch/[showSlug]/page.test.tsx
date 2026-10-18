@@ -19,6 +19,7 @@ const h = vi.hoisted(() => ({
   // resolves to the next queued result, whichever builder methods it walks.
   queue: [] as unknown[][],
   findTrialSession: vi.fn(),
+  applyUserAttribution: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/db", () => {
@@ -56,7 +57,7 @@ vi.mock("@/lib/mux-token", () => ({ muxThumbnailUrl: () => null }));
 vi.mock("@/lib/i18n/server", () => ({ getDict: async () => ({ t: {} }) }));
 vi.mock("@/lib/admin", () => ({ getOrSyncCurrentUser: async () => null }));
 vi.mock("@/lib/attribution", () => ({
-  applyUserAttribution: async () => undefined,
+  applyUserAttribution: h.applyUserAttribution,
   readAttributionCookies: async () => ({ first: {}, last: {} }),
 }));
 vi.mock("@/lib/checkout-session", () => ({ getPublishableKey: () => null }));
@@ -100,7 +101,7 @@ function episodeRow(n: number, access: Access) {
 type PlayerProps = {
   mode: string;
   autoplay: boolean;
-  episodes: Array<{ id: string; tier: Access }>;
+  episodes: Array<{ id: string; tier: Access; accountTier?: Access }>;
   accountUnlocks?: number;
   signupGate?: boolean;
   freeMode?: boolean;
@@ -139,11 +140,13 @@ async function render(access: Access[]): Promise<PlayerProps> {
 }
 
 const tiers = (p: PlayerProps) => p.episodes.map((e) => e.tier);
+const accountTiers = (p: PlayerProps) => p.episodes.map((e) => e.accountTier);
 
 beforeEach(() => {
   h.userId = null;
   h.subscriber = false;
   h.findTrialSession.mockReset().mockResolvedValue(null);
+  h.applyUserAttribution.mockClear();
   vi.stubEnv("PAYMENTS_ENABLED", "1");
   vi.stubEnv("REQUIRE_SIGNUP", "");
 });
@@ -165,6 +168,10 @@ describe("/watch — paid mode: registration first, then the paywall (#462)", ()
     // An account opens none of these episodes — the wall must not promise any.
     expect(player.accountUnlocks).toBe(0);
     expect(player.freeMode).toBe(false);
+    // …and what they ask once signed in: the paywall. The wall's "the
+    // membership comes next" copy and the «Subscribe» rows read this.
+    expect(accountTiers(player)).toEqual(["subscriber", "subscriber", "subscriber"]);
+    expect(h.applyUserAttribution).not.toHaveBeenCalled();
   });
 
   it("a free first episode still plays anonymously; the rest asks for an account", async () => {
@@ -175,6 +182,7 @@ describe("/watch — paid mode: registration first, then the paywall (#462)", ()
     expect(player.autoplay).toBe(true);
     // Only the member episode is what an account really opens.
     expect(player.accountUnlocks).toBe(1);
+    expect(accountTiers(player)).toEqual(["free", "member", "subscriber"]);
   });
 
   it("a signed-in non-subscriber meets the same episodes as the paywall", async () => {
@@ -184,6 +192,10 @@ describe("/watch — paid mode: registration first, then the paywall (#462)", ()
     // mode="member" + tier "subscriber" = the Paywall.
     expect(player.mode).toBe("member");
     expect(tiers(player)).toEqual(["subscriber", "subscriber"]);
+    expect(accountTiers(player)).toEqual(["subscriber", "subscriber"]);
+    // The paywall here sends them straight to /checkout, past /subscribe —
+    // so the account's attribution is stamped on this page, in paid mode too.
+    expect(h.applyUserAttribution).toHaveBeenCalledWith("user_1");
   });
 
   it("a subscriber plays", async () => {
@@ -218,6 +230,7 @@ describe("/watch — free mode is unchanged by #462", () => {
 
     expect(player.mode).toBe("member");
     expect(tiers(player)).toEqual(["free", "member", "member"]);
+    expect(h.applyUserAttribution).toHaveBeenCalledWith("user_1");
   });
 
   it("open free mode: everything is free for an anonymous viewer", async () => {

@@ -12,10 +12,11 @@ import {
 
 // Paid mode is live (since 2026-09-09), but /v1 carries no subscription
 // state (registry): every signed-in viewer reads as a non-subscriber, so a
-// `subscriber` episode is locked with `subscribe_required` for everyone.
-// The show page takes the same stance; neither sends anyone anywhere on it
-// but the player, whose feed leaves a signed-in viewer's answer to the
-// token route (#316).
+// `subscriber` episode is locked with `subscribe_required` for them — and
+// with `signup_required` for a signed-out viewer, who is asked for the
+// account first (#462). The show page takes the same stance; a subscribers-
+// only lock sends nobody anywhere but the player, whose feed leaves a
+// signed-in viewer's answer to the token route (#316).
 const HAS_SUBSCRIPTION = false;
 
 // Whether — and why — a show's first episode is locked for this viewer: the
