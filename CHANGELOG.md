@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.22.0](https://github.com/efymd9/matio/compare/matio-v0.21.0...matio-v0.22.0) (2026-10-18)
+
+
+### Features
+
+* все серии платные — «Смотреть» сначала регистрация, потом пейволл; без 60-секундного превью ([#462](https://github.com/efymd9/matio/issues/462)) ([#463](https://github.com/efymd9/matio/issues/463)) ([e8803ab](https://github.com/efymd9/matio/commit/e8803ab72bfdc4eac20c4da0caf673207914c157))
+
+
+### Documentation
+
+* платный режим снова включён 18.10 — CLAUDE.md и /devops ([#459](https://github.com/efymd9/matio/issues/459)) ([#460](https://github.com/efymd9/matio/issues/460)) ([d50c05b](https://github.com/efymd9/matio/commit/d50c05bc7a46b78e453e3f3dd02f36b45cdaa6e6))
+
 ## [0.21.0](https://github.com/efymd9/matio/compare/matio-v0.20.0...matio-v0.21.0) (2026-10-16)
 
 
