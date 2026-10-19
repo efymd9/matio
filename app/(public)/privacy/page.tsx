@@ -47,6 +47,13 @@
 // is the anonymous counters' proof of playback, lib/watch-segments-write.ts).
 // Written by the main session on the owner's order (PR #463 thread, 18.10),
 // counsel review pending with the rest of the page (#168).
+// 2026-10-19 edition (#466): the cookie banner is for every country —
+// proxy.ts no longer turns marketing cookies on by default outside the
+// EU/EEA, the UK and Switzerland (lib/cookie-consent.ts, CONSENT_VERSION 2).
+// §2 "Marketing-attribution data" and "Story ideas", the §3 basis and the
+// §4 Mux / Meta / PostHog / Google rows say consent everywhere instead of the
+// geo rule. Written on the owner's order (19.10), counsel review pending with
+// the rest of the page (#168).
 // matio.tv/ideas is
 // plain text on purpose: every internal link here must survive ?embed=app
 // (app/(public)/legal-embed.test.tsx).
@@ -67,7 +74,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "October 18, 2026";
+const LAST_UPDATED = "October 19, 2026";
 
 export default async function PrivacyPage() {
   const { t } = await getDict();
@@ -180,11 +187,10 @@ function PrivacyEn() {
             session replays, processed in the EU), Google Analytics (GA4) for
             site-traffic measurement, the ChatGPT Ads measurement pixel
             (ChatGPT ad measurement), and Mux Data (watch-time and
-            playback-quality measurement by our video provider, Mux). In the
-            EU/EEA, the UK and Switzerland, marketing cookies are on only after
-            you accept them in the banner; elsewhere they are on by default and
-            you can switch them off under &ldquo;Cookie preferences&rdquo; in
-            the footer.
+            playback-quality measurement by our video provider, Mux).
+            Wherever you are, marketing cookies are on only after you accept
+            them in the cookie banner, and you can switch them off at any time
+            under &ldquo;Cookie preferences&rdquo; in the footer.
             See the <LegalLink href="/cookies" className="underline underline-offset-2 hover:text-white">Cookie Policy</LegalLink>.
           </li>
           <li>
@@ -214,9 +220,8 @@ function PrivacyEn() {
             whether you asked for emails about new episodes and story calls,
             the version of the Idea Submission Terms you accepted, and the
             site language; and the campaign that brought you, only while
-            marketing cookies are on — in the EU/EEA, the UK and Switzerland
-            after you accept them in the banner; elsewhere they are on by
-            default and you can switch them off under &ldquo;Cookie
+            marketing cookies are on — after you accept them in the cookie
+            banner, until you switch them off under &ldquo;Cookie
             preferences&rdquo; in the footer. You don&rsquo;t need an account
             to send an idea, and we don&rsquo;t store your IP address with it.
           </li>
@@ -287,11 +292,10 @@ function PrivacyEn() {
             (site-traffic measurement), the ChatGPT Ads measurement pixel
             (ChatGPT ad measurement), and Mux Data (watch-time and
             playback-quality measurement by our video provider, Mux).
-            Lawful basis in the EU/EEA, the UK and Switzerland:{" "}
-            <em>consent</em> — there these run only after you accept marketing
-            cookies in the banner, and stop if you withdraw consent. Elsewhere
-            they are on by default, and you can switch them off under
-            &ldquo;Cookie preferences&rdquo; in the footer.
+            Lawful basis: <em>consent</em> — wherever you are, these run only
+            after you accept marketing cookies in the cookie banner, and stop
+            when you withdraw consent under &ldquo;Cookie preferences&rdquo; in
+            the footer.
           </li>
           <li>
             <strong>First-party audience measurement</strong> (counting unique
@@ -324,9 +328,9 @@ function PrivacyEn() {
             <strong>Mux Inc.</strong> (US) — video transcoding, storage and
             signed playback, and playback measurement (Mux Data: watch time and
             playback quality). Mux Data is only engaged while marketing cookies
-            are on: in the EU/EEA, the UK and Switzerland after you accept them
-            in the banner; elsewhere by default, until you switch them off
-            under &ldquo;Cookie preferences&rdquo; in the footer. SCCs.
+            are on: after you accept them in the cookie banner, until you
+            switch them off under &ldquo;Cookie preferences&rdquo; in the
+            footer. SCCs.
           </li>
           <li>
             <strong>Vercel Inc.</strong> (US, EU regions for compute) — hosting.
@@ -347,9 +351,8 @@ function PrivacyEn() {
             <strong>Meta Platforms Ireland Ltd</strong> (Ireland, with
             transfers to Meta Platforms Inc. in the US) — advertising
             measurement via the Meta Pixel and Conversions API. Only engaged
-            while marketing cookies are on: in the EU/EEA, the UK and
-            Switzerland after you accept them in the banner; elsewhere by
-            default, until you switch them off under &ldquo;Cookie
+            while marketing cookies are on: after you accept them in the
+            cookie banner, until you switch them off under &ldquo;Cookie
             preferences&rdquo; in the footer. We share a hashed (SHA-256)
             email address, IP address and conversion events so Meta can
             attribute and optimise our ad campaigns. US transfers covered by
@@ -360,9 +363,8 @@ function PrivacyEn() {
             — product analytics. Our PostHog project is hosted on PostHog&rsquo;s
             EU Cloud (servers in the European Union), so behavioral and usage
             data stays in the EU. Only engaged while marketing cookies are on:
-            in the EU/EEA, the UK and Switzerland after you accept them in the
-            banner; elsewhere by default, until you switch them off under
-            &ldquo;Cookie preferences&rdquo; in the footer.
+            after you accept them in the cookie banner, until you switch them
+            off under &ldquo;Cookie preferences&rdquo; in the footer.
             We send funnel events (page views, feature interactions, sign-up
             steps) and masked session replays. SCCs cover any onward transfers to
             PostHog&rsquo;s US infrastructure.
@@ -370,9 +372,8 @@ function PrivacyEn() {
           <li>
             <strong>Google Ireland Ltd</strong> (Ireland, with transfers to
             Google LLC in the US) — site analytics via Google Analytics 4. Only
-            engaged while marketing cookies are on: in the EU/EEA, the UK and
-            Switzerland after you accept them in the banner; elsewhere by
-            default, until you switch them off under &ldquo;Cookie
+            engaged while marketing cookies are on: after you accept them in
+            the cookie banner, until you switch them off under &ldquo;Cookie
             preferences&rdquo; in the footer. We share usage and device
             data (page views, approximate location from IP, browser/device
             details) so we can measure site traffic. US transfers covered by SCCs.

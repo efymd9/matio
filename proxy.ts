@@ -25,14 +25,7 @@ import {
   resolveAuthorizedParties,
 } from "@/lib/authorized-parties";
 import { FBC_COOKIE, buildFbc } from "@/lib/capi-identity";
-import {
-  CONSENT_COOKIE,
-  CONSENT_MAX_AGE_SECONDS,
-  CONSENT_VERSION,
-  marketingConsentRequired,
-  parseConsent,
-  serializeConsent,
-} from "@/lib/cookie-consent";
+import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 import { paymentsEnabled } from "@/lib/free-mode";
 import { LEGACY_ALIAS_HOST, SITE_URL, stripLocalePrefix } from "@/lib/seo";
 import {
@@ -78,101 +71,55 @@ async function getUserRoleCached(userId: string): Promise<string | null> {
 
 // Returns a NextResponse with marketing cookies set, or null if there's
 // nothing to do. Handles:
-//   - GEO-AWARE consent default. An opt-in banner is legally required only in
-//     the EU/EEA/UK/CH (ePrivacy / PECR / Spain LSSI), so there we persist
-//     nothing until the visitor accepts. Everywhere else (the Americas, etc.)
-//     we DEFAULT marketing consent ON: we write the cookie_consent cookie
-//     ourselves AND forward it on the request, so the SAME render hides the
-//     banner and loads the pixel — unless the visitor already made an explicit
-//     choice (incl. opting out via the footer). Geo comes from Vercel's
-//     `x-vercel-ip-country`; unknown geo fails CLOSED (treated as required).
 //   - attribution_first / attribution_last — UTM campaign snapshots
 //     (first: write-if-absent; last: overwrite every landing).
 //   - _fbc — derived from a Meta click id (?fbclid=) for CAPI matching
 //     (write-if-absent, 90-day life). _fbp is set by the pixel JS, never here.
-// Attribution + _fbc are written only when marketing consent is effective
-// (an explicit accept OR the geo default).
+// Both are written ONLY under an explicit «Accept all» — a cookie_consent
+// record of the current version with marketing:true, which only the banner
+// writes. No consent default, in any country (#466): until then a visitor
+// outside the EU/EEA/UK/CH got `marketing:true` written here on the first
+// request; now nothing here writes or forwards a consent record, and a
+// stale-version record (CONSENT_VERSION) counts as no choice at all.
 type MarketingDecision = {
-  autoGrant: boolean;
   marketingOk: boolean;
   incoming: ReturnType<typeof readAttributionFromSearchParams>;
   hasAttribution: boolean;
   fbclid: string | null;
   needFbc: boolean;
-  // Serialized default-on consent record, present only when autoGrant.
-  consentRecord: string | null;
 };
 
 // Evaluate what marketing state this request warrants — kept apart from the
 // cookie writing below (applyMarketingCookies runs both).
 function evaluateMarketing(req: NextRequest): MarketingDecision {
-  const existing = parseConsent(req.cookies.get(CONSENT_COOKIE)?.value);
-  const country = req.headers.get("x-vercel-ip-country");
-  // No prior choice + consent not legally required here → default marketing ON.
-  const autoGrant = !existing && !marketingConsentRequired(country);
-  const marketingOk = existing?.marketing === true || autoGrant;
+  const marketingOk = hasMarketingConsent(req.cookies.get(CONSENT_COOKIE)?.value);
   const incoming = readAttributionFromSearchParams(req.nextUrl.searchParams);
   const hasAttribution = hasAnyField(incoming);
   const fbclid = req.nextUrl.searchParams.get("fbclid");
   const needFbc = !!fbclid && !req.cookies.get(FBC_COOKIE);
-  const consentRecord = autoGrant
-    ? serializeConsent({
-        necessary: true,
-        marketing: true,
-        ts: Date.now(),
-        v: CONSENT_VERSION,
-      })
-    : null;
-  return {
-    autoGrant,
-    marketingOk,
-    incoming,
-    hasAttribution,
-    fbclid,
-    needFbc,
-    consentRecord,
-  };
+  return { marketingOk, incoming, hasAttribution, fbclid, needFbc };
 }
 
-// Build the pass-through response. Injects a REQUEST header when the same
-// render must see the auto-granted consent cookie (banner hidden + pixel on
-// the very first page), plus any request header the caller asks the render
-// to see (`extra` — the ad-pixel switch on /careers, lib/ad-pixels.ts).
+// Build the pass-through response, carrying any request header the caller
+// asks the render to see (`extra` — the ad-pixel switch on /careers,
+// lib/ad-pixels.ts).
 function buildBaseResponse(
   req: NextRequest,
-  d: MarketingDecision,
   extra: Record<string, string> = {},
 ): NextResponse {
-  const inject = d.autoGrant && d.consentRecord;
-  if (!inject && Object.keys(extra).length === 0) return NextResponse.next();
+  if (Object.keys(extra).length === 0) return NextResponse.next();
   const headers = new Headers(req.headers);
   for (const [name, value] of Object.entries(extra)) headers.set(name, value);
-  if (inject) {
-    const cookieHeader = headers.get("cookie");
-    headers.set(
-      "cookie",
-      (cookieHeader ? `${cookieHeader}; ` : "") +
-        `${CONSENT_COOKIE}=${encodeURIComponent(d.consentRecord!)}`,
-    );
-  }
   return NextResponse.next({ request: { headers } });
 }
 
-// Write the consent / attribution / _fbc cookies onto a response.
+// Write the attribution / _fbc cookies onto a response.
 function writeMarketingCookies(
   res: NextResponse,
   req: NextRequest,
   d: MarketingDecision,
 ): void {
   const prod = process.env.NODE_ENV === "production";
-  if (d.autoGrant && d.consentRecord) {
-    res.cookies.set(CONSENT_COOKIE, d.consentRecord, {
-      maxAge: CONSENT_MAX_AGE_SECONDS,
-      sameSite: "lax",
-      path: "/",
-      secure: prod,
-    });
-  }
   if (d.marketingOk && d.hasAttribution) {
     const payload = serializeAttribution(d.incoming);
     if (!req.cookies.get(ATTRIBUTION_FIRST_COOKIE)) {
@@ -209,12 +156,12 @@ function applyMarketingCookies(
   extra: Record<string, string> = {},
 ): NextResponse | null {
   const d = evaluateMarketing(req);
-  // Nothing to persist: not auto-granting, and either no consent or no params.
+  // Nothing to persist: no consent, or nothing in the URL to persist.
   // A request header to forward still needs a response that carries it.
-  if (!d.autoGrant && (!d.marketingOk || (!d.hasAttribution && !d.needFbc))) {
-    return Object.keys(extra).length > 0 ? buildBaseResponse(req, d, extra) : null;
+  if (!d.marketingOk || (!d.hasAttribution && !d.needFbc)) {
+    return Object.keys(extra).length > 0 ? buildBaseResponse(req, extra) : null;
   }
-  const res = buildBaseResponse(req, d, extra);
+  const res = buildBaseResponse(req, extra);
   writeMarketingCookies(res, req, d);
   return res;
 }
@@ -223,8 +170,7 @@ function applyMarketingCookies(
 // is lib/app-embed.ts). The request is stamped so the layout renders the page
 // alone, in English like the rest of the site (#445; an app build that asks
 // for the /es URL arrives here through the 308 below, query and all).
-// Nothing is written back — no consent default, no attribution or _fbc, no
-// matio_aid: the page loads no tracker and no beacon that could use them, and
+// Nothing is written back — no attribution or _fbc, no matio_aid: the page loads no tracker and no beacon that could use them, and
 // the app's own browser is no audience to measure.
 function applyAppEmbed(req: NextRequest): NextResponse {
   const headers = new Headers(req.headers);
@@ -294,10 +240,10 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
   }
 
   // The app's JSON surface is not a landing: a native client has no banner,
-  // no UTM and no fbclid, so the cookie work below could only ever attach a
-  // default-consent Set-Cookie to its answers — and Vercel's CDN caches no
-  // response that carries one, so /v1/catalog and /v1/shows/:slug missed
-  // their 60s edge copy. Clerk has already authenticated the request by now,
+  // no UTM and no fbclid, so the cookie work below has nothing to do there —
+  // and Vercel's CDN caches no response that carries a Set-Cookie (in #299
+  // it was the consent default, gone since #466), so /v1/catalog and
+  // /v1/shows/:slug would miss their 60s edge copy. Clerk has already authenticated the request by now,
   // with the per-request options above (#100), so the routes' auth() is
   // unchanged.
   if (req.nextUrl.pathname.startsWith(NATIVE_API_PREFIX)) return;
@@ -358,8 +304,8 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
   // Catch-all: every other passthrough route captures attribution + _fbc. Ad
   // landings are nearly always /, /shows/*, or /watch/* — anything not
   // gated above. /careers (#376) is stamped for a layout without the Meta
-  // Pixel and GA4 until #341 (lib/ad-pixels.ts); the cookie work — consent
-  // default, attribution, _fbc, matio_aid — is exactly the same.
+  // Pixel and GA4 until #341 (lib/ad-pixels.ts); the cookie work —
+  // attribution and _fbc under consent, matio_aid — is exactly the same.
   const extra: Record<string, string> = adPixelsOffFor(path)
     ? { [AD_PIXELS_HEADER]: AD_PIXELS_OFF }
     : {};

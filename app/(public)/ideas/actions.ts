@@ -105,10 +105,10 @@ export async function submitIdea(
       showId = show.id;
     }
 
-    // Snapshots and the write. The attribution cookies exist only under
-    // marketing consent (EU/EEA/UK/CH: the banner; elsewhere on by
-    // default) — without it the six columns stay NULL. terms_version is
-    // always the server's, never the client's.
+    // Snapshots and the write. The attribution cookies are written and
+    // read only under marketing consent — an explicit «Accept all» in the
+    // banner, in every country since #466 — without it the six columns
+    // stay NULL. terms_version is always the server's, never the client's.
     const locale = await getLocale();
     const attribution = await readAttributionCookies();
     const contentHash = crypto

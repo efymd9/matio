@@ -13,9 +13,14 @@ export const CONSENT_COOKIE = "cookie_consent";
 // banner must reappear.
 export const CONSENT_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
-// Schema version. Bump when categories change to invalidate stored
-// consents that no longer cover the current cookie set.
-export const CONSENT_VERSION = 1;
+// Schema version. Bump when categories change — or when the way a stored
+// record came to be changes — to invalidate stored consents: a record of any
+// other version parses to null, so the banner asks again and every marketing
+// loader, gate and server read treats the visitor as undecided (= off).
+// 2 since #466 (2026-10-19): until then proxy.ts wrote `marketing:true` by
+// itself outside the EU/EEA/UK/CH, and those v1 records cannot be told apart
+// from an explicit «Accept all» — so every v1 record is asked again, once.
+export const CONSENT_VERSION = 2;
 
 export type ConsentRecord = {
   necessary: true;
@@ -51,30 +56,9 @@ export function hasMarketingConsent(raw: string | undefined): boolean {
   return parseConsent(raw)?.marketing === true;
 }
 
-// Countries where opt-in consent for marketing cookies is legally required:
-// the EU/EEA + UK + Switzerland. ISO 3166-1 alpha-2. Everywhere else (the
-// Americas, etc.) we default marketing consent ON and skip the banner — the
-// gating happens in proxy.ts off the Vercel `x-vercel-ip-country` header.
-export const CONSENT_REQUIRED_COUNTRIES = new Set([
-  // EU 27
-  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
-  "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
-  "SI", "ES", "SE",
-  // EEA (non-EU) + UK + Switzerland
-  "IS", "LI", "NO", "GB", "CH",
-]);
-
-// Is an opt-in marketing-consent banner required for this country? Fails
-// CLOSED (treated as required) for missing / empty / malformed geo — a value
-// that isn't a clean ISO-3166-1 alpha-2 code is treated as "unknown", so we
-// never default tracking on for a visitor we can't confidently place.
-export function marketingConsentRequired(
-  country: string | null | undefined,
-): boolean {
-  const c = country?.toUpperCase();
-  if (!c || !/^[A-Z]{2}$/.test(c)) return true;
-  return CONSENT_REQUIRED_COUNTRIES.has(c);
-}
+// No geo branch (#466): consent for marketing cookies is asked of every
+// visitor, in every country — nothing writes a default record, and unknown or
+// missing geo changes nothing because geo is not read at all.
 
 export function serializeConsent(c: ConsentRecord): string {
   return JSON.stringify(c);

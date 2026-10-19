@@ -384,7 +384,7 @@ export const ru = {
     sfVisitorsCount: (n: number) =>
       `${n.toLocaleString()} ${ruPlural(n, ["посетитель", "посетителя", "посетителей"])}`,
     sfConsentNote:
-      "«Посетители» и «Стена» — персоны PostHog: считаются только браузеры с согласием на маркетинговые cookies (вне ЕС оно включено по умолчанию), поэтому это нижняя граница. «Зарегистрировались» и «Смотрели» — данные из нашей БД.",
+      "«Посетители» и «Стена» — персоны PostHog: считаются только браузеры с согласием на маркетинговые cookies (с 19.10.2026 его спрашивают во всех странах), поэтому это нижняя граница. «Зарегистрировались» и «Смотрели» — данные из нашей БД.",
     sfNotConnected1:
       "Панель не подключена. Создайте в PostHog personal API key со scope",
     sfNotConnected2: "и задайте",
@@ -1001,7 +1001,7 @@ export const ru = {
       `Убрать «${name}» в архив? Сессии по её меткам останутся в аналитике; комбинацию меток можно будет использовать снова.`,
     empty: "Ссылок пока нет — создайте первую выше.",
     consentNote:
-      "В ЕС метки пишутся только после согласия на cookies, поэтому часть кликов оседает в «(direct)». Вне ЕС метки пишутся с первого визита.",
+      "Метки пишутся только после согласия на cookies (с 19.10.2026 — во всех странах), поэтому часть кликов оседает в «(direct)».",
   },
   reminders: {
     kicker: "Рассылка",
@@ -1482,7 +1482,7 @@ export const en: AdminDict = {
     sfVisitorsCount: (n: number) =>
       `${n.toLocaleString()} visitor${n === 1 ? "" : "s"}`,
     sfConsentNote:
-      "Visitors and Wall are PostHog persons: only browsers that consented to marketing cookies are counted (outside the EU consent defaults on), so they are a floor. Signed up and Watched come from our own DB.",
+      "Visitors and Wall are PostHog persons: only browsers that consented to marketing cookies are counted (asked in every country since 2026-10-19), so they are a floor. Signed up and Watched come from our own DB.",
     sfNotConnected1:
       "Panel not connected. Create a PostHog personal API key with the",
     sfNotConnected2: "scope and set",
@@ -2072,7 +2072,7 @@ export const en: AdminDict = {
       `Archive “${name}”? Sessions matched to its tags stay in analytics; the tag combination becomes reusable.`,
     empty: "No links yet — create the first one above.",
     consentNote:
-      "In the EU, tags persist only after cookie consent, so some clicks land in “(direct)”. Outside the EU tags are written on first visit.",
+      "Tags persist only after cookie consent (in every country since 2026-10-19), so some clicks land in “(direct)”.",
   },
   reminders: {
     kicker: "Email",

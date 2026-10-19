@@ -1,5 +1,6 @@
 import "server-only";
 import type { NextRequest } from "next/server";
+import { CONSENT_COOKIE, hasMarketingConsent } from "@/lib/cookie-consent";
 import { normalizeUtm, normalizeUtmSource } from "@/lib/utm";
 
 // Per-campaign attribution. Captured from UTM query params on landing,
@@ -112,17 +113,36 @@ export function parseAttributionCookie(
   }
 }
 
-// Read both cookies from a NextRequest (used by proxy.ts which has access
-// to req.cookies). Page/route handlers running in app/ use the cookies()
-// from next/headers via readAttributionCookies().
+type CookieReader = { get(name: string): { value: string } | undefined };
+
+// Both cookies are read only under marketing consent, exactly like they are
+// written (#466). The cookies of a visitor who never said yes can still be in
+// the browser: proxy.ts wrote them outside the EU/EEA/UK/CH under an automatic
+// `marketing:true` until #466, and those v1 consent records now read as "no
+// choice" (CONSENT_VERSION). Without this gate such a leftover snapshot would
+// still be stamped into trial_sessions / users / Stripe metadata before the
+// visitor answered the banner.
+function readConsented(store: CookieReader): {
+  first: AttributionPayload;
+  last: AttributionPayload;
+} {
+  if (!hasMarketingConsent(store.get(CONSENT_COOKIE)?.value)) {
+    return { first: EMPTY_ATTRIBUTION, last: EMPTY_ATTRIBUTION };
+  }
+  return {
+    first: parseAttributionCookie(store.get(ATTRIBUTION_FIRST_COOKIE)?.value),
+    last: parseAttributionCookie(store.get(ATTRIBUTION_LAST_COOKIE)?.value),
+  };
+}
+
+// Read both cookies from a NextRequest (route handlers that have the
+// request — /api/playback-token). Pages and server actions in app/ use the
+// cookies() from next/headers via readAttributionCookies().
 export function readAttributionCookiesFromRequest(req: NextRequest): {
   first: AttributionPayload;
   last: AttributionPayload;
 } {
-  return {
-    first: parseAttributionCookie(req.cookies.get(ATTRIBUTION_FIRST_COOKIE)?.value),
-    last: parseAttributionCookie(req.cookies.get(ATTRIBUTION_LAST_COOKIE)?.value),
-  };
+  return readConsented(req.cookies);
 }
 
 // Read both cookies via next/headers cookies() inside server components,
@@ -133,11 +153,7 @@ export async function readAttributionCookies(): Promise<{
   last: AttributionPayload;
 }> {
   const { cookies } = await import("next/headers");
-  const store = await cookies();
-  return {
-    first: parseAttributionCookie(store.get(ATTRIBUTION_FIRST_COOKIE)?.value),
-    last: parseAttributionCookie(store.get(ATTRIBUTION_LAST_COOKIE)?.value),
-  };
+  return readConsented(await cookies());
 }
 
 // Map an AttributionPayload to the DB column names used across tables.

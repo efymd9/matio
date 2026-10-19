@@ -411,7 +411,7 @@ First visit                         Banner: "Accept all" / "Essential only"
    │                                  │
    ▼                                  ▼
 SiteLayout reads cookies()      writeConsentToDocument({ necessary:true,
-  → initialConsent = null         marketing:bool, ts, v:1 })
+  → initialConsent = null         marketing:bool, ts, v:2 })
   → renders CookieBanner            → sets cookie_consent (1y, samesite=lax)
                                     → if marketing=false, also clears any
                                       pre-existing attribution_first/last
@@ -421,6 +421,8 @@ Subsequent visits                 proxy.ts before writing attribution_* cookies:
   → banner null on mount            → UTM still flows in URL, just not persisted
                                       to cookies / not attributed downstream
 ```
+
+**Every country gets the banner (#466, 2026-10-19).** Until then `proxy.ts` wrote `marketing:true` itself on the first request from outside the EU/EEA/UK/CH (Vercel's `x-vercel-ip-country`) and forwarded it to the render; that geo default is gone, nothing but the banner writes `cookie_consent`, and `CONSENT_VERSION` moved to 2 so the auto-granted v1 records — indistinguishable from real ones — parse to `null` and are asked again once. The attribution cookies are read only under the same consent as they are written (`lib/attribution.ts`), so a leftover pair is never stamped into a row.
 
 Two equally-prominent buttons satisfy ICO / AEPD / CNIL guidance ("reject must be no harder than accept"). The CookieBanner reopens via `window.dispatchEvent(new Event(COOKIE_PREFS_EVENT))` — the SiteFooter has a "Cookie preferences" button that dispatches it.
 

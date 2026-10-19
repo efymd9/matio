@@ -167,8 +167,9 @@ does not on Android. App "unique visitors" will therefore skew slightly high on 
 Acceptable; document it next to the existing "ledgers accrue from deploy" caveat.
 
 **Consent model changes shape:** no cookie banner. Instead — an **ATT prompt** on iOS (only
-needed if Meta install attribution is wanted, §10) plus an EU consent screen gating PostHog and
-Meta app events. `marketingConsentRequired()` ports as-is for the geo decision.
+needed if Meta install attribution is wanted, §10) plus a consent screen gating PostHog and
+Meta app events — for every country: the web dropped its geo decision in #466
+(`marketingConsentRequired()` is gone), and the app follows.
 
 ## 6. Player architecture
 

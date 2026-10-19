@@ -19,6 +19,12 @@
 // necessary", the same footing as `matio_aid` — whether its measurement half
 // stands on it is a counsel question (#168). Written by the main session on
 // the owner's order (PR #463 thread, 18.10), counsel review pending.
+// 2026-10-19 edition (#466): §3 no longer says marketing cookies may be on by
+// default outside the EU/EEA, the UK and Switzerland — the banner is for every
+// country, nothing marketing runs before «Accept all» (proxy.ts writes no
+// consent default; lib/cookie-consent.ts CONSENT_VERSION 2 asks everyone
+// again once). Written on the owner's order (19.10), counsel review pending
+// (#168).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalLink } from "@/components/site/legal-link";
@@ -36,7 +42,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "October 18, 2026";
+const LAST_UPDATED = "October 19, 2026";
 
 export default async function CookiesPage() {
   const { t } = await getDict();
@@ -220,10 +226,9 @@ function CookiesEn() {
 
       <Section id="manage" title="3. How to manage cookies">
         <p>
-          In the EU, EEA, UK and Switzerland, marketing cookies are set{" "}
-          <strong>only after you accept</strong> them in the banner. Elsewhere
-          (where the law allows) they may be enabled by default &mdash; in
-          either case you can <strong>turn them off at any time</strong>.
+          Wherever you are, marketing cookies are set{" "}
+          <strong>only after you accept</strong> them in the banner, and you
+          can <strong>turn them off at any time</strong>.
         </p>
         <p>
           You can refuse or withdraw your consent for non-essential cookies at

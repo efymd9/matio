@@ -14,12 +14,23 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // effect, which a server render never runs, so a stand-in is the only honest
 // way to see whether the layout mounts it at all.
 
-const h = vi.hoisted(() => ({ headers: new Map<string, string>() }));
+const h = vi.hoisted(() => ({
+  headers: new Map<string, string>(),
+  cookies: new Map<string, string>(),
+  // The props each stand-in was last rendered with — how the #466 case reads
+  // the consent state the layout hands every loader.
+  props: new Map<string, Record<string, unknown>>(),
+}));
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/headers", () => ({
   headers: async () => ({ get: (k: string) => h.headers.get(k) ?? null }),
-  cookies: async () => ({ get: () => undefined }),
+  cookies: async () => ({
+    get: (k: string) => {
+      const value = h.cookies.get(k);
+      return value === undefined ? undefined : { name: k, value };
+    },
+  }),
 }));
 vi.mock("next/font/google", () => {
   const font = () => ({ variable: "font-stub" });
@@ -33,7 +44,8 @@ vi.mock("@/lib/free-mode", () => ({ paymentsEnabled: () => true }));
 vi.mock("@/components/site/user-menu", () => ({ UserMenu: () => null }));
 
 function marker(name: string) {
-  function Mounted() {
+  function Mounted(props: Record<string, unknown>) {
+    h.props.set(name, props);
     return <i data-mounted={name} />;
   }
   return Mounted;
@@ -49,6 +61,7 @@ vi.mock("@/components/site/google-analytics", () => ({
 vi.mock("@/components/site/openai-pixel", () => ({ OpenAIPixel: marker("openai-pixel") }));
 vi.mock("@/components/site/visit-beacon", () => ({ VisitBeacon: marker("visit-beacon") }));
 
+import { CONSENT_VERSION, serializeConsent } from "@/lib/cookie-consent";
 import RootLayout, { generateMetadata } from "./layout";
 
 const LOADERS = [
@@ -68,6 +81,8 @@ async function render(): Promise<string> {
 
 beforeEach(() => {
   h.headers = new Map();
+  h.cookies = new Map();
+  h.props.clear();
 });
 
 describe("RootLayout — the app's embed variant (#310)", () => {
@@ -164,5 +179,50 @@ describe("RootLayout — English only (#445)", () => {
     expect(meta.alternates).toEqual({ canonical: "https://matio.tv" });
     expect(meta.openGraph).toMatchObject({ url: "https://matio.tv", locale: "en_US" });
     expect(meta.openGraph).not.toHaveProperty("alternateLocale");
+  });
+});
+
+// #466 — the banner and every consent-gated loader take their state from the
+// layout's one server-side parse. A record of an older CONSENT_VERSION — the
+// v1 records proxy.ts wrote by itself outside Europe are indistinguishable
+// from a real «Accept all» — reaches all of them as "no choice yet": the
+// banner shows, and no tracker loads on first paint.
+describe("RootLayout — a stale consent record is no consent (#466)", () => {
+  const CONSENT_TAKERS = [
+    "cookie-banner",
+    "meta-pixel",
+    "posthog",
+    "google-analytics",
+    "openai-pixel",
+  ];
+
+  it("hands the banner and every loader null for a v1 `marketing: true` record", async () => {
+    h.cookies.set(
+      "cookie_consent",
+      JSON.stringify({ necessary: true, marketing: true, ts: 1, v: 1 }),
+    );
+
+    await render();
+
+    for (const name of CONSENT_TAKERS) {
+      expect(h.props.has(name), name).toBe(true);
+      expect(h.props.get(name)?.initialConsent, name).toBeNull();
+    }
+  });
+
+  it("hands them the record for an «Accept all» of the current version", async () => {
+    h.cookies.set(
+      "cookie_consent",
+      serializeConsent({ necessary: true, marketing: true, ts: 1, v: CONSENT_VERSION }),
+    );
+
+    await render();
+
+    for (const name of CONSENT_TAKERS) {
+      expect(h.props.get(name)?.initialConsent, name).toMatchObject({
+        marketing: true,
+        v: CONSENT_VERSION,
+      });
+    }
   });
 });

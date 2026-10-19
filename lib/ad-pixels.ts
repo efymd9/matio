@@ -4,8 +4,8 @@
 // automatic user-provided-data detection is on is still unconfirmed (#341) —
 // either would read those fields past every gate in our code. Until #341 is
 // closed, the page simply does not get the two loaders. Consent is untouched
-// (proxy.ts still writes the cookie_consent default and the attribution
-// cookies), and PostHog and the ChatGPT Ads pixel stay as they are.
+// (the banner, and proxy.ts's attribution cookies under it), and PostHog and
+// the ChatGPT Ads pixel stay as they are.
 //
 // The mechanism is the `?embed=app` one (lib/app-embed.ts): proxy.ts stamps
 // AD_PIXELS_HEADER on the request for these paths, and the root layout skips

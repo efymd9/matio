@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef } from "react";
 import {
   CONSENT_VERSION,
@@ -561,7 +561,7 @@ describe("Player — Mux Data consent on the live element", () => {
 // a new playbackId, no remount (the invariant that carries WebKit's
 // autoplay blessing across the seam).
 import { capturePostHog, onPostHogReady } from "@/lib/posthog-events";
-import { onPixelReady } from "@/lib/meta-pixel-events";
+import { onPixelReady, trackPixel } from "@/lib/meta-pixel-events";
 
 // The overlays load through next/dynamic — under a full parallel run the
 // lazy import can take longer than Testing Library's 1s default.
@@ -1252,5 +1252,73 @@ describe("Player → a subscriber's 403 subscribe_required (#462)", () => {
     // kicker asks for the membership — the episode in view does not count.
     expect(screen.queryByText(en.paywall.allFreeWatched)).toBeNull();
     expect(screen.getByText(en.paywall.becomeMemberKicker)).toBeTruthy();
+  });
+});
+
+// #466 (VPPA) — the Meta events the player sends name no video: no show or
+// episode title, slug or id goes to the ad network, only what kind of event
+// it is. The pixel-ready deferral runs its callback here, so what is read is
+// the REAL argument list trackPixel receives.
+describe("Player → Meta events name no video (#466)", () => {
+  const LEAD_KEY = "matio:fb:lead";
+  // Everything in this render that identifies the show or the episode.
+  const IDENTIFIERS = [
+    "the-scarlet-oath",
+    "The Scarlet Oath",
+    "show-1",
+    "ep-1",
+    "pb-1",
+    "Episode 1",
+  ];
+
+  beforeEach(() => {
+    vi.mocked(trackPixel).mockClear();
+    vi.mocked(onPixelReady).mockImplementation((cb: () => void) => {
+      cb();
+      return () => undefined;
+    });
+    localStorage.removeItem(LEAD_KEY);
+  });
+
+  afterEach(() => {
+    vi.mocked(onPixelReady).mockImplementation(() => () => undefined);
+    localStorage.removeItem(LEAD_KEY);
+  });
+
+  const sent = (event: string) =>
+    vi.mocked(trackPixel).mock.calls.filter(([name]) => name === event);
+
+  function expectNoVideo(calls: unknown[]) {
+    const wire = JSON.stringify(calls);
+    for (const id of IDENTIFIERS) expect(wire, id).not.toContain(id);
+  }
+
+  it("ViewContent on the first playing frame carries the content type only", async () => {
+    renderPlayer("horizontal");
+    const video = await screen.findByTestId("mux-video");
+
+    fireEvent.playing(video);
+
+    const calls = sent("ViewContent");
+    expect(calls).toEqual([["ViewContent", { content_type: "product" }]]);
+    expectNoVideo(calls);
+  });
+
+  it("Lead at the end of episode 1 carries its category and type only", async () => {
+    renderPlayer("horizontal");
+    const video = (await screen.findByTestId("mux-video")) as HTMLVideoElement;
+    await waitFor(() => expect(probe.inits).toHaveLength(1));
+    const c = clock(video, 600);
+
+    await c.end();
+
+    const calls = sent("Lead");
+    expect(calls).toEqual([
+      [
+        "Lead",
+        { content_category: "first_episode_finished", content_type: "product" },
+      ],
+    ]);
+    expectNoVideo(calls);
   });
 });

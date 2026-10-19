@@ -2,8 +2,9 @@ import { describeError } from "@/lib/observability";
 import { POSTHOG_API_HOST, type PosthogQueryConfig } from "@/lib/posthog-hogql";
 
 // Art. 17 at PostHog: delete the person behind a Clerk id (the app's
-// `identify(userId, {email})` makes the Clerk id a distinct_id, and the
-// person carries the address as a property) together with its events.
+// `identify(userId)` makes the Clerk id a distinct_id; a person identified
+// before #466 also carries the address as a property) together with its
+// events.
 //
 //   GET    /api/projects/{id}/persons/?distinct_id=<clerk id>   → person ids
 //   DELETE /api/projects/{id}/persons/{personId}/?delete_events=true&delete_recordings=true
