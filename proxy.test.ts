@@ -50,6 +50,12 @@ vi.mock("@clerk/nextjs/server", () => ({
 }));
 
 const { default: proxy, config } = await import("./proxy");
+const { CONSENT_VERSION } = await import("./lib/cookie-consent");
+
+// A cookie_consent record the banner writes: the current version, with the
+// visitor's answer.
+const consentCookie = (marketing: boolean, v: number = CONSENT_VERSION) =>
+  `cookie_consent=${encodeURIComponent(JSON.stringify({ necessary: true, marketing, ts: 1, v }))}`;
 
 // Obviously fake — the nightly gitleaks scan should have nothing to chase.
 const PASSWORD = "dummy-staging-password";
@@ -157,43 +163,43 @@ describe("proxy — staging lock on", () => {
 
 // The app's JSON surface skips the landing machinery (#299). Before, a native
 // request from outside the consent-required countries got the default-consent
-// cookie on its answer — and Vercel's CDN caches no response with Set-Cookie,
-// so the public /v1 reads missed their 60s edge copy. Everything else keeps
-// the machinery, and Clerk's per-request options are untouched by it.
+// cookie on its answer (a default gone everywhere since #466) — and Vercel's
+// CDN caches no response with Set-Cookie, so the public /v1 reads missed
+// their 60s edge copy. Everything else keeps the machinery, and Clerk's
+// per-request options are untouched by it.
 describe("proxy — /api/v1 answers carry no cookies", () => {
   const nonEu = { "x-vercel-ip-country": "US" };
 
-  it("sets no consent cookie on a /v1 read from a country that defaults consent on", async () => {
+  it("persists no attribution or _fbc from a /v1 URL, even under consent — the CDN-cached reads stay cookie-free", async () => {
     vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
 
-    const res = await proxy(request("/api/v1/catalog", nonEu), event);
+    // Consent + a campaign + a click id: everything that WOULD set cookies
+    // on a page (the sibling test below proves it does there), so only the
+    // #299 early return keeps these answers clean.
+    for (const path of ["/api/v1/catalog", "/api/v1/shows/some-show"]) {
+      const res = await proxy(
+        request(`${path}?utm_source=tiktok&utm_campaign=c1&fbclid=abc`, {
+          ...nonEu,
+          cookie: consentCookie(true),
+        }),
+        event,
+      );
 
-    expect(res?.headers.get("Set-Cookie")).toBeNull();
-    // A plain pass-through: the route answers, nothing is rewritten.
-    expect(res?.headers.get("x-middleware-next")).toBe("1");
+      expect(res?.headers.get("Set-Cookie"), path).toBeNull();
+      // A plain pass-through: the route answers, nothing is rewritten.
+      expect(res?.headers.get("x-middleware-next"), path).toBe("1");
+    }
   });
 
-  it("persists no attribution or _fbc from a /v1 URL, even under consent", async () => {
-    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
-
-    const consented = JSON.stringify({ necessary: true, marketing: true, ts: 1, v: 1 });
-    const res = await proxy(
-      request("/api/v1/shows/some-show?utm_source=tiktok&utm_campaign=c1&fbclid=abc", {
-        ...nonEu,
-        cookie: `cookie_consent=${encodeURIComponent(consented)}`,
-      }),
-      event,
-    );
-
-    expect(res?.headers.get("Set-Cookie")).toBeNull();
-  });
-
-  it("leaves every other path as it was: pages and the web's own /api still get the geo default", async () => {
+  it("leaves every other path as it was: pages and the web's own /api still persist a consented campaign", async () => {
     vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
 
     for (const path of ["/", "/watch/some-show", "/api/playback-token", "/api/v1"]) {
-      const res = await proxy(request(path, nonEu), event);
-      expect(res?.headers.get("Set-Cookie"), path).toContain("cookie_consent=");
+      const res = await proxy(
+        request(`${path}?utm_source=tiktok`, { ...nonEu, cookie: consentCookie(true) }),
+        event,
+      );
+      expect(res?.headers.get("Set-Cookie"), path).toContain("attribution_first=");
     }
   });
 
@@ -305,8 +311,8 @@ describe("proxy — the app's embed of the legal documents", () => {
   const forwarded = (res: Awaited<ReturnType<typeof proxy>>, name: string) =>
     (res && res.headers.get(`x-middleware-request-${name}`)) ?? null;
 
-  // A first visit from outside the EU — the case where the normal page would
-  // default marketing consent ON and mint matio_aid.
+  // A first visit — the case where the normal page would mint matio_aid
+  // (and, until #466, default marketing consent ON outside the EU).
   const firstVisit = { "x-vercel-ip-country": "US" };
 
   it("stamps a bare /terms?embed=app for the bare layout — a Spanish phone too, in place, nothing written", async () => {
@@ -359,7 +365,8 @@ describe("proxy — the app's embed of the legal documents", () => {
 
     expect(forwarded(res, "x-matio-embed")).toBeNull();
     expect(res?.headers.get("Set-Cookie")).toContain("matio_aid");
-    expect(res?.headers.get("Set-Cookie")).toContain("cookie_consent");
+    // No consent default for anyone since #466 — the banner asks.
+    expect(res?.headers.get("Set-Cookie")).not.toContain("cookie_consent");
   });
 
   it("gives no other page an embed variant, and no other value counts", async () => {
@@ -382,13 +389,13 @@ describe("proxy — the app's embed of the legal documents", () => {
 
 // #376, the owner's option (а): /careers renders without the Meta Pixel and
 // GA4 until #341 (lib/ad-pixels.ts). proxy.ts stamps the request for that
-// path only; the cookie work — the consent default outside the EU, the
-// attribution cookies, matio_aid — is exactly what any other page gets.
+// path only; the cookie work — the attribution cookies under consent,
+// matio_aid — is exactly what any other page gets.
 describe("proxy — /careers is stamped for a layout without the ad pixels", () => {
   const forwarded = (res: Awaited<ReturnType<typeof proxy>>, name: string) =>
     (res && res.headers.get(`x-middleware-request-${name}`)) ?? null;
 
-  it("a first visit from outside the EU: stamped, and consent + matio_aid written as on any page", async () => {
+  it("a first visit from outside the EU: stamped, matio_aid written, and no consent or campaign before the banner (#466)", async () => {
     vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
 
     const res = await proxy(
@@ -397,12 +404,27 @@ describe("proxy — /careers is stamped for a layout without the ad pixels", () 
     );
 
     expect(forwarded(res, "x-matio-ad-pixels")).toBe("off");
-    // The same render still sees the auto-granted consent (banner hidden).
-    expect(forwarded(res, "cookie")).toContain("cookie_consent=");
+    // The render sees the visitor's own cookies and nothing added to them.
+    expect(forwarded(res, "cookie") ?? "").not.toContain("cookie_consent=");
     const setCookie = res?.headers.get("Set-Cookie") ?? "";
-    expect(setCookie).toContain("cookie_consent");
-    expect(setCookie).toContain("attribution_first");
+    expect(setCookie).not.toContain("cookie_consent");
+    expect(setCookie).not.toContain("attribution_first");
     expect(setCookie).toContain("matio_aid");
+  });
+
+  it("a consented visit: stamped, and the campaign persisted as on any page", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(
+      request("/careers?role=ai-creator&utm_source=ig", {
+        "x-vercel-ip-country": "US",
+        cookie: consentCookie(true),
+      }),
+      event,
+    );
+
+    expect(forwarded(res, "x-matio-ad-pixels")).toBe("off");
+    expect(res?.headers.get("Set-Cookie")).toContain("attribution_first");
   });
 
   it("an EU visitor with nothing to write is still stamped", async () => {
@@ -584,5 +606,85 @@ describe("proxy — the retired /es URLs", () => {
     );
     expect(open?.status).toBe(308);
     expect(new URL(open!.headers.get("location")!).pathname).toBe("/about");
+  });
+});
+
+// #466 — consent for marketing cookies is asked of every visitor, in every
+// country. Until then a first request from outside the EU/EEA/UK/CH (by
+// Vercel's x-vercel-ip-country) got `marketing: true` written here and
+// forwarded to its own render, so the banner never showed and the campaign
+// and _fbc cookies were written from the first page. Now nothing here writes
+// or forwards a consent record, a stale-version record counts as no answer,
+// and only the banner's «Accept all» opens the marketing cookies.
+describe("proxy — no consent default, in any country (#466)", () => {
+  const forwarded = (res: Awaited<ReturnType<typeof proxy>>, name: string) =>
+    (res && res.headers.get(`x-middleware-request-${name}`)) ?? null;
+  const LANDING = "/watch/some-show?utm_source=tiktok&utm_campaign=c1&fbclid=abc";
+
+  it.each(["US", "MX", "BR", "ES", "GB", "CH", "", "zz"])(
+    "a first visit from %j: no consent record, no campaign, no _fbc — only matio_aid",
+    async (country) => {
+      vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+      const headers: Record<string, string> = country ? { "x-vercel-ip-country": country } : {};
+
+      const res = await proxy(request(LANDING, headers), event);
+
+      const setCookie = res?.headers.get("Set-Cookie") ?? "";
+      expect(setCookie).not.toContain("cookie_consent");
+      expect(setCookie).not.toContain("attribution_first");
+      expect(setCookie).not.toContain("attribution_last");
+      expect(setCookie).not.toContain("_fbc");
+      expect(setCookie).toContain("matio_aid");
+      // The render is not told a consent it never got (the banner shows).
+      expect(forwarded(res, "cookie") ?? "").not.toContain("cookie_consent");
+    },
+  );
+
+  it("treats a v1 record — even one that says yes — as no answer", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(
+      request(LANDING, {
+        "x-vercel-ip-country": "US",
+        cookie: `${consentCookie(true, 1)}; matio_aid=already`,
+      }),
+      event,
+    );
+
+    // Nothing written at all: no campaign, no _fbc, and the old record is
+    // neither refreshed nor replaced.
+    expect(res?.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("writes nothing after «Essential only»", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(
+      request(LANDING, {
+        "x-vercel-ip-country": "US",
+        cookie: `${consentCookie(false)}; matio_aid=already`,
+      }),
+      event,
+    );
+
+    expect(res?.headers.get("Set-Cookie")).toBeNull();
+  });
+
+  it("persists the campaign and _fbc after «Accept all» — and still writes no consent record itself", async () => {
+    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
+
+    const res = await proxy(
+      request(LANDING, {
+        "x-vercel-ip-country": "DE",
+        cookie: `${consentCookie(true)}; matio_aid=already`,
+      }),
+      event,
+    );
+
+    const setCookie = res?.headers.get("Set-Cookie") ?? "";
+    expect(setCookie).toContain("attribution_first=");
+    expect(setCookie).toContain("attribution_last=");
+    expect(setCookie).toContain("_fbc=fb.1.");
+    expect(setCookie).not.toContain("cookie_consent");
   });
 });

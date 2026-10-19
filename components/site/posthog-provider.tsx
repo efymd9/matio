@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { useAuth, useUser } from "@clerk/nextjs";
+import { useAuth } from "@clerk/nextjs";
 import {
   CONSENT_CHANGED_EVENT,
   readConsentFromDocument,
@@ -36,7 +36,6 @@ export function PostHogProvider({
 }) {
   const pathname = usePathname();
   const { isSignedIn, userId } = useAuth();
-  const { user } = useUser();
 
   const [enabled, setEnabled] = useState(initialConsent?.marketing === true);
   const [ready, setReady] = useState(false);
@@ -167,21 +166,21 @@ export function PostHogProvider({
     window.posthog?.capture("$pageview");
   }, [enabled, ready, pathname]);
 
-  // Derived once so the identify effect deps on the email string, not the whole
-  // mutable Clerk user object (which would re-run on any profile change).
-  const email = user?.primaryEmailAddress?.emailAddress ?? null;
   // Stitch the anonymous person to the Clerk user once known; reset on sign-out.
+  // The Clerk id and nothing else (#466): no email or other person property
+  // goes to PostHog — the privacy rule is ids, statuses and durations only,
+  // and the funnel needs nothing more to join the browser to the account.
   useEffect(() => {
     if (!enabled || !ready || !consentRef.current) return;
     if (isSignedIn && userId) {
       if (identifiedRef.current === userId) return;
       identifiedRef.current = userId;
-      window.posthog?.identify(userId, email ? { email } : undefined);
+      window.posthog?.identify(userId);
     } else if (isSignedIn === false && identifiedRef.current) {
       identifiedRef.current = null;
       window.posthog?.reset();
     }
-  }, [enabled, ready, isSignedIn, userId, email]);
+  }, [enabled, ready, isSignedIn, userId]);
 
   return null;
 }

@@ -283,7 +283,10 @@ export async function createGuestCheckoutSession(
           eventName: "InitiateCheckout",
           eventId: session.id,
           actionSource: "website",
-          eventSourceUrl: watchPath ? `${origin}${watchPath}` : origin,
+          // The checkout page, never the watch path the buyer came from:
+          // `/watch/<slug>?ep=<id>` would tell Meta which video this person
+          // watched (#466, VPPA).
+          eventSourceUrl: `${origin}/checkout`,
           user: {
             fbp: capiIdentity?.fbp,
             fbc: capiIdentity?.fbc,

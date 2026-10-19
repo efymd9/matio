@@ -13,9 +13,14 @@ export const CONSENT_COOKIE = "cookie_consent";
 // banner must reappear.
 export const CONSENT_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
-// Schema version. Bump when categories change to invalidate stored
-// consents that no longer cover the current cookie set.
-export const CONSENT_VERSION = 1;
+// Schema version. Bump when categories change — or when the way a stored
+// record came to be changes — to invalidate stored consents: a record of any
+// other version parses to null, so the banner asks again and every marketing
+// loader, gate and server read treats the visitor as undecided (= off).
+// 2 since #466 (2026-10-19): until then proxy.ts wrote `marketing:true` by
+// itself outside the EU/EEA/UK/CH, and those v1 records cannot be told apart
+// from an explicit «Accept all» — so every v1 record is asked again, once.
+export const CONSENT_VERSION = 2;
 
 export type ConsentRecord = {
   necessary: true;
@@ -51,30 +56,9 @@ export function hasMarketingConsent(raw: string | undefined): boolean {
   return parseConsent(raw)?.marketing === true;
 }
 
-// Countries where opt-in consent for marketing cookies is legally required:
-// the EU/EEA + UK + Switzerland. ISO 3166-1 alpha-2. Everywhere else (the
-// Americas, etc.) we default marketing consent ON and skip the banner — the
-// gating happens in proxy.ts off the Vercel `x-vercel-ip-country` header.
-export const CONSENT_REQUIRED_COUNTRIES = new Set([
-  // EU 27
-  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
-  "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
-  "SI", "ES", "SE",
-  // EEA (non-EU) + UK + Switzerland
-  "IS", "LI", "NO", "GB", "CH",
-]);
-
-// Is an opt-in marketing-consent banner required for this country? Fails
-// CLOSED (treated as required) for missing / empty / malformed geo — a value
-// that isn't a clean ISO-3166-1 alpha-2 code is treated as "unknown", so we
-// never default tracking on for a visitor we can't confidently place.
-export function marketingConsentRequired(
-  country: string | null | undefined,
-): boolean {
-  const c = country?.toUpperCase();
-  if (!c || !/^[A-Z]{2}$/.test(c)) return true;
-  return CONSENT_REQUIRED_COUNTRIES.has(c);
-}
+// No geo branch (#466): consent for marketing cookies is asked of every
+// visitor, in every country — nothing writes a default record, and unknown or
+// missing geo changes nothing because geo is not read at all.
 
 export function serializeConsent(c: ConsentRecord): string {
   return JSON.stringify(c);
@@ -123,7 +107,19 @@ export function clearMarketingCookies(): void {
   // `muxData` is Mux Data's viewer-id cookie (host-only, path=/, written by
   // mux-embed while a consented view is being monitored). Listed under
   // Marketing on /cookies, so a withdrawal has to take it with it — the watch
-  // player stops the monitor itself but never touches cookies (#127).
+  // player stops the monitor itself but never touches cookies (#127);
+  // `mux_viewer_id` is the other name /cookies gives it.
+  //
+  // The SDKs that name their cookies after a key are matched by pattern on
+  // what the browser actually holds: GA4's `_ga` + `_ga_<container>` (up to
+  // two years, on the registrable domain) and PostHog's `ph_<key>_posthog`.
+  // Since #466 «Essential only» is the one thing that cleans a browser left
+  // with them by the old geo default — once a visitor says no, neither SDK
+  // loads again to remove its own.
+  const held = document.cookie
+    .split(";")
+    .map((pair) => pair.split("=")[0].trim())
+    .filter((name) => /^_ga(_.+)?$/.test(name) || /^ph_.+_posthog$/.test(name));
   for (const name of [
     "attribution_first",
     "attribution_last",
@@ -131,10 +127,25 @@ export function clearMarketingCookies(): void {
     "_fbc",
     "__oppref",
     "muxData",
+    "mux_viewer_id",
+    ...held,
   ]) {
     document.cookie = `${name}=; max-age=0; path=/`;
     if (root) document.cookie = `${name}=; max-age=0; path=/; domain=.${root}`;
   }
+}
+
+// A `cookie_consent` the browser holds that no longer parses — a record of an
+// older version (the v1 records proxy.ts wrote by itself outside Europe until
+// #466) or a damaged one. The visitor is undecided again, and whatever the old
+// record let in is still sitting in the browser: `attribution_first` and
+// `_fbc` are write-if-absent, so a pair from the geo-default era would
+// otherwise outrank the visitor's real first touch once they press «Accept
+// all». The banner clears the marketing cookies once when it finds one.
+export function hasStaleConsentRecord(): boolean {
+  if (typeof document === "undefined") return false;
+  const present = new RegExp(`(?:^|;\\s*)${CONSENT_COOKIE}=[^;]`).test(document.cookie);
+  return present && readConsentFromDocument() === null;
 }
 
 // Custom event the SiteFooter dispatches when the user clicks "Cookie

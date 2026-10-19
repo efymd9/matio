@@ -7,6 +7,7 @@ import {
   COOKIE_PREFS_EVENT,
   broadcastConsentChange,
   clearMarketingCookies,
+  hasStaleConsentRecord,
   writeConsentToDocument,
   type ConsentRecord,
 } from "@/lib/cookie-consent";
@@ -17,10 +18,14 @@ import { useT } from "@/lib/i18n/client";
 // "Cookie preferences" link in the footer (which dispatches
 // COOKIE_PREFS_EVENT).
 //
-// Two equally prominent buttons — "Accept all" and "Essential only" —
-// satisfy ICO/AEPD/CNIL guidance that rejecting must be no harder than
-// accepting. No multi-step "Customize" flow needed because the only
-// non-essential category we set is `marketing`.
+// Two buttons side by side, the same size — "Essential only" and "Accept
+// all" — so rejecting takes one tap, like accepting (ICO/AEPD/CNIL: no
+// harder to refuse than to accept). They are NOT visually equal: "Accept
+// all" is the filled gold CTA, "Essential only" the outlined one. Whether
+// that colour/weight asymmetry is acceptable is a counsel question (#466 row
+// in docs/registry.md, #168); any change to it goes through the Lab first.
+// No multi-step "Customize" flow needed because the only non-essential
+// category we set is `marketing`.
 export function CookieBanner({
   initialConsent,
 }: {
@@ -36,6 +41,14 @@ export function CookieBanner({
     const open = () => setVisible(true);
     window.addEventListener(COOKIE_PREFS_EVENT, open);
     return () => window.removeEventListener(COOKIE_PREFS_EVENT, open);
+  }, []);
+
+  // A consent record that no longer parses (the v1 records of the old geo
+  // default, #466): the visitor is undecided again, so what that record let
+  // in goes now — before an «Accept all» could adopt a geo-default-era
+  // attribution pair or _fbc as this visitor's own.
+  useEffect(() => {
+    if (hasStaleConsentRecord()) clearMarketingCookies();
   }, []);
 
   if (!visible) return null;

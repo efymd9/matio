@@ -212,6 +212,29 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+// #466 (VPPA) — what the ONE InitiateCheckout sent so far carries: the plan
+// and the price, a non-watch page, nothing that identifies a video.
+function expectInitiateCheckoutWithoutVideo() {
+  expect(h.capiEvents).toHaveLength(1);
+  const event = h.capiEvents[0] as {
+    eventName: string;
+    eventSourceUrl: string;
+    customData: Record<string, unknown>;
+  };
+  expect(event.eventName).toBe("InitiateCheckout");
+  expect(event.eventSourceUrl).toBe("https://matio.tv/subscribe");
+  expect(event.customData).toEqual({
+    value: 25,
+    currency: "USD",
+    content_type: "product",
+    content_ids: ["matio-membership"],
+  });
+  const wire = JSON.stringify(h.capiEvents);
+  for (const id of ["the-scarlet-oath", "ep-3", "/watch"]) {
+    expect(wire, id).not.toContain(id);
+  }
+}
+
 describe("createAuthWalletCheckoutSession — refusals reach Stripe as silence", () => {
   it("redirects and creates NOTHING while payments are off", async () => {
     vi.stubEnv("PAYMENTS_ENABLED", "");
@@ -741,6 +764,12 @@ describe("reportWalletCheckoutStarted", () => {
     ]);
   });
 
+  it("names no show or episode in what Meta receives (#466)", async () => {
+    await reportWalletCheckoutStarted("cs_test_created");
+
+    expectInitiateCheckoutWithoutVideo();
+  });
+
   it("ignores a session id that is not shaped like one", async () => {
     // The id becomes a Meta event id; a caller-supplied string is shape-checked
     // before it can pollute the ad account's dedup keyspace.
@@ -850,6 +879,14 @@ describe("createAuthCheckoutSession — unchanged by the wallet refactor", () =>
     expect(h.posthogEvents).toEqual([
       expect.objectContaining({ event: "checkout_started" }),
     ]);
+  });
+
+  // #466 (VPPA): the target is /watch/the-scarlet-oath?ep=ep-3, and none of
+  // it reaches Meta — the plan is the only "content" named.
+  it("sends Meta an InitiateCheckout that names no show or episode", async () => {
+    await createAuthCheckoutSession(INPUT);
+
+    expectInitiateCheckoutWithoutVideo();
   });
 
   it("still honours the payments kill-switch", async () => {

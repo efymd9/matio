@@ -10,9 +10,17 @@ const ph = vi.hoisted(() => ({ init: vi.fn() }));
 vi.mock("posthog-js", () => ({ default: ph }));
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
+// Signed out unless a case signs in. The Clerk user always HAS an address —
+// what is pinned below is that the provider never hands it to PostHog.
+const clerk = vi.hoisted(() => ({
+  isSignedIn: false as boolean,
+  userId: null as string | null,
+}));
 vi.mock("@clerk/nextjs", () => ({
-  useAuth: () => ({ isSignedIn: false, userId: null }),
-  useUser: () => ({ user: null }),
+  useAuth: () => ({ isSignedIn: clerk.isSignedIn, userId: clerk.userId }),
+  useUser: () => ({
+    user: { primaryEmailAddress: { emailAddress: "viewer@example.invalid" } },
+  }),
 }));
 
 // POSTHOG_KEY is a module-level env read — pinned here so the init path runs
@@ -34,6 +42,9 @@ const consented: ConsentRecord = {
 afterEach(() => {
   cleanup();
   ph.init.mockReset();
+  clerk.isSignedIn = false;
+  clerk.userId = null;
+  delete (window as { posthog?: unknown }).posthog;
 });
 
 async function initOptions(): Promise<Record<string, unknown>> {
@@ -85,5 +96,32 @@ describe("PostHogProvider — no language super-properties", () => {
       "unregister:locale_source",
       "capture:$pageview",
     ]);
+  });
+});
+
+// #466 — the person PostHog keeps is the Clerk id and nothing else: identify()
+// gets no person properties, so no email address reaches the processor.
+describe("PostHogProvider — identify sends the id only", () => {
+  it("identifies a signed-in viewer by the Clerk id, with no email or other property", async () => {
+    clerk.isSignedIn = true;
+    clerk.userId = "user_1";
+    const options = await initOptions();
+    const sdk = {
+      identify: vi.fn(),
+      unregister: vi.fn(),
+      register: vi.fn(),
+      capture: vi.fn(),
+      reset: vi.fn(),
+      opt_out_capturing: vi.fn(),
+    };
+
+    await act(async () => {
+      (options.loaded as (instance: typeof sdk) => void)(sdk);
+    });
+
+    await waitFor(() => expect(sdk.identify).toHaveBeenCalledTimes(1));
+    expect(sdk.identify.mock.calls[0]).toEqual(["user_1"]);
+    expect(JSON.stringify(sdk.identify.mock.calls)).not.toContain("@");
+    expect(sdk.register).not.toHaveBeenCalled();
   });
 });

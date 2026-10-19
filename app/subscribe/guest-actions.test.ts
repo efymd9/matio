@@ -464,6 +464,29 @@ describe("createGuestCheckoutSession — unchanged around the sweep", () => {
     ]);
   });
 
+  // #466 (VPPA): the buyer came from /watch/the-scarlet-oath?ep=ep-3, and
+  // none of that reaches Meta — not in custom_data, not in event_source_url.
+  it("sends Meta an InitiateCheckout that names no show or episode", async () => {
+    await createGuestCheckoutSession(INPUT);
+
+    expect(h.capiEvents).toHaveLength(1);
+    const event = h.capiEvents[0] as {
+      eventSourceUrl: string;
+      customData: Record<string, unknown>;
+    };
+    expect(event.eventSourceUrl).toBe("https://matio.tv/checkout");
+    expect(event.customData).toEqual({
+      value: 25,
+      currency: "USD",
+      content_type: "product",
+      content_ids: ["matio-membership"],
+    });
+    const wire = JSON.stringify(h.capiEvents);
+    for (const id of ["the-scarlet-oath", "ep-3", "/watch"]) {
+      expect(wire, id).not.toContain(id);
+    }
+  });
+
   it("still sells without marketing consent — no snapshots, no intent events", async () => {
     delete h.cookies.cookie_consent;
 

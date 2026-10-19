@@ -4,8 +4,8 @@
 // that asks for one is redirected (308) to the bare one first, #445) in an
 // in-app browser. The full site page carries the header, and in paid mode the
 // header's «Subscribe» link leads to a Stripe purchase outside the App Store
-// (guideline 3.1.1). Outside the EU/EEA/UK/CH the same page also loads the
-// consent-gated trackers (Meta Pixel, GA4, PostHog, OpenAI) with no banner.
+// (guideline 3.1.1), plus the cookie banner and, once a visitor accepts it,
+// the consent-gated trackers (Meta Pixel, GA4, PostHog, OpenAI).
 // With `?embed=app` the page is the document and nothing else: proxy.ts sees
 // the parameter on exactly these paths and stamps APP_EMBED_HEADER on the
 // request, and the root layout then renders only the page — no header, footer,

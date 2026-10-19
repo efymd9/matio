@@ -236,3 +236,28 @@ describe("mirrorSubscription · CAPI identity scrub (#165)", () => {
     expect(h.stripeUpdate).not.toHaveBeenCalled();
   });
 });
+
+// #466 (VPPA) — the Purchase names the plan and the price, never a video: no
+// show or episode title, slug or id in custom_data, and the site's origin,
+// not a watch page, as event_source_url. Pinned so a future "richer" Purchase
+// cannot slip a video identifier back in.
+describe("mirrorSubscription · the Purchase names no video (#466)", () => {
+  it("custom_data is the membership and its price, event_source_url the bare origin", async () => {
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://matio.tv");
+
+    await mirrorSubscription(stripeSub({ metadata: IDENTITY }));
+
+    expect(h.sendCapi).toHaveBeenCalledTimes(1);
+    const [events] = h.sendCapi.mock.calls[0];
+    expect(events).toHaveLength(1);
+    expect(events[0].eventName).toBe("Purchase");
+    expect(events[0].eventSourceUrl).toBe("https://matio.tv");
+    expect(events[0].customData).toEqual({
+      value: 38,
+      currency: "USD",
+      content_type: "product",
+      content_ids: ["matio-membership"],
+    });
+    expect(JSON.stringify(events)).not.toMatch(/\/watch|ep-|show/i);
+  });
+});

@@ -319,7 +319,10 @@ export function Player({
   // the first real playing frame — NOT page land or token issuance, so
   // blocked-autoplay sessions and crawlers never count — once per player
   // mount, any mode. Deferred onto the consent-gated pixel; without consent
-  // the listener never fires.
+  // the listener never fires. It names no video (#466, VPPA): no show or
+  // episode title, slug or id goes to an ad network — "someone started
+  // watching something" is all Meta learns. PostHog keeps the show (it is
+  // our processor, not an advertiser).
   const viewContentFiredRef = useRef(false);
   // Whether anything played in this visit — the sign-up wall's analytics
   // `trigger` (#462): "land" before any playback (a walled first episode, a
@@ -330,13 +333,9 @@ export function Player({
     viewContentFiredRef.current = true;
     setHasPlayed(true);
     onPixelReady(() => {
-      trackPixel("ViewContent", {
-        content_type: "product",
-        content_ids: [showSlug],
-        content_name: showTitle ?? showSlug,
-      });
+      trackPixel("ViewContent", { content_type: "product" });
     });
-  }, [showSlug, showTitle]);
+  }, []);
 
   const current = useMemo(
     () => episodes.find((e) => e.id === currentEpisodeId) ?? episodes[0],
@@ -1799,7 +1798,9 @@ function EpisodePlayback({
           // matio:fb:lead flag — Lead ≈ unique hooked prospects, not
           // finishes; the flag is set only AFTER the fire so a not-yet-
           // loaded SDK doesn't burn it, and consent stays enforced by the
-          // pixel-ready deferral (no consent → no fbq → no fire).
+          // pixel-ready deferral (no consent → no fbq → no fire). No show
+          // or episode identifier in the payload (#466, VPPA) — see
+          // ViewContent above.
           if (currentPosition === 1) {
             const leadKey = "matio:fb:lead";
             let leadDone = false;
@@ -1813,7 +1814,6 @@ function EpisodePlayback({
                 trackPixel("Lead", {
                   content_category: "first_episode_finished",
                   content_type: "product",
-                  content_ids: [showSlug],
                 });
                 try {
                   localStorage.setItem(leadKey, "1");
