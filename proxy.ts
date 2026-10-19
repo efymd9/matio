@@ -170,8 +170,9 @@ function applyMarketingCookies(
 // is lib/app-embed.ts). The request is stamped so the layout renders the page
 // alone, in English like the rest of the site (#445; an app build that asks
 // for the /es URL arrives here through the 308 below, query and all).
-// Nothing is written back — no attribution or _fbc, no matio_aid: the page loads no tracker and no beacon that could use them, and
-// the app's own browser is no audience to measure.
+// Nothing is written back — no attribution or _fbc, no matio_aid: the page
+// loads no tracker and no beacon that could use them, and the app's own
+// browser is no audience to measure.
 function applyAppEmbed(req: NextRequest): NextResponse {
   const headers = new Headers(req.headers);
   headers.set(APP_EMBED_HEADER, APP_EMBED_VALUE);
@@ -243,9 +244,9 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
   // no UTM and no fbclid, so the cookie work below has nothing to do there —
   // and Vercel's CDN caches no response that carries a Set-Cookie (in #299
   // it was the consent default, gone since #466), so /v1/catalog and
-  // /v1/shows/:slug would miss their 60s edge copy. Clerk has already authenticated the request by now,
-  // with the per-request options above (#100), so the routes' auth() is
-  // unchanged.
+  // /v1/shows/:slug would miss their 60s edge copy. Clerk has already
+  // authenticated the request by now, with the per-request options above
+  // (#100), so the routes' auth() is unchanged.
   if (req.nextUrl.pathname.startsWith(NATIVE_API_PREFIX)) return;
 
   // The retired Spanish URLs (#445): the site is English-only, and /es and
@@ -318,7 +319,7 @@ const handleRequest = clerkMiddleware(async (auth, req) => {
 // origin asks for HTTP Basic Auth, plus every response is marked
 // `noindex, nofollow`. It sits first on purpose: an anonymous hit must not
 // reach the marketing machinery below, or a stray crawler would mint visitor
-// and consent cookies — and attribution rows — on the bench.
+// cookies — and attribution rows — on the bench.
 //
 // With the variable unset, the cost of all of this is a single environment
 // read: no header parsing, no path matching, no extra allocation, on a file

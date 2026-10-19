@@ -329,7 +329,7 @@ export const ru = {
     ofEngaged3: "Дошли до 3-го эпизода",
     ofEngaged3Hint: "Самый дальний начатый эпизод ≥ 3",
     organicDepthNote: (avg: number | string) =>
-      `В среднем ${avg} эп. на сессию среди начавших смотреть. Число сессий — нижняя граница: лимит 10 минтов на (IP, сериал) в час молча отбрасывает трекинг в горячих сетях (CGNAT, webview), а до согласия на cookies в ЕС метки не пишутся.`,
+      `В среднем ${avg} эп. на сессию среди начавших смотреть. Число сессий — нижняя граница: лимит 10 минтов на (IP, сериал) в час молча отбрасывает трекинг в горячих сетях (CGNAT, webview), а без согласия на cookies (с 19.10.2026 его спрашивают во всех странах) метки не пишутся.`,
     sectionSources: "Источники трафика",
     sourcesBySourceLabel: "Сессии по источникам",
     sourcesEmpty:
@@ -343,7 +343,7 @@ export const ru = {
     tableColAvgEps: "Эп./сессия",
     tableColDeepPct: "2+ эп.",
     campaignFreeNote:
-      "Сессии — анонимные сессии просмотра с выбранной моделью атрибуции; «(direct)» — без UTM-меток (органика, вводы вручную и клики до согласия на cookies в ЕС). Регистрации — аккаунты, чьё касание по выбранной модели совпало с кампанией.",
+      "Сессии — анонимные сессии просмотра с выбранной моделью атрибуции; «(direct)» — без UTM-меток (органика, вводы вручную и клики без согласия на cookies — с 19.10.2026 его спрашивают во всех странах). Регистрации — аккаунты, чьё касание по выбранной модели совпало с кампанией.",
     sectionTrackedLinks: "Отслеживаемые ссылки",
     sectionTrackedLinksHint: "по первому касанию · за выбранный период",
     trackedLinksManage: "Управлять ссылками →",
@@ -672,7 +672,7 @@ export const ru = {
     tabSessions: "Сессии",
     tabLegacy: "Старый дашборд",
     coverageNote:
-      "Источник — PostHog: видны только визиты с согласием на куки (EU до баннера и часть трафика с блокировщиками сюда не попадают). Время — UTC.",
+      "Источник — PostHog: видны только визиты с согласием на куки (посетители без согласия — с 19.10.2026 его спрашивают во всех странах — и часть трафика с блокировщиками сюда не попадают). Время — UTC.",
     listTitle: "Сессии",
     sessionsCount: (n: number) =>
       `${n} ${ruPlural(n, ["сессия", "сессии", "сессий"])}`,
@@ -1428,7 +1428,7 @@ export const en: AdminDict = {
     ofEngaged3: "Reached episode 3",
     ofEngaged3Hint: "Furthest episode started ≥ 3",
     organicDepthNote: (avg: number | string) =>
-      `Avg ${avg} episodes per session among those that played. Session counts are a floor: the 10-mints-per-(IP, show)-hour cap silently drops tracking on hot networks (CGNAT, webviews), and EU visitors carry no UTM cookies before consent.`,
+      `Avg ${avg} episodes per session among those that played. Session counts are a floor: the 10-mints-per-(IP, show)-hour cap silently drops tracking on hot networks (CGNAT, webviews), and visitors without cookie consent (asked in every country since 2026-10-19) carry no UTM cookies.`,
     sectionSources: "Traffic sources",
     sourcesBySourceLabel: "Sessions by source",
     sourcesEmpty:
@@ -1442,7 +1442,7 @@ export const en: AdminDict = {
     tableColAvgEps: "Eps/session",
     tableColDeepPct: "2+ eps",
     campaignFreeNote:
-      "Sessions are anonymous watch sessions under the selected attribution model; “(direct)” means no UTM tags (organic, hand-typed URLs and pre-consent EU clicks). Signups are accounts whose touch under the selected model matched the campaign.",
+      "Sessions are anonymous watch sessions under the selected attribution model; “(direct)” means no UTM tags (organic, hand-typed URLs and clicks from visitors without cookie consent — asked in every country since 2026-10-19). Signups are accounts whose touch under the selected model matched the campaign.",
     sectionTrackedLinks: "Tracked links",
     sectionTrackedLinksHint: "first-touch · selected range",
     trackedLinksManage: "Manage links →",
@@ -1754,7 +1754,7 @@ export const en: AdminDict = {
     tabSessions: "Sessions",
     tabLegacy: "Legacy dashboard",
     coverageNote:
-      "Source — PostHog: only cookie-consented visits appear (EU pre-banner and some ad-blocked traffic are invisible here). Times are UTC.",
+      "Source — PostHog: only cookie-consented visits appear (visitors without cookie consent — asked in every country since 2026-10-19 — and some ad-blocked traffic are invisible here). Times are UTC.",
     listTitle: "Sessions",
     sessionsCount: (n: number) => `${n} ${n === 1 ? "session" : "sessions"}`,
     notConfiguredTitle: "PostHog is not connected",

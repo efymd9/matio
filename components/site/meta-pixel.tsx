@@ -79,9 +79,20 @@ export function MetaPixel({
 
   // One fbq('init', …) per pixel. The single fbq('track', 'PageView') after
   // them fires to all init'd pixels (as do all trackPixel() call sites).
-  const initCalls = META_PIXEL_IDS.map((id) => `fbq('init', '${id}');`).join(
-    "\n",
-  );
+  //
+  // Each init is preceded by fbq('set', 'autoConfig', false, id) — where
+  // Meta's docs place it, above that pixel's init. Automatic configuration
+  // is ON by default and makes fbevents.js send events our code never
+  // builds: SubscribedButtonClick with the clicked button's TEXT (on /watch
+  // that is "3. <episode title>" in the episodes overlay, or a fork option's
+  // label) and Microdata with the page's <title> / OpenGraph / JSON-LD (the
+  // show's name and TVSeries data on /shows/<slug>). #466: no ad event names
+  // a video, so it is off for every pixel, in code — not left to a toggle in
+  // Events Manager. It does NOT switch off Automatic Advanced Matching
+  // (a separate Events Manager setting — registry, #341).
+  const initCalls = META_PIXEL_IDS.map(
+    (id) => `fbq('set', 'autoConfig', false, '${id}');\nfbq('init', '${id}');`,
+  ).join("\n");
 
   return (
     <>

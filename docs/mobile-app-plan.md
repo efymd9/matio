@@ -168,8 +168,9 @@ Acceptable; document it next to the existing "ledgers accrue from deploy" caveat
 
 **Consent model changes shape:** no cookie banner. Instead — an **ATT prompt** on iOS (only
 needed if Meta install attribution is wanted, §10) plus a consent screen gating PostHog and
-Meta app events — for every country: the web dropped its geo decision in #466
-(`marketingConsentRequired()` is gone), and the app follows.
+Meta app events. Which countries it covers is decided in #98 (through the `/gdpr`
+checklist): the web asks every country since #466, and `marketingConsentRequired()` —
+the geo function this plan meant to port — no longer exists.
 
 ## 6. Player architecture
 

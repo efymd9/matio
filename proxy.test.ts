@@ -170,28 +170,25 @@ describe("proxy — staging lock on", () => {
 describe("proxy — /api/v1 answers carry no cookies", () => {
   const nonEu = { "x-vercel-ip-country": "US" };
 
-  it("sets no cookie on a /v1 read", async () => {
+  it("persists no attribution or _fbc from a /v1 URL, even under consent — the CDN-cached reads stay cookie-free", async () => {
     vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
 
-    const res = await proxy(request("/api/v1/catalog", nonEu), event);
+    // Consent + a campaign + a click id: everything that WOULD set cookies
+    // on a page (the sibling test below proves it does there), so only the
+    // #299 early return keeps these answers clean.
+    for (const path of ["/api/v1/catalog", "/api/v1/shows/some-show"]) {
+      const res = await proxy(
+        request(`${path}?utm_source=tiktok&utm_campaign=c1&fbclid=abc`, {
+          ...nonEu,
+          cookie: consentCookie(true),
+        }),
+        event,
+      );
 
-    expect(res?.headers.get("Set-Cookie")).toBeNull();
-    // A plain pass-through: the route answers, nothing is rewritten.
-    expect(res?.headers.get("x-middleware-next")).toBe("1");
-  });
-
-  it("persists no attribution or _fbc from a /v1 URL, even under consent", async () => {
-    vi.stubEnv("STAGING_LOCK_PASSWORD", undefined);
-
-    const res = await proxy(
-      request("/api/v1/shows/some-show?utm_source=tiktok&utm_campaign=c1&fbclid=abc", {
-        ...nonEu,
-        cookie: consentCookie(true),
-      }),
-      event,
-    );
-
-    expect(res?.headers.get("Set-Cookie")).toBeNull();
+      expect(res?.headers.get("Set-Cookie"), path).toBeNull();
+      // A plain pass-through: the route answers, nothing is rewritten.
+      expect(res?.headers.get("x-middleware-next"), path).toBe("1");
+    }
   });
 
   it("leaves every other path as it was: pages and the web's own /api still persist a consented campaign", async () => {

@@ -17,9 +17,24 @@ vi.mock("@/lib/i18n/client", async () => {
 
 import { CookieBanner } from "./cookie-banner";
 
+// Everything a consented visit (or the old geo default) can leave behind
+// that /cookies lists under Marketing — by the names the browser holds.
+const MARKETING_LEFTOVERS = [
+  "attribution_first",
+  "attribution_last",
+  "_fbp",
+  "_fbc",
+  "__oppref",
+  "muxData",
+  "mux_viewer_id",
+  "_ga",
+  "_ga_9FS22EEF6K",
+  "ph_phc_test_posthog",
+];
+
 afterEach(() => {
   cleanup();
-  for (const name of ["cookie_consent", "attribution_first", "_fbp", "_fbc", "muxData"]) {
+  for (const name of ["cookie_consent", ...MARKETING_LEFTOVERS]) {
     document.cookie = `${name}=; max-age=0; path=/`;
   }
 });
@@ -71,7 +86,10 @@ describe("CookieBanner — asked of everyone (#466)", () => {
     expect(dialog()).not.toBeNull();
   });
 
-  it("keeps both answers equally at hand", () => {
+  // Size only: the two are NOT visually equal (filled gold CTA vs outlined),
+  // and whether that asymmetry is acceptable is a counsel question (#466 row
+  // in docs/registry.md) — this test claims no more than it checks.
+  it("gives both answers the same height, one tap each", () => {
     render(<CookieBanner initialConsent={null} />);
     const accept = screen.getByRole("button", { name: en.cookieBanner.acceptAll });
     const reject = screen.getByRole("button", { name: en.cookieBanner.essentialOnly });
@@ -86,15 +104,52 @@ describe("CookieBanner — asked of everyone (#466)", () => {
     expect(dialog()).toBeNull();
   });
 
-  it("«Essential only» stores a no at the current version and clears the marketing cookies", () => {
-    for (const name of ["attribution_first", "_fbp", "_fbc", "muxData"]) {
+  it("«Essential only» stores a no at the current version and clears every marketing cookie /cookies lists", () => {
+    for (const name of MARKETING_LEFTOVERS) {
       document.cookie = `${name}=left-over; path=/`;
     }
+    document.cookie = "matio_aid=keep; path=/";
     render(<CookieBanner initialConsent={null} />);
     fireEvent.click(screen.getByRole("button", { name: en.cookieBanner.essentialOnly }));
     expect(readConsentFromDocument()).toMatchObject({ marketing: false, v: CONSENT_VERSION });
-    for (const name of ["attribution_first", "_fbp", "_fbc", "muxData"]) {
-      expect(document.cookie, name).not.toContain(`${name}=`);
+    const held = document.cookie.split("; ").map((pair) => pair.split("=")[0]);
+    for (const name of MARKETING_LEFTOVERS) {
+      expect(held, name).not.toContain(name);
     }
+    // Strictly necessary cookies stay.
+    expect(held).toContain("matio_aid");
+    expect(held).toContain("cookie_consent");
+    document.cookie = "matio_aid=; max-age=0; path=/";
+  });
+
+  it("clears what a v1 record let in as soon as it mounts — before any answer", () => {
+    document.cookie = `cookie_consent=${encodeURIComponent(
+      JSON.stringify({ necessary: true, marketing: true, ts: 1, v: 1 }),
+    )}; path=/`;
+    for (const name of MARKETING_LEFTOVERS) {
+      document.cookie = `${name}=geo-default-era; path=/`;
+    }
+    render(<CookieBanner initialConsent={readConsentFromDocument()} />);
+    expect(dialog()).not.toBeNull();
+    const held = document.cookie.split("; ").map((pair) => pair.split("=")[0]);
+    for (const name of MARKETING_LEFTOVERS) {
+      expect(held, name).not.toContain(name);
+    }
+  });
+
+  it("leaves the marketing cookies of a current record alone, and has nothing to clear without a record", () => {
+    document.cookie = `cookie_consent=${encodeURIComponent(
+      JSON.stringify({ necessary: true, marketing: true, ts: 1, v: CONSENT_VERSION }),
+    )}; path=/`;
+    document.cookie = "attribution_first=consented; path=/";
+    render(<CookieBanner initialConsent={readConsentFromDocument()} />);
+    expect(document.cookie).toContain("attribution_first=consented");
+    cleanup();
+
+    document.cookie = "cookie_consent=; max-age=0; path=/";
+    render(<CookieBanner initialConsent={null} />);
+    // No record at all: nothing marketing could have been written under it,
+    // and the banner simply asks.
+    expect(document.cookie).toContain("attribution_first=consented");
   });
 });

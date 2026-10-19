@@ -8,9 +8,10 @@ import { getPosthogQueryConfig, hogTs, runHogQL } from "@/lib/posthog-query";
 // this page reads PostHog instead: the same $session_id that groups the
 // curated funnel events also groups $pageview/$pageleave, giving an ordered
 // timeline per browser session. Trade-off (deliberate, noted in the UI):
-// PostHog is consent-gated, so EU visitors who never accept the banner and
-// some ad-blocked traffic are invisible here — fine for qualitative
-// inspection, which is this page's job; counting stays on the DB dashboard.
+// PostHog is consent-gated, so visitors without cookie consent (asked in
+// every country since 2026-10-19, #466) and some ad-blocked traffic are
+// invisible here — fine for qualitative inspection, which is this page's
+// job; counting stays on the DB dashboard.
 
 // Only these events appear in timelines AND count toward a session's event
 // total — an explicit whitelist so PostHog-internal noise ($identify,

@@ -107,7 +107,19 @@ export function clearMarketingCookies(): void {
   // `muxData` is Mux Data's viewer-id cookie (host-only, path=/, written by
   // mux-embed while a consented view is being monitored). Listed under
   // Marketing on /cookies, so a withdrawal has to take it with it — the watch
-  // player stops the monitor itself but never touches cookies (#127).
+  // player stops the monitor itself but never touches cookies (#127);
+  // `mux_viewer_id` is the other name /cookies gives it.
+  //
+  // The SDKs that name their cookies after a key are matched by pattern on
+  // what the browser actually holds: GA4's `_ga` + `_ga_<container>` (up to
+  // two years, on the registrable domain) and PostHog's `ph_<key>_posthog`.
+  // Since #466 «Essential only» is the one thing that cleans a browser left
+  // with them by the old geo default — once a visitor says no, neither SDK
+  // loads again to remove its own.
+  const held = document.cookie
+    .split(";")
+    .map((pair) => pair.split("=")[0].trim())
+    .filter((name) => /^_ga(_.+)?$/.test(name) || /^ph_.+_posthog$/.test(name));
   for (const name of [
     "attribution_first",
     "attribution_last",
@@ -115,10 +127,25 @@ export function clearMarketingCookies(): void {
     "_fbc",
     "__oppref",
     "muxData",
+    "mux_viewer_id",
+    ...held,
   ]) {
     document.cookie = `${name}=; max-age=0; path=/`;
     if (root) document.cookie = `${name}=; max-age=0; path=/; domain=.${root}`;
   }
+}
+
+// A `cookie_consent` the browser holds that no longer parses — a record of an
+// older version (the v1 records proxy.ts wrote by itself outside Europe until
+// #466) or a damaged one. The visitor is undecided again, and whatever the old
+// record let in is still sitting in the browser: `attribution_first` and
+// `_fbc` are write-if-absent, so a pair from the geo-default era would
+// otherwise outrank the visitor's real first touch once they press «Accept
+// all». The banner clears the marketing cookies once when it finds one.
+export function hasStaleConsentRecord(): boolean {
+  if (typeof document === "undefined") return false;
+  const present = new RegExp(`(?:^|;\\s*)${CONSENT_COOKIE}=[^;]`).test(document.cookie);
+  return present && readConsentFromDocument() === null;
 }
 
 // Custom event the SiteFooter dispatches when the user clicks "Cookie
