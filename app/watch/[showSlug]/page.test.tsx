@@ -20,6 +20,12 @@ const h = vi.hoisted(() => ({
   queue: [] as unknown[][],
   findTrialSession: vi.fn(),
   applyUserAttribution: vi.fn(async () => undefined),
+  // #469 — the cached catalog the prefix redirect reads on a miss.
+  catalog: ["the-scarlet-oath", "the-heather-oath-two-blades"],
+  getPublishedShows: vi.fn(async () => h.catalog.map((slug) => ({ slug }))),
+  permanentRedirect: vi.fn((to: string) => {
+    throw new Error(`permanentRedirect:${to}`);
+  }),
 }));
 
 vi.mock("@/db", () => {
@@ -42,7 +48,9 @@ vi.mock("next/navigation", () => ({
   notFound: () => {
     throw new Error("notFound");
   },
+  permanentRedirect: h.permanentRedirect,
 }));
+vi.mock("@/lib/catalog", () => ({ getPublishedShows: h.getPublishedShows }));
 vi.mock("@/components/watch/player", () => ({ Player: () => null }));
 vi.mock("@/components/watch/watch-shell", () => ({
   WatchShell: ({ children }: { children: ReactNode }) => children,
@@ -147,9 +155,29 @@ beforeEach(() => {
   h.subscriber = false;
   h.findTrialSession.mockReset().mockResolvedValue(null);
   h.applyUserAttribution.mockClear();
+  h.getPublishedShows.mockClear();
+  h.permanentRedirect.mockClear();
   vi.stubEnv("PAYMENTS_ENABLED", "1");
   vi.stubEnv("REQUIRE_SIGNUP", "");
 });
+
+// A slug that is not a show: the page's first read comes back empty and the
+// rest of the queue is never reached.
+async function openMissing(
+  showSlug: string,
+  query: Record<string, string | string[] | undefined> = {},
+): Promise<string> {
+  h.queue = [[]];
+  try {
+    await WatchPage({
+      params: Promise.resolve({ showSlug }),
+      searchParams: Promise.resolve(query),
+    });
+  } catch (e) {
+    return (e as Error).message;
+  }
+  throw new Error("the page rendered a show that does not exist");
+}
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -204,6 +232,37 @@ describe("/watch — paid mode: registration first, then the paywall (#462)", ()
     const player = await render(["subscriber", "subscriber"]);
 
     expect(player.mode).toBe("subscriber");
+  });
+});
+
+describe("/watch — a truncated slug is a 308 to the real show (#469)", () => {
+  it("`the-scarlet-oa..?ep=…&utm_source=youtube` → 308 /watch/the-scarlet-oath with the query kept", async () => {
+    const outcome = await openMissing("the-scarlet-oa..", {
+      ep: "ep-2",
+      utm_source: "youtube",
+    });
+
+    expect(outcome).toBe(
+      "permanentRedirect:/watch/the-scarlet-oath?ep=ep-2&utm_source=youtube",
+    );
+    expect(h.permanentRedirect).toHaveBeenCalledWith(
+      "/watch/the-scarlet-oath?ep=ep-2&utm_source=youtube",
+    );
+    expect(h.getPublishedShows).toHaveBeenCalledTimes(1);
+  });
+
+  it("an unknown, ambiguous or short slug is still a 404", async () => {
+    expect(await openMissing("nonexistent-show")).toBe("notFound");
+    expect(await openMissing("the-s")).toBe("notFound");
+    h.catalog = ["the-scarlet-oath", "the-scarlet-oath-season-2"];
+    expect(await openMissing("the-scarlet-oa..")).toBe("notFound");
+    expect(h.permanentRedirect).not.toHaveBeenCalled();
+  });
+
+  it("a show that exists never consults the catalog", async () => {
+    await render(["subscriber"]);
+    expect(h.getPublishedShows).not.toHaveBeenCalled();
+    expect(h.permanentRedirect).not.toHaveBeenCalled();
   });
 });
 

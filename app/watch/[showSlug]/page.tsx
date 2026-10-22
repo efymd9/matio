@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies, headers } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { userAgent } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
@@ -24,6 +24,8 @@ import { Icon } from "@/components/site/icon";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import { getOrSyncCurrentUser } from "@/lib/admin";
+import { getPublishedShows } from "@/lib/catalog";
+import { resolveSlugByPrefix, withSearchParams } from "@/lib/slug-prefix";
 import {
   applyUserAttribution,
   readAttributionCookies,
@@ -67,9 +69,10 @@ export default async function WatchPage({
   searchParams: Promise<{ resume?: string; ep?: string; cs?: string }>;
 }) {
   const { showSlug } = await params;
+  const query = await searchParams;
   // `cs` = the Checkout Session id Stripe appends to the signed-in return_url
   // (app/subscribe/actions.ts) — consumed by <CheckoutReturnBeacon/> below.
-  const { resume, ep: epParam, cs } = await searchParams;
+  const { resume, ep: epParam, cs } = query;
 
   const [show] = await db
     .select()
@@ -82,7 +85,18 @@ export default async function WatchPage({
       ),
     )
     .limit(1);
-  if (!show) notFound();
+  if (!show) {
+    // The /shows/[slug] rule (#469): a unique prefix of one published slug is
+    // a 308 to the real path with the query kept; the slug list is the cached
+    // catalog read. permanentRedirect throws — outside any try/catch, ahead
+    // of every other read and render.
+    const target = resolveSlugByPrefix(
+      showSlug,
+      (await getPublishedShows()).map((s) => s.slug),
+    );
+    if (target) permanentRedirect(withSearchParams(`/watch/${target}`, query));
+    notFound();
+  }
 
   const showSeasons = await db
     .select({ id: seasons.id, number: seasons.number, title: seasons.title })

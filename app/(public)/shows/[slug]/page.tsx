@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { actors, episodes, seasons, showActors } from "@/db/schema";
@@ -13,7 +13,13 @@ import { paymentsEnabled, signupRequired } from "@/lib/free-mode";
 import { muxThumbnailUrl } from "@/lib/mux-token";
 import { getDict } from "@/lib/i18n/server";
 import type { Dict } from "@/lib/i18n/dictionaries";
+import { getPublishedShows } from "@/lib/catalog";
 import { getShowBySlug } from "@/lib/show-query";
+import {
+  type PageSearchParams,
+  resolveSlugByPrefix,
+  withSearchParams,
+} from "@/lib/slug-prefix";
 import {
   SITE_URL,
   canonicalUrl,
@@ -94,14 +100,32 @@ type EpisodeRowData = {
 
 export default async function ShowDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<PageSearchParams>;
 }) {
   const { slug } = await params;
   const { t } = await getDict();
 
   const show = await getShowBySlug(slug);
-  if (!show) notFound();
+  if (!show) {
+    // A truncated link — `/shows/the-scarlet-oa..` from YouTube (#469) — is a
+    // 308 to the one published slug it is a prefix of, query kept (`?utm_*`
+    // reach the real page, where proxy.ts does the cookie work). The slug
+    // list is the cached catalog read — no query of its own. permanentRedirect
+    // throws, so it stays outside any try/catch and ahead of every render.
+    const target = resolveSlugByPrefix(
+      slug,
+      (await getPublishedShows()).map((s) => s.slug),
+    );
+    if (target) {
+      permanentRedirect(
+        withSearchParams(`/shows/${target}`, await searchParams),
+      );
+    }
+    notFound();
+  }
 
   const showSeasons = await db
     .select()
