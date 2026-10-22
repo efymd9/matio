@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.23.0](https://github.com/efymd9/matio/compare/matio-v0.22.0...matio-v0.23.0) (2026-10-22)
+
+
+### Features
+
+* приватность — без названий видео в рекламных событиях, без email в PostHog, баннер cookie для всех стран ([#466](https://github.com/efymd9/matio/issues/466)) ([#467](https://github.com/efymd9/matio/issues/467)) ([84f9696](https://github.com/efymd9/matio/commit/84f96968283410a862a222e5460057b890cae2f3))
+
+
+### Bug fixes
+
+* ссылка из YouTube /shows/the-scarlet-oa.. — префиксный 308 на /shows/the-scarlet-oath ([#469](https://github.com/efymd9/matio/issues/469)) ([#471](https://github.com/efymd9/matio/issues/471)) ([86c7bce](https://github.com/efymd9/matio/commit/86c7bce2aec6f675734c47ec4a3b21f1829f9624))
+
+
+### Documentation
+
+* все серии на проде — subscriber с 19.10 ([#462](https://github.com/efymd9/matio/issues/462)) ([#464](https://github.com/efymd9/matio/issues/464)) ([6882de7](https://github.com/efymd9/matio/commit/6882de799f78f88c17eeb799db1f71950285c6af))
+
 ## [0.22.0](https://github.com/efymd9/matio/compare/matio-v0.21.0...matio-v0.22.0) (2026-10-18)
 
 
