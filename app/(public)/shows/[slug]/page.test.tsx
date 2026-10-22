@@ -2,7 +2,7 @@
 import { ImageConfigContext } from "next/dist/shared/lib/image-config-context.shared-runtime";
 import { type ImageConfigComplete, imageConfigDefault } from "next/dist/shared/lib/image-config";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { en } from "@/lib/i18n/dictionaries";
 import nextConfig from "@/next.config";
@@ -28,9 +28,34 @@ const HERO =
 const still = (playbackId: string) =>
   `https://image.mux.com/${playbackId}/thumbnail.jpg?width=320&height=180&fit_mode=smartcrop&token=eyJ.dummy.sig`;
 
+const SHOW = {
+  id: "show-1",
+  slug: "the-scarlet-oath",
+  title: "The Scarlet Oath",
+  description: "London, 1882.",
+  genre: ["drama"],
+  heroImageUrl: HERO,
+  posterImageUrl: null,
+  createdAt: new Date("2026-06-01T00:00:00Z"),
+};
+
 // The page's three reads, in order: seasons, cast, episodes. Each chain
 // resolves to the next queued result, whichever builder methods it walks.
 const rows = vi.hoisted(() => ({ queue: [] as unknown[][] }));
+// #469 — the show lookup (the show by default, null for a slug that is not
+// one), the cached catalog the prefix redirect reads on a miss, and the two
+// next/navigation exits, which throw like the real ones.
+const h = vi.hoisted(() => ({
+  getShowBySlug: vi.fn<(slug: string) => Promise<unknown>>(),
+  catalog: [] as string[],
+  getPublishedShows: vi.fn(async () => h.catalog.map((slug) => ({ slug }))),
+  notFound: vi.fn(() => {
+    throw new Error("notFound");
+  }),
+  permanentRedirect: vi.fn((to: string) => {
+    throw new Error(`permanentRedirect:${to}`);
+  }),
+}));
 vi.mock("@/db", () => {
   const chain = (result: unknown[]) => {
     const c: Record<string, unknown> = {};
@@ -41,17 +66,11 @@ vi.mock("@/db", () => {
   };
   return { db: { select: () => chain(rows.queue.shift() ?? []) } };
 });
-vi.mock("@/lib/show-query", () => ({
-  getShowBySlug: async () => ({
-    id: "show-1",
-    slug: "the-scarlet-oath",
-    title: "The Scarlet Oath",
-    description: "London, 1882.",
-    genre: ["drama"],
-    heroImageUrl: HERO,
-    posterImageUrl: null,
-    createdAt: new Date("2026-06-01T00:00:00Z"),
-  }),
+vi.mock("@/lib/show-query", () => ({ getShowBySlug: h.getShowBySlug }));
+vi.mock("@/lib/catalog", () => ({ getPublishedShows: h.getPublishedShows }));
+vi.mock("next/navigation", () => ({
+  notFound: h.notFound,
+  permanentRedirect: h.permanentRedirect,
 }));
 vi.mock("@/lib/i18n/server", () => ({
   getDict: async () => ({ locale: "en", t: en }),
@@ -71,6 +90,14 @@ vi.mock("next/link", async () => await import("@/tools/test/next-link-probe"));
 
 import ShowDetailPage, { generateMetadata } from "./page";
 
+beforeEach(() => {
+  h.getShowBySlug.mockReset().mockResolvedValue(SHOW);
+  h.catalog = ["the-scarlet-oath", "the-heather-oath-two-blades", "fallen"];
+  h.getPublishedShows.mockClear();
+  h.notFound.mockClear();
+  h.permanentRedirect.mockClear();
+});
+
 async function renderPage() {
   rows.queue = [
     [{ id: "season-1", number: 1, title: null }],
@@ -88,7 +115,10 @@ async function renderPage() {
       access: "free",
     })),
   ];
-  const page = await ShowDetailPage({ params: Promise.resolve({ slug: "the-scarlet-oath" }) });
+  const page = await ShowDetailPage({
+    params: Promise.resolve({ slug: "the-scarlet-oath" }),
+    searchParams: Promise.resolve({}),
+  });
   const html = renderToStaticMarkup(
     <ImageConfigContext.Provider value={IMAGE_CONFIG}>{page}</ImageConfigContext.Provider>,
   );
@@ -130,5 +160,91 @@ describe("/shows/[slug] — metadata", () => {
     expect(meta.openGraph).toMatchObject({
       url: "https://matio.tv/shows/the-scarlet-oath",
     });
+  });
+});
+
+// #469 — a truncated show link (`/shows/the-scarlet-oa..`, the YouTube
+// description) is a 308 to the one published slug it is a prefix of, with the
+// query kept; anything else that is not a show stays a 404. The rule itself is
+// the real one (lib/slug-prefix.ts); the page is run as the function it is and
+// its exit — the redirect or notFound(), both thrown — is read back.
+type Query = Record<string, string | string[] | undefined>;
+
+async function openMissing(slug: string, query: Query = {}): Promise<string> {
+  h.getShowBySlug.mockResolvedValueOnce(null);
+  try {
+    await ShowDetailPage({
+      params: Promise.resolve({ slug }),
+      searchParams: Promise.resolve(query),
+    });
+  } catch (e) {
+    return (e as Error).message;
+  }
+  throw new Error("the page rendered a show that does not exist");
+}
+
+describe("/shows/[slug] — a truncated slug is a 308 to the real show (#469)", () => {
+  it("`the-scarlet-oa..?utm_source=youtube&fbclid=…` → 308 /shows/the-scarlet-oath with the query kept", async () => {
+    const outcome = await openMissing("the-scarlet-oa..", {
+      utm_source: "youtube",
+      fbclid: "IwAR0abc",
+    });
+
+    expect(outcome).toBe(
+      "permanentRedirect:/shows/the-scarlet-oath?utm_source=youtube&fbclid=IwAR0abc",
+    );
+    expect(h.permanentRedirect).toHaveBeenCalledTimes(1);
+    expect(h.permanentRedirect).toHaveBeenCalledWith(
+      "/shows/the-scarlet-oath?utm_source=youtube&fbclid=IwAR0abc",
+    );
+    // The redirect throws before notFound() is reached.
+    expect(h.notFound).not.toHaveBeenCalled();
+    // The slug list is the cached catalog read, asked exactly once.
+    expect(h.getPublishedShows).toHaveBeenCalledTimes(1);
+  });
+
+  it("the other two shapes of the link, no query → the bare path, no trailing `?`", async () => {
+    expect(await openMissing("the-scarlet-oa.")).toBe(
+      "permanentRedirect:/shows/the-scarlet-oath",
+    );
+    expect(await openMissing("the-scarlet-oa")).toBe(
+      "permanentRedirect:/shows/the-scarlet-oath",
+    );
+  });
+
+  it("an unknown slug is still a 404", async () => {
+    expect(await openMissing("nonexistent-show", { utm_source: "youtube" })).toBe(
+      "notFound",
+    );
+    expect(h.permanentRedirect).not.toHaveBeenCalled();
+    expect(h.notFound).toHaveBeenCalledTimes(1);
+  });
+
+  it("a prefix two published shows share is a 404 — never a guess", async () => {
+    h.catalog = ["the-scarlet-oath", "the-scarlet-oath-season-2"];
+    expect(await openMissing("the-scarlet-oa..")).toBe("notFound");
+    expect(h.permanentRedirect).not.toHaveBeenCalled();
+  });
+
+  it("a prefix shorter than 6 characters is a 404", async () => {
+    expect(await openMissing("the-s")).toBe("notFound");
+    expect(await openMissing("the-s..")).toBe("notFound");
+    expect(h.permanentRedirect).not.toHaveBeenCalled();
+  });
+
+  it("a show that exists never consults the catalog", async () => {
+    await renderPage();
+    expect(h.getPublishedShows).not.toHaveBeenCalled();
+    expect(h.permanentRedirect).not.toHaveBeenCalled();
+  });
+
+  it("generateMetadata for a missing slug is unchanged — the not-found title, no redirect from there", async () => {
+    h.getShowBySlug.mockResolvedValueOnce(null);
+    const meta = await generateMetadata({
+      params: Promise.resolve({ slug: "the-scarlet-oa.." }),
+    });
+    expect(meta).toEqual({ title: en.showDetail.notFound });
+    expect(h.permanentRedirect).not.toHaveBeenCalled();
+    expect(h.getPublishedShows).not.toHaveBeenCalled();
   });
 });
