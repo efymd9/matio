@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { watchProgress, type User } from "@/db/schema";
 import { getOrSyncCurrentUser } from "@/lib/admin";
 import type { EpisodeProgressResponse, SaveProgressResponse } from "@/lib/api/types";
-import { apiError, apiOk } from "@/lib/api/v1";
+import { apiError, apiOk, appPaymentsEnabled } from "@/lib/api/v1";
 import { isForeignKeyViolation } from "@/lib/db-errors";
 import { describeError } from "@/lib/observability";
 import {
@@ -92,8 +92,12 @@ export async function POST(req: NextRequest) {
   const episodeId = input.episodeId;
   const positionSeconds = input.positionSeconds;
   const completed = input.completed;
+  // The APP's view of payments (#476) — the one the token route mints by:
+  // under APP_FREE_WITH_ACCOUNT=1 an account plays a subscriber episode, so
+  // its progress must save too, or «Up next» would break.
+  const policy = { paymentsOn: appPaymentsEnabled() };
   const save = () =>
-    saveWatchProgressForUser(userId, episodeId, positionSeconds, completed);
+    saveWatchProgressForUser(userId, episodeId, positionSeconds, completed, policy);
 
   let outcome: SaveWatchProgressOutcome;
   try {
@@ -119,8 +123,9 @@ export async function POST(req: NextRequest) {
     case "not_found":
       return apiError("not_found", "Episode not found or not ready.");
     case "forbidden":
-      // Paid mode only: a non-subscriber on a subscriber-tier episode. Same
-      // machine-readable reason the token route uses for that wall.
+      // Only while the app sees payments: a non-subscriber on a
+      // subscriber-tier episode. Same machine-readable reason the token route
+      // uses for that wall.
       return apiError("forbidden", "Subscribe to watch.", {
         reason: "subscribe_required",
       });

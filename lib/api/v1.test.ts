@@ -33,6 +33,7 @@ import {
   absoluteMediaUrl,
   apiError,
   apiOk,
+  appPaymentsEnabled,
   DEVICE_ID_HEADER,
   envInt,
   linearShowsOnly,
@@ -137,6 +138,66 @@ describe("resolveSignupGate", () => {
     vi.stubEnv("PAYMENTS_ENABLED", "");
     vi.stubEnv("REQUIRE_SIGNUP", "");
     expect(resolveSignupGate()).toEqual({ mode: "none" });
+  });
+});
+
+// #476: the owner's lever — the site keeps charging, the app is free for any
+// account. Every payments question on /api/v1 is asked through
+// appPaymentsEnabled(); the gate follows it.
+describe("appPaymentsEnabled + resolveSignupGate under APP_FREE_WITH_ACCOUNT (#476)", () => {
+  it("payments on × lever off: the app sees payments, the tiers decide — as before", () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "");
+    expect(appPaymentsEnabled()).toBe(true);
+    expect(resolveSignupGate()).toEqual({ mode: "tiers" });
+  });
+
+  it("payments on × lever on: no payments in the app, and every episode asks for an account", () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "1");
+    // REQUIRE_SIGNUP is irrelevant here (it only bites in free mode).
+    vi.stubEnv("REQUIRE_SIGNUP", "");
+    expect(appPaymentsEnabled()).toBe(false);
+    // Gate 0 by default: "only sign up" — not even episode 1 without one.
+    expect(resolveSignupGate()).toEqual({ mode: "after_episodes", episodes: 0 });
+  });
+
+  it("payments on × lever on: APP_SIGNUP_GATE_EPISODES opens the first N", () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "1");
+    vi.stubEnv("APP_SIGNUP_GATE_EPISODES", "2");
+    expect(resolveSignupGate()).toEqual({ mode: "after_episodes", episodes: 2 });
+    // A fat-fingered value falls back to the lever's own default, 0.
+    vi.stubEnv("APP_SIGNUP_GATE_EPISODES", "abc");
+    expect(resolveSignupGate()).toEqual({ mode: "after_episodes", episodes: 0 });
+  });
+
+  it("payments off × lever on: free mode is unchanged — the lever has nothing to switch off", () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "");
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "1");
+    expect(appPaymentsEnabled()).toBe(false);
+    vi.stubEnv("REQUIRE_SIGNUP", "1");
+    // Free mode's default stays 1, not the lever's 0.
+    expect(resolveSignupGate()).toEqual({ mode: "after_episodes", episodes: 1 });
+    vi.stubEnv("REQUIRE_SIGNUP", "");
+    expect(resolveSignupGate()).toEqual({ mode: "none" });
+  });
+
+  it("payments off × lever off: free mode, as before", () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "");
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "");
+    vi.stubEnv("REQUIRE_SIGNUP", "1");
+    expect(appPaymentsEnabled()).toBe(false);
+    expect(resolveSignupGate()).toEqual({ mode: "after_episodes", episodes: 1 });
+  });
+
+  it("only the exact value 1 pulls the lever", () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    for (const off of [undefined, "", "0", "true", "yes", "on", " 1", "1 "]) {
+      vi.stubEnv("APP_FREE_WITH_ACCOUNT", off);
+      expect(appPaymentsEnabled()).toBe(true);
+      expect(resolveSignupGate()).toEqual({ mode: "tiers" });
+    }
   });
 });
 

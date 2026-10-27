@@ -46,7 +46,11 @@ export async function saveWatchProgress(
   const { userId } = await auth();
   if (!userId) return;
 
-  await saveWatchProgressForUser(userId, episodeId, positionSeconds, completed);
+  // The SITE's view of payments — never the app's APP_FREE_WITH_ACCOUNT
+  // lever (#476): the web stays paid whatever the app is told.
+  await saveWatchProgressForUser(userId, episodeId, positionSeconds, completed, {
+    paymentsOn: paymentsEnabled(),
+  });
 }
 
 // Audience-retention counter flush. The player marks each 10s bucket the
@@ -61,7 +65,12 @@ export async function saveWatchProgress(
 export async function saveWatchSegments(episodeId: string, buckets: number[]) {
   const { userId } = await auth();
   if (userId) {
-    await saveWatchSegmentsFor({ kind: "user", userId }, episodeId, buckets);
+    // The site's view of payments, as for the progress save above (#476).
+    await saveWatchSegmentsFor(
+      { kind: "user", userId, paymentsOn: paymentsEnabled() },
+      episodeId,
+      buckets,
+    );
     return;
   }
   // Anonymous flushes are only legitimate where anonymous playback exists:

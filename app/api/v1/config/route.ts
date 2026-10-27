@@ -1,8 +1,13 @@
 import type { AppConfig } from "@/lib/api/types";
 import { API_VERSION } from "@/lib/api/types";
-import { apiOk, envInt, resolveSignupGate, resolveSocialSignIn } from "@/lib/api/v1";
+import {
+  apiOk,
+  appPaymentsEnabled,
+  envInt,
+  resolveSignupGate,
+  resolveSocialSignIn,
+} from "@/lib/api/v1";
 import { withAppEmbed } from "@/lib/app-embed";
-import { paymentsEnabled } from "@/lib/free-mode";
 import { SITE_URL } from "@/lib/seo";
 
 // GET /api/v1/config — the app's startup call.
@@ -33,7 +38,11 @@ export async function GET() {
     minSupportedBuild: envInt("APP_MIN_SUPPORTED_BUILD", 1),
     latestBuild: envInt("APP_LATEST_BUILD", 1),
     flags: {
-      paymentsEnabled: paymentsEnabled(),
+      // The APP's view (#476): false under APP_FREE_WITH_ACCOUNT=1 even
+      // while the site charges — no «Member» line, no "No card needed", as
+      // in free mode. The same function the gate below and the token route
+      // read.
+      paymentsEnabled: appPaymentsEnabled(),
       // Downloads stay off until the Mux plan supports static renditions —
       // shipping the UI before the backend can serve a file would put a dead
       // button in a released binary.

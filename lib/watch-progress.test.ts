@@ -78,6 +78,10 @@ import {
 
 const USER = "user_1";
 const EPISODE = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+// The caller's view of payments (#476): the web passes the site's flag, the
+// app route the app's.
+const FREE = { paymentsOn: false };
+const PAID = { paymentsOn: true };
 
 type Upsert = {
   values: Record<string, unknown>;
@@ -92,7 +96,6 @@ beforeEach(() => {
   h.row = { id: EPISODE, showId: "show-1", access: "free" };
   h.inserts = [];
   h.hasActiveSubscription.mockReset().mockResolvedValue(false);
-  vi.stubEnv("PAYMENTS_ENABLED", "");
 });
 
 afterEach(() => {
@@ -116,7 +119,7 @@ describe("clampPositionSeconds", () => {
 
 describe("saveWatchProgressForUser — refusals write nothing", () => {
   it("rejects an out-of-range position before touching the database", async () => {
-    await expect(saveWatchProgressForUser(USER, EPISODE, -5, false)).resolves.toBe(
+    await expect(saveWatchProgressForUser(USER, EPISODE, -5, false, FREE)).resolves.toBe(
       "invalid_position",
     );
     expect(h.inserts).toEqual([]);
@@ -126,7 +129,7 @@ describe("saveWatchProgressForUser — refusals write nothing", () => {
     // The lookup carries the ready/published/not-deleted filter, so an empty
     // result IS that refusal.
     h.row = undefined;
-    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false)).resolves.toBe(
+    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false, FREE)).resolves.toBe(
       "not_found",
     );
     expect(h.inserts).toEqual([]);
@@ -135,7 +138,7 @@ describe("saveWatchProgressForUser — refusals write nothing", () => {
 
 describe("saveWatchProgressForUser — the write", () => {
   it("upserts on the natural (user, episode) key with the floored position", async () => {
-    await expect(saveWatchProgressForUser(USER, EPISODE, 12.7, false)).resolves.toBe(
+    await expect(saveWatchProgressForUser(USER, EPISODE, 12.7, false, FREE)).resolves.toBe(
       "saved",
     );
 
@@ -158,7 +161,7 @@ describe("saveWatchProgressForUser — the write", () => {
     // first_watched_at feeds the dashboard's release retention and
     // total_watched_seconds is owned by saveWatchSegments; a save that
     // rewrote either would silently corrupt both. Pin the whole key set.
-    await saveWatchProgressForUser(USER, EPISODE, 12, false);
+    await saveWatchProgressForUser(USER, EPISODE, 12, false, FREE);
 
     const [write] = progressWrites();
     expect(Object.keys(write.conflict.set).sort()).toEqual([
@@ -174,7 +177,7 @@ describe("saveWatchProgressForUser — the write", () => {
     // "finish" it for the dashboard (finished = max_position ≥ 95 %·duration)
     // — and knock it off the continue-watching rail.
     h.row = { id: EPISODE, showId: "show-1", access: "free", durationSeconds: 600 };
-    await expect(saveWatchProgressForUser(USER, EPISODE, 86_400, false)).resolves.toBe(
+    await expect(saveWatchProgressForUser(USER, EPISODE, 86_400, false, FREE)).resolves.toBe(
       "saved",
     );
 
@@ -188,13 +191,13 @@ describe("saveWatchProgressForUser — the write", () => {
 
   it("keeps the 24h ceiling alone when the duration is unknown", async () => {
     h.row = { id: EPISODE, showId: "show-1", access: "free", durationSeconds: null };
-    await saveWatchProgressForUser(USER, EPISODE, 5000, false);
+    await saveWatchProgressForUser(USER, EPISODE, 5000, false, FREE);
     expect(progressWrites()[0].values).toMatchObject({ positionSeconds: 5000 });
   });
 
   it("keeps max_position_seconds monotonic on a seek back", async () => {
-    await saveWatchProgressForUser(USER, EPISODE, 100, false);
-    await saveWatchProgressForUser(USER, EPISODE, 40, false);
+    await saveWatchProgressForUser(USER, EPISODE, 100, false, FREE);
+    await saveWatchProgressForUser(USER, EPISODE, 40, false, FREE);
 
     const [, seekBack] = progressWrites();
     // The resume target follows the playhead down…
@@ -207,8 +210,8 @@ describe("saveWatchProgressForUser — the write", () => {
   });
 
   it("lets `completed` flip both ways — the rail reads it live", async () => {
-    await saveWatchProgressForUser(USER, EPISODE, 500, true);
-    await saveWatchProgressForUser(USER, EPISODE, 20, false);
+    await saveWatchProgressForUser(USER, EPISODE, 500, true, FREE);
+    await saveWatchProgressForUser(USER, EPISODE, 20, false, FREE);
 
     const [finished, rewatch] = progressWrites();
     expect(finished.conflict.set.completed).toBe(true);
@@ -221,7 +224,7 @@ describe("saveWatchProgressForUser — the write", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-09-01T23:30:00Z"));
 
-    await saveWatchProgressForUser(USER, EPISODE, 10, false);
+    await saveWatchProgressForUser(USER, EPISODE, 10, false, FREE);
 
     const ledger = h.inserts.find((c) => c.table === watchDays);
     expect(ledger).toBeDefined();
@@ -232,7 +235,7 @@ describe("saveWatchProgressForUser — the write", () => {
 
   it("never consults the subscription in free mode", async () => {
     h.row = { id: EPISODE, showId: "show-1", access: "subscriber" };
-    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false)).resolves.toBe(
+    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false, FREE)).resolves.toBe(
       "saved",
     );
     expect(h.hasActiveSubscription).not.toHaveBeenCalled();
@@ -240,13 +243,9 @@ describe("saveWatchProgressForUser — the write", () => {
 });
 
 describe("saveWatchProgressForUser — paid-mode ownership gate", () => {
-  beforeEach(() => {
-    vi.stubEnv("PAYMENTS_ENABLED", "1");
-  });
-
   it("refuses a non-subscriber on a subscriber-tier episode, writing nothing", async () => {
     h.row = { id: EPISODE, showId: "show-1", access: "subscriber" };
-    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false)).resolves.toBe(
+    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false, PAID)).resolves.toBe(
       "forbidden",
     );
     expect(h.inserts).toEqual([]);
@@ -254,7 +253,7 @@ describe("saveWatchProgressForUser — paid-mode ownership gate", () => {
 
   it("lets a non-subscriber save on an episode open to them", async () => {
     h.row = { id: EPISODE, showId: "show-1", access: "member" };
-    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false)).resolves.toBe(
+    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false, PAID)).resolves.toBe(
       "saved",
     );
     expect(progressWrites()).toHaveLength(1);
@@ -263,9 +262,36 @@ describe("saveWatchProgressForUser — paid-mode ownership gate", () => {
   it("lets a subscriber save on anything", async () => {
     h.hasActiveSubscription.mockResolvedValue(true);
     h.row = { id: EPISODE, showId: "show-1", access: "subscriber" };
-    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false)).resolves.toBe(
+    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false, PAID)).resolves.toBe(
       "saved",
     );
     expect(h.hasActiveSubscription).toHaveBeenCalledWith(USER);
+  });
+});
+
+// #476: the gate takes the CALLER's view of payments, because the web and the
+// app can disagree (APP_FREE_WITH_ACCOUNT=1 — the app free for any account
+// while the site charges). The write reads no env of its own: whatever the
+// process says about payments, the argument decides.
+describe("saveWatchProgressForUser — the caller's view of payments decides (#476)", () => {
+  beforeEach(() => {
+    h.row = { id: EPISODE, showId: "show-1", access: "subscriber" };
+  });
+
+  it("saves for a non-subscriber when the caller sees no payments, even with the site's PAYMENTS_ENABLED=1", async () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false, FREE)).resolves.toBe(
+      "saved",
+    );
+    expect(progressWrites()).toHaveLength(1);
+    expect(h.hasActiveSubscription).not.toHaveBeenCalled();
+  });
+
+  it("refuses a non-subscriber when the caller sees payments, even with PAYMENTS_ENABLED unset", async () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "");
+    await expect(saveWatchProgressForUser(USER, EPISODE, 10, false, PAID)).resolves.toBe(
+      "forbidden",
+    );
+    expect(h.inserts).toEqual([]);
   });
 });

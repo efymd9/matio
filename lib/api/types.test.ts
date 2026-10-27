@@ -94,6 +94,24 @@ describe("isEpisodeLockedForApp — free mode", () => {
     ).toBe("signup_required");
   });
 
+  it("gate 0 (a paid site under APP_FREE_WITH_ACCOUNT=1, #476): every episode asks a signed-out viewer for an account, none locks a signed-in one", () => {
+    // What the builds already installed draw from /v1/config — no new build:
+    // «Create account» on every row for a guest, nothing locked once signed
+    // in, whatever the episode's tier.
+    const gate = { mode: "after_episodes", episodes: 0 } as const;
+    for (const access of ["free", "member", "subscriber"] as const) {
+      expect(isEpisodeLockedForApp({ ...base, gate, position: 1, access })).toBe(
+        "signup_required",
+      );
+      expect(
+        isEpisodeLockedForApp({ ...base, gate, position: 1, access, signedIn: true }),
+      ).toBe(false);
+    }
+    // And the sign-in in front of such an episode may promise "free": an
+    // account opens it (no paywallNext wording).
+    expect(subscriptionFollowsSignIn(gate, "subscriber")).toBe(false);
+  });
+
   it("plays everything for a signed-in viewer, however deep", () => {
     const gate = { mode: "after_episodes", episodes: 1 } as const;
     expect(
