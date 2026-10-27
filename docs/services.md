@@ -72,6 +72,8 @@ Any of the three unset → the revocation is skipped (`apple: {status: "skipped_
 | `STRIPE_PRICE_MONTHLY` | Printed by `pnpm stripe:setup`. The recurring **$25/mo** membership, charged at checkout; the only price there is. |
 | `NEXT_PUBLIC_APP_URL` | Origin used in Checkout `return_url` (embedded) / `success_url` + `cancel_url` (hosted). `http://localhost:3000` locally; `https://matio.tv` in prod. |
 
+**The app can be free while the site charges (#476)**: `APP_FREE_WITH_ACCOUNT=1` in **Vercel** (runtime read, bind-at-deploy; only the exact value `1` switches it on) makes `/api/v1` answer as if payments were off — `lib/api/v1.ts:appPaymentsEnabled()` is `PAYMENTS_ENABLED=1` and NOT this lever, and it alone feeds `/v1/config` (`flags.paymentsEnabled`, `signupGate`), the app's token route and the app's progress / retention writes. Any account plays everything in the app; without one nothing plays (`signupGate: after_episodes`, `APP_SIGNUP_GATE_EPISODES` defaulting to **0** under the lever). The web, Stripe and the webhooks never read it. Installed builds switch with no store release — every EAS build reads the prod `/v1/config`. A temporary owner move for App Store review (`docs/registry.md`).
+
 **One-time setup**:
 1. Drop a `sk_test_…` into `.env.local`.
 2. `pnpm stripe:setup` (scripts/stripe-setup.ts) — idempotently creates the "Matio Membership" product + a **$25/mo** price tagged `metadata.plan=monthly` and prints the id. If a stale active price exists at a different amount (the legacy $38, or the older $9.99) the script archives it and creates a new one — Stripe prices are immutable, so the amount cannot be patched in place. There is no trial product and no second line item: the membership is charged at checkout (#207).

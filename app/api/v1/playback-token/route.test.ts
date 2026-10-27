@@ -113,6 +113,7 @@ beforeEach(() => {
   h.signStoryboard.mockReset().mockReturnValue("signed-storyboard-jwt");
   vi.stubEnv("PAYMENTS_ENABLED", "");
   vi.stubEnv("REQUIRE_SIGNUP", "");
+  vi.stubEnv("APP_FREE_WITH_ACCOUNT", "");
   vi.spyOn(console, "info").mockImplementation(() => {});
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -287,6 +288,61 @@ describe("POST /api/v1/playback-token — paid mode, no preview (#462)", () => {
     expect(res.status).toBe(403);
     expect((await res.json()).error.reason).toBe("signup_required");
     expect(h.stampSignupWall).not.toHaveBeenCalled();
+  });
+});
+
+// #476: the site charges, the app is free for any account. The token route
+// asks appPaymentsEnabled() — the answer /v1/config reports — so what the app
+// draws unlocked plays, and what it draws locked is refused the same way.
+describe("POST /api/v1/playback-token — paid site, APP_FREE_WITH_ACCOUNT=1 (#476)", () => {
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "1");
+    h.row = { playbackId: "pb-1", showId: SHOW, access: "subscriber" };
+  });
+
+  it("a signed-in non-subscriber plays a subscriber episode on the member path — 1h, like a member", async () => {
+    h.userId = "user_1";
+
+    const res = await POST(post({ episodeId: EPISODE }));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ playbackId: "pb-1", token: "signed-jwt", mode: "member" });
+    expect(h.sign).toHaveBeenCalledWith("pb-1", 3600);
+    // No funnel row for an account: the member path mints nothing.
+    expect(h.mintTrialSession).not.toHaveBeenCalled();
+  });
+
+  it("an anonymous device is asked for an account — even for episode 1 (gate 0)", async () => {
+    const res = await POST(post({ episodeId: EPISODE }));
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body.error.reason).toBe("signup_required");
+    expect(h.sign).not.toHaveBeenCalled();
+    expect(h.stampSignupWall).toHaveBeenCalledWith(DEVICE, SHOW);
+  });
+
+  it("a subscriber still plays as a subscriber — that check comes first and is unchanged", async () => {
+    h.userId = "user_1";
+    h.hasActiveSubscription.mockResolvedValue(true);
+
+    const res = await POST(post({ episodeId: EPISODE }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).mode).toBe("subscriber");
+  });
+
+  it("APP_SIGNUP_GATE_EPISODES opens the first N to an anonymous device, and no deeper", async () => {
+    vi.stubEnv("APP_SIGNUP_GATE_EPISODES", "1");
+
+    const first = await POST(post({ episodeId: EPISODE }));
+    expect(first.status).toBe(200);
+    expect((await first.json()).mode).toBe("free");
+
+    const second = await POST(post({ episodeId: OTHER_EPISODE }));
+    expect(second.status).toBe(403);
+    expect((await second.json()).error.reason).toBe("signup_required");
   });
 });
 

@@ -4,12 +4,17 @@ import type { NextRequest } from "next/server";
 import { db } from "@/db";
 import { episodes, seasons, shows } from "@/db/schema";
 import type { PlaybackMode, PlaybackTokenResponse } from "@/lib/api/types";
-import { apiError, apiOk, readDeviceId, resolveSignupGate } from "@/lib/api/v1";
+import {
+  apiError,
+  apiOk,
+  appPaymentsEnabled,
+  readDeviceId,
+  resolveSignupGate,
+} from "@/lib/api/v1";
 import {
   getOrderedReadyEpisodeIds,
   resolveEffectiveTier,
 } from "@/lib/episode-access";
-import { paymentsEnabled } from "@/lib/free-mode";
 import { signMuxPlaybackToken, signMuxStoryboardToken } from "@/lib/mux-token";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import { EMPTY_ATTRIBUTION } from "@/lib/attribution";
@@ -123,15 +128,18 @@ export async function POST(req: NextRequest) {
   }
 
   // --- effective tier ---------------------------------------------------
-  // Paid mode: the episode's own tier through the web's rule — an anonymous
-  // device meets a subscriber episode as `member`, i.e. the sign-up ask
-  // (#462), exactly what the app locks up front (isEpisodeLockedForApp).
-  // Free mode: signed-in viewers take the member path; anonymous viewers are
-  // free UNLESS the positional signup gate puts this episode out of reach.
+  // The app sees payments: the episode's own tier through the web's rule —
+  // an anonymous device meets a subscriber episode as `member`, i.e. the
+  // sign-up ask (#462), exactly what the app locks up front
+  // (isEpisodeLockedForApp).
+  // The app sees none (free mode, or a paid site under APP_FREE_WITH_ACCOUNT=1
+  // — #476): signed-in viewers take the member path; anonymous viewers are
+  // free UNLESS the positional signup gate puts this episode out of reach
+  // (under the lever it does by default, from episode 1).
   const gate = resolveSignupGate();
   let access = row.access;
 
-  if (paymentsEnabled()) {
+  if (appPaymentsEnabled()) {
     access = resolveEffectiveTier(row.access, {
       paymentsOn: true,
       signupGate: false,
@@ -216,8 +224,9 @@ export async function POST(req: NextRequest) {
   }
 
   // --- subscriber-tier episode, requester isn't one ----------------------
-  // Paid mode, signed in only (an anonymous device took the member branch
-  // above; free mode never leaves `access` at "subscriber"). Every show
+  // The app sees payments, signed in only (an anonymous device took the
+  // member branch above; with no payments in the app's view `access` never
+  // stays "subscriber"). Every show
   // answers the same, all-subscriber ones included: the legacy 60-second
   // preview that used to follow here is gone (#462), so no request through
   // here mints a kind='preview' row. The app renders this 403 as its

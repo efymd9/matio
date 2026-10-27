@@ -157,6 +157,7 @@ beforeEach(() => {
   h.orderedEpisodeIds.mockReset().mockResolvedValue([EPISODE, EPISODE_2]);
   vi.stubEnv("PAYMENTS_ENABLED", "");
   vi.stubEnv("REQUIRE_SIGNUP", "");
+  vi.stubEnv("APP_FREE_WITH_ACCOUNT", "");
 });
 
 afterEach(() => {
@@ -325,6 +326,52 @@ describe("POST /api/v1/watch-segments — paid mode", () => {
 
     expect(res.status).toBe(403);
     expect((await res.json()).error.reason).toBe("subscribe_required");
+    expect(h.inserts).toEqual([]);
+  });
+});
+
+// #476: the paid site with the app free for any account. The flush follows
+// what the token route plays — through the real shared write.
+describe("POST /api/v1/watch-segments — paid site, APP_FREE_WITH_ACCOUNT=1 (#476)", () => {
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    h.episode = { id: EPISODE, showId: SHOW, access: "subscriber", durationSeconds: 600 };
+  });
+
+  it("counts a non-subscriber's flush on a subscriber episode under the lever, crediting the progress row", async () => {
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "1");
+    h.userId = "user_1";
+
+    const res = await POST(post({ episodeId: EPISODE, buckets: [1, 2] }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, accepted: 2 });
+    expect(segmentWrites()).toHaveLength(1);
+    expect(h.updates).toHaveLength(1);
+    expect(h.hasActiveSubscription).not.toHaveBeenCalled();
+  });
+
+  it("refuses the same flush without the lever — `forbidden`, as before", async () => {
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "");
+    h.userId = "user_1";
+
+    const res = await POST(post({ episodeId: EPISODE, buckets: [1, 2] }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatchObject({
+      code: "forbidden",
+      reason: "subscribe_required",
+    });
+    expect(h.inserts).toEqual([]);
+  });
+
+  it("refuses an anonymous device past the gate — 0 by default, so every episode", async () => {
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "1");
+
+    const res = await POST(post({ episodeId: EPISODE, buckets: [1] }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.reason).toBe("signup_required");
     expect(h.inserts).toEqual([]);
   });
 });

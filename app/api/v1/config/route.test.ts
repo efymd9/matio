@@ -47,6 +47,22 @@ describe("GET /api/v1/config", () => {
     expect((await config()).signupGate).toEqual({ mode: "none" });
   });
 
+  it("under APP_FREE_WITH_ACCOUNT=1 tells the app there are no payments, while the site charges (#476)", async () => {
+    // The flag and the gate come from the same appPaymentsEnabled(): no
+    // «Member», no "No card needed" — and every episode asks for an account.
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "1");
+    const body = await config();
+    expect(body.flags.paymentsEnabled).toBe(false);
+    expect(body.signupGate).toEqual({ mode: "after_episodes", episodes: 0 });
+
+    // Lever off again: the paid answer, as before.
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "");
+    const paid = await config();
+    expect(paid.flags.paymentsEnabled).toBe(true);
+    expect(paid.signupGate).toEqual({ mode: "tiers" });
+  });
+
   it("keeps unbuilt features off unless explicitly switched on", async () => {
     // Downloads need Mux static renditions (paid plan); shipping the UI first
     // would put a dead button in a released binary.

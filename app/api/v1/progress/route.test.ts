@@ -162,6 +162,7 @@ beforeEach(() => {
   h.progress = new Map();
   h.failNextWrite = null;
   vi.stubEnv("PAYMENTS_ENABLED", "");
+  vi.stubEnv("APP_FREE_WITH_ACCOUNT", "");
 });
 
 afterEach(() => {
@@ -268,6 +269,41 @@ describe("POST /api/v1/progress — the row underneath", () => {
 
     expect(res.status).toBe(403);
     expect((await res.json()).error.reason).toBe("subscribe_required");
+    expect(h.inserts).toEqual([]);
+  });
+});
+
+// #476: under APP_FREE_WITH_ACCOUNT=1 the token route plays a subscriber
+// episode for any account — so its progress must save too, or «Up next»
+// breaks. Through the real shared write: the route hands it the APP's view.
+describe("POST /api/v1/progress — paid site, APP_FREE_WITH_ACCOUNT=1 (#476)", () => {
+  beforeEach(() => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    h.row = { id: EPISODE, showId: "show-1", access: "subscriber" };
+  });
+
+  it("saves a non-subscriber's position on a subscriber episode under the lever", async () => {
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "1");
+
+    const res = await POST(post({ episodeId: EPISODE, positionSeconds: 10, completed: false }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(progressWrites()).toHaveLength(1);
+    expect(progressWrites()[0].values).toMatchObject({ userId: "user_1", positionSeconds: 10 });
+    expect(h.hasActiveSubscription).not.toHaveBeenCalled();
+  });
+
+  it("refuses the same save without the lever — `forbidden`, as before", async () => {
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "");
+
+    const res = await POST(post({ episodeId: EPISODE, positionSeconds: 10, completed: false }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toMatchObject({
+      code: "forbidden",
+      reason: "subscribe_required",
+    });
     expect(h.inserts).toEqual([]);
   });
 });

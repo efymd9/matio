@@ -2,7 +2,6 @@ import "server-only";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { episodes, seasons, shows, watchDays, watchProgress } from "@/db/schema";
-import { paymentsEnabled } from "@/lib/free-mode";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 
 // The watch-progress write, shared by the web's server action
@@ -40,11 +39,21 @@ export type SaveWatchProgressOutcome =
   | "not_found"
   | "forbidden";
 
+// Whose view of payments the ownership gate takes. The CALLER states it,
+// because the two surfaces can disagree (#476): the web passes the site's
+// paymentsEnabled(), the app route passes lib/api/v1.ts:appPaymentsEnabled(),
+// which APP_FREE_WITH_ACCOUNT=1 turns off while the site still charges — the
+// same answer that route's token mint gives, so a save is never refused for
+// an episode the app was allowed to play. Required, so no caller can forget
+// which surface it speaks for; this module reads no env of its own.
+export type SaveWatchProgressPolicy = { paymentsOn: boolean };
+
 export async function saveWatchProgressForUser(
   userId: string,
   episodeId: string,
   positionSeconds: number,
   completed: boolean,
+  policy: SaveWatchProgressPolicy,
 ): Promise<SaveWatchProgressOutcome> {
   const clamped = clampPositionSeconds(positionSeconds);
   if (clamped === null) return "invalid_position";
@@ -78,9 +87,9 @@ export async function saveWatchProgressForUser(
   // All-subscriber (legacy 60s-trial) shows have no such episodes, so
   // non-subscribers are rejected there exactly as before. Mirrors the token
   // route's gate so progress rows can't be written for content the user
-  // can't play — with payments off every episode is playable, so the gate
-  // (and its subscription lookup) is skipped.
-  if (paymentsEnabled() && !(await hasActiveSubscription(userId))) {
+  // can't play — with payments off (in the caller's view) every episode is
+  // playable, so the gate (and its subscription lookup) is skipped.
+  if (policy.paymentsOn && !(await hasActiveSubscription(userId))) {
     if (ep.access === "subscriber") return "forbidden";
   }
 
