@@ -1952,3 +1952,51 @@ describe("EpisodeFeed — the landscape page's glass chrome, board E «Стек�
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 });
+
+// #484 — the wall is the whole page in either orientation, from either of its
+// two sources (the page's own lock, the token route's 403), and it is the
+// same component every time: clear of the Dynamic Island at both sides, its
+// column inside a scroll view. The column's own rules are in
+// components/signup-wall.test.tsx.
+describe("EpisodeFeed — the sign-up wall keeps the safe area in both feeds (#484)", () => {
+  const DYNAMIC_ISLAND_LANDSCAPE = { top: 0, bottom: 21, left: 59, right: 59 };
+
+  function wallPadding() {
+    const scrollers = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="signup-wall"]'));
+    expect(scrollers).toHaveLength(1);
+    const [scroller] = scrollers;
+    expect(scroller.contains(leaf(WALL_CTA))).toBe(true);
+    expect(getComputedStyle(scroller).overflowY).toMatch(/^(auto|scroll)$/);
+    const column = getComputedStyle(scroller.firstElementChild as HTMLElement);
+    return { left: column.paddingLeft, right: column.paddingRight };
+  }
+
+  beforeEach(() => {
+    safeArea.insets = DYNAMIC_ISLAND_LANDSCAPE;
+  });
+
+  it.each(["horizontal", "vertical"] as const)(
+    "%s show: a page the gate locks",
+    async (orientation) => {
+      await renderFeed(makeShow(orientation, ["member"]));
+
+      expect(wallPadding()).toEqual({ left: "59px", right: "59px" });
+      expect(tokens.calls).toEqual([]);
+    },
+  );
+
+  it.each(["horizontal", "vertical"] as const)(
+    "%s show: the token route's signup_required for a signed-out viewer",
+    async (orientation) => {
+      // The client thinks the episode is open; the server says otherwise.
+      gate = { mode: "none" };
+      tokens.answer = async () => {
+        throw SIGNUP_REQUIRED();
+      };
+      await renderFeed(makeShow(orientation, ["member"]));
+
+      expect(wallPadding()).toEqual({ left: "59px", right: "59px" });
+      expect(tokens.calls).toEqual(["ep1"]);
+    },
+  );
+});

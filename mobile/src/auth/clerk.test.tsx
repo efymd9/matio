@@ -58,10 +58,12 @@ vi.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 vi.mock("expo-web-browser", () => ({ openBrowserAsync: async () => ({}) }));
-// The sign-in form's Terms / Privacy line (#312) reads the legal URLs.
+// The sign-in form's Terms / Privacy line (#312) reads the legal URLs; the
+// signed-out tab's greeting, the gate (#484).
 vi.mock("@/api/config-context", () => ({
   useConfig: () => ({
     flags: { paymentsEnabled: true, downloadsEnabled: false, castEnabled: false },
+    signupGate: { mode: "tiers" },
     urls: {
       terms: "https://matio.tv/terms?embed=app",
       privacy: "https://matio.tv/privacy?embed=app",
