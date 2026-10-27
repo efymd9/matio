@@ -2,6 +2,7 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SignupGate } from "@/shared/api-types";
 
 // #292 — the signed-in Account tab:
 //   item 2: no «Manage subscription» row. It opened matio.tv signed out in a
@@ -128,15 +129,28 @@ vi.mock("@/api/client", async (importOriginal) => {
     api: { ...actual.api, deleteAccount: (options?: DeleteOptions) => deleteAccount(options) },
   };
 });
-// The signed-out tab's email → code form has its own suite.
-vi.mock("@/components/sign-in-form", () => ({ SignInForm: () => null }));
+// The signed-out tab's email → code form has its own suite; here it only
+// shows the copy the tab hands it (#484).
+vi.mock("@/components/sign-in-form", () => ({
+  SignInForm: ({ kicker, headline, bodyText }: { kicker: string; headline: string; bodyText: string }) => (
+    <div>
+      <p>{kicker}</p>
+      <p>{headline}</p>
+      <p>{bodyText}</p>
+    </div>
+  ),
+}));
 // Paid mode, as live since 2026-09-09 — the mode the row used to show in —
-// unless a case switches payments off (#447: the «Member» pill).
-const mode = vi.hoisted(() => ({ paymentsEnabled: true }));
+// unless a case switches payments off (#447: the «Member» pill); the gate
+// /v1/config reports, which the signed-out greeting follows (#484).
+const mode = vi.hoisted(() => ({
+  paymentsEnabled: true,
+  gate: { mode: "tiers" } as SignupGate,
+}));
 vi.mock("@/api/config-context", () => ({
   useConfig: () => ({
     flags: { paymentsEnabled: mode.paymentsEnabled, downloadsEnabled: false, castEnabled: false },
-    signupGate: { mode: "tiers" },
+    signupGate: mode.gate,
     urls: { web: "https://matio.tv" },
   }),
 }));
@@ -203,6 +217,7 @@ async function choose(label: string) {
 
 beforeEach(() => {
   mode.paymentsEnabled = true;
+  mode.gate = { mode: "tiers" };
   alerts.calls.length = 0;
   h.steps.length = 0;
   h.signedIn = true;
@@ -231,6 +246,58 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+});
+
+// #484: signed out, the tab greets with what an account changes. Under a gate
+// that opens the first episode of every show without one (APP_FREE_WITH_
+// ACCOUNT=1 with APP_SIGNUP_GATE_EPISODES=1, the App Store review's setup)
+// the web's «…to start watching…» is untrue; with no free episode it is
+// right, and stays.
+describe("Account tab — signed out, the greeting follows the gate (#484)", () => {
+  const START_WATCHING =
+    "Create a free account to start watching and save your progress across every series.";
+
+  beforeEach(() => {
+    h.signedIn = false;
+  });
+
+  it("the first episode of every show open without an account: says so, and no «start watching»", () => {
+    mode.gate = { mode: "after_episodes", episodes: 1 };
+    render();
+
+    expect(text()).toContain(
+      "The first episode of every series is on us. Create a free account to keep watching and save your progress.",
+    );
+    expect(text()).not.toContain("start watching");
+    // Nothing to sell in the app (3.1.1).
+    expect(text()).not.toMatch(/trial|\$|subscri/i);
+  });
+
+  it("more than one open episode: the count is the gate's", () => {
+    mode.gate = { mode: "after_episodes", episodes: 2 };
+    render();
+
+    expect(text()).toContain("The first 2 episodes of every series are on us.");
+    expect(text()).not.toContain("start watching");
+  });
+
+  it("no episode open without an account: the web's gate greeting, unchanged", () => {
+    mode.gate = { mode: "after_episodes", episodes: 0 };
+    render();
+
+    expect(text()).toContain(START_WATCHING);
+    expect(text()).not.toContain("on us");
+  });
+
+  it("the paid site's tiers, and no gate at all: the same greeting as before", () => {
+    for (const gate of [{ mode: "tiers" }, { mode: "none" }] as const) {
+      mode.gate = gate;
+      render();
+
+      expect(text(), gate.mode).toContain(START_WATCHING);
+      expect(text(), gate.mode).not.toContain("on us");
+    }
+  });
 });
 
 // #447 (the #446 audit): in Matio's copy a «Member» is someone who pays, so

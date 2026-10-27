@@ -48,6 +48,16 @@ export const appEn = {
   account: {
     member: "Member",
     signOut: "Sign out",
+    // The signed-out tab's greeting under a positional gate that opens the
+    // first `n` episodes of every show without an account (/v1/config
+    // `after_episodes`, n ≥ 1 — #484): the web's `signupWall.gateBody`
+    // («…to start watching…») would be untrue there. With no free episodes
+    // the tab keeps gateBody. Nothing about a trial, a price or a
+    // subscription (App Store 3.1.1).
+    firstEpisodesFreeBody: (n: number) =>
+      n === 1
+        ? "The first episode of every series is on us. Create a free account to keep watching and save your progress."
+        : `The first ${n} episodes of every series are on us. Create a free account to keep watching and save your progress.`,
     whyKicker: "Your progress, on every device",
     whyBody: "Pick up where you left off — on matio.tv too.",
     // Clerk would not load — a vendor error, no network, an outage (#253).

@@ -406,8 +406,15 @@ const stay = () => {};
 
 function AnonymousAccount() {
   const t = useT();
+  const { signupGate } = useConfig();
   const insets = useSafeAreaInsets();
   const clearance = useTabBarClearance();
+  // A gate that opens the first episodes of every show without an account
+  // (#484) must not say an account is needed to «start watching».
+  const greeting =
+    signupGate.mode === "after_episodes" && signupGate.episodes >= 1
+      ? t.app.account.firstEpisodesFreeBody(signupGate.episodes)
+      : t.signupWall.gateBody;
 
   return (
     <KeyboardAvoidingView
@@ -426,13 +433,13 @@ function AnonymousAccount() {
         </Text>
 
         <View style={{ marginTop: space(6) }}>
-          {/* The gate's greeting — the viewer has watched nothing yet — with
-              the wall's own CTA. On success the tab simply re-renders as
-              the signed-in account: nowhere to go back to. */}
+          {/* The gate's greeting with the wall's own CTA. On success the
+              tab simply re-renders as the signed-in account: nowhere to go
+              back to. */}
           <SignInForm
             kicker={t.signupWall.gateKicker}
             headline={t.signupWall.headline}
-            bodyText={t.signupWall.gateBody}
+            bodyText={greeting}
             cta={t.signupWall.signUpCta}
             onDone={stay}
             signInHint
