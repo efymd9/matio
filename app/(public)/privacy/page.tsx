@@ -54,6 +54,16 @@
 // §4 Mux / Meta / PostHog / Google rows say consent everywhere instead of the
 // geo rule. Written on the owner's order (19.10), counsel review pending with
 // the rest of the page (#168).
+// 2026-10-27 edition (#485, before the first App Store submission, #486): the
+// approximate location Clerk records for every sign-in session — the city and
+// country it resolves from the IP address, beside that IP address, the browser
+// and the device type (Clerk's SessionActivity object) — in §2 "Account data",
+// the §4 Clerk row and §11 "If you sign in", so the policy says what the App
+// Privacy answers say (Coarse Location, linked to the user). Clerk publishes
+// no retention window for these records; the policy ties them to the account
+// (§6 "Account"), and that assumption is a registry row. An agent's draft,
+// merged only on the owner's «да» in the PR thread; counsel review pending
+// with the rest (#168).
 // matio.tv/ideas is
 // plain text on purpose: every internal link here must survive ?embed=app
 // (app/(public)/legal-embed.test.tsx).
@@ -74,7 +84,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "October 19, 2026";
+const LAST_UPDATED = "October 27, 2026";
 
 export default async function PrivacyPage() {
   const { t } = await getDict();
@@ -144,7 +154,14 @@ function PrivacyEn() {
             Apple, possibly a private relay address that forwards to your real
             one), your name and, from Google, your profile picture, together
             with the provider&rsquo;s identifier for your account. Clerk keeps
-            them with your account.
+            them with your account. For each sign-in session, Clerk also
+            records the approximate location the session was used from
+            &mdash; the city and country, worked out from the IP address
+            &mdash; together with that IP address and the browser and type of
+            device. Clerk uses this to keep your account secure, for example
+            to email you when your account is signed in from a device it
+            hasn&rsquo;t seen before; we don&rsquo;t use it for anything else.
+            It is kept with your account (&ldquo;Account&rdquo; in section 6).
           </li>
           <li>
             <strong>Subscription and payment data</strong> — billing name and
@@ -316,8 +333,10 @@ function PrivacyEn() {
         </p>
         <ul className="ml-5 list-disc space-y-1.5">
           <li>
-            <strong>Clerk Inc.</strong> (US) — authentication. EU/UK transfers
-            covered by Standard Contractual Clauses (SCCs).
+            <strong>Clerk Inc.</strong> (US) — authentication: your account
+            and the record of each sign-in session described in section 2,
+            including its approximate location. EU/UK transfers covered by
+            Standard Contractual Clauses (SCCs).
           </li>
           <li>
             <strong>Stripe Payments Europe Ltd</strong> (Ireland) — payments and
@@ -578,8 +597,11 @@ function PrivacyEn() {
             hide your email address). When you create an account with your
             email address, the app also passes Clerk the language you use in
             the app. Your sign-in session is kept in the
-            device&rsquo;s secure storage. While you are signed in, the app
-            sends us your watch progress — the episode, how far you got,
+            device&rsquo;s secure storage. As on the website, Clerk records
+            the approximate location of each sign-in session &mdash; the city
+            and country, worked out from your IP address &mdash; with the IP
+            address and the type of device (section 2). While you are signed
+            in, the app sends us your watch progress — the episode, how far you got,
             whether you finished it and how long you watched — so you can
             pick up where you left off, in the app or on matio.tv; we also
             record the days on which you watched, to measure how our own

@@ -76,6 +76,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly",
       priority: 0.5,
     }),
+    // The support page (#485) — the App Store's Support URL; indexed so a
+    // viewer searching "matio support" finds it.
+    entry("/support", {
+      changeFrequency: "monthly",
+      priority: 0.3,
+    }),
     ...published.map((s) =>
       entry(`/shows/${s.slug}`, {
         lastModified: s.updatedAt ?? catalogLastMod,

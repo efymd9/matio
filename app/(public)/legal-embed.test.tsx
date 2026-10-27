@@ -112,11 +112,16 @@ describe("«Last updated»", () => {
     expect(await render(TermsPage)).toContain(`Last updated: ${edition}`);
   });
 
-  // #466 — the banner for every country is a new edition of both; /terms
+  // #466 — the banner for every country is a new edition of /cookies; /terms
   // did not change and keeps its TOS_VERSION date.
-  it("/privacy and /cookies have the #466 edition", async () => {
-    expect(await render(PrivacyPage)).toContain("Last updated: October 19, 2026");
+  it("/cookies has the #466 edition", async () => {
     expect(await render(CookiesPage)).toContain("Last updated: October 19, 2026");
+  });
+
+  // #485 — the approximate location Clerk records per sign-in session is a
+  // new disclosure, so a new edition of /privacy.
+  it("/privacy has the #485 edition", async () => {
+    expect(await render(PrivacyPage)).toContain("Last updated: October 27, 2026");
   });
 });
 
