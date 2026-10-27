@@ -116,19 +116,25 @@ function sameJson(a: AppConfig, b: AppConfig): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-// Where an update comes from today: TestFlight (#292) — the app is not in the
-// App Store yet. The TestFlight app by its scheme; where it is not installed
-// openURL rejects, and Apple's TestFlight page (which offers it) opens
-// instead. Once the app is published this becomes its store page (registry).
-export const TESTFLIGHT_APP_URL = "itms-beta://";
-export const TESTFLIGHT_WEB_URL = "https://testflight.apple.com/";
+// Where an update comes from: the app's page in the App Store (#483; it was
+// TestFlight while the app shipped only there, #292). A published build
+// cannot be patched, so this wall is the one way to retire a broken one
+// (minSupportedBuild) — and it has to lead where the update is. The App
+// Store app by its scheme; where openURL rejects that (Android — which has no
+// build yet — or a device without the App Store), the same page on the web.
+// A TestFlight tester retired here lands on a store page that does not exist
+// until the public release — accepted (registry). The App Store Connect
+// record id lives in this one string.
+const APP_STORE_PAGE = "apps.apple.com/app/id6812321366";
+export const APP_STORE_APP_URL = `itms-apps://${APP_STORE_PAGE}`;
+export const APP_STORE_WEB_URL = `https://${APP_STORE_PAGE}`;
 
 async function openUpdate() {
   try {
-    await Linking.openURL(TESTFLIGHT_APP_URL);
+    await Linking.openURL(APP_STORE_APP_URL);
   } catch {
     // A phone with no browser to take it has nothing better to offer.
-    await Linking.openURL(TESTFLIGHT_WEB_URL).catch(() => undefined);
+    await Linking.openURL(APP_STORE_WEB_URL).catch(() => undefined);
   }
 }
 

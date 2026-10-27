@@ -74,7 +74,7 @@ vi.mock("expo-web-browser", () => ({
   },
 }));
 vi.mock("expo-constants", () => ({
-  default: { expoConfig: { version: "0.1.0" }, nativeBuildVersion: "7" },
+  default: { expoConfig: { version: "1.0.0" }, nativeBuildVersion: "7" },
 }));
 vi.mock("expo-crypto", () => ({
   randomUUID: () => "00000000-0000-4000-8000-000000000000",

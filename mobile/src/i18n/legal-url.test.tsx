@@ -24,7 +24,7 @@ vi.mock("expo-web-browser", () => ({
   },
 }));
 vi.mock("expo-constants", () => ({
-  default: { expoConfig: { version: "0.1.0" }, nativeBuildVersion: "6" },
+  default: { expoConfig: { version: "1.0.0" }, nativeBuildVersion: "6" },
 }));
 const legal = vi.hoisted(() => ({ query: "" }));
 vi.mock("@/api/config-context", () => ({
