@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/efymd9/matio/compare/matio-v0.23.0...matio-v0.24.0) (2026-10-27)
+
+
+### Features
+
+* приложение бесплатно для любого аккаунта при платном сайте — рычаг APP_FREE_WITH_ACCOUNT ([#476](https://github.com/efymd9/matio/issues/476)) ([#478](https://github.com/efymd9/matio/issues/478)) ([31c483c](https://github.com/efymd9/matio/commit/31c483c195cfbc348f3134d9abe4632d3d5d2f66))
+
 ## [0.23.0](https://github.com/efymd9/matio/compare/matio-v0.22.0...matio-v0.23.0) (2026-10-22)
 
 
