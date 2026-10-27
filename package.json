@@ -102,7 +102,8 @@
   "pnpm": {
     "overrides": {
       "@clerk/shared@3>js-cookie": "3.0.8",
-      "@esbuild-kit/core-utils>esbuild": "0.25.12"
+      "@esbuild-kit/core-utils>esbuild": "0.25.12",
+      "@vercel/cli-config>zod": "4.6.7"
     }
   }
 }

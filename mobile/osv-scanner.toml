@@ -13,7 +13,7 @@
 # nightly run goes red — that is the review reminder, do not push the date out
 # without re-checking upstream. Mirror every entry in docs/registry.md.
 # Cap: 5 packages — several advisories of ONE package with ONE exposure count
-# once (image-size and stream-json below). Re-check: 2026-12-20.
+# once (image-size below). Re-check: 2026-12-20.
 
 # image-size 1.2.1 <- metro 0.84.4 (range ^1.0.2) <- @expo/metro <- expo.
 # No fixed release exists on any line (advisory: last_affected 2.0.2).
@@ -27,43 +27,12 @@ id = "GHSA-w3rx-r6r6-pgpr"
 ignoreUntil = 2026-12-20
 reason = "Same package and same exposure as GHSA-5p2g-fcmc-qvqq (image-size ICNS parser loop): no fixed version upstream, Metro build-time only on the project's own assets, absent from the exported iOS bundle (#256)."
 
-# stream-json 1.9.1 <- jayson 4.3.0 (range ^1.9.1) <- @solana/web3.js
-#   <- @solana/wallet-adapter-base <- @clerk/clerk-js <- @clerk/expo.
-# Fix is 3.5.0: ESM-only, node >=22, entry points moved to ./src/* — jayson does
-# a CJS require('stream-json/streamers/StreamValues'), so an override breaks it.
-[[IgnoredVulns]]
-id = "GHSA-528h-pc64-c93x"
-ignoreUntil = 2026-12-20
-reason = "Unreachable. The flaw is in the pick/ignore/filter/replace filters; jayson requires only StreamValues and Verifier, and only from its SERVER-side lib/utils.js. @solana/web3.js imports just jayson/lib/client/browser, which does not load utils.js. Verified: stream-json, jayson and @solana/web3.js are all absent from the exported iOS bundle (#256). The fixed 3.5.0 is ESM-only and not loadable by jayson's CJS require."
-
-# Same package, same chain, same exposure as above (#417) — counts once toward
-# the cap. Both advisories are fixed only in 3.6.0, the same ESM-only line.
-# jayson 5.0.0 drops stream-json altogether, but @solana/web3.js 1.99.0 (the
-# latest) still asks jayson ^4.3.0.
-[[IgnoredVulns]]
-id = "GHSA-hqr4-qq8f-hg3x"
-ignoreUntil = 2026-12-20
-reason = "The vulnerable code is not in the installed version. The flaw is the comment re-scan in the JSONC parser and verifier (stream-json/jsonc/*); 1.9.1 ships no jsonc module at all (no jsonc or comment-handling code anywhere in the package) — the advisory's range simply starts at 0. jayson requires only the plain-JSON StreamValues and Verifier. Verified: stream-json, jayson and @solana/web3.js are all absent from the exported iOS bundle (#417). The fixed 3.6.0 is ESM-only and not loadable by jayson's CJS require."
-
-[[IgnoredVulns]]
-id = "GHSA-mjw6-4jj6-33hc"
-ignoreUntil = 2026-12-20
-reason = "Unreachable. The flaw is Assembler's plain current[key] assignment (a __proto__ key replaces the PARSED object's prototype, never Object.prototype), reached through StreamValues. jayson's lib/utils.js requires StreamValues at module load but instantiates the Assembler only in parseStream, which only its Node TCP/TLS server and client transports call; @solana/web3.js imports just jayson/lib/client/browser (uuid + generateRequest), which never loads utils.js, so stream-json is never even loaded. Verified: stream-json, jayson and @solana/web3.js are all absent from the exported iOS bundle (#417). The fixed 3.6.0 is ESM-only and not loadable by jayson's CJS require."
-
 # decode-uri-component 0.2.2 <- query-string 7.1.3 (range ^0.2.2) <- expo-router.
 # NOT a build-time-only entry — read the reason.
 [[IgnoredVulns]]
 id = "GHSA-vcc3-ghjq-m6fr"
 ignoreUntil = 2026-12-20
 reason = "SHIPS IN THE APP (present in the exported iOS bundle): expo-router parses an incoming path's query with query-string, which calls decode-uri-component. Accepted because the only fix, 0.5.0, is ESM-only while query-string 7.1.3 does a CJS require() and calls the export as a function — an override would break deep-link parsing for every user. Exposure is a client-side stall on the device that opens a crafted percent-encoded deep link; no server, no data, no other user. Unblocks when expo-router drops query-string 7 (#256)."
-
-# braces 3.0.3 <- micromatch 4.0.8 (range ^3.0.3) <- @expo/metro-file-map 57.0.1
-#   <- @expo/cli 57.0.11 <- expo. The only path (`npm explain braces`).
-# No fixed release exists (advisory: last_affected 3.0.3; 3.0.3 is the latest).
-[[IgnoredVulns]]
-id = "GHSA-vfj7-8cjw-p6xm"
-ignoreUntil = 2026-12-20
-reason = "No fixed version exists upstream (all releases through 3.0.3 affected). Build-time only: Metro's file map (@expo/metro-file-map watchers/common.js) runs micromatch -> braces over the project's OWN watcher globs while bundling; a crafted pattern can only crash the local bundler. Verified absent from the exported iOS bundle: braces, micromatch and @expo/metro-file-map are 0 modules in the source map (#379)."
 
 # node-forge 1.4.0 <- @expo/cli 57.0.11 (direct) and <- @expo/code-signing-certificates
 #   0.0.6 <- @expo/cli. The only paths (`npm explain node-forge`).
@@ -73,3 +42,14 @@ reason = "No fixed version exists upstream (all releases through 3.0.3 affected)
 id = "GHSA-86w9-cpqp-85rv"
 ignoreUntil = 2026-12-20
 reason = "No fixed version exists upstream (all releases through 1.4.0 affected). Developer CLI only: @expo/cli loads node-forge to read signing certificates from the local Keychain (`expo run:ios`) and, via @expo/code-signing-certificates, to sign dev-server manifests for expo-updates code signing — which this app does not use (no expo-updates, no updates.codeSigningCertificate). The RSA verifies it runs check certificates/signatures the CLI itself generated or fetched, never an attacker-supplied signature. Verified absent from the exported iOS bundle: node-forge and @expo/code-signing-certificates are 0 modules in the source map; the one @expo/cli module there is Metro's require polyfill (#379)."
+
+# zod 3.25.76 <- @expo/cli 57.0.11 (range ^3.25.76) <- expo. Also resolved as the
+#   OPTIONAL peer of abitype 1.3.0 (<- ox <- @base-org/account) and 1.2.3 (<- viem
+#   <- @base-org/account) <- @clerk/clerk-js <- @clerk/expo (`npm ls zod`).
+# No fixed release on the 3.x line (advisory: introduced 0, fixed 4.6.6; 3.25.76
+# is the latest 3.x); @expo/cli 57.0.32 (sdk-57) and 58.1.15 (latest) still ask
+# ^3.25.76, and a zod 4 override would be a major under Expo's own CLI.
+[[IgnoredVulns]]
+id = "GHSA-mrhx-c7xc-m3w5"
+ignoreUntil = 2026-12-20
+reason = "No fixed version on the 3.x line (all releases through 3.25.76 affected; the fix, 4.6.6, is the next major, and @expo/cli 57.0.32 and 58.1.15, the latest, still ask zod ^3.25.76). Developer CLI only: zod is required by exactly two @expo/cli files, start/server/DevToolsPlugin.schema.js and createMCPDevToolsExtensionSchema.js - `expo start` validates the configs of installed dev-tools plugins, the output of their CLI-extension commands (the unbounded z.array is DevToolsPluginOutputSchema) and the arguments of the MCP tools it builds from them, all on the developer's own machine, never a viewer's input. abitype only peers zod optionally and imports it solely from its abitype/zod subpath, which nothing in the tree imports. Verified absent from the exported iOS bundle: zod, abitype, viem, ox and @base-org/account are 0 modules in the source map (control: decode-uri-component is present) (#477). Unblocks when @expo/cli moves to zod >= 4.6.6."
