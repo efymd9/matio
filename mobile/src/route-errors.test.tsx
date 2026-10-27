@@ -159,7 +159,7 @@ vi.mock("expo-image", () => ({ Image: () => null }));
 vi.mock("expo-symbols", () => ({ SymbolView: () => null }));
 // Read by the root layout for the tracker's release (#317).
 vi.mock("expo-constants", () => ({
-  default: { expoConfig: { version: "0.1.0" }, nativeBuildVersion: "7" },
+  default: { expoConfig: { version: "1.0.0" }, nativeBuildVersion: "7" },
 }));
 
 // The error tracker (#317). The fake SDK does what the real one does with a
@@ -472,7 +472,7 @@ describe("a caught crash goes to the error tracker, scrubbed (#317)", () => {
   beforeEach(() => {
     // A build with a DSN; the SDK is the fake above.
     initObservability(
-      { dsn: "https://dummy@sentry.invalid/1", appEnv: undefined, isDev: false, version: "0.1.0", build: 7 },
+      { dsn: "https://dummy@sentry.invalid/1", appEnv: undefined, isDev: false, version: "1.0.0", build: 7 },
       () => Sentry,
     );
     captureException.mockClear();

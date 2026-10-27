@@ -24,7 +24,7 @@ export default function SettingsScreen() {
   const config = useConfig();
   const [autoplay, setAutoplay] = useAutoplayNext();
 
-  // «0.1.0 (1)»: the store version from app.json and the native build number
+  // «1.0.0 (17)»: the store version from app.json and the native build number
   // — which a dev client has no value for, so the app's own APP_BUILD stands
   // in there.
   const version = `${Constants.expoConfig?.version ?? "0.0.0"} (${

@@ -122,7 +122,7 @@ vi.mock("@/api/config-context", () => ({
 }));
 vi.mock("expo-web-browser", () => ({ openBrowserAsync: async () => undefined }));
 vi.mock("expo-constants", () => ({
-  default: { expoConfig: { version: "0.1.0" }, nativeBuildVersion: "6" },
+  default: { expoConfig: { version: "1.0.0" }, nativeBuildVersion: "6" },
 }));
 vi.mock("@/api/catalog-context", () => ({
   useCatalog: () => ({

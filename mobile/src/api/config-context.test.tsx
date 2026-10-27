@@ -160,8 +160,14 @@ describe("ConfigProvider (#288)", () => {
     expect(text()).not.toContain("the app");
   });
 
-  // #292 item 3 — the wall's one button leads to the update (TestFlight,
-  // while the app is not in the App Store), never to the website.
+  // #292 item 3, #483 — the wall's one button leads to the update: the app's
+  // page in the App Store, never the website (and no longer TestFlight). The
+  // App Store Connect record (mobile/eas.json → ascAppId) is restated here
+  // rather than read from the module, so a wrong id in the module fails.
+  const ASC_APP_ID = "6812321366";
+  const STORE_APP_URL = `itms-apps://apps.apple.com/app/id${ASC_APP_ID}`;
+  const STORE_WEB_URL = `https://apps.apple.com/app/id${ASC_APP_ID}`;
+
   describe("the update button", () => {
     afterEach(() => {
       vi.restoreAllMocks();
@@ -186,21 +192,21 @@ describe("ConfigProvider (#288)", () => {
       return spy;
     }
 
-    it("opens the TestFlight app", async () => {
+    it("opens the app's page in the App Store app", async () => {
       const spy = await pressUpdate(async () => true);
 
-      expect(spy.mock.calls).toEqual([["itms-beta://"]]);
+      expect(spy.mock.calls).toEqual([[STORE_APP_URL]]);
       // A plain CTA, not a play button.
       expect(stage.container.querySelector('[data-testid="play-glyph"]')).toBeNull();
     });
 
-    it("falls back to Apple's TestFlight page where the app is not installed — never to matio.tv", async () => {
+    it("falls back to the same page on the web where the App Store app does not take it — never to matio.tv", async () => {
       const spy = await pressUpdate(async (url) => {
-        if (url === "itms-beta://") throw new Error("No app handles itms-beta://");
+        if (url === STORE_APP_URL) throw new Error("No app handles itms-apps://");
         return true;
       });
 
-      expect(spy.mock.calls).toEqual([["itms-beta://"], ["https://testflight.apple.com/"]]);
+      expect(spy.mock.calls).toEqual([[STORE_APP_URL], [STORE_WEB_URL]]);
     });
   });
 
