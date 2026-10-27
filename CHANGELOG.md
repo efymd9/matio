@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.25.0](https://github.com/efymd9/matio/compare/matio-v0.24.0...matio-v0.25.0) (2026-10-27)
+
+
+### Features
+
+* страница /support для App Store; /privacy — местоположение сессий в Clerk ([#485](https://github.com/efymd9/matio/issues/485)) ([#491](https://github.com/efymd9/matio/issues/491)) ([05bb929](https://github.com/efymd9/matio/commit/05bb92929f110e27043b83e1d127ce6d888abe6f))
+
+
+### Bug fixes
+
+* **deps:** ночной security зелёный — zod и body-parser в веб-локе подняты, zod 3 приложения в ignore, 5 мёртвых ignore убраны ([#477](https://github.com/efymd9/matio/issues/477)) ([#481](https://github.com/efymd9/matio/issues/481)) ([3dc777e](https://github.com/efymd9/matio/commit/3dc777eda7e365438a2a25fe326add4520fb2f45))
+* сборка-кандидат App Store 1.0.0 — expo-screen-orientation 57.0.3, стена обновления → App Store, privacy manifest ([#489](https://github.com/efymd9/matio/issues/489)) ([a6df0f7](https://github.com/efymd9/matio/commit/a6df0f77333f8aa6529735aac8cbb064b71b6cfa))
+* стена регистрации в приложении — в safe area и с прокруткой; вкладка Account без входа — текст под гейт «1-я серия без аккаунта» ([#484](https://github.com/efymd9/matio/issues/484)) ([#490](https://github.com/efymd9/matio/issues/490)) ([505ac94](https://github.com/efymd9/matio/commit/505ac94c1ad51550f68e1d79686d8f0fcd0bdb0d))
+
 ## [0.24.0](https://github.com/efymd9/matio/compare/matio-v0.23.0...matio-v0.24.0) (2026-10-27)
 
 
