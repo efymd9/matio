@@ -22,7 +22,7 @@ Production prod URL: **https://matio.tv**. Stripe webhook URL on prod = `https:/
 **Webhook setup**:
 1. Dashboard → Webhooks → Add endpoint
 2. URL: `https://matio.tv/api/webhooks/clerk`
-3. Subscribe to `user.created` **and `user.deleted`** (the production endpoint was created with `user.created` only — adding `user.deleted` there is an owner step tracked in `docs/registry.md`; until it is ticked, account deletion never reaches our database)
+3. Subscribe to `user.created` **and `user.deleted`** (the production endpoint was created with `user.created` only; the owner added `user.deleted` on 27.10.2026, #172 — account deletions in Clerk before that date never reached our database, and their remnants are erased by hand or on a later address conflict (#380), `docs/runbooks/gdpr-requests.md` §4)
 4. Copy the endpoint's signing secret into `CLERK_WEBHOOK_SIGNING_SECRET`
 
 Handler (`app/api/webhooks/clerk/route.ts`) uses `verifyWebhook(req)` from `@clerk/nextjs/webhooks` (not `/server`). It picks up the secret from env automatically.

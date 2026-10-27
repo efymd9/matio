@@ -10,7 +10,8 @@ import { SocialIcon } from "./social-icon";
 
 // Site-wide footer. Hidden on /watch (fullscreen player) and /admin
 // (own layout). Carries the three legal links — required for live
-// payments + GDPR Art. 13 — plus a few navigational shortcuts.
+// payments + GDPR Art. 13 — with /support beside them (#485), plus a few
+// navigational shortcuts.
 export function SiteFooter({
   paymentsEnabled,
 }: {
@@ -92,6 +93,7 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
           <FooterLink href="/api/billing-portal" routeHandler>
             {t.footer.manage}
           </FooterLink>
+          <FooterLink href="/support">{t.footer.support}</FooterLink>
           <FooterLink href="/terms">{t.footer.terms}</FooterLink>
           <FooterLink href="/privacy">
             {t.footer.privacy}
@@ -132,6 +134,7 @@ function SiteFooterContent({ paymentsEnabled }: { paymentsEnabled: boolean }) {
             </FooterLink>
           </FooterColumn>
           <FooterColumn heading={t.footer.sectionLegal}>
+            <FooterLink href="/support">{t.footer.support}</FooterLink>
             <FooterLink href="/terms">{t.footer.terms}</FooterLink>
             <FooterLink href="/privacy">{t.footer.privacy}</FooterLink>
             <FooterLink href="/cookies">{t.footer.cookies}</FooterLink>

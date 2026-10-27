@@ -474,6 +474,7 @@ export const en = {
     privacy: "Privacy Policy",
     cookies: "Cookie Policy",
     cookiePreferences: "Cookie preferences",
+    support: "Support",
     contact: "Contact",
     browse: "Browse",
     about: "About",
@@ -504,5 +505,8 @@ export const en = {
       "How Matio collects, uses and protects your personal data, and the rights you have.",
     cookiesDescription:
       "The cookies Matio uses, what they are for and how to manage your consent.",
+    supportTitle: "Support",
+    supportDescription:
+      "Help with Matio: how to reach us, signing in, deleting your account and managing a subscription.",
   },
 };

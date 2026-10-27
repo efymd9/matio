@@ -98,6 +98,29 @@ describe("SiteFooter — links that must not be prefetched (#259)", () => {
     }
   });
 
+  it.each([
+    ["paid mode", true],
+    ["free mode", false],
+  ])(
+    "links to /support (#485) in both layouts, beside the legal links — %s",
+    (_mode, paymentsEnabled) => {
+      // The App Store's Support URL: reachable from every public page, in
+      // both modes. An ordinary page, so an ordinary next/link.
+      render(<SiteFooter paymentsEnabled={paymentsEnabled} />);
+
+      const support = links(en.footer.support);
+      expect(support).toHaveLength(2);
+      for (const a of support) {
+        expect(a.getAttribute("href")).toBe("/support");
+        expect(isNextLink(a)).toBe(true);
+        expect(prefetchOf(a)).toBe("default");
+        // Beside the legal links: the next link in its list is the Terms.
+        const next = a.closest("li")?.nextElementSibling?.querySelector("a");
+        expect(next?.getAttribute("href")).toBe("/terms");
+      }
+    },
+  );
+
   it("has no Subscribe link at all while payments are off", () => {
     render(<SiteFooter paymentsEnabled={false} />);
 

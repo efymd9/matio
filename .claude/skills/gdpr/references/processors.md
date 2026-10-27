@@ -28,6 +28,17 @@ PostHog по согласию (уже в таблице); Meta Pixel и GA4 на
 редакции называет обработчиком ящика Google Ireland Ltd (Google Workspace), а
 не Namecheap PrivateEmail.
 
+**27.10.2026 (#485, страница `/support` + сверка `/privacy` перед первой
+подачей в App Store, #486): новых процессоров код не добавляет.** Строка
+Clerk дополнена тем, что он хранит на каждую сессию сам: последняя
+активность — IP, **город и страна по геолокации IP**, браузер, тип
+устройства (объект `SessionActivity`); `/privacy` §2/§4/§11 с этой редакции
+это называют (в App Privacy — Coarse Location, связано с пользователем).
+Строка Google Workspace сверена с публичным Cloud Data Processing Addendum.
+Попутно: DNS `matio.tv` с ~17.10 — Cloudflare, и апекс проксируется через
+него — процессор, которого в таблице нет, разбор в #488; адрес поддержки в
+прод-Clerk — мёртвый `contact@` (#487).
+
 **04.10.2026 (#277, вход через Apple и Google в приложении iOS): новых
 процессоров нет.** Данные входа принимает и хранит Clerk (уже в таблице).
 Apple и Google появляются как **провайдеры входа** — раздел «Не процессоры»
@@ -43,7 +54,7 @@ Apple и Google появляются как **провайдеры входа** 
 |---|---|---|---|---|---|
 | **Vercel Inc.** | хостинг, edge, runtime-логи, Blob (артворк + шифрованные дампы) | функции `fra1`, Blob Франкфурт, edge/CDN глобально; компания US | авто (DPA «binding upon entering the Agreement») | SCC 2021/914 (модули 1–3) + UK IDTA; DPF в DPA не заявлен | https://vercel.com/legal/dpa — обновлён 17.03.2026, в силе с 31.03.2026; субпроцессоры: https://security.vercel.com |
 | **Neon, LLC** (Databricks) | база данных — все таблицы | AWS eu-central-1 (Франкфурт) | **проверить**: Databricks «offers … the ability to enter into a DPA» — https://www.databricks.com/legal/databricks-data-processing-addendum; `neon.com/dpa` теперь отдаёт Product Specific Schedule Databricks (05.08.2026) | DPF: в сертификации Databricks перечислена **Neon, LLC**; SCC для EEA/CH | https://www.databricks.com/legal/privacynotice — 09.01.2026 |
-| **Clerk Inc.** | аутентификация: email, креды, сессии (IP/UA/устройство) | Google Cloud + Cloudflare (регион в DPA не раскрыт; компания US) | авто (DPA «incorporated into and forms part of the Agreement») | DPF (самосертификация) → SCC модули 2/3 как fallback; UK Approved Addendum | https://clerk.com/legal/dpa — 26.11.2024; субпроцессоры: https://trust.clerk.com |
+| **Clerk Inc.** | аутентификация: email, креды, сессии — на каждую последняя активность (`SessionActivity`: IP, **город и страна, «resolved by IP address geo-location»**, браузер и версия, тип устройства, `isMobile`; наш код её не читает — #485). Срока хранения записей сессии Clerk не публикует: DPA §9 говорит лишь об удалении всех данных клиента в течение 90 дней после окончания договора, документация `deleteUser` — только «Deletes the given User»; `/privacy` привязывает их к аккаунту (§6 «Account») — допущение, `docs/registry.md` | Google Cloud + Cloudflare (регион в DPA не раскрыт; компания US) | авто (DPA «incorporated into and forms part of the Agreement») | DPF (самосертификация) → SCC модули 2/3 как fallback; UK Approved Addendum | https://clerk.com/legal/dpa — 26.11.2024; субпроцессоры: https://trust.clerk.com; поля сессии — https://clerk.com/docs/reference/backend/types/backend-session-activity (сверено 27.10.2026) |
 | **Stripe Payments Europe Ltd** (SPEL, Ирландия) | платежи: Customer, billing address, карта (токен), инвойсы, `metadata` подписки (CAPI-снимок `_fbp`/`_fbc`/сырой IP/UA — только до `Purchase`, затем стирается, #165; версия принятых Условий `tos_version` (кошелёк на paywall, без метки времени) — хранится постоянно, #210/#214; при стирании аккаунта С платёжным следом (есть `stripe_customer_id` или строка `subscriptions`) адрес уходит в Stripe ещё раз — как запрос `customers.search` по email (#223), чтобы тумбстоунить все его Customer'ы; аккаунт без следа (эпоха free/gate) не ищется — так адрес уходит только туда, где он уже есть, нового ничего не передаётся) | ЕС; передачи Stripe, LLC (US) и аффилиатам | авто (DPA «forms part of the Agreement»; контрагент вне Америк — SPEL) | DPF / EEA SCC / UK IDTA — по выбору Stripe | https://stripe.com/legal/dpa — 18.11.2025 |
 | **Mux Inc.** | видео: ассеты (контент), CDN-логи доставки (IP/UA зрителя), Mux Data (по согласию) | США | авто (ToS §11: DPA «incorporated herein» когда Mux обрабатывает персональные данные от нашего имени) | DPF (EU-US + UK Extension + Swiss-US) | https://www.mux.com/terms и https://www.mux.com/privacy — 19.03.2026; DPA PDF — https://www.mux.com/dpa (01.04.2025) |
 | **Resend Inc.** | письма: адрес, тема, тело; логи доставки | США; отправка из AWS eu-west-1; 21 субпроцессор, все US | авто (DPA «binding upon Customer entering into the Agreement») | SCC модуль 2 + UK Addendum; DPF (EU-US + UK Extension) | https://resend.com/legal/dpa и https://resend.com/legal/subprocessors — 27.08.2026; логи 30 дней (https://resend.com/security/gdpr) |
@@ -52,7 +63,7 @@ Apple и Google появляются как **провайдеры входа** 
 | **Google Ireland Ltd** / Google LLC | GA4: page_view, события, client id. **«User-provided data collection → automatic detection»: не сверено** — если включено, gtag сам ищет email на странице (`/ideas`, форма напоминаний). Сверяет владелец (GA4 Admin → Data collection → автоопределение = off); до того — `docs/registry.md` (строка AAM / GA4, #297) → #341 | Ирландия / США | **проверить**: Google Ads Data Processing Terms применяются только к сервисам, для которых приняты — в GA4 Admin принять «Data Processing Terms» | DPF для Ads Services с 01.09.2023; SCC там, где DPF не принят | https://business.safety.google/adsprocessorterms/ (v8.0, 30.05.2024), https://business.safety.google/adsdatatransfers/ |
 | **OpenAI Ireland Ltd** | ChatGPT Ads pixel: `page_viewed`, конверсии с `event_id` = `signup:<Clerk id>` / sub id, `__oppref` | Ирландия / США | авто: Ad Tools DPA — часть Advertising Terms («effective upon incorporation by reference»); **стороны — независимые контролёры**, не процессор (кроме «Restricted Processing») — учесть в политике; страница отдаёт 403 из агента — сверено по вторичным источникам, открыть руками | SCC + UK Addendum; **записи в DPF у OpenAI нет** | https://openai.com/policies/ad-tools-dpa/ , https://openai.com/policies/advertising-terms/ , https://openai.com/policies/eu-privacy-policy/ |
 | **Functional Software, Inc.** (Sentry) | ошибки/трейсы: `user.id`, URL без query, UA; **приложение** (#317, тот же проект, только в сборке с `EXPO_PUBLIC_SENTRY_DSN`): JS-ошибки после тех же скрабберов + нативные крэши (стек, контекст устройства, случайный installation id SDK — не Clerk id); без сессий release health | организация в **EU-регионе** (данные в ЕС); компания US | **проверить**: DPA v5.1.0 «amends the Agreement», требует отдельного принятия («enter into our DPA») в настройках организации | DPF → SCC при инвалидации; UK Addendum | https://sentry.io/legal/dpa/ — 29.05.2024; ретеншен: https://docs.sentry.io/security-legal-pii/security/data-retention-periods/ |
-| **Google Ireland Ltd** (Google Workspace — почта домена) | почтовый ящик `maksym@matio.tv` (публичный контакт с 08.10.2026, #414): входящая и исходящая переписка — запросы субъектов (доступ, копия, удаление), ответы авторам идей (#297), переписка с кандидатами по заявкам с `/careers` (#376), любые письма зрителей; адрес отправителя и всё, что он написал | не сверено | **не сверено** → `docs/registry.md` (строка «почта домена — Google Workspace», #414) | не сверено | MX сверены 08.10.2026 (`dig MX matio.tv` → `smtp.google.com`, SPF `include:_spf.google.com`); до этого — Namecheap PrivateEmail (MX `mx1/mx2.privateemail.com`, сверено 27.09.2026); условия и DPA Google Workspace — не сверены |
+| **Google Ireland Ltd** (Google Workspace — почта домена) | почтовый ящик `maksym@matio.tv` (публичный контакт с 08.10.2026, #414; с #485 — и адрес страницы `/support`): входящая и исходящая переписка — запросы субъектов (доступ, копия, удаление — письмо остаётся запасным путём удаления аккаунта на сайте, `/support`), вопросы поддержки (вход, приложение, подписка), ответы авторам идей (#297), переписка с кандидатами по заявкам с `/careers` (#376), любые письма зрителей; адрес отправителя и всё, что он написал | «Customer Data may be processed in any country where Google or its Subprocessors maintain facilities» (CDPA §10.1), если не заданы data regions — для нашего аккаунта не сверено | **проверить**: Cloud Data Processing Addendum (бывший Data Processing Amendment для Workspace) действует с даты, когда клиент его принял («Addendum Effective Date»), — принят ли для нашего аккаунта, видно только в Google Admin → `docs/registry.md` (строка «почта домена — Google Workspace», #414) | SCC (CDPA, Appendix 3 §4.1) или Alternative Transfer Solution, если Google его принял — https://cloud.google.com/terms/alternative-transfer-solution (из агента не читается, открыть руками); `/privacy` §4 пишет «SCCs» — с CDPA не расходится | https://cloud.google.com/terms/data-processing-addendum — last modified 08.06.2026, сверено 27.10.2026; MX сверены 08.10.2026 и 27.10.2026 (`dig MX matio.tv` → `smtp.google.com`, SPF `include:_spf.google.com`); до 08.10 — Namecheap PrivateEmail (MX `mx1/mx2.privateemail.com`, сверено 27.09.2026) |
 | **GitHub, Inc.** (Microsoft) | CI: раннеры `db-backup` (дамп в открытом виде до шифрования) и `db-restore-check` (полное восстановление на время джобы); секреты `BACKUP_*` | США | авто (DPA «forms part of the GitHub Customer Agreement») | DPF (EU-US, UK Extension, Swiss-US) + SCC модули 1–3 + UK Addendum | https://github.com/customer-terms/github-data-protection-agreement — октябрь 2025 |
 
 ## Не процессоры (для ясности)
@@ -60,11 +71,16 @@ Apple и Google появляются как **провайдеры входа** 
 - **Anthropic / Claude Code** — инструмент разработки; по дизайну персональные
   данные в контекст агентов не попадают (правило в SKILL.md). Станет
   процессором в тот день, когда первый LLM-вызов увидит данные пользователей.
-- **Namecheap** как регистратор домена и DNS, **Expo/EAS** (сборки
-  приложения) — не видят данных пользователей. Но почта `maksym@matio.tv` —
-  Namecheap **PrivateEmail**, и она видит переписку: это процессор, строка в
-  таблице выше (#297). Пуши (#98) добавят Expo push service / FCM / APNs —
-  строка здесь ДО первого пуша.
+- **Namecheap** как регистратор домена (whois, 27.10.2026) и **Expo/EAS**
+  (сборки приложения) — не видят данных пользователей. Почта
+  `maksym@matio.tv` — Google Workspace, она видит переписку: это процессор,
+  строка в таблице выше (#297, #414). **Cloudflare** — DNS зоны `matio.tv`
+  с ~17.10.2026 (NS `dana`/`peter.ns.cloudflare.com`, #458), а пока апекс
+  проксируется (27.10.2026: `server: cloudflare`, `cf-ray` на
+  `https://matio.tv/api/healthz`) — ещё и TLS-прокси всего трафика сайта: в
+  этой роли он процессор, которого в таблице нет, — #488 (решение владельца:
+  DPA + строка + `/privacy` §4 или «DNS only»). Пуши (#98) добавят Expo push
+  service / FCM / APNs — строка здесь ДО первого пуша.
 - **Cloudflare**, **AWS** — субпроцессоры Clerk/Resend/Neon, не наши
   контрагенты; числятся в их списках.
 - **Google LLC / Google Ireland Ltd** и **Apple Inc. / Apple Distribution
@@ -105,8 +121,10 @@ Apple и Google появляются как **провайдеры входа** 
    юристу.
 7. План Vercel (Hobby/Pro) — от него зависит ретеншен логов, обещанный в
    `/privacy` как 30 дней.
-8. Google Workspace (почта домена) — подтвердить Data Processing Amendment для ящика `maksym@`, записать
-   регион и механизм трансфера (#297; строка в `docs/registry.md`).
+8. Google Workspace (почта домена) — подтвердить в Google Admin, что Cloud
+   Data Processing Addendum (бывший Data Processing Amendment) принят для
+   аккаунта с ящиком `maksym@`, записать регион данных и принятый Google
+   механизм трансфера (#297, #485; строка в `docs/registry.md`).
 9. Meta AAM и автоопределение GA4 — выключены ли (для каждого пикселя и для
    свойства GA4); ответ с датой — в строки Meta и Google выше (#297, #341). Блокирует
    рекламу на `/ideas` наравне с ревью юриста.

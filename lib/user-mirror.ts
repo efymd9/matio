@@ -18,9 +18,11 @@ import { getStripe } from "@/lib/stripe";
 // branch below. What it does NOT absorb is `users_email_unique`: the address
 // already held by a row under ANOTHER Clerk id. Two ways that happens, both
 // gaps in our mirroring rather than in Clerk (which keeps an address unique):
-//   1. the account was deleted at Clerk without our erasure — the production
-//      endpoint is not subscribed to `user.deleted` (#172) — and the person
-//      signed up again with the same address;
+//   1. the account was deleted at Clerk without our erasure — before
+//      27.10.2026 the production endpoint was not subscribed to
+//      `user.deleted` (#172; it is since), and a webhook that never arrives
+//      leaves the same remnant — and the person signed up again with the
+//      same address;
 //   2. the address was changed at Clerk — `user.updated` is not mirrored
 //      (docs/registry.md) — and somebody else signed up with the old one.
 // Before #380 the insert threw: the webhook answered 500 forever and the new
