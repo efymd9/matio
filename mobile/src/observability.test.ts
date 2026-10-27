@@ -11,7 +11,7 @@ vi.hoisted(() => {
 
 vi.mock("@sentry/react-native", () => ({ init: vi.fn(), captureException: vi.fn() }));
 vi.mock("expo-constants", () => ({
-  default: { expoConfig: { version: "0.1.0" }, nativeBuildVersion: "7" },
+  default: { expoConfig: { version: "1.0.0" }, nativeBuildVersion: "7" },
 }));
 
 import * as Sentry from "@sentry/react-native";
@@ -39,7 +39,7 @@ const ENV: ObservabilityEnv = {
   dsn: DSN,
   appEnv: undefined,
   isDev: false,
-  version: "0.1.0",
+  version: "1.0.0",
   build: 7,
 };
 
@@ -75,7 +75,7 @@ describe("without a DSN (the default build)", () => {
       dsn: undefined,
       appEnv: undefined,
       isDev: false,
-      version: "0.1.0",
+      version: "1.0.0",
       build: 7,
     });
     // The root layout's call, verbatim. Had it reached the real loader, the
@@ -153,7 +153,7 @@ describe("with a DSN", () => {
   it("names the stage and the build: production by default, the marker when set", () => {
     const options = started();
     expect(options.environment).toBe("production");
-    expect(options.release).toBe("matio-app@0.1.0+7");
+    expect(options.release).toBe("matio-app@1.0.0+7");
     expect(options.dist).toBe("7");
 
     expect(resolveAppEnvironment({ appEnv: "staging", isDev: false })).toBe("staging");
