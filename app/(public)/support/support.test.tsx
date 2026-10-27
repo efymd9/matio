@@ -17,6 +17,7 @@ vi.mock("next/headers", () => ({
 }));
 vi.mock("next/link", async () => await import("@/tools/test/next-link-probe"));
 
+import { enUS } from "@clerk/localizations";
 import { isAppEmbedRequest } from "@/lib/app-embed";
 import { appEn } from "@/lib/i18n/app-dictionaries";
 import { en } from "@/lib/i18n/dictionaries";
@@ -94,12 +95,28 @@ describe("/support (#485)", () => {
     expect(t).toContain("this can’t be undone");
   });
 
-  it("sends the website's deletion to the mailbox while Clerk's webhook misses user.deleted (#172)", async () => {
+  it("names Clerk's own delete path on the website, in the labels the site's Clerk shows, with the mailbox as the fallback", async () => {
+    // Since 27.10.2026 the production webhook carries user.deleted (#172), so
+    // Clerk's button erases our data too (lib/erase-user.ts). Its labels are
+    // the enUS localization app/layout.tsx hands ClerkProvider — read from
+    // the installed package, so a Clerk relabel fails here, not on a reader.
     const t = text(await render());
-    expect(t).toContain("On the website: write to maksym@matio.tv");
-    // Not Clerk's own menu button: it would leave our data behind (#172).
-    expect(t).not.toContain("Manage account");
-    expect(t).not.toContain("Security");
+    const manageAccount = enUS.userButton?.action__manageAccount;
+    const security = enUS.userProfile?.navbar?.security;
+    const deleteButton = enUS.userProfile?.start?.dangerSection?.deleteAccountButton;
+    const confirmHint = enUS.userProfile?.deletePage?.actionDescription;
+    expect([manageAccount, security, deleteButton]).toEqual([
+      "Manage account",
+      "Security",
+      "Delete account",
+    ]);
+    expect(confirmHint).toBe('Type "Delete account" below to continue.');
+
+    expect(t).toContain(
+      `On the website: sign in on matio.tv, open the menu behind your profile picture at the top of the page and choose ${manageAccount}. Under ${security}, choose ${deleteButton} and confirm by typing “Delete account”.`,
+    );
+    expect(t).toContain("Your account and the data we keep with it are deleted, as in the app.");
+    expect(t).toContain("Or write to maksym@matio.tv from the email address of your account");
   });
 
   it("names no price and links to no purchase (App Store 3.1.1)", async () => {

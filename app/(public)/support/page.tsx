@@ -9,12 +9,17 @@
 //    lib/i18n/app-dictionaries.ts (`deleteConfirmBody`, then
 //    `deleteFinalTitle`) and POST /api/v1/account/delete, which erases our
 //    data (lib/erase-user.ts) before it deletes the Clerk account.
-//  - On the website deletion goes by email, not through the «Delete account»
-//    in Clerk's own account menu. That button is on in the production
-//    instance (`delete_self`), but until Clerk's production webhook carries
-//    `user.deleted` (#172) it removes the Clerk account and leaves everything
-//    we keep — so the page names the path that erases all of it. Once #172 is
-//    done, the button can be named here.
+//  - On the website: Clerk's own UserProfile — «Manage account» in the
+//    UserButton menu → the «Security» page → «Delete account», confirmed by
+//    typing «Delete account» (the labels of @clerk/localizations' enUS, which
+//    app/layout.tsx passes; the delete section renders on the Security page
+//    only while the instance has `delete_self` on — checked against the
+//    @clerk/ui 1.42.0 bundle production loads, 27.10.2026). Clerk deletes the
+//    user and sends `user.deleted`, which the production endpoint carries
+//    since 27.10.2026 (#172), and the webhook runs lib/erase-user.ts — the
+//    same erasure as the app's button. The mailbox stays as the fallback.
+//    Clerk relabels or moves the section, or `delete_self` goes off → this
+//    paragraph changes.
 //  - Cancelling: «Manage subscription» in the user menu and the footer →
 //    /api/billing-portal → the Stripe Customer Portal (cancel at period end).
 //  - No price, no link to /subscribe or /checkout (App Store 3.1.1 — the app
@@ -153,10 +158,18 @@ function SupportEn() {
           straight away.
         </p>
         <p>
-          <strong>On the website:</strong> write to <Email /> from the email
-          address of your account and ask us to delete it. We check that the
-          request comes from you, delete your account and the data we keep
-          with it in the same way, and reply when it&rsquo;s done.
+          <strong>On the website:</strong> sign in on matio.tv, open the menu
+          behind your profile picture at the top of the page and choose{" "}
+          <strong>Manage account</strong>. Under <strong>Security</strong>,
+          choose <strong>Delete account</strong> and confirm by typing
+          &ldquo;Delete account&rdquo;. Your account and the data we keep with
+          it are deleted, as in the app.
+        </p>
+        <p>
+          Or write to <Email /> from the email address of your account and
+          ask us to delete it. We check that the request comes from you,
+          delete your account and the data we keep with it in the same way,
+          and reply when it&rsquo;s done.
         </p>
         <p>
           Deleting the app from your phone does not delete your account. A

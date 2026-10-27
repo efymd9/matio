@@ -628,9 +628,11 @@ app/
     cookies/               # /cookies — cookie policy (filled; counsel review pending)
     support/               # /support — the App Store Support URL (#485): who
                            #   runs Matio, maksym@, the email-code help,
-                           #   deleting an account (app button / web = email
-                           #   until #172), cancelling; no price, no
-                           #   purchase link; indexed, no ?embed=app
+                           #   deleting an account (app button / web = Clerk's
+                           #   Manage account → Security → Delete account,
+                           #   user.deleted since #172; maksym@ fallback),
+                           #   cancelling; no price, no purchase link;
+                           #   indexed, no ?embed=app
     unsubscribe/           # /unsubscribe — reminder-email opt-out (noindex;
                            #   GET renders a confirm button, the server action
                            #   deletes — never delete on GET, scanners prefetch)
