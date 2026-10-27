@@ -116,8 +116,8 @@ function SupportEn() {
           Matio has no passwords. To sign in or create an account, you enter
           your email address, we email you a one-time code, and you type the
           code in to continue. The email is sent for us by Clerk, the company
-          that runs sign-in for Matio. On the website you can also choose
-          &ldquo;Continue with Google&rdquo;.
+          that runs sign-in for Matio. Instead of the emailed code, you can
+          also continue with Apple or Google.
         </p>
         <p>If the code doesn&rsquo;t arrive:</p>
         <ul className="ml-5 list-disc space-y-1.5">

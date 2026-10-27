@@ -65,7 +65,13 @@ describe("/support (#485)", () => {
 
   it("explains the email code and what to do when it does not arrive", async () => {
     const t = text(await render());
+    expect(t).toContain("Matio has no passwords");
     expect(t).toContain("one-time code");
+    // Apple and Google, with no claim about which platform shows which
+    // button (#486: both ship in app 1.0; both are on in production Clerk).
+    expect(t).toContain("Instead of the emailed code, you can also continue with Apple or Google.");
+    expect(t).not.toMatch(/On the website you can also/);
+    expect(t).not.toContain("“Continue with Google”");
     expect(t).toContain("spam or junk folder");
     expect(t).toContain("Wait a minute, then ask for a new code");
     // The app's own button label, read from the app's dictionary.
