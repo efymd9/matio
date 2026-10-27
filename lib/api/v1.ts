@@ -105,6 +105,22 @@ export function absoluteMediaUrl(url: string | null): string | null {
   return `${SITE_URL}${url.startsWith("/") ? "" : "/"}${url}`;
 }
 
+// Whether the APP sees payments (#476) — the one answer to that question on
+// the /api/v1 surface. The site's PAYMENTS_ENABLED, unless the owner's
+// APP_FREE_WITH_ACCOUNT=1 lever makes the app free for any account while the
+// site keeps charging (a move for App Store review: with every episode
+// `subscriber`, a reviewer without a subscription saw no video at all). Only
+// the exact value "1" switches it on; anything else, or nothing, is off. Read
+// per request like the other app levers — an env change plus a redeploy, no
+// store release. Every payments read on the app's path goes through here:
+// /v1/config's flag, the gate below, the token route and the two shared
+// writes (/v1/progress, /v1/watch-segments) — so what the app is told, what
+// it may play and what it may record cannot drift apart. The web never reads
+// this: it keeps the site's own flag (lib/free-mode.ts).
+export function appPaymentsEnabled(): boolean {
+  return paymentsEnabled() && process.env.APP_FREE_WITH_ACCOUNT !== "1";
+}
+
 // The app's playback gate, resolved in ONE place.
 //
 // /v1/config reports this to the client so it can lock episodes prop-driven
@@ -117,9 +133,21 @@ export function absoluteMediaUrl(url: string | null): string | null {
 // to anonymous viewers; anything deeper needs an account. Positional, matching
 // how the web derives funnel depth (getOrderedReadyEpisodeIds).
 export function resolveSignupGate(): SignupGate {
-  // Paid mode: the per-episode tier system owns all gating, exactly as on the
-  // web. No second flag matrix.
-  if (paymentsEnabled()) return { mode: "tiers" };
+  // The app sees payments: the per-episode tier system owns all gating,
+  // exactly as on the web. No second flag matrix.
+  if (appPaymentsEnabled()) return { mode: "tiers" };
+
+  // The site charges but APP_FREE_WITH_ACCOUNT=1 (#476): any account plays
+  // everything in the app, and without one nothing plays — by default not
+  // even episode 1 ("only sign up", the owner's words). Positional, so it
+  // ignores the tiers: a `free` episode asks for an account too (there are
+  // none today — docs/registry.md). APP_SIGNUP_GATE_EPISODES can open the
+  // first N. The site's own reading here only tells this case from free mode
+  // below, whose default stays 1; whether the app sees payments was decided
+  // above.
+  if (paymentsEnabled()) {
+    return { mode: "after_episodes", episodes: envInt("APP_SIGNUP_GATE_EPISODES", 0) };
+  }
 
   // Free mode + REQUIRE_SIGNUP: the web hard-gates ALL playback behind an
   // account. The app deliberately softens that — a hard login wall on first

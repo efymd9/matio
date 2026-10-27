@@ -1,7 +1,13 @@
 import { auth } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
 import type { SaveWatchSegmentsResponse } from "@/lib/api/types";
-import { apiError, apiOk, readDeviceId, resolveSignupGate } from "@/lib/api/v1";
+import {
+  apiError,
+  apiOk,
+  appPaymentsEnabled,
+  readDeviceId,
+  resolveSignupGate,
+} from "@/lib/api/v1";
 import { WATCH_SEGMENT_FLUSH_MAX_BUCKETS } from "@/lib/watch-segments";
 import {
   saveWatchSegmentsFor,
@@ -62,7 +68,9 @@ export async function POST(req: NextRequest) {
   const { userId } = await auth();
   let caller: SegmentsCaller;
   if (userId) {
-    caller = { kind: "user", userId };
+    // The APP's view of payments (#476), as the token route mints by: under
+    // APP_FREE_WITH_ACCOUNT=1 an account's subscriber-episode flush counts.
+    caller = { kind: "user", userId, paymentsOn: appPaymentsEnabled() };
   } else {
     const deviceId = readDeviceId(req);
     if (!deviceId) {
@@ -103,8 +111,10 @@ export async function POST(req: NextRequest) {
     case "not_found":
       return apiError("not_found", "Episode not found or not ready.");
     case "forbidden":
-      // Signed in: a non-subscriber on a subscriber-tier episode (paid mode).
-      // Anonymous: past the positional gate. Same reasons the token route
+      // Signed in: a non-subscriber on a subscriber-tier episode (only while
+      // the app sees payments). Anonymous: past the positional gate — under
+      // APP_FREE_WITH_ACCOUNT=1 that is every episode by default (gate 0,
+      // #476). Same reasons the token route
       // answers for the same walls.
       return caller.kind === "user"
         ? apiError("forbidden", "Subscribe to watch.", { reason: "subscribe_required" })

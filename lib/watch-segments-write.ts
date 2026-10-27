@@ -10,7 +10,6 @@ import {
   watchSegments,
 } from "@/db/schema";
 import { getOrderedReadyEpisodeIds } from "@/lib/episode-access";
-import { paymentsEnabled } from "@/lib/free-mode";
 import { hasActiveSubscription } from "@/lib/subscription-access";
 import { POSITION_SECONDS_MAX } from "@/lib/watch-progress";
 import {
@@ -43,7 +42,17 @@ import {
 // (the app's positional signup gate) — the surface decides, the write
 // enforces.
 export type SegmentsCaller =
-  | { kind: "user"; userId: string }
+  | {
+      kind: "user";
+      userId: string;
+      /** Whose view of payments the ownership gate takes (#476): the web
+       *  passes the site's paymentsEnabled(), the app route
+       *  lib/api/v1.ts:appPaymentsEnabled() — off under
+       *  APP_FREE_WITH_ACCOUNT=1 while the site still charges, exactly
+       *  when the app's token route plays every episode for an account.
+       *  This module reads no env of its own. */
+      paymentsOn: boolean;
+    }
   | {
       kind: "anonymous";
       sessionToken: string;
@@ -106,9 +115,10 @@ export async function saveWatchSegmentsFor(
 
   if (caller.kind === "user") {
     // Same ownership gate as the progress save: no counters for content
-    // the caller couldn't legitimately play. Payments off → every episode
-    // is playable and the subscription lookup is skipped.
-    if (paymentsEnabled() && !(await hasActiveSubscription(caller.userId))) {
+    // the caller couldn't legitimately play. Payments off (in the caller's
+    // view) → every episode is playable and the subscription lookup is
+    // skipped.
+    if (caller.paymentsOn && !(await hasActiveSubscription(caller.userId))) {
       if (ep.access === "subscriber") return { outcome: "forbidden" };
     }
   } else {

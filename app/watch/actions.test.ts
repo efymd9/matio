@@ -11,8 +11,12 @@ const h = vi.hoisted(() => ({
   userId: null as string | null,
   cookie: undefined as string | undefined,
   save: vi.fn(),
+  // The REAL shared progress write, for the one case that must prove what
+  // it decides (#476) — set by the module mock below.
+  realSave: undefined as unknown as (...args: unknown[]) => Promise<unknown>,
   saveSegments: vi.fn(),
   select: vi.fn(),
+  insert: vi.fn(),
   update: vi.fn(() => ({ set: () => ({ where: async () => undefined }) })),
 }));
 
@@ -26,6 +30,7 @@ vi.mock("next/headers", () => ({
 vi.mock("@/db", () => ({
   db: {
     select: h.select,
+    insert: h.insert,
     update: () => h.update(),
   },
 }));
@@ -35,6 +40,7 @@ vi.mock("@/db/schema", () => ({
   showReminders: {},
   shows: {},
   trialSessions: {},
+  watchDays: {},
   watchProgress: {},
   watchSegments: {},
 }));
@@ -66,6 +72,7 @@ vi.mock("@/lib/trial", () => ({
 vi.mock("@/lib/watch-progress", async (importOriginal) => {
   // The clamp is the real one — saveTrialPosition must keep sharing it.
   const actual = await importOriginal<typeof import("@/lib/watch-progress")>();
+  h.realSave = actual.saveWatchProgressForUser as typeof h.realSave;
   return { ...actual, saveWatchProgressForUser: h.save };
 });
 vi.mock("@/lib/watch-segments-write", () => ({
@@ -83,9 +90,11 @@ beforeEach(() => {
   h.save.mockReset().mockResolvedValue("saved");
   h.saveSegments.mockReset().mockResolvedValue({ outcome: "saved", accepted: 1 });
   h.select.mockReset();
+  h.insert.mockReset();
   h.update = vi.fn(() => ({ set: () => ({ where: async () => undefined }) }));
   vi.stubEnv("PAYMENTS_ENABLED", "");
   vi.stubEnv("REQUIRE_SIGNUP", "");
+  vi.stubEnv("APP_FREE_WITH_ACCOUNT", "");
 });
 
 afterEach(() => {
@@ -102,7 +111,7 @@ describe("saveWatchProgress (web server action)", () => {
     h.userId = "user_1";
     await expect(saveWatchProgress(EPISODE, 12.7, true)).resolves.toBeUndefined();
     expect(h.save).toHaveBeenCalledTimes(1);
-    expect(h.save).toHaveBeenCalledWith("user_1", EPISODE, 12.7, true);
+    expect(h.save).toHaveBeenCalledWith("user_1", EPISODE, 12.7, true, { paymentsOn: false });
   });
 
   it("stays void when the write refuses — the player never reads an answer", async () => {
@@ -111,6 +120,32 @@ describe("saveWatchProgress (web server action)", () => {
       h.save.mockResolvedValueOnce(outcome);
       await expect(saveWatchProgress(EPISODE, 12, false)).resolves.toBeUndefined();
     }
+  });
+});
+
+// #476: APP_FREE_WITH_ACCOUNT=1 makes the APP free for any account while the
+// site charges. The web's save must not hear of it — it hands the write the
+// SITE's view of payments, so a non-subscriber's save on a subscriber
+// episode stays refused. Through the real shared write, down to the fake
+// database: the refusal is what the write itself answers, not a stub's.
+describe("saveWatchProgress — the app's lever never reaches the web (#476)", () => {
+  it("still refuses a non-subscriber on a subscriber episode with payments AND APP_FREE_WITH_ACCOUNT on", async () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "1");
+    h.userId = "user_1";
+    h.save.mockImplementation(h.realSave);
+    h.select.mockReturnValueOnce(
+      episodeRow([{ id: EPISODE, showId: "show-1", access: "subscriber", durationSeconds: 600 }]),
+    );
+    const { hasActiveSubscription } = await import("@/lib/subscription-access");
+    vi.mocked(hasActiveSubscription).mockResolvedValueOnce(false);
+
+    await expect(saveWatchProgress(EPISODE, 12, false)).resolves.toBeUndefined();
+
+    expect(h.save).toHaveBeenCalledWith("user_1", EPISODE, 12, false, { paymentsOn: true });
+    await expect(h.save.mock.results[0].value).resolves.toBe("forbidden");
+    expect(hasActiveSubscription).toHaveBeenCalledWith("user_1");
+    expect(h.insert).not.toHaveBeenCalled();
   });
 });
 
@@ -123,9 +158,21 @@ describe("saveWatchSegments (web server action)", () => {
     await expect(saveWatchSegments(EPISODE, [1, 2])).resolves.toBeUndefined();
     expect(h.saveSegments).toHaveBeenCalledTimes(1);
     expect(h.saveSegments).toHaveBeenCalledWith(
-      { kind: "user", userId: "user_1" },
+      { kind: "user", userId: "user_1", paymentsOn: false },
       EPISODE,
       [1, 2],
+    );
+  });
+
+  it("hands the write the SITE's view of payments — the app's lever does not leak in (#476)", async () => {
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    vi.stubEnv("APP_FREE_WITH_ACCOUNT", "1");
+    h.userId = "user_1";
+    await saveWatchSegments(EPISODE, [1]);
+    expect(h.saveSegments).toHaveBeenCalledWith(
+      { kind: "user", userId: "user_1", paymentsOn: true },
+      EPISODE,
+      [1],
     );
   });
 

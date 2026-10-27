@@ -129,7 +129,10 @@ const EPISODE_2 = "3f2504e0-4f89-41d3-9a0c-0305e82c3302";
 const DEVICE = "9c858901-8a57-4791-81fe-4c455b099bc9";
 const SHOW = "show-1";
 
-const user: SegmentsCaller = { kind: "user", userId: "user_1" };
+// The caller's view of payments rides on the user caller (#476): the web
+// passes the site's flag, the app route the app's. Payments off by default.
+const user: SegmentsCaller = { kind: "user", userId: "user_1", paymentsOn: false };
+const paidUser: SegmentsCaller = { kind: "user", userId: "user_1", paymentsOn: true };
 const anonymousOpen: SegmentsCaller = {
   kind: "anonymous",
   sessionToken: DEVICE,
@@ -266,16 +269,15 @@ describe("saveWatchSegmentsFor — signed-in credit", () => {
   });
 
   it("gates a non-subscriber off a subscriber-tier episode in paid mode", async () => {
-    vi.stubEnv("PAYMENTS_ENABLED", "1");
     h.episode = { id: EPISODE, showId: SHOW, access: "subscriber", durationSeconds: 600 };
 
-    await expect(saveWatchSegmentsFor(user, EPISODE, [1])).resolves.toEqual({
+    await expect(saveWatchSegmentsFor(paidUser, EPISODE, [1])).resolves.toEqual({
       outcome: "forbidden",
     });
     expect(h.inserts).toEqual([]);
 
     h.hasActiveSubscription.mockResolvedValue(true);
-    await expect(saveWatchSegmentsFor(user, EPISODE, [1])).resolves.toEqual({
+    await expect(saveWatchSegmentsFor(paidUser, EPISODE, [1])).resolves.toEqual({
       outcome: "saved",
       accepted: 1,
     });
@@ -286,6 +288,25 @@ describe("saveWatchSegmentsFor — signed-in credit", () => {
     await saveWatchSegmentsFor(user, EPISODE, [1]);
     expect(h.hasActiveSubscription).not.toHaveBeenCalled();
     expect(segmentWrites()).toHaveLength(1);
+  });
+
+  it("takes the caller's view of payments, never the process env (#476)", async () => {
+    // The app under APP_FREE_WITH_ACCOUNT=1 sees no payments while the site
+    // charges: its flush on a subscriber episode must count, and the web's
+    // must not — so the write cannot read PAYMENTS_ENABLED itself.
+    h.episode = { id: EPISODE, showId: SHOW, access: "subscriber", durationSeconds: 600 };
+
+    vi.stubEnv("PAYMENTS_ENABLED", "1");
+    await expect(saveWatchSegmentsFor(user, EPISODE, [1])).resolves.toEqual({
+      outcome: "saved",
+      accepted: 1,
+    });
+    expect(h.hasActiveSubscription).not.toHaveBeenCalled();
+
+    vi.stubEnv("PAYMENTS_ENABLED", "");
+    await expect(saveWatchSegmentsFor(paidUser, EPISODE, [1])).resolves.toEqual({
+      outcome: "forbidden",
+    });
   });
 
   it("still reports saved when the credit fails after the counter landed, logging ids only", async () => {
