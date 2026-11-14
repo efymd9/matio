@@ -11,7 +11,7 @@ import { getPublishedShows } from "@/lib/catalog";
 import { LICENSING_SLUGS } from "@/lib/licensing";
 
 // A screener request from /licensing (#498). Anonymous; one email to
-// contact@matio.tv, subject "Screener request — <title>" (or "— catalogue"
+// maksym@matio.tv, subject "Screener request — <title>" (or "— catalogue"
 // when the buyer picked no title). The title is resolved from the slug on
 // the SERVER, against the licensing list — what the form posted is only a
 // choice among our titles. The team checks the rights and sends the

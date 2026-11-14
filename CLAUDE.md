@@ -655,7 +655,7 @@ app/
                            #   Both forms: lib/b2b-enquiry-submit.ts — honeypot,
                            #   shared rules (lib/b2b-enquiry.ts), 5/h brake,
                            #   ONE plain-text email via Resend to
-                           #   contact@matio.tv; nothing stored in the DB
+                           #   maksym@matio.tv; nothing stored in the DB
   admin/                   # /admin — admin role required (proxy-gated, DB check)
     analytics/             # /admin/analytics — the spec'd retention dashboard
                            #   (page.tsx, 7 blocks — see "Analytics dashboard

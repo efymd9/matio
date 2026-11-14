@@ -124,7 +124,7 @@ describe("«Last updated»", () => {
     const html = await render(PrivacyPage);
     expect(html).toContain("Last updated: November 14, 2026");
     expect(html).toContain('id="business-enquiries"');
-    expect(html).toContain("contact@matio.tv");
+    expect(html).toContain("business enquiries");
   });
 });
 

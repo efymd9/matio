@@ -12,7 +12,7 @@ import { requestScreener } from "./actions";
 // /licensing — Content Licensing (#498): the titles the team has confirmed
 // for licensing (lib/licensing.ts — independent of the viewer catalogue),
 // with posters and facts from the live catalogue, and the screener request
-// form (emailed to contact@matio.tv). Indexed, English, no sign-in. The
+// form (emailed to maksym@matio.tv). Indexed, English, no sign-in. The
 // canonical never carries `?title=`.
 
 export async function generateMetadata(): Promise<Metadata> {

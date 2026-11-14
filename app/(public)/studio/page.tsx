@@ -10,7 +10,7 @@ import { BEFORE_AFTER, SHOWCASE_SLUG } from "@/lib/studio";
 import { submitStudioBrief } from "./actions";
 
 // /studio — Production & VFX (#498): the studio's services and the brief
-// form, whose submissions are emailed to contact@matio.tv. Indexed, English,
+// form, whose submissions are emailed to maksym@matio.tv. Indexed, English,
 // no sign-in.
 
 export async function generateMetadata(): Promise<Metadata> {

@@ -12,7 +12,7 @@ import { submitEnquiry } from "@/lib/b2b-enquiry-submit";
 
 // A production / VFX brief from /studio (#498). Anonymous; the page hands
 // this action to the client form as a prop. It becomes one email to
-// contact@matio.tv, subject "Studio brief — <project type>" — the subject is
+// maksym@matio.tv, subject "Studio brief — <project type>" — the subject is
 // our label, never what the sender typed. Never throws (lib/b2b-enquiry-submit.ts).
 export async function submitStudioBrief(input: StudioBriefInput): Promise<EnquiryResult> {
   const v = normalizeStudioBrief(input ?? {});

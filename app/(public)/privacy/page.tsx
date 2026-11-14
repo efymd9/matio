@@ -42,7 +42,7 @@
 // agent's draft from the code, DRAFT with the rest of this page; the
 // lawful basis and the 24-month window are the owner's and counsel's to
 // confirm (#168). Nothing is stored in our database: the form becomes one
-// email (Resend) to contact@matio.tv (Google Workspace).
+// email (Resend) to maksym@matio.tv (Google Workspace).
 // 2026-10-18 edition (#462): the 60-second preview is gone. §2 "Usage data"
 // describes the anonymous free-episode record instead — every field
 // `trial_sessions` holds for a web row (db/schema/trial_sessions.ts; the
@@ -443,9 +443,8 @@ function PrivacyEn() {
             <strong>Google Ireland Ltd</strong> (Google Workspace, with
             transfers to Google LLC in the US) — our mailbox at
             maksym@matio.tv, for correspondence with you, including replies
-            about story ideas and job applications and requests about your
-            data, and our mailbox at contact@matio.tv, where business
-            enquiries arrive. SCCs.
+            about story ideas, job applications and business enquiries
+            (which arrive there as email) and requests about your data. SCCs.
           </li>
         </ul>
         <p>

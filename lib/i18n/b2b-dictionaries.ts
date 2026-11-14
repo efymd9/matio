@@ -28,9 +28,9 @@ const FORM_COMMON = {
   summary: (n: number) =>
     n === 1 ? "Please fix 1 field above." : `Please fix ${n} fields above.`,
   rateLimited:
-    "You've sent several requests in the last hour. Please try again later, or write to contact@matio.tv.",
+    "You've sent several requests in the last hour. Please try again later, or write to maksym@matio.tv.",
   serverError:
-    "Something went wrong and your request was not sent. Please try again, or write to contact@matio.tv.",
+    "Something went wrong and your request was not sent. Please try again, or write to maksym@matio.tv.",
   privacy: {
     before: "We use these details only to answer your request — see our ",
     link: "Privacy Policy",

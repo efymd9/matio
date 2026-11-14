@@ -38,11 +38,11 @@ describe("renderEnquiryText", () => {
 describe("sendEnquiryEmail", () => {
   it("sends plain text to the studio inbox with the sender as Reply-To", async () => {
     expect(await sendEnquiryEmail(email())).toEqual({ ok: true });
-    expect(ENQUIRY_INBOX).toBe("contact@matio.tv");
+    expect(ENQUIRY_INBOX).toBe("maksym@matio.tv");
     const [payload, opts] = h.send.mock.calls[0];
     expect(payload).toEqual({
       from: "Matio <updates@example.invalid>",
-      to: "contact@matio.tv",
+      to: "maksym@matio.tv",
       replyTo: "ana@studio.example",
       subject: "Studio brief — VFX for existing footage",
       text: renderEnquiryText(email()),

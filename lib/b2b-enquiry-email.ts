@@ -5,7 +5,7 @@ import { emailFrom, getResend, resendConfigured } from "./resend";
 // The studio inbox both B2B forms land in (#498). Not stored anywhere else:
 // the email IS the enquiry — no table, no admin page, so nothing here for the
 // retention cron or the erasure cascade to forget (data map, #498).
-export const ENQUIRY_INBOX = "contact@matio.tv";
+export const ENQUIRY_INBOX = "maksym@matio.tv";
 
 export type EnquiryEmail = {
   // "studio" | "screener" — the subject prefix and the dedupe namespace.
