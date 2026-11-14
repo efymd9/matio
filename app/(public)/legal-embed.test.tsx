@@ -118,10 +118,13 @@ describe("«Last updated»", () => {
     expect(await render(CookiesPage)).toContain("Last updated: October 19, 2026");
   });
 
-  // #485 — the approximate location Clerk records per sign-in session is a
-  // new disclosure, so a new edition of /privacy.
-  it("/privacy has the #485 edition", async () => {
-    expect(await render(PrivacyPage)).toContain("Last updated: October 27, 2026");
+  // #498 — business enquiries (/studio, /licensing) are a new disclosure, so
+  // a new edition of /privacy (the #485 one was October 27, 2026).
+  it("/privacy has the #498 edition, naming business enquiries", async () => {
+    const html = await render(PrivacyPage);
+    expect(html).toContain("Last updated: November 14, 2026");
+    expect(html).toContain('id="business-enquiries"');
+    expect(html).toContain("business enquiries");
   });
 });
 

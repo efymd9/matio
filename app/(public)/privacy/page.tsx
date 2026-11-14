@@ -37,6 +37,12 @@
 // §4's mailbox row names Google Workspace, which has carried maksym@matio.tv
 // since 08.10.2026 (#414), instead of Namecheap PrivateEmail — both in the
 // same #376 draft, merged on the owner's «да» in the PR thread.
+// Business enquiries (/studio briefs and /licensing screener requests, #498)
+// added 2026-11-14 in §2/§3/§4/§6 — a new edition ("Last updated" moves): an
+// agent's draft from the code, DRAFT with the rest of this page; the
+// lawful basis and the 24-month window are the owner's and counsel's to
+// confirm (#168). Nothing is stored in our database: the form becomes one
+// email (Resend) to maksym@matio.tv (Google Workspace).
 // 2026-10-18 edition (#462): the 60-second preview is gone. §2 "Usage data"
 // describes the anonymous free-episode record instead — every field
 // `trial_sessions` holds for a web row (db/schema/trial_sessions.ts; the
@@ -84,7 +90,7 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-const LAST_UPDATED = "October 27, 2026";
+const LAST_UPDATED = "November 14, 2026";
 
 export default async function PrivacyPage() {
   const { t } = await getDict();
@@ -252,6 +258,17 @@ function PrivacyEn() {
             accept files, and we don&rsquo;t store your IP address with your
             application.
           </li>
+          <li id="business-enquiries" className="scroll-mt-24">
+            <strong>Business enquiries</strong> — if you send us a project
+            brief through matio.tv/studio or request a screener through
+            matio.tv/licensing, we receive your name, your email address and
+            what you write in the form (the type of project, a short brief and,
+            if you give them, a timeline and a budget range; or your company,
+            the title and the market you&rsquo;re interested in). The form
+            sends it to us as an email; we don&rsquo;t store it in our
+            database, we don&rsquo;t accept files, and we don&rsquo;t keep your
+            IP address with it.
+          </li>
           <li>
             <strong>Technical data</strong> — IP address, browser user-agent,
             request logs needed to operate, secure and debug the service.
@@ -298,6 +315,16 @@ function PrivacyEn() {
             product analytics (PostHog) also counts that an application for a
             role was sent — which role, never your name, your contact details,
             your links or what you wrote.
+          </li>
+          <li>
+            <strong>To answer a business enquiry</strong> — a project brief
+            or a screener request — and to discuss a possible deal with you.
+            Lawful basis: <em>steps taken at your request before entering into
+            a contract</em> and our <em>legitimate interests</em> in
+            developing Matio&rsquo;s production and licensing business. While
+            marketing cookies are on, our product analytics (PostHog) also
+            counts that a brief or a screener request was sent — never what
+            it said or who sent it.
           </li>
           <li>
             <strong>Marketing and advertising measurement</strong> via the{" "}
@@ -364,7 +391,9 @@ function PrivacyEn() {
             <strong>Resend Inc.</strong> (US, EU region for email delivery) —
             transactional email: the new-episode notifications you ask for.
             We share the email address you submitted and the show it relates
-            to; every email carries an unsubscribe link. SCCs.
+            to; every email carries an unsubscribe link. It also delivers a
+            business enquiry you send through matio.tv/studio or
+            matio.tv/licensing to our own mailbox. SCCs.
           </li>
           <li>
             <strong>Meta Platforms Ireland Ltd</strong> (Ireland, with
@@ -414,8 +443,8 @@ function PrivacyEn() {
             <strong>Google Ireland Ltd</strong> (Google Workspace, with
             transfers to Google LLC in the US) — our mailbox at
             maksym@matio.tv, for correspondence with you, including replies
-            about story ideas and job applications and requests about your
-            data. SCCs.
+            about story ideas, job applications and business enquiries
+            (which arrive there as email) and requests about your data. SCCs.
           </li>
         </ul>
         <p>
@@ -464,6 +493,11 @@ function PrivacyEn() {
           </li>
           <li>
             <strong>Job applications</strong>: 6 months from submission.
+          </li>
+          <li>
+            <strong>Business enquiries</strong>: in our mailbox for up to 24
+            months after our last message on it, or longer as part of the
+            records of a deal we make with you.
           </li>
           <li>
             <strong>Request and security logs</strong>: 30 days.

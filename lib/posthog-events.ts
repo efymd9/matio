@@ -85,7 +85,13 @@ export type FunnelEvent =
   // `{ ok: true }` only. One property: `position`, the vacancy id
   // ("ai-creator" | "sales-distribution"). Never the name, the address, the
   // links, the location or the message.
-  | "job_application_submitted";
+  | "job_application_submitted"
+  // A business enquiry was sent (#498), fired on the server's `{ ok: true }`
+  // only: a production / VFX brief from /studio, a screener request from
+  // /licensing. NO properties — not the project type, not the title,
+  // nothing the sender typed.
+  | "studio_brief_submitted"
+  | "screener_requested";
 
 // Minimal surface we use. The provider assigns the real posthog-js instance
 // (which is structurally compatible) to window.posthog after init.

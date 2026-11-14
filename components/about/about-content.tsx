@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { Dict } from "@/lib/i18n/dictionaries";
+import { B2bLinksBand } from "@/components/b2b/b2b-parts";
 import { PressContact } from "./press-contact";
 
 // The /about page body («About page v3» mock): 4K hero with the duotone
@@ -21,6 +22,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       </h2>
     </div>
   );
+}
+
+// The two business pages (#498), shared with /press.
+export function b2bLinks(t: Dict) {
+  return [
+    { href: "/studio", label: t.footer.studio },
+    { href: "/licensing", label: t.footer.licensing },
+  ] as const;
 }
 
 export function AboutContent({
@@ -186,6 +195,12 @@ export function AboutContent({
           </Link>
         </div>
       </section>
+
+      <B2bLinksBand
+        kicker={t.footer.workWithKicker}
+        heading={t.footer.workWithHeading}
+        links={b2bLinks(t)}
+      />
 
       <PressContact t={t} />
     </>

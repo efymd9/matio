@@ -480,6 +480,12 @@ export const en = {
     about: "About",
     press: "Press",
     careers: "Careers",
+    // The two business pages (#498) — the footer links and the band on
+    // /about and /press.
+    studio: "Production & VFX",
+    licensing: "Content Licensing",
+    workWithKicker: "Producers, platforms, distributors",
+    workWithHeading: "Work with Matio — production, VFX and licensing.",
     subscribe: "Subscribe",
     manage: "Manage subscription",
     followUs: "Follow us",

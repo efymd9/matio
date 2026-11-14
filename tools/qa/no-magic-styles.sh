@@ -41,6 +41,7 @@ SCAN_DIRS=(
   "components/watch"
   "components/ideas"
   "components/careers"
+  "components/b2b"
   "app/(public)"
   "app/watch"
 )

@@ -513,7 +513,7 @@ urgent — it costs one command.
   not exist yet is added to `@theme` **and** to the token sheet in
   `lab/tokens.stories.tsx` in the same PR. Since #31 the gate catches four
   layers in `components/site`, `components/watch`, `components/ideas`,
-  `components/careers`, `app/(public)`, `app/watch`: colour literals in arbitrary Tailwind values (`bg-[#…]`);
+  `components/careers`, `components/b2b`, `app/(public)`, `app/watch`: colour literals in arbitrary Tailwind values (`bg-[#…]`);
   colour in props (`color="#…"`, `fill=`, `stroke=`, incl. `color={cond ?
   "#…" : …}`) — an `Icon` inherits `currentColor`, the parent's text token or
   a `className="text-gold"` on the icon decides; **any** `shadow-[…]` — the
@@ -644,6 +644,18 @@ app/
                            #   (#376; indexed): page.tsx + actions.ts
                            #   (submitJobApplication — never throws, typed
                            #   result) — see "Careers" rule
+    studio/                # /studio — Production & VFX (#498; indexed):
+                           #   services, Selected Work (the-scarlet-oath, live
+                           #   episode facts), Before/After slot (lib/studio.ts,
+                           #   off), brief form → actions.ts:submitStudioBrief
+    licensing/             # /licensing — Content Licensing (#498; indexed):
+                           #   titles from lib/licensing.ts (NOT the viewer
+                           #   catalogue; empty until the team confirms),
+                           #   screener form → actions.ts:requestScreener.
+                           #   Both forms: lib/b2b-enquiry-submit.ts — honeypot,
+                           #   shared rules (lib/b2b-enquiry.ts), 5/h brake,
+                           #   ONE plain-text email via Resend to
+                           #   maksym@matio.tv; nothing stored in the DB
   admin/                   # /admin — admin role required (proxy-gated, DB check)
     analytics/             # /admin/analytics — the spec'd retention dashboard
                            #   (page.tsx, 7 blocks — see "Analytics dashboard
