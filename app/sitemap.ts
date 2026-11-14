@@ -76,6 +76,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly",
       priority: 0.5,
     }),
+    // The two business pages (#498): production / VFX briefs and content
+    // licensing — indexed on purpose, they are where buyers land.
+    entry("/studio", {
+      changeFrequency: "monthly",
+      priority: 0.5,
+    }),
+    entry("/licensing", {
+      changeFrequency: "monthly",
+      priority: 0.5,
+    }),
     // The support page (#485) — the App Store's Support URL; indexed so a
     // viewer searching "matio support" finds it.
     entry("/support", {

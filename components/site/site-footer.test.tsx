@@ -98,6 +98,22 @@ describe("SiteFooter — links that must not be prefetched (#259)", () => {
     }
   });
 
+  it("links to /studio and /licensing (#498) in both layouts — so from the home page, /about and /press alike", () => {
+    render(<SiteFooter paymentsEnabled={false} />);
+
+    for (const [name, href] of [
+      [en.footer.studio, "/studio"],
+      [en.footer.licensing, "/licensing"],
+    ] as const) {
+      const found = links(name);
+      expect(found).toHaveLength(2);
+      for (const a of found) {
+        expect(a.getAttribute("href")).toBe(href);
+        expect(isNextLink(a)).toBe(true);
+      }
+    }
+  });
+
   it.each([
     ["paid mode", true],
     ["free mode", false],

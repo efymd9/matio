@@ -46,6 +46,7 @@ const {
   del,
   insert,
   batchSend,
+  emailSend,
   clerkVerify,
   stripeUpdate,
   stripeSearch,
@@ -61,6 +62,7 @@ const {
   del: vi.fn(),
   insert: vi.fn(),
   batchSend: vi.fn(),
+  emailSend: vi.fn(),
   clerkVerify: vi.fn(),
   stripeUpdate: vi.fn(),
   stripeSearch: vi.fn(),
@@ -198,9 +200,12 @@ vi.mock("@/lib/admin", () => ({
     stripeCustomerId: "cus_dummy",
   }),
 }));
+// The screener action resolves a title through the cached catalogue read
+// (#498); the audit's cases ask about no title, so an empty catalogue.
+vi.mock("@/lib/catalog", () => ({ getPublishedShows: async () => [] }));
 vi.mock("@/lib/resend", () => ({
   resendConfigured: () => true,
-  getResend: () => ({ batch: { send: batchSend } }),
+  getResend: () => ({ batch: { send: batchSend }, emails: { send: emailSend } }),
   emailFrom: () => "Matio <updates@example.invalid>",
   emailReplyTo: () => "contact@example.invalid",
 }));
@@ -363,6 +368,8 @@ import type { IdeaSubmissionInput } from "@/lib/idea-submission";
 import { submitJobApplication } from "@/app/(public)/careers/actions";
 import { deleteJobApplication } from "@/app/admin/careers/actions";
 import type { JobApplicationInput } from "@/lib/job-application";
+import { submitStudioBrief } from "@/app/(public)/studio/actions";
+import { requestScreener } from "@/app/(public)/licensing/actions";
 
 /** Render a console argument the way a log aggregator would see it. */
 function render(value: unknown): string {
@@ -399,6 +406,7 @@ beforeEach(() => {
   insert.mockReset();
   stripeUpdate.mockReset();
   batchSend.mockReset();
+  emailSend.mockReset();
   clerkVerify.mockReset();
   stripeUpdate.mockReset().mockResolvedValue({ id: "sub_dummy" });
   stripeSearch.mockReset().mockResolvedValue({ data: [], has_more: false });
@@ -3215,6 +3223,124 @@ describe("log audit · job application (/careers, #376)", () => {
       "submitJobApplication: failed",
       { level: "error", tags: { code: "42P01", name: "DrizzleQueryError" } },
     ]);
+  });
+});
+
+describe("log audit · business enquiries (/studio brief + /licensing screener, #498)", () => {
+  // Both forms become ONE email to the studio inbox — the name, the address,
+  // the company, the market and the brief belong in that email and nowhere
+  // else. The pipeline may log `{ kind, code }` (a Resend error NAME or a
+  // class) and nothing more — Resend quotes the refused address in its
+  // error MESSAGE, so the worst case seeds the markers there.
+  const MARKER_COMPANY = "Leak Marker Pictures";
+  const MARKER_MARKET = "Leak Marker Territory";
+  const MARKERS = [MARKER_NAME, MARKER_EMAIL, MARKER_STORY, MARKER_COMPANY, MARKER_MARKET];
+
+  const brief = (website = "") => ({
+    name: MARKER_NAME,
+    email: MARKER_EMAIL,
+    projectType: "vfx",
+    brief: MARKER_STORY,
+    timeline: MARKER_MARKET,
+    budget: "not-sure",
+    website,
+  });
+  const screener = (website = "") => ({
+    title: "",
+    name: MARKER_NAME,
+    company: MARKER_COMPANY,
+    email: MARKER_EMAIL,
+    market: MARKER_MARKET,
+    website,
+  });
+
+  function leaked(logged: () => string, result: unknown): string[] {
+    const outputs = [
+      logged(),
+      sentryMessage.mock.calls.map(render).join("\n"),
+      sentryException.mock.calls.map(render).join("\n"),
+      render(result),
+    ];
+    return MARKERS.filter((marker) => outputs.some((out) => out.includes(marker)));
+  }
+
+  beforeEach(() => {
+    walletAudit.rateLimited.mockClear();
+  });
+
+  it("honeypot: one bare line with the kind — no email, the brake untouched", async () => {
+    const logged = captureConsole();
+    const result = await submitStudioBrief(brief("https://bot.example.invalid"));
+    expect(result).toEqual({ ok: true });
+    expect(logged()).toBe('submitEnquiry: honeypot {"kind":"studio"}');
+    expect(emailSend).not.toHaveBeenCalled();
+    expect(walletAudit.rateLimited).not.toHaveBeenCalled();
+    expect(leaked(logged, result)).toEqual([]);
+  });
+
+  it("a validation refusal answers field + code pairs and logs nothing", async () => {
+    const logged = captureConsole();
+    const result = await requestScreener({ ...screener(), email: `${MARKER_NAME} at nowhere` });
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalid",
+      errors: [{ field: "email", code: "invalid_email" }],
+    });
+    expect(logged()).toBe("");
+    expect(leaked(logged, result)).toEqual([]);
+  });
+
+  it("the brake's key is `<kind>:` + a hash — never an address or an IP", async () => {
+    walletAudit.rateLimited.mockResolvedValueOnce(true);
+    const logged = captureConsole();
+    const result = await requestScreener(screener());
+    expect(result).toEqual({ ok: false, reason: "rate_limited" });
+    const keys = (walletAudit.rateLimited.mock.calls as unknown as [string, number][]).map(([k]) => k);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toMatch(/^screener:[0-9a-f]{64}$/);
+    expect(emailSend).not.toHaveBeenCalled();
+    expect(leaked(logged, [result, keys])).toEqual([]);
+  });
+
+  it("a Resend refusal whose message quotes the sender resolves to server_error and reports the kind + the error NAME only", async () => {
+    emailSend.mockResolvedValue({
+      data: null,
+      error: {
+        name: "validation_error",
+        message: `Invalid reply_to: ${MARKER_NAME} <${MARKER_EMAIL}> (${MARKER_COMPANY})`,
+      },
+    });
+    const logged = captureConsole();
+    const result = await submitStudioBrief(brief());
+    expect(result).toEqual({ ok: false, reason: "server_error" });
+    expect(emailSend).toHaveBeenCalledTimes(1);
+    expect(logged()).toBe('submitEnquiry: failed {"kind":"studio","code":"validation_error"}');
+    expect(sentryMessage.mock.calls).toEqual([
+      ["submitEnquiry: failed", { level: "error", tags: { kind: "studio", code: "validation_error" } }],
+    ]);
+    expect(leaked(logged, result)).toEqual([]);
+  });
+
+  it("a thrown transport error carrying the markers reports its class only", async () => {
+    emailSend.mockRejectedValue(
+      Object.assign(new Error(`socket hang up sending to ${MARKER_EMAIL}: ${MARKER_STORY}`), {
+        name: "FetchError",
+      }),
+    );
+    const logged = captureConsole();
+    const result = await requestScreener(screener());
+    expect(result).toEqual({ ok: false, reason: "server_error" });
+    expect(logged()).toBe('submitEnquiry: failed {"kind":"screener","code":"FetchError"}');
+    expect(leaked(logged, result)).toEqual([]);
+  });
+
+  it("a sent enquiry logs nothing at all", async () => {
+    emailSend.mockResolvedValue({ data: { id: "email_dummy" }, error: null });
+    const logged = captureConsole();
+    const result = await submitStudioBrief(brief());
+    expect(result).toEqual({ ok: true });
+    expect(logged()).toBe("");
+    expect(sentryMessage).not.toHaveBeenCalled();
   });
 });
 

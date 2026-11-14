@@ -1,5 +1,7 @@
 import Image from "next/image";
 import type { Dict } from "@/lib/i18n/dictionaries";
+import { B2bLinksBand } from "@/components/b2b/b2b-parts";
+import { b2bLinks } from "./about-content";
 import { PressContact } from "./press-contact";
 
 // The /press page body («About page v3» mock, press view): press-room hero
@@ -149,6 +151,11 @@ export function PressContent({
       </section>
 
       <div className="mt-20 tablet:mt-24">
+        <B2bLinksBand
+          kicker={t.footer.workWithKicker}
+          heading={t.footer.workWithHeading}
+          links={b2bLinks(t)}
+        />
         <PressContact t={t} />
       </div>
     </>
